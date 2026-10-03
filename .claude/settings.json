@@ -1,0 +1,25 @@
+{
+  "enabledPlugins": { "crew@crew": true },
+  "permissions": {
+    "allow": [
+      "Bash(gh issue:*)",
+      "Bash(gh pr:*)",
+      "Bash(gh api:*)",
+      "Bash(gh label:*)",
+      "Bash(gh stack:*)",
+      "Bash(git:*)",
+      "Bash(cargo:*)",
+      "Bash(crew-*)"
+    ],
+    "ask": [
+      "Bash(gh pr merge *)",
+      "Bash(gh stack merge *)",
+      "Bash(git push * main*)",
+      "Bash(git push *HEAD:main*)",
+      "Bash(gh secret *)"
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"
+  }
+}

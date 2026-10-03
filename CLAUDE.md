@@ -1,9 +1,8 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This project is developed with **crew** (https://github.com/StanleyGoldman/crew), a Claude Code plugin.
 
-## Current state
-
-This directory contains no source code, build configuration, README, or git history yet. The only content is a project-level skill at `.claude/skills/tdd/` (test-driven development guidance: `SKILL.md`, `tests.md`, `mocking.md`).
-
-Once code is added, re-run `/init` to document the build, lint, and test commands (including how to run a single test) and the high-level architecture.
+- Run `crew` (`alias crew='claude --agent crew:orchestrator'`) to work with the orchestrator. Plain `claude` stays normal Claude; `/crew:status` shows the board and `/crew:file` files an idea or bug.
+- The project profile, `.claude/crew/project.md`, has the language, the build, test and run commands, and the conventions. Read it before working here.
+- Domain language: `CONTEXT.md` (once it exists). Decisions: `docs/adr/`.
+- There's no app code yet.
