@@ -30,6 +30,10 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 - The PR description states what the prototype set out to answer, plus a running Q&A about what it showed.
 - When the prototype session ends, close the PR unmerged and leave a pointer to it on the prototype's issue.
 
+### Research
+
+- Research ends with a pull request that commits the findings to `docs/research/<topic>.md`; the PR closes the research ticket (`Closes #<n>`), so the ticket stays open until the user merges. This overrides any skill (e.g. `wayfinder`) that leaves findings on a throwaway branch.
+
 ### Writing for agents
 
 - Load the `writing-for-agents` skill before writing anything an agent reads: `CLAUDE.md`, `docs/agents/*`, skills, prompts.
