@@ -48,13 +48,14 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 
 - The main checkout in the repo folder belongs to the user; keep its branch as the user left it.
 - Do branch work (practice and doc updates, fixes, PR branches) in a git worktree. A subagent in its own worktree makes such a fix in the background.
-- In a worktree-isolated subagent, write each shell command plain: literal paths, one command per call, no background `&`, loops, variables, or `sh <script>`. The isolation guard refuses any command it cannot prove keeps git inside the worktree, including `curl`/`gh` downloads of source archives.
+- In a worktree-isolated subagent, run each shell command as one plain call with literal paths. The isolation guard refuses any command it cannot prove keeps git inside the worktree, and backgrounding, loops, shell variables, and `sh <script>` all trip it, even for `curl` or `gh` downloads.
 
 ### Pull requests
 
 - Implementation ends with a pull request: after the review fixes are committed, push the branch and open a PR that closes the ticket (`Closes #<n>`).
 - Open pull requests and leave merging to a human; never merge one yourself.
 - Stage by explicit path (`git add <paths>`) and check `git status` before committing: untracked output from another branch (e.g. build or prototype output ignored only on that branch) survives `git switch`.
+- Leave remote branches to GitHub, which deletes a PR's head branch when it merges; cleanup after a merge covers only local branches and worktrees.
 - Whenever you push to a pull request, update its title and description to cover everything it now contains.
 
 ### Merge conflicts
