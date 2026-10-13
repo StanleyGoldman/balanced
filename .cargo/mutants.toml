@@ -1,0 +1,9 @@
+profile = "mutants"
+# UI, binary and xtask code is out by construction: only these crates are mutated.
+examine_globs = ["crates/balanced_core/src/**/*.rs", "crates/balanced_i18n/src/**/*.rs"]
+# Each mutant runs only its own crate's tests (`test_workspace` stays false), so core
+# logic must be caught by core's tests, not incidentally by a UI test.
+exclude_re = [
+  "impl Debug",        # formatting boilerplate, not behaviour
+  "impl fmt::Display", # covered by insta snapshots where it matters
+]

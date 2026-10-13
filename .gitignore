@@ -1,2 +1,8 @@
 # Agent git worktrees
 /.claude/worktrees/
+
+# Cargo
+/target/
+
+# cargo-mutants
+mutants.out*/

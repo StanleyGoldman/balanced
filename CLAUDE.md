@@ -1,3 +1,7 @@
+## Code
+
+Read `CODING_STANDARDS.md` before writing or reviewing Rust code. It lists the cross-cutting rules and points to the practice doc for each area. `ARCHITECTURE.md` maps the crates and their layer rules.
+
 ## Agent skills
 
 ### Issue tracker

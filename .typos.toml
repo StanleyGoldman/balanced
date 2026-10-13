@@ -1,0 +1,10 @@
+[default]
+extend-ignore-re = [
+  '\b[0-9a-f]{7,40}\b',  # git commit hashes
+]
+
+[default.extend-words]
+alikes = "alikes"        # "look-alikes"
+invokable = "invokable"  # quoted from Rerun's source
+jod = "jod"              # ISO 4217 Jordanian dinar
+pn = "pn"                # the "PN" of "PNGs"

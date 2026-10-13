@@ -1,0 +1,70 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+
+[workspace.dependencies]
+balanced_core = { path = "crates/balanced_core" }
+balanced_i18n = { path = "crates/balanced_i18n" }
+balanced_ui = { path = "crates/balanced_ui" }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unknown_lints = "deny"
+future_incompatible = { level = "warn", priority = -1 }
+nonstandard_style = { level = "warn", priority = -1 }
+rust_2018_idioms = { level = "warn", priority = -1 }
+elided_lifetimes_in_paths = "warn"
+missing_debug_implementations = "warn"
+trivial_numeric_casts = "warn"
+unreachable_pub = "warn"
+unused_lifetimes = "warn"
+
+[workspace.lints.rustdoc]
+all = "warn"
+missing_crate_level_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+# Cherry-picked from `restriction` and `nursery`.
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+dbg_macro = "warn"
+iter_over_hash_type = "warn"
+let_underscore_must_use = "warn"
+mem_forget = "warn"
+mod_module_files = "warn"
+needless_pass_by_ref_mut = "warn"
+print_stderr = "warn"
+print_stdout = "warn"
+rc_buffer = "warn"
+str_to_string = "warn"
+string_add = "warn"
+todo = "warn"
+undocumented_unsafe_blocks = "warn"
+unimplemented = "warn"
+unwrap_used = "warn"
+use_self = "warn"
+wildcard_enum_match_arm = "warn"
+
+# `pedantic` lints switched off, one reason each.
+missing_errors_doc = "allow"  # internal crates with no outside callers; error enums document themselves
+missing_panics_doc = "allow"  # panics are bugs by policy, so there is nothing to document
+must_use_candidate = "allow"  # fires on nearly every getter; `#[must_use]` is added where ignoring is a bug
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.mutants]
+inherits = "test"
+debug = "none"

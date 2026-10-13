@@ -1,0 +1,35 @@
+# Lint levels live in `[workspace.lints]` in Cargo.toml; this file holds clippy's options
+# and the project's bans. Each ban's `reason` is the rule; `docs/practices/` says when the
+# one sanctioned `#[expect(clippy::disallowed_*, reason = "…")]` applies.
+
+allow-unwrap-in-tests = true
+avoid-breaking-exported-api = false  # an application has no exported API to protect
+
+disallowed-methods = [
+  { path = "std::thread::spawn", reason = "use `std::thread::Builder` and name the thread" },
+  { path = "std::process::exit", reason = "return an exit code from `main` so destructors run and logs flush" },
+
+  # Colours come from the theme module, which is the one place allowed to build them.
+  { path = "egui::Color32::from_rgb", reason = "use a theme colour" },
+  { path = "egui::Color32::from_rgb_additive", reason = "use a theme colour" },
+  { path = "egui::Color32::from_rgba_premultiplied", reason = "use a theme colour" },
+  { path = "egui::Color32::from_rgba_unmultiplied", reason = "use a theme colour" },
+  { path = "egui::Color32::from_rgba_unmultiplied_const", reason = "use a theme colour" },
+  { path = "egui::Color32::from_gray", reason = "use a theme colour" },
+  { path = "egui::Color32::from_hex", reason = "use a theme colour" },
+
+  { path = "egui_extras::TableBody::row", reason = "lays out every row each frame; use `rows` or `heterogeneous_rows`" },
+
+  # Only the binary installs a tracing subscriber; libraries emit through `tracing` alone.
+  { path = "tracing::subscriber::set_global_default", reason = "only the binary installs a subscriber" },
+  { path = "tracing_subscriber::fmt::init", reason = "only the binary installs a subscriber" },
+  { path = "tracing_subscriber::fmt::try_init", reason = "only the binary installs a subscriber" },
+  { path = "tracing_subscriber::fmt::SubscriberBuilder::init", reason = "only the binary installs a subscriber" },
+  { path = "tracing_subscriber::fmt::SubscriberBuilder::try_init", reason = "only the binary installs a subscriber" },
+  { path = "tracing_subscriber::util::SubscriberInitExt::init", reason = "only the binary installs a subscriber" },
+  { path = "tracing_subscriber::util::SubscriberInitExt::try_init", reason = "only the binary installs a subscriber" },
+]
+
+disallowed-macros = [
+  { path = "egui::hex_color", reason = "use a theme colour" },
+]
