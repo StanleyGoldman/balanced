@@ -33,6 +33,7 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 ### Research
 
 - Research ends with a pull request that commits the findings to `docs/research/<topic>.md`; the PR closes the research ticket (`Closes #<n>`), so the ticket stays open until the user merges. This overrides any skill (e.g. `wayfinder`) that leaves findings on a throwaway branch.
+- Look up crate versions and metadata with `cargo info` or `cargo search`, not raw crates.io API calls.
 
 ### Writing for agents
 
