@@ -6,7 +6,7 @@ A prototype is throwaway code that answers one question by giving the user somet
 
 - Each prototype gets its own branch, `prototype/<name>`, and a **draft** PR titled `PROTOTYPE: <what it prototypes>`.
 - The PR description states the question the prototype set out to answer, plus a running Q&A of what it showed. Update it as answers land.
-- When the prototype session ends, close the PR unmerged and leave a pointer to it on the prototype's issue. Decisions go back into real code or docs through their own PRs.
+- When the prototype session ends, post the resolution comment (below) on the prototype's issue and close the PR unmerged. Decisions go back into real code or docs through their own PRs.
 
 ## Shape
 
@@ -18,8 +18,9 @@ A prototype is throwaway code that answers one question by giving the user somet
 ## Variants and toggles
 
 - Build 2–5 **variants** that differ in structure or interaction model, not colour.
-- Switch variants inside the running app: a floating ◀ ▶ bar at the bottom centre, styled so it reads as tooling rather than design, and the ←/→ keys while no text field has focus. A `--variant <key>` flag picks the starting one.
-- A collapsible **Prototype panel** holds toggles. Tag each toggle as applying to one variant or to all. Toggle state and shared data (selection, sort) survive a variant switch, so the user compares like with like.
+- Put all prototype tooling in a separate **controls window** (an egui immediate viewport), so the app window shows only the design under review. It holds the variant switcher and the toggles.
+- In the app window, the ←/→ keys switch variants while no text field has focus. A `--variant <key>` flag picks the starting one.
+- Tag each toggle as applying to one variant or to all. Toggle state and shared data (selection, sort) survive a variant switch, so the user compares like with like.
 
 ## Observation harness
 
@@ -41,8 +42,50 @@ The harness lives in `crates/balanced_ui/examples/shell_layout_prototype/harness
 
 ## Running a session
 
-1. When the prototype builds, ask the user for clearance to launch. Every launch needs it, including your own scripted control-file runs: the window opens on the user's desktop and takes keyboard focus, so it logs whatever they were typing elsewhere. An unfocused window is also throttled on Wayland, so a scripted run stalls while the user works in another app.
-2. On a yes, start it yourself as a background process; the window opens on the user's desktop. Tell them it's up.
-3. Watch the event log as it grows (the Monitor tool), and read screenshots when a variant or toggle changes or the user drops a marker.
-4. Turn what you see into questions and Q&A entries on the PR: hesitations, Esc right after starting an edit, Tab landing somewhere the user leaves at once, slow frames.
-5. When the user's message refers to "this" or "here", line it up with the log by timestamp.
+The user learns what to look at from you. Drive the session through an **agenda**: the questions the prototype must answer, in the order the user should meet them.
+
+1. Before launch, write the agenda into the PR's Q&A, one entry per question.
+2. When the prototype builds, ask the user for clearance to launch. Every launch needs it, including your own scripted control-file runs: the window opens on the user's desktop and takes keyboard focus, so it logs whatever they were typing elsewhere. An unfocused window is also throttled on Wayland, so a scripted run stalls while the user works in another app.
+3. On a yes, start it yourself as a background process and tell the user it's up.
+4. Guide one agenda question at a time, numbered `Step <n>/<total>`. For each step, give the user:
+   - **context**: what the variants or toggles in play change, and why it matters for the question;
+   - **look at**: where on screen the difference lives;
+   - **try**: concrete actions, with the scenario already set up through the control file;
+   - **notice**: what to pay attention to while trying it.
+
+   End the step by asking for their reaction.
+5. Watch the event log as it grows (the Monitor tool), and read screenshots when a variant or toggle changes or the user drops a marker.
+6. Turn what the log shows and the user doesn't say into follow-up questions: hesitations, Esc right after starting an edit, Tab landing somewhere the user leaves at once, a control never touched, slow frames.
+7. When the user's message refers to "this" or "here", line it up with the log by timestamp.
+8. A step closes when the user's answer and the log agree. Record it as a Q&A entry on the PR, then move to the next step.
+9. The session ends when every agenda question has an answer. Post the resolution comment, then close the PR unmerged.
+
+## Resolution comment
+
+When the session ends, post one comment on the prototype's issue with this shape, then close the issue and append the context pointer to the map's Decisions-so-far. The pointer links to this comment, so the first line answers the ticket without scrolling.
+
+```
+**Resolution:** <one or two sentences: the answer the prototype gave to the ticket's question>
+
+| # | Question | Answer | Tag | Reversibility | Evidence |
+|---|----------|--------|-----|---------------|----------|
+| S1 | <agenda question> | <what was chosen> | firm / leaning / coin-flip | cheap / expensive | <user quote, log events, screenshot> |
+
+**Variants:** <each variant: chosen, merged into the winner (name the parts), or dropped, with the reason>
+
+**Observed in the log:** <what the log showed beyond what the user said: hesitations, ignored controls, slow frames, or "none">
+
+**User-decided:** <the `coin-flip` and `expensive` calls the user answered, with their reasoning if given>
+
+**Assumed, shout if wrong:** <answers taken from the log or defaults without asking>
+
+**Revises:** <earlier decisions or map entries this contradicts, or "none">
+
+**Follow-ups:** <new tickets, ADRs, or `CONTEXT.md` terms it produced, linked, or "none">
+
+**Prototype:** <the closed draft PR and its branch>
+```
+
+- List every agenda question as a table row, numbered by its step.
+- Use the tags defined in the Grilling section of `CLAUDE.md`. Here `firm` means the user chose it and the log agrees.
+- Write `none` in an empty section.
