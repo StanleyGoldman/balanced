@@ -51,3 +51,10 @@ egui releases a breaking minor version about every two months, and it removes de
 5. Run the tests. Expect snapshot changes, regenerate them on the snapshot source-of-truth machine, and review every image diff.
 6. Make one PR per egui minor, and never skip a minor.
 7. If the new egui needs a newer Rust, bump the toolchain first (see [tooling](tooling.md#toolchain)).
+
+## Gotchas
+
+- egui's default proportional fonts (Ubuntu-Light, NotoEmoji, emoji-icon-font) lack ▸ ▾ ▼ ⋯ and draw a box in their place; ⏵ ⏷ ◀ ▶ render. Check a glyph with `fc-query --format='%{charset}' <font>` against the fonts in the `epaint_default_fonts` crate.
+- `egui::MenuBar` takes the whole row. Anything sharing the row (tabs, a search box) goes inside its closure.
+- To pin a footer under a scrolling list in a side panel, nest a `Panel::bottom` and then a `CentralPanel` inside the side panel.
+- On Wayland, winit 0.30 ignores window levels and parent windows, so no second OS window can be kept above the Main window there.
