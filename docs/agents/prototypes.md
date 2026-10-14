@@ -18,7 +18,7 @@ A prototype is throwaway code that answers one question by giving the user somet
 ## Variants and toggles
 
 - Build 2–5 **variants** that differ in structure or interaction model, not colour.
-- Put all prototype tooling in a separate **controls window** (an egui immediate viewport), so the app window shows only the design under review. It holds the variant switcher and the toggles.
+- Dock all prototype tooling (variant switcher, toggles) in one panel along the window's right edge, added before the variant's own panels so every variant lays out in the remaining space. Style it as tooling, and let F4 collapse it to a thin edge. Floating overlays cover the design under review. A separate OS window can't stay above the app on Wayland: winit ignores window levels and parent windows there.
 - In the app window, the ←/→ keys switch variants while no text field has focus. A `--variant <key>` flag picks the starting one.
 - Tag each toggle as applying to one variant or to all. Toggle state and shared data (selection, sort) survive a variant switch, so the user compares like with like.
 
