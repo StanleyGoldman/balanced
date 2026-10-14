@@ -428,6 +428,27 @@ impl Variant {
     }
 }
 
+/// The key that flips each entry of `TOGGLES`, in order, while no text field has focus.
+const TOGGLE_KEYS: [(egui::Key, &str); 10] = [
+    (egui::Key::Num1, "1"),
+    (egui::Key::Num2, "2"),
+    (egui::Key::Num3, "3"),
+    (egui::Key::Num4, "4"),
+    (egui::Key::Num5, "5"),
+    (egui::Key::Num6, "6"),
+    (egui::Key::Num7, "7"),
+    (egui::Key::Num8, "8"),
+    (egui::Key::Num9, "9"),
+    (egui::Key::Num0, "0"),
+];
+
+/// The key that picks each variant, in `Variant::ALL` order.
+const VARIANT_KEYS: [(egui::Key, &str); 3] = [
+    (egui::Key::A, "A"),
+    (egui::Key::B, "B"),
+    (egui::Key::C, "C"),
+];
+
 /// (key, label, applies to)
 const TOGGLES: &[(&str, &str, &str)] = &[
     ("dark", "Dark theme", "all"),
@@ -700,6 +721,16 @@ impl eframe::App for Proto {
             }
             if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
                 self.set_variant(self.variant.step(1), "key");
+            }
+            for (v, (k, _)) in Variant::ALL.into_iter().zip(VARIANT_KEYS) {
+                if ctx.input(|i| i.key_pressed(k) && i.modifiers.is_none()) {
+                    self.set_variant(v, "key");
+                }
+            }
+            for (&(key, _, _), (k, _)) in TOGGLES.iter().zip(TOGGLE_KEYS) {
+                if ctx.input(|i| i.key_pressed(k) && i.modifiers.is_none()) {
+                    self.set_toggle(key, None, "key");
+                }
             }
         }
         ctx.set_theme(if self.t.dark {
@@ -1458,8 +1489,8 @@ impl Proto {
                 );
                 ui.separator();
                 ui.label(RichText::new("Variant").strong());
-                for v in Variant::ALL {
-                    let r = ui.selectable_label(self.variant == v, v.label());
+                for (v, (_, hint)) in Variant::ALL.into_iter().zip(VARIANT_KEYS) {
+                    let r = ui.selectable_label(self.variant == v, format!("{hint}   {}", v.label()));
                     self.h.track(&r, format!("dock: variant {}", v.key()));
                     if r.clicked() {
                         self.set_variant(v, "click");
@@ -1468,10 +1499,10 @@ impl Proto {
                 ui.separator();
                 ui.label(RichText::new("Toggles").strong());
                 let current = self.variant.key().to_uppercase();
-                for &(key, label, applies) in TOGGLES {
+                for (&(key, label, applies), (_, hint)) in TOGGLES.iter().zip(TOGGLE_KEYS) {
                     let relevant = applies == "all" || applies == current;
                     let mut value = *self.t.get_mut(key).unwrap();
-                    let text = RichText::new(format!("[{applies}] {label}"));
+                    let text = RichText::new(format!("{hint}   [{applies}] {label}"));
                     let r = ui.checkbox(&mut value, if relevant { text } else { text.weak() });
                     self.h.track(&r, format!("dock: toggle {key}"));
                     if r.changed() {
@@ -1480,7 +1511,7 @@ impl Proto {
                 }
                 ui.separator();
                 ui.label(
-                    RichText::new("◀ / ▶ variant · F2 note · F3 marker · F4 hide this dock")
+                    RichText::new("A B C or ◀ / ▶ variant · 1–0 toggles · F2 note · F3 marker · F4 hide this dock")
                         .small()
                         .weak(),
                 );
