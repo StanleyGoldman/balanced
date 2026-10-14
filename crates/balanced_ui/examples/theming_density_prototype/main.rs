@@ -479,8 +479,8 @@ const TOGGLES: &[(&str, &str)] = &[
 
 const SCALES: [u32; 4] = [100, 125, 150, 200];
 
-/// Left inset for the Register's first column, so its text doesn't touch the edge.
-const FIRST_COL_INSET: f32 = 6.0;
+/// Inset for the Register's first and last columns, so their text doesn't touch the edges.
+const EDGE_INSET: f32 = 6.0;
 
 /// (key, label) for the gridline cycle: rules between rows, between columns, or both.
 const GRIDS: [(&str, &str); 4] = [
@@ -1674,11 +1674,14 @@ impl Proto {
                             .rect_filled(bg, 0.0, pal.header);
                         if matches!(title, "Payment" | "Deposit" | "Balance") {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if title == "Balance" {
+                                    ui.add_space(EDGE_INSET);
+                                }
                                 ui.strong(title);
                             });
                         } else {
                             if title == "Date" {
-                                ui.add_space(FIRST_COL_INSET);
+                                ui.add_space(EDGE_INSET);
                             }
                             ui.strong(title);
                         }
@@ -1745,11 +1748,14 @@ impl Proto {
                             }
                             if right {
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    if col == "balance" {
+                                        ui.add_space(EDGE_INSET);
+                                    }
                                     ui.label(rt);
                                 });
                             } else {
                                 if col == "date" {
-                                    ui.add_space(FIRST_COL_INSET);
+                                    ui.add_space(EDGE_INSET);
                                 }
                                 ui.label(rt);
                             }
