@@ -13,6 +13,20 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
 
+## Linking a pull request to its issue
+
+Every PR that comes from an issue opens its body with `Closes #<n>`, and that includes prototype PRs. The keyword is what puts the PR in the issue's **Development** panel. A prototype PR is closed unmerged, so its keyword only links; the resolution comment closes the issue.
+
+- **When GitHub links:** only while the PR is open and targets the default branch (`main`). A keyword added after the PR closed, or on a PR stacked on another branch, links nothing until those hold. The link survives the PR closing unmerged.
+- **Check a link** from the PR side; this also works for closed PRs:
+
+  ```sh
+  gh api graphql -f query='{repository(owner:"StanleyGoldman",name:"balanced"){pullRequest(number:<pr>){closingIssuesReferences(first:10){nodes{number}}}}}'
+  ```
+
+- **Fix a closed PR that lacks the link:** add the keyword to the body, `gh pr reopen <pr>`, wait a few seconds for GitHub to link it, check, then `gh pr close <pr>`.
+- **No API writes the link.** GitHub's public GraphQL has no mutation for it; a link comes only from a body keyword or by hand in the issue's Development panel.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_

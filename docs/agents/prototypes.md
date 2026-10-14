@@ -4,9 +4,10 @@ A prototype is throwaway code that answers one question by giving the user somet
 
 ## Branch and PR
 
-- Each prototype gets its own branch, `prototype/<name>`, and a **draft** PR titled `PROTOTYPE: <what it prototypes>`.
+- Each prototype gets its own branch, `prototype/<name>`, and a **draft** PR titled `PROTOTYPE: <what it prototypes>`. Its body opens with `Closes #<issue>`, so the PR shows in the issue's Development panel (`docs/agents/issue-tracker.md`, "Linking a pull request to its issue").
 - The PR description states the question the prototype set out to answer, plus a running Q&A of what it showed. Update it as answers land.
 - When the prototype session ends, post the resolution comment (below) on the prototype's issue and close the PR unmerged. Decisions go back into real code or docs through their own PRs.
+- Once the PR is closed, remove the prototype's local worktree and branch: `git worktree remove .claude/worktrees/<name>`, then `git branch -D prototype/<name>`. The remote branch stays as the PR's record.
 
 ## Shape
 
@@ -73,7 +74,7 @@ You drive the prototype as well as the conversation. Through the control file yo
 6. Turn what the log shows and the user doesn't say into follow-up questions: hesitations, Esc right after starting an edit, Tab landing somewhere the user leaves at once, a control never touched, slow frames.
 7. When the user's message refers to "this" or "here", line it up with the log by timestamp.
 8. A step closes on the user's answer. The log is supporting evidence of what they saw and tried, not a gate: some questions are easy to picture, and the user may answer from a glance or before trying anything. Raise a mismatch only when the log shows something that changes the answer, e.g. the user picked a variant they never opened. Record the step as a Q&A entry on the PR, citing log events where they exist, then move to the next step.
-9. The session ends when every agenda question has an answer. Post the resolution comment, then close the PR unmerged.
+9. The session ends when every agenda question has an answer. Post the resolution comment, close the PR unmerged, then remove the local worktree and branch.
 
 To stop the prototype, send `quit` through the control file, or stop the background task. The example binary can outlive its `cargo run` wrapper, so confirm with `pgrep -f target/debug/examples/<name>_prototype`.
 

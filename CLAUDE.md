@@ -52,7 +52,16 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 ### Self-improvement
 
 - When you hit friction (a tool gotcha, a wrong assumption, a repeated workaround), record the lesson in the doc where the next agent will look, written with the `writing-for-agents` skill.
-- Write scripts or skills whenever they help you get a task done; write skills with the `writing-for-agents` skill.
+- Reach for a skill when repeated work needs judgement; write skills with the `writing-for-agents` skill. When it needs only commands, write a script (below).
+
+### Agent scripts
+
+- **When:** script a check, repair or lookup you have run more than once, or will clearly run again, then use the script from then on and name it in the doc that calls for the task. Script work you have seen recur; a failure that hasn't happened yet earns a line in a doc, not a script.
+- **Where:** `.claude/scripts/`, beside the project's other agent tooling (`.claude/settings.json`, `.claude/worktrees/`). These scripts are for the agent working the project. A top-level `scripts/` would read as part of the app, or as something the user runs.
+- **Audience:** only an agent ever calls or reads them. Shape each one for that caller and nothing else:
+  - the contract (arguments, output, statuses, exit codes) in the header comment, so a later session learns it without reading the code;
+  - one JSON result line on stdout, built with `jq -n` (installed) and read back with `jq`;
+  - a `next` field naming the follow-up whenever the script can't finish.
 
 ### Worktrees
 
