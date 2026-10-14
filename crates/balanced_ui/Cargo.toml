@@ -17,3 +17,4 @@ workspace = true
 eframe = "=0.36.2"
 egui_extras = "=0.36.2"
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
+serde_json = "1"
