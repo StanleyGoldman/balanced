@@ -18,7 +18,7 @@ Infer the repo from `git remote -v`; `gh` does this automatically when run insid
 Every PR that comes from an issue opens its body with `Closes #<n>`, and that includes prototype PRs. The keyword is what puts the PR in the issue's **Development** panel. A prototype PR is closed unmerged, so its keyword only links; the resolution comment closes the issue.
 
 - **When GitHub links:** only while the PR is open and targets the default branch (`main`). A keyword added after the PR closed, or on a PR stacked on another branch, links nothing until those hold. The link survives the PR closing unmerged.
-- **Check the link with `scripts/link-pr <pr>`** after opening a PR and after retargeting a stacked one. It reads the PR's closing keywords and checks each issue, closed PRs included; `gh issue view --json closedByPullRequestsReferences` hides those. When a link is missing on a closed PR, it reopens the PR until GitHub links it, then closes it again. A stacked PR, or a merged one, it only reports.
+- **Check the link with `.claude/scripts/link-pr <pr>`** after opening a PR and after retargeting a stacked one. It reads the PR's closing keywords and checks each issue, closed PRs included; `gh issue view --json closedByPullRequestsReferences` hides those. When a link is missing on a closed PR, it reopens the PR until GitHub links it, then closes it again. A stacked PR, or a merged one, it only reports.
 
 ## Pull requests as a triage surface
 

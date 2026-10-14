@@ -2,12 +2,12 @@
 # Check that a pull request shows in the Development panel of every issue its body
 # names with a closing keyword, and repair the link where GitHub missed it.
 #
-# Usage: scripts/link-pr <pr-number>
+# Usage: .claude/scripts/link-pr <pr-number>
 #
 # See docs/agents/issue-tracker.md, "Linking a pull request to its issue".
 set -euo pipefail
 
-pr="${1:?usage: scripts/link-pr <pr-number>}"
+pr="${1:?usage: .claude/scripts/link-pr <pr-number>}"
 repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 owner="${repo%/*}"
 name="${repo#*/}"
