@@ -44,13 +44,15 @@ The harness lives in `crates/balanced_ui/examples/shell_layout_prototype/harness
 
 The user learns what to look at from you. Drive the session through an **agenda**: the questions the prototype must answer, in the order the user should meet them.
 
+You drive the prototype as well as the conversation. Through the control file you switch variants, flip toggles, and open the account, tab or row each step needs, so the user's hands stay on looking, trying and reacting. Each step takes the user through every variant and toggle that bears on its question, side by side, and you make each switch yourself as the step reaches it.
+
 1. Before launch, write the agenda into the PR's Q&A, one entry per question.
 2. When the prototype builds, ask the user for clearance to launch. Every launch needs it, including your own scripted control-file runs: the window opens on the user's desktop and takes keyboard focus, so it logs whatever they were typing elsewhere. An unfocused window is also throttled on Wayland, so a scripted run stalls while the user works in another app.
 3. On a yes, start it yourself as a background process and tell the user it's up.
 4. Guide one agenda question at a time, numbered `Step <n>/<total>`. For each step, give the user:
    - **context**: what the variants or toggles in play change, and why it matters for the question;
    - **look at**: where on screen the difference lives;
-   - **try**: concrete actions, with the scenario already set up through the control file;
+   - **try**: concrete actions in a scenario you have already set up through the control file; when the step compares variants or toggles, switch them yourself one at a time and say what changed after each switch;
    - **notice**: what to pay attention to while trying it.
 
    End the step by asking for their reaction.
