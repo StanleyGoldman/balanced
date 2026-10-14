@@ -5,9 +5,12 @@
 //!
 //! - `--log <path>`: a JSONL event log, one object per line with `ts_ms` (Unix ms, to line up
 //!   with chat messages) and `t` (seconds since start). Screenshots land in the same directory.
-//! - `--control <path>`: a file the agent appends commands to, one per line. The harness empties
-//!   it after reading (commands already there at launch run first) and hands the app one command at a time, waiting for any screenshot in
-//!   progress so `variant b` then `screenshot b` capture the right thing.
+//! - `--control <path>`: a file the agent appends commands to, one per line. A background thread
+//!   reads it every 250 ms, empties it (commands already there at launch run first) and wakes the
+//!   app, which applies one command per frame, waiting for any screenshot in progress so
+//!   `variant b` then `screenshot b` capture the right thing. On Wayland a covered or unfocused
+//!   window gets no frames, so commands wait until it is visible; `quit` still lands, because the
+//!   thread exits the process itself once no frame has run for 2 s.
 //! - `--variant <key>`: the variant to start on.
 //! - F2 opens a one-line note box (Enter logs it, Esc cancels); F3 drops a marker + screenshot.
 //!
@@ -23,6 +26,9 @@ use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::Write as _;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use eframe::egui::{self, Align2, Context, Id, Key, Response};
@@ -69,7 +75,9 @@ pub struct Harness {
     control: Option<PathBuf>,
     start: Instant,
     frame: u64,
-    last_poll: Instant,
+    control_rx: Option<mpsc::Receiver<String>>,
+    /// Milliseconds since `start` at the last frame; the control thread reads it.
+    last_frame_ms: Arc<AtomicU64>,
     commands: VecDeque<String>,
     names: HashMap<Id, String>,
     prev_names: HashMap<Id, String>,
@@ -104,7 +112,8 @@ impl Harness {
             control: args.control.clone(),
             start: now,
             frame: 0,
-            last_poll: now,
+            control_rx: None,
+            last_frame_ms: Arc::new(AtomicU64::new(0)),
             commands: VecDeque::new(),
             names: HashMap::new(),
             prev_names: HashMap::new(),
@@ -138,20 +147,9 @@ impl Harness {
 
     /// Write one event line. `fields` must be a JSON object (or null).
     pub fn event(&mut self, kind: &str, fields: Value) {
-        let Some(file) = &mut self.log else { return };
-        let ts_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis());
-        let mut obj = json!({
-            "ts_ms": ts_ms,
-            "t": (self.start.elapsed().as_secs_f64() * 1000.0).round() / 1000.0,
-            "event": kind,
-        });
-        if let (Some(o), Value::Object(f)) = (obj.as_object_mut(), fields) {
-            o.extend(f);
+        if let Some(file) = &mut self.log {
+            write_event(file, self.start, kind, fields);
         }
-        let _ = writeln!(file, "{obj}");
-        let _ = file.flush();
     }
 
     /// Name a widget for the log; logs clicks and right-clicks on it.
@@ -220,6 +218,20 @@ impl Harness {
     /// Call first in `ui()`. Returns at most one control command to apply this frame.
     pub fn begin_frame(&mut self, ctx: &Context) -> Option<String> {
         self.frame += 1;
+        let now_ms = u64::try_from(self.start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.last_frame_ms.store(now_ms, Ordering::Relaxed);
+        if self.control_rx.is_none()
+            && let Some(path) = self.control.clone()
+        {
+            let log = self.log.as_ref().and_then(|f| f.try_clone().ok());
+            self.control_rx = Some(spawn_control_reader(
+                path,
+                ctx.clone(),
+                log,
+                self.start,
+                Arc::clone(&self.last_frame_ms),
+            ));
+        }
         self.prev_names = std::mem::take(&mut self.names);
         self.dt_ms = ctx.input(|i| i.unstable_dt) * 1000.0;
         let field = self.name_of(self.focused);
@@ -319,24 +331,9 @@ impl Harness {
     }
 
     fn poll_control(&mut self) {
-        let Some(path) = &self.control else { return };
-        if self.last_poll.elapsed() < Duration::from_millis(250) {
-            return;
+        if let Some(rx) = &self.control_rx {
+            self.commands.extend(rx.try_iter());
         }
-        self.last_poll = Instant::now();
-        let Ok(text) = fs::read_to_string(path) else {
-            return;
-        };
-        if text.trim().is_empty() {
-            return;
-        }
-        let _ = fs::write(path, "");
-        self.commands.extend(
-            text.lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty())
-                .map(str::to_owned),
-        );
     }
 
     fn save_shot(&mut self, image: &egui::ColorImage) {
@@ -439,4 +436,75 @@ impl Harness {
             None => self.note = Some(text),
         }
     }
+}
+
+fn write_event(file: &mut fs::File, start: Instant, kind: &str, fields: Value) {
+    let ts_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let mut obj = json!({
+        "ts_ms": ts_ms,
+        "t": (start.elapsed().as_secs_f64() * 1000.0).round() / 1000.0,
+        "event": kind,
+    });
+    if let (Some(o), Value::Object(f)) = (obj.as_object_mut(), fields) {
+        o.extend(f);
+    }
+    let _ = writeln!(file, "{obj}");
+    let _ = file.flush();
+}
+
+/// Read the control file off the UI thread, so commands arrive even while the window gets no
+/// frames. Commands go to the app in order; `quit` also arms a fallback that exits the process
+/// when no frame has run for 2 s (a throttled window would never apply it).
+fn spawn_control_reader(
+    path: PathBuf,
+    ctx: Context,
+    mut log: Option<fs::File>,
+    start: Instant,
+    last_frame_ms: Arc<AtomicU64>,
+) -> mpsc::Receiver<String> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("prototype-control".to_owned())
+        .spawn(move || {
+            let mut quit_requested = false;
+            loop {
+                std::thread::sleep(Duration::from_millis(250));
+                if quit_requested {
+                    let now_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                    if now_ms.saturating_sub(last_frame_ms.load(Ordering::Relaxed)) > 2_000 {
+                        if let Some(file) = &mut log {
+                            write_event(
+                                file,
+                                start,
+                                "session_end",
+                                json!({ "via": "control thread, no frames" }),
+                            );
+                        }
+                        #[allow(
+                            clippy::disallowed_methods,
+                            reason = "the window gets no frames, so it cannot close itself"
+                        )]
+                        std::process::exit(0);
+                    }
+                }
+                let Ok(text) = fs::read_to_string(&path) else {
+                    continue;
+                };
+                if text.trim().is_empty() {
+                    continue;
+                }
+                let _ = fs::write(&path, "");
+                for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+                    quit_requested |= line == "quit";
+                    if tx.send(line.to_owned()).is_err() {
+                        return;
+                    }
+                }
+                ctx.request_repaint();
+            }
+        })
+        .expect("spawn the control reader thread");
+    rx
 }
