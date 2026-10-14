@@ -1480,7 +1480,7 @@ impl Proto {
                 }
                 ui.separator();
                 ui.label(
-                    RichText::new("← / → variant · F2 note · F3 marker · F4 hide this dock")
+                    RichText::new("◀ / ▶ variant · F2 note · F3 marker · F4 hide this dock")
                         .small()
                         .weak(),
                 );
