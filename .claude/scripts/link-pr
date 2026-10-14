@@ -3,7 +3,7 @@
 # names with a closing keyword (Closes/Fixes/Resolves #n). Policy:
 # docs/agents/issue-tracker.md, "Linking a pull request to its issue".
 #
-# Output: one JSON line on stdout, always.
+# Output: one JSON line on stdout, always (read fields with jq, e.g. `| jq -r .next`).
 #   {"pr":N,"issues":[..],"linked":[..],"missing":[..],"status":S,"action":A,"next":T}
 #   status  ok          every issue linked                                  exit 0
 #           no-keyword  body names no issue                                 exit 1
@@ -19,7 +19,7 @@
 set -euo pipefail
 
 pr="${1:-}"
-[[ "$pr" =~ ^[0-9]+$ ]] || { echo '{"status":"usage","next":"call: .claude/scripts/link-pr <pr-number>"}'; exit 2; }
+[[ "$pr" =~ ^[0-9]+$ ]] || { jq -nc '{status:"usage",next:"call: .claude/scripts/link-pr <pr-number>"}'; exit 2; }
 
 repo="$(gh repo view --json nameWithOwner,defaultBranchRef --jq '"\(.nameWithOwner) \(.defaultBranchRef.name)"')"
 default="${repo#* }"; repo="${repo% *}"
@@ -29,8 +29,6 @@ base="$(gh pr view "$pr" --json baseRefName --jq .baseRefName)"
 issues="$(gh pr view "$pr" --json body --jq .body \
   | grep -oiE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?) #[0-9]+' \
   | grep -oE '[0-9]+$' | sort -un | tr '\n' ' ' || true)"
-
-json_list() { local out=""; for x in $1; do out+="${out:+,}$x"; done; echo "[$out]"; }
 
 # Partition $issues into linked / missing, counting closed PRs too.
 check() {
@@ -46,8 +44,10 @@ check() {
 }
 
 emit() { # status action next exit
-  printf '{"pr":%s,"issues":%s,"linked":%s,"missing":%s,"status":"%s","action":"%s","next":"%s"}\n' \
-    "$pr" "$(json_list "$issues")" "$(json_list "$linked")" "$(json_list "$missing")" "$1" "$2" "$3"
+  nums() { jq -nc --arg s "$1" '$s | [splits(" +") | select(length > 0) | tonumber]'; }
+  jq -nc --argjson pr "$pr" --argjson issues "$(nums "$issues")" --argjson linked "$(nums "$linked")" \
+    --argjson missing "$(nums "$missing")" --arg status "$1" --arg action "$2" --arg next "$3" \
+    '{$pr, $issues, $linked, $missing, $status, $action, $next}'
   exit "$4"
 }
 
