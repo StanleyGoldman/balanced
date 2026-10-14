@@ -56,7 +56,7 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 ### Self-improvement
 
 - When you hit friction (a tool gotcha, a wrong assumption, a repeated workaround), record the lesson in the doc where the next agent will look, written with the `writing-for-agents` skill.
-- Make each lesson fix straight away, in its own worktree and PR, and report the PR link; the user weighs it in the PR review.
+- Make each lesson fix straight away, in its own worktree and PR, and report what you changed with the PR link; the user weighs it in the PR review. A lesson exists for the user once it is in a PR, so file it rather than mention it.
 - Read a sign-off message ("leave notes, I'll pick this up later") as the session's last word: finish the work it asks for, file any lessons as PRs, and end on what was done.
 - Reach for a skill when repeated work needs judgement; write skills with the `writing-for-agents` skill. When it needs only commands, write a script (below).
 
