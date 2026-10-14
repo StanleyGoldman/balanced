@@ -32,6 +32,7 @@ This doc applies to egui 0.36. Tutorials and examples written before 0.34 use AP
 ## Colours and theme
 
 - Colours come from the theme module, which supports light and dark. `clippy.toml` bans `Color32` constructors and `hex_color!`. The theme module is the one place that builds colours, under a module-level `#[expect(clippy::disallowed_methods, reason = "the theme module defines the palette")]` (and `disallowed_macros` if it uses `hex_color!`).
+- How widgets take their colours and sizes from the theme is in [theme](theme.md).
 
 ## Accessibility
 
