@@ -35,7 +35,7 @@ A prototype is throwaway code that answers one question by giving the user somet
 
 The agent follows the user through the app's own output. Build these in:
 
-- **Event log**: JSONL at the path given by `--log <path>` (use your scratchpad). One line per event, with a timestamp:
+- **Event log**: JSONL at the path given by `--log <path>` (a fresh directory in your scratchpad for every launch: screenshot numbers restart at `001` each launch and overwrite the last run's). One line per event, with a timestamp:
   - clicks, named by widget (`payee cell, row 1204`), not coordinates;
   - focus gained and lost, with the cause (click, Tab, app moved it);
   - typing: each keystroke tied to its field, and Tab, Enter, Esc and arrows as their own events;
