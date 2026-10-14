@@ -38,7 +38,7 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 
 ### Wayfinder
 
-- When charting, recommend a destination of decisions or a spec. The cleared map then hands off to `/to-spec` → `/to-tickets` → `/implement`, which does the building. Carrying the build into the map is the user's call: list it as an option without recommending it.
+- When charting, recommend a destination of decisions or a spec. The cleared map then hands off to `/to-spec` → `/to-tickets` → `/implement`, which does the building.
 
 ### Prototypes
 
