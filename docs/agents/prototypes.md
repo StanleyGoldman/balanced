@@ -59,7 +59,7 @@ You drive the prototype as well as the conversation. Through the control file yo
 5. Watch the event log as it grows (the Monitor tool), and read screenshots when a variant or toggle changes or the user drops a marker.
 6. Turn what the log shows and the user doesn't say into follow-up questions: hesitations, Esc right after starting an edit, Tab landing somewhere the user leaves at once, a control never touched, slow frames.
 7. When the user's message refers to "this" or "here", line it up with the log by timestamp.
-8. A step closes when the user's answer and the log agree. Record it as a Q&A entry on the PR, then move to the next step.
+8. A step closes on the user's answer. The log is supporting evidence of what they saw and tried, not a gate: some questions are easy to picture, and the user may answer from a glance or before trying anything. Raise a mismatch only when the log shows something that changes the answer, e.g. the user picked a variant they never opened. Record the step as a Q&A entry on the PR, citing log events where they exist, then move to the next step.
 9. The session ends when every agenda question has an answer. Post the resolution comment, then close the PR unmerged.
 
 ## Resolution comment
@@ -89,5 +89,5 @@ When the session ends, post one comment on the prototype's issue with this shape
 ```
 
 - List every agenda question as a table row, numbered by its step.
-- Use the tags defined in the Grilling section of `CLAUDE.md`. Here `firm` means the user chose it and the log agrees.
+- Use the tags defined in the Grilling section of `CLAUDE.md`. Here `firm` means the user chose it explicitly. In Evidence, cite log events and screenshots where they exist, and write "user's answer" where the user answered without them.
 - Write `none` in an empty section.
