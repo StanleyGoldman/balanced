@@ -7,8 +7,8 @@
 //!   cargo run -p balanced_ui --example shell_layout_prototype -- \
 //!     [--variant a|b|c] [--log <dir>/events.jsonl] [--control <dir>/control.txt]
 //!
-//! A separate "PROTOTYPE controls" window holds the variant switcher and toggles. In the app
-//! window, ← / → switch variant, F2 writes a note into the log, F3 drops a marker.
+//! The PROTOTYPE dock on the right holds the variant switcher and toggles; F4 collapses it.
+//! ← / → switch variant, F2 writes a note into the log, F3 drops a marker.
 //!
 //! Fixed-seed stub data, English literals, default egui theme. None of this is production code.
 
@@ -495,8 +495,8 @@ struct Proto {
     /// Selected Register row per account; shared across variants.
     selected_row: HashMap<usize, usize>,
     jump_to_row: Option<usize>,
-    /// Window level last sent to the controls window, to send changes only.
-    controls_level: Option<egui::WindowLevel>,
+    /// The docked prototype controls (F4).
+    dock_open: bool,
     /// Last action, shown in the Status bar so every click is visible.
     status: String,
 }
@@ -532,7 +532,7 @@ impl Proto {
             open_registers: vec![0, 8],
             selected_row: HashMap::new(),
             jump_to_row: None,
-            controls_level: None,
+            dock_open: true,
             status: "Ready".to_owned(),
         }
     }
@@ -660,6 +660,7 @@ impl Proto {
             "screenshot" => self
                 .h
                 .screenshot(if rest.is_empty() { "control" } else { rest }),
+            "dock" => self.set_dock(rest != "off", "control"),
             "quit" => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             _ => self.h.event("control_unknown", json!({ "command": cmd })),
         }
@@ -709,13 +710,16 @@ impl eframe::App for Proto {
             egui::Theme::Light
         });
 
+        if ctx.input(|i| i.key_pressed(egui::Key::F4)) {
+            self.set_dock(!self.dock_open, "key");
+        }
+        self.dock(ui);
         match self.variant {
             Variant::A => self.variant_a(ui),
             Variant::B => self.variant_b(ui),
             Variant::C => self.variant_c(ui),
         }
 
-        self.controls_window(&ctx);
         self.h.end_frame(&ctx);
     }
 }
@@ -1406,84 +1410,83 @@ impl Proto {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Prototype tooling lives in its own OS window, so the app window shows only the design.
+// Prototype tooling is docked as the outermost right-hand panel: each variant lays out in the
+// rest of the window, so the dock never covers the design. F4 collapses it to a thin edge.
 
 impl Proto {
-    fn controls_window(&mut self, ctx: &egui::Context) {
-        let app_focused = ctx.input(|i| i.viewport().focused).unwrap_or(false);
-        let builder = egui::ViewportBuilder::default()
-            .with_title("PROTOTYPE controls — shell layout")
-            .with_inner_size([380.0, 460.0]);
-        ctx.show_viewport_immediate(
-            egui::ViewportId::from_hash_of("prototype_controls"),
-            builder,
-            |ui, _class| {
-                if ui.input(|i| i.viewport().close_requested()) {
-                    // Closing the controls would strand the toggles; closing the app window ends the session.
-                    ui.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                }
-                // On top while the prototype is the active app; normal otherwise; untouched while
-                // minimized. Wayland ignores window levels (winit no-op), X11/Windows/macOS honour them.
-                let (focused, minimized) =
-                    ui.input(|i| (i.viewport().focused, i.viewport().minimized));
-                if minimized != Some(true) {
-                    let level = if app_focused || focused == Some(true) {
-                        egui::WindowLevel::AlwaysOnTop
-                    } else {
-                        egui::WindowLevel::Normal
-                    };
-                    if self.controls_level != Some(level) {
-                        self.controls_level = Some(level);
-                        ui.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
-                        self.h
-                            .event("controls_level", json!({ "level": format!("{level:?}") }));
+    fn set_dock(&mut self, open: bool, via: &str) {
+        self.dock_open = open;
+        self.h.event("dock", json!({ "open": open, "via": via }));
+    }
+
+    fn dock(&mut self, ui: &mut Ui) {
+        let frame = {
+            let v = ui.visuals();
+            egui::Frame::side_top_panel(ui.style())
+                .fill(v.warn_fg_color.gamma_multiply(0.10).blend(v.panel_fill))
+                .stroke(egui::Stroke::new(1.0, v.warn_fg_color))
+        };
+        if !self.dock_open {
+            Panel::right("prototype_dock_edge")
+                .exact_size(22.0)
+                .resizable(false)
+                .frame(frame)
+                .show(ui, |ui| {
+                    let r = ui
+                        .small_button("⏴")
+                        .on_hover_text("Show prototype controls (F4)");
+                    self.h.track(&r, "dock: expand");
+                    if r.clicked() {
+                        self.set_dock(true, "click");
                     }
-                }
-                CentralPanel::default().show(ui, |ui| {
-                    ui.heading("Variant");
-                    ui.horizontal(|ui| {
-                        let prev = ui.button("◀");
-                        self.h.track(&prev, "controls: previous variant");
-                        if prev.clicked() {
-                            self.set_variant(self.variant.step(-1), "click");
-                        }
-                        let next = ui.button("▶");
-                        self.h.track(&next, "controls: next variant");
-                        if next.clicked() {
-                            self.set_variant(self.variant.step(1), "click");
-                        }
-                    });
-                    for v in Variant::ALL {
-                        let r = ui.selectable_label(self.variant == v, v.label());
-                        self.h.track(&r, format!("controls: variant {}", v.key()));
+                });
+            return;
+        }
+        Panel::right("prototype_dock")
+            .exact_size(270.0)
+            .resizable(false)
+            .frame(frame)
+            .show(ui, |ui| {
+                Sides::new().show(
+                    ui,
+                    |ui| ui.label(RichText::new("PROTOTYPE").strong()),
+                    |ui| {
+                        let r = ui.small_button("⏵").on_hover_text("Collapse (F4)");
+                        self.h.track(&r, "dock: collapse");
                         if r.clicked() {
-                            self.set_variant(v, "click");
+                            self.set_dock(false, "click");
                         }
+                    },
+                );
+                ui.separator();
+                ui.label(RichText::new("Variant").strong());
+                for v in Variant::ALL {
+                    let r = ui.selectable_label(self.variant == v, v.label());
+                    self.h.track(&r, format!("dock: variant {}", v.key()));
+                    if r.clicked() {
+                        self.set_variant(v, "click");
                     }
-                    ui.separator();
-                    ui.heading("Toggles");
-                    let current = self.variant.key().to_uppercase();
-                    for &(key, label, applies) in TOGGLES {
-                        let relevant = applies == "all" || applies == current;
-                        let mut value = *self.t.get_mut(key).unwrap();
-                        let text = RichText::new(format!("[{applies}] {label}"));
-                        let r = ui.checkbox(&mut value, if relevant { text } else { text.weak() });
-                        self.h.track(&r, format!("controls: toggle {key}"));
-                        if r.changed() {
-                            self.set_toggle(key, Some(value), "click");
-                        }
+                }
+                ui.separator();
+                ui.label(RichText::new("Toggles").strong());
+                let current = self.variant.key().to_uppercase();
+                for &(key, label, applies) in TOGGLES {
+                    let relevant = applies == "all" || applies == current;
+                    let mut value = *self.t.get_mut(key).unwrap();
+                    let text = RichText::new(format!("[{applies}] {label}"));
+                    let r = ui.checkbox(&mut value, if relevant { text } else { text.weak() });
+                    self.h.track(&r, format!("dock: toggle {key}"));
+                    if r.changed() {
+                        self.set_toggle(key, Some(value), "click");
                     }
-                    ui.separator();
-                    ui.label(
-                        RichText::new(
-                            "In the app window: ← / → switch variant, F2 note, F3 marker.",
-                        )
+                }
+                ui.separator();
+                ui.label(
+                    RichText::new("← / → variant · F2 note · F3 marker · F4 hide this dock")
                         .small()
                         .weak(),
-                    );
-                });
-            },
-        );
+                );
+            });
     }
 }
 
