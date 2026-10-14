@@ -36,6 +36,10 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 
 - Ask before starting research subagents, even when a skill (e.g. `wayfinder` charting) says to start them automatically.
 
+### Wayfinder
+
+- When charting, recommend a destination of decisions or a spec. The cleared map then hands off to `/to-spec` → `/to-tickets` → `/implement`, which does the building.
+
 ### Prototypes
 
 - Read `docs/agents/prototypes.md` before planning, building, running or closing a prototype.
@@ -71,7 +75,7 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 
 ### Pull requests
 
-- Implementation ends with a pull request: after the review fixes are committed, push the branch and open a PR that closes the ticket (`Closes #<n>`).
+- Implementation ends with a pull request: after the review fixes are committed, push the branch and open a PR that closes the ticket (`Closes #<n>`). This extends the `implement` skill, which stops at the commit; it is user-invoked, so it never appears in your skill list.
 - Open pull requests and leave merging to a human; never merge one yourself.
 - Stage by explicit path (`git add <paths>`) and check `git status` before committing: untracked output from another branch (e.g. build or prototype output ignored only on that branch) survives `git switch`.
 - Leave remote branches to GitHub, which deletes a PR's head branch when it merges; cleanup after a merge covers only local branches and worktrees.
