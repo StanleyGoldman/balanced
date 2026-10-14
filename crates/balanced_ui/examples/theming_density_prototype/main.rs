@@ -1753,11 +1753,24 @@ impl Proto {
                                 .ctx()
                                 .layer_painter(ui.layer_id())
                                 .with_clip_rect(ui.clip_rect().expand2(pad).intersect(view));
+                            // Snap to a pixel centre: at fractional scales an unsnapped 1 pt line
+                            // straddles two pixels and antialiases almost to nothing.
+                            let ppp = ui.ctx().pixels_per_point();
+                            let snap = |v: f32| ((v * ppp).floor() + 0.5) / ppp;
+                            let line = egui::Stroke::new(1.0 / ppp, line.color);
                             if grid_cols {
-                                painter.vline(rect.right() + pad.x, rect.y_range().expand(pad.y), line);
+                                painter.vline(
+                                    snap(rect.right() + pad.x),
+                                    rect.y_range().expand(pad.y),
+                                    line,
+                                );
                             }
                             if grid_rows || hair {
-                                painter.hline(rect.x_range().expand(pad.x), rect.top() - pad.y, line);
+                                painter.hline(
+                                    rect.x_range().expand(pad.x),
+                                    snap(rect.top() - pad.y),
+                                    line,
+                                );
                             }
                         });
                         if resp.clicked() {
