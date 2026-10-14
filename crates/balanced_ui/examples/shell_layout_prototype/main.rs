@@ -495,6 +495,8 @@ struct Proto {
     /// Selected Register row per account; shared across variants.
     selected_row: HashMap<usize, usize>,
     jump_to_row: Option<usize>,
+    /// Window level last sent to the controls window, to send changes only.
+    controls_level: Option<egui::WindowLevel>,
     /// Last action, shown in the Status bar so every click is visible.
     status: String,
 }
@@ -530,6 +532,7 @@ impl Proto {
             open_registers: vec![0, 8],
             selected_row: HashMap::new(),
             jump_to_row: None,
+            controls_level: None,
             status: "Ready".to_owned(),
         }
     }
@@ -1407,6 +1410,7 @@ impl Proto {
 
 impl Proto {
     fn controls_window(&mut self, ctx: &egui::Context) {
+        let app_focused = ctx.input(|i| i.viewport().focused).unwrap_or(false);
         let builder = egui::ViewportBuilder::default()
             .with_title("PROTOTYPE controls — shell layout")
             .with_inner_size([380.0, 460.0]);
@@ -1417,6 +1421,23 @@ impl Proto {
                 if ui.input(|i| i.viewport().close_requested()) {
                     // Closing the controls would strand the toggles; closing the app window ends the session.
                     ui.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                }
+                // On top while the prototype is the active app; normal otherwise; untouched while
+                // minimized. Wayland ignores window levels (winit no-op), X11/Windows/macOS honour them.
+                let (focused, minimized) =
+                    ui.input(|i| (i.viewport().focused, i.viewport().minimized));
+                if minimized != Some(true) {
+                    let level = if app_focused || focused == Some(true) {
+                        egui::WindowLevel::AlwaysOnTop
+                    } else {
+                        egui::WindowLevel::Normal
+                    };
+                    if self.controls_level != Some(level) {
+                        self.controls_level = Some(level);
+                        ui.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
+                        self.h
+                            .event("controls_level", json!({ "level": format!("{level:?}") }));
+                    }
                 }
                 CentralPanel::default().show(ui, |ui| {
                     ui.heading("Variant");
