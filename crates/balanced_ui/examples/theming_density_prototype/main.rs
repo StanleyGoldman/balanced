@@ -1558,7 +1558,7 @@ impl Proto {
             .show(ui, |ui| {
                 if self.t.net_worth_footer {
                     Panel::bottom(Id::new((id, "footer")))
-                        .frame(chrome.inner_margin(egui::Margin::symmetric(0, 4)))
+                        .frame(chrome.inner_margin(egui::Margin::symmetric(8, 6)))
                         .show(ui, |ui| self.net_worth_row(ui));
                 }
                 CentralPanel::default()
@@ -1623,6 +1623,8 @@ impl Proto {
     }
 
     fn register_table(&mut self, ui: &mut Ui, account: usize) {
+        // The scroll viewport: header and grid painters reach past their cells but not past this.
+        let view = ui.clip_rect();
         let lk = look(self.variant);
         let row_h = if self.t.dense { lk.row_dense } else { lk.row };
         let pal = self.pal;
@@ -1665,7 +1667,7 @@ impl Proto {
                         let bg = ui.max_rect().expand2(pad);
                         ui.ctx()
                             .layer_painter(ui.layer_id())
-                            .with_clip_rect(bg)
+                            .with_clip_rect(bg.intersect(view))
                             .rect_filled(bg, 0.0, pal.header);
                         if matches!(title, "Payment" | "Deposit" | "Balance") {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1750,7 +1752,7 @@ impl Proto {
                             let painter = ui
                                 .ctx()
                                 .layer_painter(ui.layer_id())
-                                .with_clip_rect(ui.clip_rect().expand2(pad));
+                                .with_clip_rect(ui.clip_rect().expand2(pad).intersect(view));
                             if grid_cols {
                                 painter.vline(rect.right() + pad.x, rect.y_range().expand(pad.y), line);
                             }
