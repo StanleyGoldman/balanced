@@ -7,10 +7,8 @@
 //!   cargo run -p balanced_ui --example shell_layout_prototype -- \
 //!     [--variant a|b|c] [--log <dir>/events.jsonl] [--control <dir>/control.txt]
 //!
-//! Flip variants with the floating bar at the bottom or ← / →. Toggles live in the
-//! Prototype panel (top right). F2 writes a note into the log, F3 drops a marker.
-//! Control commands (one per line in the control file): `variant b`, `toggle dense [on|off]`,
-//! `account <index|name>`, `tab <index|name>`, `row <n>`, `reload`, `screenshot [label]`, `quit`.
+//! A separate "PROTOTYPE controls" window holds the variant switcher and toggles. In the app
+//! window, ← / → switch variant, F2 writes a note into the log, F3 drops a marker.
 //!
 //! Fixed-seed stub data, English literals, default egui theme. None of this is production code.
 
@@ -33,9 +31,7 @@ mod harness;
 use std::collections::HashMap;
 
 use eframe::egui;
-use egui::{
-    Align, Align2, Button, CentralPanel, Id, Layout, Order, Panel, RichText, Sense, Sides, Ui,
-};
+use egui::{Align, Button, CentralPanel, Id, Layout, Panel, RichText, Sense, Sides, Ui};
 use egui_extras::{Column, TableBuilder};
 use harness::Harness;
 use serde_json::json;
@@ -687,6 +683,10 @@ impl Proto {
 }
 
 impl eframe::App for Proto {
+    fn on_exit(&mut self) {
+        self.h.event("session_end", json!({}));
+    }
+
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if let Some(cmd) = self.h.begin_frame(&ctx) {
@@ -712,8 +712,7 @@ impl eframe::App for Proto {
             Variant::C => self.variant_c(ui),
         }
 
-        self.switcher(&ctx);
-        self.prototype_panel(&ctx);
+        self.controls_window(&ctx);
         self.h.end_frame(&ctx);
     }
 }
@@ -1404,75 +1403,66 @@ impl Proto {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Prototype tooling: the floating variant switcher and the Prototype panel. Not part of any
-// design, so they get a loud tooling look.
-
-fn tooling_frame(ui: &Ui) -> egui::Frame {
-    let v = ui.visuals();
-    egui::Frame::popup(ui.style())
-        .fill(
-            v.warn_fg_color
-                .gamma_multiply(0.18)
-                .blend(v.extreme_bg_color),
-        )
-        .stroke(egui::Stroke::new(2.0, v.warn_fg_color))
-}
+// Prototype tooling lives in its own OS window, so the app window shows only the design.
 
 impl Proto {
-    fn switcher(&mut self, ctx: &egui::Context) {
-        egui::Area::new(Id::new("prototype_switcher"))
-            .anchor(Align2::CENTER_BOTTOM, [0.0, -36.0])
-            .order(Order::Foreground)
-            .show(ctx, |ui| {
-                tooling_frame(ui).show(ui, |ui| {
+    fn controls_window(&mut self, ctx: &egui::Context) {
+        let builder = egui::ViewportBuilder::default()
+            .with_title("PROTOTYPE controls — shell layout")
+            .with_inner_size([380.0, 460.0]);
+        ctx.show_viewport_immediate(
+            egui::ViewportId::from_hash_of("prototype_controls"),
+            builder,
+            |ui, _class| {
+                if ui.input(|i| i.viewport().close_requested()) {
+                    // Closing the controls would strand the toggles; closing the app window ends the session.
+                    ui.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                }
+                CentralPanel::default().show(ui, |ui| {
+                    ui.heading("Variant");
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("PROTOTYPE").small().strong());
                         let prev = ui.button("◀");
-                        self.h.track(&prev, "switcher: previous");
+                        self.h.track(&prev, "controls: previous variant");
                         if prev.clicked() {
                             self.set_variant(self.variant.step(-1), "click");
                         }
-                        ui.label(RichText::new(self.variant.label()).strong());
                         let next = ui.button("▶");
-                        self.h.track(&next, "switcher: next");
+                        self.h.track(&next, "controls: next variant");
                         if next.clicked() {
                             self.set_variant(self.variant.step(1), "click");
                         }
-                        ui.label(RichText::new("F2 note · F3 marker").small().weak());
                     });
-                });
-            });
-    }
-
-    fn prototype_panel(&mut self, ctx: &egui::Context) {
-        let v = self.variant.key().to_uppercase();
-        egui::Window::new("Prototype panel")
-            .anchor(Align2::RIGHT_BOTTOM, [-8.0, -36.0])
-            .collapsible(true)
-            .default_open(false)
-            .resizable(false)
-            .frame(tooling_frame(&egui::Ui::new(
-                ctx.clone(),
-                Id::new("tooling_style"),
-                egui::UiBuilder::new(),
-            )))
-            .show(ctx, |ui| {
-                ui.label(
-                    RichText::new(format!("Variant {v}. Toggles tagged [all] or by variant."))
+                    for v in Variant::ALL {
+                        let r = ui.selectable_label(self.variant == v, v.label());
+                        self.h.track(&r, format!("controls: variant {}", v.key()));
+                        if r.clicked() {
+                            self.set_variant(v, "click");
+                        }
+                    }
+                    ui.separator();
+                    ui.heading("Toggles");
+                    let current = self.variant.key().to_uppercase();
+                    for &(key, label, applies) in TOGGLES {
+                        let relevant = applies == "all" || applies == current;
+                        let mut value = *self.t.get_mut(key).unwrap();
+                        let text = RichText::new(format!("[{applies}] {label}"));
+                        let r = ui.checkbox(&mut value, if relevant { text } else { text.weak() });
+                        self.h.track(&r, format!("controls: toggle {key}"));
+                        if r.changed() {
+                            self.set_toggle(key, Some(value), "click");
+                        }
+                    }
+                    ui.separator();
+                    ui.label(
+                        RichText::new(
+                            "In the app window: ← / → switch variant, F2 note, F3 marker.",
+                        )
                         .small()
                         .weak(),
-                );
-                for &(key, label, applies) in TOGGLES {
-                    let relevant = applies == "all" || applies == v;
-                    let mut value = *self.t.get_mut(key).unwrap();
-                    let text = RichText::new(format!("[{applies}] {label}"));
-                    let r = ui.checkbox(&mut value, if relevant { text } else { text.weak() });
-                    self.h.track(&r, format!("prototype panel: {key}"));
-                    if r.changed() {
-                        self.set_toggle(key, Some(value), "click");
-                    }
-                }
-            });
+                    );
+                });
+            },
+        );
     }
 }
 
