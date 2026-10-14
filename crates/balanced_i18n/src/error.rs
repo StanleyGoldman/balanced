@@ -12,7 +12,8 @@ pub enum I18nError {
     /// ICU4X has no date pattern for the formatting locale.
     #[error("no date formatting data for the locale")]
     DateFormattingData(#[from] icu_datetime::DateTimeFormatterLoadError),
-    /// The currency code is not three ASCII letters, or its decimal places don't fit.
+    /// The currency code is not three uppercase ASCII letters, or its decimal places
+    /// don't fit.
     #[error("invalid currency {code:?}")]
     Currency {
         /// The code as given.

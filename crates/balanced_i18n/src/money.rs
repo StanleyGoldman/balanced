@@ -32,12 +32,15 @@ pub struct Currency {
 }
 
 impl Currency {
-    /// The currency with this three-letter code, whose amounts carry
+    /// The currency with this three-letter uppercase code, whose amounts carry
     /// `decimal_places` decimal places.
     pub fn new(code: &str, decimal_places: u32) -> Result<Self, I18nError> {
         let invalid = || I18nError::Currency {
             code: code.to_owned(),
         };
+        if code.len() != 3 || !code.bytes().all(|b| b.is_ascii_uppercase()) {
+            return Err(invalid());
+        }
         Ok(Self {
             code: CurrencyType::try_from_str(code).map_err(|_| invalid())?,
             decimal_places: u8::try_from(decimal_places).map_err(|_| invalid())?,
@@ -59,15 +62,18 @@ pub enum AmountStyle {
 /// standard minus sign for negative amounts.
 ///
 /// `amount` should already be at the currency's decimal places, as `Money` amounts
-/// are. Any extra digits are rounded half away from zero, for display only.
+/// are. An amount with more significant decimal places shows all of them: display
+/// never rounds.
 pub(crate) fn format_amount(
     locale: &Locale,
     amount: Decimal,
     currency: Currency,
     style: AmountStyle,
 ) -> String {
+    let significant_places =
+        u8::try_from(amount.normalize().scale()).expect("a Decimal's scale is at most 28");
     let provider = IsoDigits {
-        decimal_places: currency.decimal_places,
+        decimal_places: currency.decimal_places.max(significant_places),
     };
     let prefs = locale.into();
     let options = CurrencyFormatterOptions::default();
@@ -91,7 +97,7 @@ pub(crate) fn format_amount(
 }
 
 /// ICU4X's compiled data, except that every currency's decimal places come from
-/// [`Currency`] rather than from CLDR.
+/// [`Currency`] (or from the amount, when it has more) rather than from CLDR.
 ///
 /// CLDR's display digits differ from ISO 4217's minor units for some currencies
 /// (IQD has 3 in ISO and 0 in CLDR), and `CurrencyFormatter` rounds to CLDR's. A
@@ -176,9 +182,9 @@ impl NumberSymbols {
                 _ => runs.push((is_digit, c.to_string())),
             }
         }
-        let minus_prefix = take_if(&mut runs, 0, false);
+        let minus_prefix = take_separator_run(&mut runs, 0);
         let last = runs.len().saturating_sub(1);
-        let minus_suffix = take_if(&mut runs, last, false);
+        let minus_suffix = take_separator_run(&mut runs, last);
         // What is left alternates digits and separators, and ends `<decimal> 5`.
         let separators: Vec<&str> = runs
             .iter()
@@ -193,6 +199,7 @@ impl NumberSymbols {
         let (decimal, group_separators) = separators
             .split_last()
             .expect("-1234567.5 has a decimal mark");
+        // The probe has digits after its decimal mark, so `groups` is not empty.
         let integer_groups = &groups[..groups.len() - 1];
         Self {
             digits,
@@ -238,9 +245,9 @@ impl NumberSymbols {
 
 /// Removes and returns run `index` when it is a separator run, as at either end of
 /// the probe.
-fn take_if(runs: &mut Vec<(bool, String)>, index: usize, is_digit: bool) -> String {
+fn take_separator_run(runs: &mut Vec<(bool, String)>, index: usize) -> String {
     match runs.get(index) {
-        Some((run_is_digit, _)) if *run_is_digit == is_digit => runs.remove(index).1,
+        Some((false, _)) => runs.remove(index).1,
         _ => String::new(),
     }
 }
@@ -266,6 +273,7 @@ pub(crate) fn parse_amount(
         Some(excess) if !excess.bytes().all(|b| b == b'0') => {
             return Err(AmountParseError::TooManyDecimalPlaces { decimal_places });
         }
+        // `get(places..)` succeeded, so `places` is within the ASCII `fraction`.
         Some(_) => &fraction[..places],
         None => fraction.as_str(),
     };
@@ -277,6 +285,8 @@ pub(crate) fn parse_amount(
     } else {
         format!("{sign}{integer}.{fraction}")
     };
+    // `digits` is ASCII digits with at most one `.`, so the only failure is a value
+    // with more digits than a `Decimal` holds.
     let mut amount = Decimal::from_str_exact(&digits).map_err(|_| AmountParseError::OutOfRange)?;
     // Padding never rounds; a short scale means the mantissa ran out of room.
     amount.rescale(decimal_places);
@@ -376,7 +386,7 @@ fn strip_minus<'a>(symbols: &NumberSymbols, text: &'a str) -> (bool, &'a str) {
 }
 
 /// Strips a currency symbol or code, and spaces, from both ends: `US$ 5`, `5 €`,
-/// `5,00 kr.`. The symbol is not checked against the currency.
+/// `5,00 kr.`, `S/ 5`, `B/.5`. The symbol is not checked against the currency.
 fn strip_affixes(text: &str) -> &str {
     let mut start = 0;
     let mut previous: Option<char> = None;
@@ -387,28 +397,30 @@ fn strip_affixes(text: &str) -> &str {
         start = i + c.len_utf8();
         previous = Some(c);
     }
+    // `start` is the end of a char, so it is a char boundary within `text`.
     let text = &text[start..];
 
     let mut end = text.len();
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     for (n, &(i, c)) in chars.iter().enumerate().rev() {
         let before = n.checked_sub(1).and_then(|p| chars.get(p)).map(|&(_, c)| c);
-        // Read right to left, a `.` belongs to the symbol when a letter precedes it.
-        if !(is_affix(c, None) || (c == '.' && before.is_some_and(char::is_alphabetic))) {
+        if !is_affix(c, before) {
             break;
         }
         end = i;
     }
+    // `end` is the start of a char, or the length, so it is a char boundary.
     &text[..end]
 }
 
-/// Whether `c` can be part of a currency symbol or code, given the character before
-/// it. A `.` right after a letter is an abbreviation (`kr.`), not a decimal mark.
-fn is_affix(c: char, previous: Option<char>) -> bool {
+/// Whether `c` can be part of a currency symbol or code, given `neighbour`, the
+/// character next to it on the symbol's side. A `.` or `/` right after a letter or
+/// a `/` belongs to the symbol (`kr.`, `S/`, `B/.`), not to the number.
+fn is_affix(c: char, neighbour: Option<char>) -> bool {
     c.is_alphabetic()
         || c.is_whitespace()
         || is_currency_symbol(c)
-        || (c == '.' && previous.is_some_and(char::is_alphabetic))
+        || (matches!(c, '.' | '/') && neighbour.is_some_and(|n| n.is_alphabetic() || n == '/'))
 }
 
 /// Unicode's currency symbols (general category Sc).
@@ -459,6 +471,18 @@ mod tests {
         text: &str,
     ) -> Result<Decimal, AmountParseError> {
         parse_amount(&symbols(locale), decimal_places, text)
+    }
+
+    #[test]
+    fn rejects_currency_codes_that_are_not_three_uppercase_letters() {
+        for code in ["usd", "US", "USDX", "U1D"] {
+            let result = Currency::new(code, 2);
+
+            assert!(
+                matches!(result, Err(I18nError::Currency { code: ref given }) if given == code),
+                "{code:?}: {result:?}"
+            );
+        }
     }
 
     /// One line per amount and currency, both styles, for a snapshot.
@@ -540,6 +564,16 @@ mod tests {
     }
 
     #[test]
+    fn formatting_shows_every_decimal_place_the_amount_has() {
+        let amount = dec!(1.005);
+
+        assert_eq!(
+            format_amount(&locale!("en-US"), amount, usd(), AmountStyle::Bare),
+            "1.005"
+        );
+    }
+
+    #[test]
     fn reads_the_symbols_each_locale_writes() {
         let en = symbols(&locale!("en-US"));
         let de = symbols(&locale!("de-DE"));
@@ -558,6 +592,10 @@ mod tests {
         let hi = symbols(&locale!("en-IN"));
 
         assert_eq!((hi.primary_group, hi.secondary_group), (3, 2));
+    }
+
+    #[test]
+    fn parses_by_indian_grouping() {
         assert_eq!(
             parse(&locale!("en-IN"), 2, "12,34,567.89"),
             Ok(dec!(1234567.89))
@@ -631,14 +669,21 @@ mod tests {
 
     #[test]
     fn accepts_a_leading_or_trailing_minus() {
-        for text in ["-5", "5-", "\u{2212}5", "-$5.00", "$-5.00", "($5.00)"] {
-            let expected = if text.starts_with('(') {
-                Err(AmountParseError::Invalid)
-            } else {
-                Ok(dec!(-5.00))
-            };
-            assert_eq!(parse(&locale!("en-US"), 2, text), expected, "{text:?}");
+        for text in ["-5", "5-", "\u{2212}5", "-$5.00", "$-5.00"] {
+            assert_eq!(
+                parse(&locale!("en-US"), 2, text),
+                Ok(dec!(-5.00)),
+                "{text:?}"
+            );
         }
+    }
+
+    #[test]
+    fn rejects_accounting_parentheses() {
+        assert_eq!(
+            parse(&locale!("en-US"), 2, "($5.00)"),
+            Err(AmountParseError::Invalid)
+        );
     }
 
     #[test]
@@ -672,6 +717,22 @@ mod tests {
             (locale!("en-US"), "US$1,234.50"),
             (locale!("de-DE"), "1.234,50 €"),
             (locale!("da-DK"), "1.234,50 kr."),
+        ];
+        for (locale, text) in cases {
+            assert_eq!(
+                parse(&locale, 2, text),
+                Ok(dec!(1234.50)),
+                "{locale} {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ignores_currency_symbols_written_with_a_slash() {
+        let cases = [
+            (locale!("es-PE"), "S/\u{a0}1,234.50"),
+            (locale!("es-PA"), "B/.1,234.50"),
+            (locale!("es-PA"), "1,234.50 B/."),
         ];
         for (locale, text) in cases {
             assert_eq!(
@@ -722,30 +783,61 @@ mod tests {
         assert!(zero.is_sign_positive());
     }
 
+    /// Amounts at `decimal_places`, from their minor units, so that no fixture rounds.
+    fn amounts(decimal_places: u32) -> [Decimal; 4] {
+        [0, 5, -123_450, 123_456_789].map(|minor_units| Decimal::new(minor_units, decimal_places))
+    }
+
+    /// Formats `amount` in both styles and parses each back.
+    fn assert_parses_back(locale: &Locale, amount: Decimal, currency: Currency) {
+        let symbols = symbols(locale);
+        let places = u32::from(currency.decimal_places);
+        for style in [AmountStyle::Symbol, AmountStyle::Bare] {
+            let text = format_amount(locale, amount, currency, style);
+
+            let parsed = parse_amount(&symbols, places, &text);
+
+            assert_eq!(parsed, Ok(amount), "{locale} {style:?} {text:?}");
+        }
+    }
+
     #[test]
     fn formatted_amounts_parse_back() {
-        let amounts = [dec!(0.00), dec!(0.05), dec!(-1234.50), dec!(1234567.89)];
         let currencies = [
             usd(),
             currency("JPY", 0),
             currency("BHD", 3),
             currency("IQD", 3),
         ];
-        for locale in [locale!("en-US"), locale!("de-DE"), locale!("en-XA")] {
-            let symbols = symbols(&locale);
+        // `en-XA` formats in `de-DE`; `Localizer`'s tests round-trip it.
+        for locale in [locale!("en-US"), locale!("de-DE")] {
             for currency in currencies {
-                let places = u32::from(currency.decimal_places);
-                for amount in amounts {
-                    let mut amount = amount;
-                    amount.rescale(places);
-                    for style in [AmountStyle::Symbol, AmountStyle::Bare] {
-                        let text = format_amount(&locale, amount, currency, style);
-
-                        let parsed = parse_amount(&symbols, places, &text);
-
-                        assert_eq!(parsed, Ok(amount), "{locale} {style:?} {text:?}");
-                    }
+                for amount in amounts(u32::from(currency.decimal_places)) {
+                    assert_parses_back(&locale, amount, currency);
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn amounts_in_each_locale_own_currency_parse_back() {
+        let cases = [
+            (locale!("fr-FR"), currency("EUR", 2)),
+            (locale!("da-DK"), currency("DKK", 2)),
+            (locale!("de-CH"), currency("CHF", 2)),
+            (locale!("en-IN"), currency("INR", 2)),
+            (locale!("es-PE"), currency("PEN", 2)),
+            (locale!("es-PA"), currency("PAB", 2)),
+            (locale!("pt-BR"), currency("BRL", 2)),
+            (locale!("ar-EG"), currency("EGP", 2)),
+            (locale!("fa-IR"), currency("IRR", 0)),
+            (locale!("he-IL"), currency("ILS", 2)),
+            (locale!("ja-JP"), currency("JPY", 0)),
+            (locale!("ar-KW"), currency("KWD", 3)),
+        ];
+        for (locale, currency) in cases {
+            for amount in amounts(u32::from(currency.decimal_places)) {
+                assert_parses_back(&locale, amount, currency);
             }
         }
     }
