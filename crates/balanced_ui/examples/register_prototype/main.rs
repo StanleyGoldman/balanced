@@ -12,8 +12,10 @@
 //! Keys (no text field focused): A B C / ← → switch variant, 1–9 0 flip toggles, F2 note,
 //! F3 marker, F5 spotlight. In variant C the grid owns the keyboard, so hold Alt for those keys.
 //!
-//! Fixed-seed stub data (money is whole cents in an `i64` until `Money` exists), English
-//! literals, default egui theme. None of this is production code.
+//! Fixed-seed stub data (money is whole cents in an `i64`), English literals. The look is
+//! Balanced's own theme, `balanced_ui::theme`, pulled in by path because it is crate-private;
+//! the toggles for gridlines, alternating rows, density and dark set its `ThemeSettings`.
+//! None of this is production code.
 
 #![allow(
     clippy::allow_attributes,
@@ -39,10 +41,17 @@
 use balanced_prototype_harness::{Args, Harness};
 use eframe::egui;
 use egui::{
-    Align, CentralPanel, Id, Key, Label, Layout, Modifiers, Panel, RichText, Sense, Sides, Ui,
+    Align, CentralPanel, Id, Key, Label, Layout, Margin, Modifiers, Panel, Rect, RichText,
+    ScrollArea, Sense, Sides, Ui,
 };
 use egui_extras::{Column, TableBuilder};
 use serde_json::json;
+
+// The real theme module: crate-private, so the example compiles its source in.
+#[path = "../../src/theme.rs"]
+#[allow(dead_code)]
+mod theme;
+use theme::{Density, Gridlines, Scheme, Theme, ThemeSettings};
 
 // ---------------------------------------------------------------------------------------------
 // Stub data: fixed seed, realistic volume
@@ -565,8 +574,8 @@ const TOGGLES: &[(&str, &str, &str)] = &[
         "Autocomplete: list (off: inline ghost text)",
         "all",
     ),
-    ("grid_lines", "Grid lines", "all"),
-    ("striping", "Striped rows", "all"),
+    ("gridlines", "Gridlines (cycles)", "all"),
+    ("striping", "Alternating rows", "all"),
     ("dense", "Dense rows", "all"),
     ("entry_bar_top", "Entry bar on top (off: bottom)", "B"),
     ("enter_down", "Enter moves down (off: right)", "C"),
@@ -582,7 +591,7 @@ struct Toggles {
     two_line: bool,
     running_balance: bool,
     ac_popup: bool,
-    grid_lines: bool,
+    gridlines: Gridlines,
     striping: bool,
     dense: bool,
     entry_bar_top: bool,
@@ -597,7 +606,6 @@ impl Toggles {
             "two_line" => &mut self.two_line,
             "running_balance" => &mut self.running_balance,
             "ac_popup" => &mut self.ac_popup,
-            "grid_lines" => &mut self.grid_lines,
             "striping" => &mut self.striping,
             "dense" => &mut self.dense,
             "entry_bar_top" => &mut self.entry_bar_top,
@@ -797,22 +805,113 @@ fn suggestions(data: &Data, query: &str) -> Vec<usize> {
 // ---------------------------------------------------------------------------------------------
 // Widgets
 
-fn grid_lines(ui: &Ui, on: bool) {
-    if on {
-        let rect = ui.max_rect();
-        let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
-        ui.painter()
-            .line_segment([rect.right_top(), rect.right_bottom()], stroke);
-        ui.painter()
-            .line_segment([rect.left_bottom(), rect.right_bottom()], stroke);
+fn gridlines_name(g: Gridlines) -> &'static str {
+    match g {
+        Gridlines::Off => "off",
+        Gridlines::Horizontal => "horizontal",
+        Gridlines::Vertical => "vertical",
+        Gridlines::Both => "both",
     }
 }
 
+/// The grid being drawn this frame: its theme, its scroll viewport (painters that reach into
+/// the gaps between cells stop there), and its left and right edges, so a cell can tell it
+/// is in the first or last column and take the edge inset.
+struct Grid {
+    theme: Theme,
+    view: Rect,
+    left: f32,
+    /// The right edge of the last column, as the previous frame drew it.
+    right: f32,
+    seen_right: f32,
+}
+
+thread_local! {
+    static GRID: std::cell::RefCell<Option<Grid>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Start a grid: call it in the `Ui` the table is built in.
+fn set_grid(ui: &Ui, theme: &Theme) {
+    GRID.with_borrow_mut(|g| {
+        let right = g
+            .as_ref()
+            .map(|g| g.seen_right)
+            .filter(|r| r.is_finite())
+            .unwrap_or(ui.max_rect().right());
+        *g = Some(Grid {
+            theme: theme.clone(),
+            view: ui.clip_rect(),
+            left: ui.max_rect().left(),
+            right,
+            seen_right: f32::NEG_INFINITY,
+        });
+    });
+}
+
+fn first_col(ui: &Ui) -> bool {
+    GRID.with_borrow(|g| {
+        g.as_ref()
+            .is_some_and(|g| ui.max_rect().left() <= g.left + 0.5)
+    })
+}
+
+fn last_col(ui: &Ui) -> bool {
+    GRID.with_borrow(|g| {
+        g.as_ref()
+            .is_some_and(|g| ui.max_rect().right() >= g.right - 0.5)
+    })
+}
+
+/// The cell's gridlines, from the theme: call it after the cell's content.
+fn grid_lines(ui: &Ui) {
+    GRID.with_borrow_mut(|g| {
+        let Some(g) = g else { return };
+        let cell = ui.max_rect();
+        g.seen_right = g.seen_right.max(cell.right());
+        let column = usize::from(cell.left() > g.left + 0.5);
+        let ctx = ui.ctx();
+        ctx.layer_painter(ui.layer_id())
+            .with_clip_rect(g.theme.rule_clip(ui.clip_rect(), g.view))
+            .extend(g.theme.cell_rules(cell, column, ctx.pixels_per_point()));
+    });
+}
+
+/// The header band behind a header cell and half the gap around it: call it first.
+fn header_band(ui: &Ui) {
+    GRID.with_borrow_mut(|g| {
+        let Some(g) = g else { return };
+        let cell = ui.max_rect();
+        g.seen_right = g.seen_right.max(cell.right());
+        let bg = cell.expand2(ui.spacing().item_spacing / 2.0);
+        ui.ctx()
+            .layer_painter(ui.layer_id())
+            .with_clip_rect(bg.intersect(g.view))
+            .rect_filled(bg, 0.0, g.theme.header_fill());
+    });
+}
+
+/// A right-aligned header (amounts), with the edge inset in the last column.
+fn money_header(ui: &mut Ui, title: &str) {
+    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        if last_col(ui) {
+            ui.add_space(Theme::EDGE_INSET);
+        }
+        ui.strong(title);
+    });
+}
+
 fn cell_label(ui: &mut Ui, text: impl Into<egui::WidgetText>) {
+    if first_col(ui) {
+        ui.add_space(Theme::EDGE_INSET);
+    }
     ui.add(Label::new(text).truncate());
 }
 
+/// An amount, in a right-to-left cell.
 fn money_label(ui: &mut Ui, cents: i64) {
+    if last_col(ui) {
+        ui.add_space(Theme::EDGE_INSET);
+    }
     let text = fmt_cents(cents);
     if cents < 0 {
         let c = ui.visuals().error_fg_color;
@@ -1003,6 +1102,8 @@ struct Proto {
     error: Option<String>,
     /// The keys taken this frame, for variant C's payee cell.
     c_keys: Keys,
+    theme: Theme,
+    applied: Option<ThemeSettings>,
 }
 
 impl Proto {
@@ -1020,10 +1121,10 @@ impl Proto {
             data,
             variant,
             t: Toggles {
-                two_line: true,
+                two_line: false,
                 running_balance: true,
                 ac_popup: true,
-                grid_lines: false,
+                gridlines: Gridlines::Off,
                 striping: true,
                 dense: false,
                 entry_bar_top: false,
@@ -1052,6 +1153,8 @@ impl Proto {
             status: "Ready".to_owned(),
             error: None,
             c_keys: Keys::default(),
+            theme: Theme::default(),
+            applied: None,
         };
         me.rebuild_view();
         me.sel = Sel::Txn(me.order.last().copied().unwrap_or(0));
@@ -1603,7 +1706,75 @@ impl Proto {
         self.h.screenshot(format!("variant-{}", to.key()));
     }
 
+    /// The theme Preferences the toggles stand for.
+    fn settings(&self) -> ThemeSettings {
+        ThemeSettings {
+            scheme: if self.t.dark {
+                Scheme::Dark
+            } else {
+                Scheme::Light
+            },
+            density: if self.t.dense {
+                Density::Dense
+            } else {
+                Density::Normal
+            },
+            gridlines: self.t.gridlines,
+            alternating_rows: self.t.striping,
+            ..ThemeSettings::default()
+        }
+    }
+
+    fn sync_theme(&mut self, ctx: &egui::Context) {
+        let want = self.settings();
+        if self.applied == Some(want) {
+            return;
+        }
+        self.applied = Some(want);
+        self.theme = Theme::new(want);
+        let style = self.theme.style();
+        ctx.set_style_of(egui::Theme::Dark, style.clone());
+        ctx.set_style_of(egui::Theme::Light, style);
+        ctx.set_theme(if self.t.dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        });
+    }
+
+    /// Gridlines cycle off → horizontal → vertical → both, or take a named value.
+    fn set_gridlines(&mut self, value: Option<&str>, via: &str) {
+        let next = match value {
+            Some("off") => Gridlines::Off,
+            Some("horizontal") => Gridlines::Horizontal,
+            Some("vertical") => Gridlines::Vertical,
+            Some("both") => Gridlines::Both,
+            Some(other) => {
+                self.h
+                    .event("control_unknown", json!({ "gridlines": other }));
+                return;
+            }
+            None => match self.t.gridlines {
+                Gridlines::Off => Gridlines::Horizontal,
+                Gridlines::Horizontal => Gridlines::Vertical,
+                Gridlines::Vertical => Gridlines::Both,
+                Gridlines::Both => Gridlines::Off,
+            },
+        };
+        self.t.gridlines = next;
+        let name = gridlines_name(next);
+        self.h.event(
+            "toggle",
+            json!({ "key": "gridlines", "value": name, "via": via, "applies_to": "all" }),
+        );
+        self.h.screenshot(format!("toggle-gridlines-{name}"));
+    }
+
     fn set_toggle(&mut self, key: &str, value: Option<bool>, via: &str) {
+        if key == "gridlines" {
+            self.set_gridlines(None, via);
+            return;
+        }
         let Some(slot) = self.t.get_mut(key) else {
             self.h.event("control_unknown", json!({ "toggle": key }));
             return;
@@ -1646,7 +1817,12 @@ impl Proto {
                 let (key, value) = rest
                     .split_once(' ')
                     .map_or((rest, None), |(k, v)| (k, Some(v.trim() == "on")));
-                self.set_toggle(key, value, "control");
+                if key == "gridlines" {
+                    let value = rest.split_once(' ').map(|(_, v)| v.trim());
+                    self.set_gridlines(value, "control");
+                } else {
+                    self.set_toggle(key, value, "control");
+                }
             }
             "row" => {
                 let target = if rest == "split" {
@@ -1964,7 +2140,11 @@ impl Proto {
     // -- chrome -------------------------------------------------------------------------------
 
     fn status_bar(&mut self, ui: &mut Ui) {
-        let r = Panel::bottom("status").show(ui, |ui| {
+        let frame = self
+            .theme
+            .chrome_frame()
+            .inner_margin(Margin::symmetric(8, 3));
+        let r = Panel::bottom("status").frame(frame).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(format!(
                     "Everyday Checking · {} transactions · sorted by {} {}",
@@ -1985,13 +2165,7 @@ impl Proto {
     }
 
     fn row_height(&self, lines: u32) -> f32 {
-        let line = 15.0;
-        let pad = if self.t.dense { 5.0 } else { 9.0 };
-        if lines == 2 {
-            2.0 * line + pad + 4.0
-        } else {
-            line + pad
-        }
+        self.theme.row_height() * lines as f32
     }
 
     fn split_window(&mut self, ui: &mut Ui) {
@@ -2058,17 +2232,10 @@ impl eframe::App for Proto {
 
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        if ctx.global_style().interaction.selectable_labels {
-            ctx.all_styles_mut(|s| s.interaction.selectable_labels = false);
-        }
         if let Some(cmd) = self.h.begin_frame(&ctx) {
             self.apply_control(&ctx, &cmd);
         }
-        ctx.set_theme(if self.t.dark {
-            egui::Theme::Dark
-        } else {
-            egui::Theme::Light
-        });
+        self.sync_theme(&ctx);
         if ctx.input(|i| i.key_pressed(Key::F4)) {
             self.set_dock(!self.dock_open, "key");
         }
@@ -2148,7 +2315,21 @@ fn sort_header(
         " ⏷"
     };
     let text = RichText::new(format!("{title}{arrow}")).strong();
-    let r = ui.add(Label::new(text).sense(Sense::click()));
+    let label = Label::new(text).sense(Sense::click());
+    let r = if col == SortCol::Amount {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if last_col(ui) {
+                ui.add_space(Theme::EDGE_INSET);
+            }
+            ui.add(label)
+        })
+        .inner
+    } else {
+        if first_col(ui) {
+            ui.add_space(Theme::EDGE_INSET);
+        }
+        ui.add(label)
+    };
     h.track(&r, format!("header: {title}"));
     if r.clicked() {
         acts.push(Act::Sort(col));
@@ -2188,7 +2369,8 @@ impl Proto {
         let mut b = TableBuilder::new(ui)
             .id_salt(id)
             .striped(self.t.striping)
-            .resizable(true)
+            // Off: its drag handles draw a line at every column boundary, read as gridlines.
+            .resizable(false)
             .sense(Sense::click())
             .cell_layout(Layout::left_to_right(Align::Center));
         if let Some((row, align)) = self.jump_clone() {
@@ -2208,7 +2390,9 @@ impl Proto {
 impl Proto {
     fn variant_a(&mut self, ui: &mut Ui, keys: Keys) {
         self.status_bar(ui);
-        let r = CentralPanel::default().show(ui, |ui| self.grid_a(ui, keys));
+        let r = CentralPanel::default().show(ui, |ui| {
+            ScrollArea::horizontal().show(ui, |ui| self.grid_a(ui, keys))
+        });
         self.h.region(r.response.rect, "register");
     }
 
@@ -2216,7 +2400,7 @@ impl Proto {
         let two = self.t.two_line;
         let row_h = self.row_height(if two { 2 } else { 1 });
         let n = self.order.len();
-        let lines = self.t.grid_lines;
+        set_grid(ui, &self.theme);
         let balance = self.t.running_balance;
         let sort = self.sort;
         let popup = self.t.ac_popup;
@@ -2225,25 +2409,27 @@ impl Proto {
         builder = builder.column(Column::exact(90.0));
         builder = if two {
             builder
-                .column(Column::initial(300.0).at_least(120.0))
+                .column(Column::remainder().at_least(160.0).clip(true))
                 .column(Column::initial(240.0).at_least(100.0))
         } else {
             builder
-                .column(Column::initial(220.0).at_least(100.0))
-                .column(Column::initial(180.0).at_least(80.0))
+                .column(Column::remainder().at_least(120.0).clip(true))
+                .column(Column::remainder().at_least(100.0).clip(true))
                 .column(Column::initial(160.0).at_least(80.0))
                 .column(Column::exact(100.0))
         };
         if balance {
-            builder = builder.column(Column::remainder().at_least(100.0));
+            builder = builder.column(Column::exact(100.0));
         }
         self.jump = None;
         let out = builder
-            .header(24.0, |mut hd| {
+            .header(self.row_height(1) + 2.0, |mut hd| {
                 hd.col(|ui| {
+                    header_band(ui);
                     sort_header(ui, &mut self.h, sort, SortCol::Date, "Date", &mut acts);
                 });
                 hd.col(|ui| {
+                    header_band(ui);
                     sort_header(ui, &mut self.h, sort, SortCol::Payee, "Payee", &mut acts);
                     if two {
                         ui.label("/");
@@ -2252,23 +2438,28 @@ impl Proto {
                 });
                 if two {
                     hd.col(|ui| {
+                    header_band(ui);
                         sort_header(ui, &mut self.h, sort, SortCol::Amount, "Amount", &mut acts);
                         ui.label("/ Memo");
                     });
                 } else {
                     hd.col(|ui| {
+                    header_band(ui);
                         sort_header(ui, &mut self.h, sort, SortCol::Category, "Category", &mut acts);
                     });
                     hd.col(|ui| {
+                    header_band(ui);
                         ui.strong("Memo");
                     });
                     hd.col(|ui| {
+                    header_band(ui);
                         sort_header(ui, &mut self.h, sort, SortCol::Amount, "Amount", &mut acts);
                     });
                 }
                 if balance {
                     hd.col(|ui| {
-                        ui.strong("Balance");
+                    header_band(ui);
+                        money_header(ui, "Balance");
                     });
                 }
             })
@@ -2286,7 +2477,7 @@ impl Proto {
                         let skip_cat = matches!(this, Sel::Txn(id) if self.data.txns[id].split.is_some());
                         let tag = format!("row {pos}");
                         row.col(|ui| {
-                            ui.label(if let Sel::Txn(id) = this { fmt_day(self.data.txns[id].day) } else { fmt_day(TODAY) });
+                            cell_label(ui, if let Sel::Txn(id) = this { fmt_day(self.data.txns[id].day) } else { fmt_day(TODAY) });
                         });
                         let ac_keys = keys;
                         let mut picked = None;
@@ -2368,7 +2559,7 @@ impl Proto {
                         let t = &self.data.txns[id];
                         let (_, r) = row.col(|ui| {
                             cell_label(ui, fmt_day(t.day));
-                            grid_lines(ui, lines);
+                            grid_lines(ui);
                         });
                         note(&r, &mut self.h, "date");
                         let (_, r) = row.col(|ui| {
@@ -2387,7 +2578,7 @@ impl Proto {
                             } else {
                                 cell_label(ui, &self.data.payees[t.payee as usize]);
                             }
-                            grid_lines(ui, lines);
+                            grid_lines(ui);
                         });
                         note(&r, &mut self.h, "payee");
                         if two {
@@ -2397,7 +2588,7 @@ impl Proto {
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| money_label(ui, t.amount));
                                     cell_label(ui, RichText::new(&t.memo).weak());
                                 });
-                                grid_lines(ui, lines);
+                                grid_lines(ui);
                             });
                             note(&r, &mut self.h, "amount");
                         } else {
@@ -2409,24 +2600,24 @@ impl Proto {
                                 } else {
                                     cell_label(ui, &self.data.categories[t.category as usize]);
                                 }
-                                grid_lines(ui, lines);
+                                grid_lines(ui);
                             });
                             note(&r, &mut self.h, "category");
                             let (_, r) = row.col(|ui| {
                                 cell_label(ui, RichText::new(&t.memo).weak());
-                                grid_lines(ui, lines);
+                                grid_lines(ui);
                             });
                             note(&r, &mut self.h, "memo");
                             let (_, r) = row.col(|ui| {
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| money_label(ui, t.amount));
-                                grid_lines(ui, lines);
+                                grid_lines(ui);
                             });
                             note(&r, &mut self.h, "amount");
                         }
                         if balance {
                             let (_, r) = row.col(|ui| {
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| money_label(ui, self.view_bal[pos]));
-                                grid_lines(ui, lines);
+                                grid_lines(ui);
                             });
                             note(&r, &mut self.h, "balance");
                         }
@@ -2435,11 +2626,11 @@ impl Proto {
                         for c in 0..cols {
                             let (_, r) = row.col(|ui| {
                                 if c == 0 {
-                                    ui.label(RichText::new(fmt_day(TODAY)).weak());
+                                    cell_label(ui, RichText::new(fmt_day(TODAY)).weak());
                                 } else if c == 1 {
                                     ui.label(RichText::new("New transaction — click or press Enter").weak().italics());
                                 }
-                                grid_lines(ui, lines);
+                                grid_lines(ui);
                             });
                             note(&r, &mut self.h, "new row");
                         }
@@ -2487,9 +2678,15 @@ impl Proto {
         } else {
             Panel::bottom("entry_bar")
         };
-        let r = panel.show(ui, |ui| self.entry_bar(ui, keys));
+        let frame = self
+            .theme
+            .chrome_frame()
+            .inner_margin(Margin::symmetric(8, 6));
+        let r = panel.frame(frame).show(ui, |ui| self.entry_bar(ui, keys));
         self.h.region(r.response.rect, "entry bar");
-        let r = CentralPanel::default().show(ui, |ui| self.grid_b(ui));
+        let r = CentralPanel::default().show(ui, |ui| {
+            ScrollArea::horizontal().show(ui, |ui| self.grid_b(ui))
+        });
         self.h.region(r.response.rect, "register");
     }
 
@@ -2620,25 +2817,25 @@ impl Proto {
     }
 
     fn grid_b(&mut self, ui: &mut Ui) {
-        let row_h = self.row_height(1) - 2.0;
+        let row_h = self.row_height(1);
         let n = self.order.len();
-        let lines = self.t.grid_lines;
+        set_grid(ui, &self.theme);
         let balance = self.t.running_balance;
         let sort = self.sort;
         let mut acts: Vec<Act> = Vec::new();
         let mut builder = self.table(ui, "register_b");
         builder = builder
             .column(Column::exact(88.0))
-            .column(Column::initial(240.0).at_least(100.0))
-            .column(Column::initial(190.0).at_least(80.0))
+            .column(Column::remainder().at_least(120.0).clip(true))
+            .column(Column::remainder().at_least(100.0).clip(true))
             .column(Column::initial(170.0).at_least(80.0))
             .column(Column::exact(100.0));
         if balance {
-            builder = builder.column(Column::remainder().at_least(100.0));
+            builder = builder.column(Column::exact(100.0));
         }
         self.jump = None;
         let out = builder
-            .header(22.0, |mut hd| {
+            .header(self.row_height(1) + 2.0, |mut hd| {
                 for (title, col) in [
                     ("Date", Some(SortCol::Date)),
                     ("Payee", Some(SortCol::Payee)),
@@ -2646,16 +2843,20 @@ impl Proto {
                     ("Memo", None),
                     ("Amount", Some(SortCol::Amount)),
                 ] {
-                    hd.col(|ui| match col {
-                        Some(c) => sort_header(ui, &mut self.h, sort, c, title, &mut acts),
-                        None => {
-                            ui.strong(title);
+                    hd.col(|ui| {
+                        header_band(ui);
+                        match col {
+                            Some(c) => sort_header(ui, &mut self.h, sort, c, title, &mut acts),
+                            None => {
+                                ui.strong(title);
+                            }
                         }
                     });
                 }
                 if balance {
                     hd.col(|ui| {
-                        ui.strong("Balance");
+                    header_band(ui);
+                        money_header(ui, "Balance");
                     });
                 }
             })
@@ -2670,7 +2871,7 @@ impl Proto {
                     let mut cells = |row: &mut egui_extras::TableRow<'_, '_>, h: &mut Harness, name: &str, f: &mut dyn FnMut(&mut Ui)| {
                         let (_, r) = row.col(|ui| {
                             f(ui);
-                            grid_lines(ui, lines);
+                            grid_lines(ui);
                         });
                         h.track(&r, format!("{name} cell, row {pos}"));
                         clicked |= r.clicked();
@@ -2729,14 +2930,16 @@ const C_TITLES: [&str; 6] = ["Date", "Payee", "Category", "Memo", "Amount", "Bal
 impl Proto {
     fn variant_c(&mut self, ui: &mut Ui, _keys: Keys) {
         self.status_bar(ui);
-        let r = CentralPanel::default().show(ui, |ui| self.grid_c(ui));
+        let r = CentralPanel::default().show(ui, |ui| {
+            ScrollArea::horizontal().show(ui, |ui| self.grid_c(ui))
+        });
         self.h.region(r.response.rect, "register");
     }
 
     fn grid_c(&mut self, ui: &mut Ui) {
-        let row_h = self.row_height(1) - 2.0;
+        let row_h = self.row_height(1);
         let n = self.order.len();
-        let lines = self.t.grid_lines;
+        set_grid(ui, &self.theme);
         let balance = self.t.running_balance;
         let sort = self.sort;
         let popup = self.t.ac_popup;
@@ -2745,26 +2948,46 @@ impl Proto {
         let mut builder = self.table(ui, "register_c");
         builder = builder
             .column(Column::exact(88.0))
-            .column(Column::initial(240.0).at_least(100.0))
-            .column(Column::initial(190.0).at_least(80.0))
+            .column(Column::remainder().at_least(120.0).clip(true))
+            .column(Column::remainder().at_least(100.0).clip(true))
             .column(Column::initial(170.0).at_least(80.0))
             .column(Column::exact(100.0));
         if balance {
-            builder = builder.column(Column::remainder().at_least(100.0));
+            builder = builder.column(Column::exact(100.0));
         }
         self.jump = None;
         let out = builder
-            .header(22.0, |mut hd| {
+            .header(self.row_height(1) + 2.0, |mut hd| {
                 for (i, title) in C_TITLES.iter().enumerate().take(5 + usize::from(balance)) {
-                    hd.col(|ui| match i {
-                        0 => sort_header(ui, &mut self.h, sort, SortCol::Date, title, &mut acts),
-                        1 => sort_header(ui, &mut self.h, sort, SortCol::Payee, title, &mut acts),
-                        2 => {
-                            sort_header(ui, &mut self.h, sort, SortCol::Category, title, &mut acts)
-                        }
-                        4 => sort_header(ui, &mut self.h, sort, SortCol::Amount, title, &mut acts),
-                        _ => {
-                            ui.strong(*title);
+                    hd.col(|ui| {
+                        header_band(ui);
+                        match i {
+                            0 => {
+                                sort_header(ui, &mut self.h, sort, SortCol::Date, title, &mut acts)
+                            }
+                            1 => {
+                                sort_header(ui, &mut self.h, sort, SortCol::Payee, title, &mut acts)
+                            }
+                            2 => sort_header(
+                                ui,
+                                &mut self.h,
+                                sort,
+                                SortCol::Category,
+                                title,
+                                &mut acts,
+                            ),
+                            4 => sort_header(
+                                ui,
+                                &mut self.h,
+                                sort,
+                                SortCol::Amount,
+                                title,
+                                &mut acts,
+                            ),
+                            5 => money_header(ui, title),
+                            _ => {
+                                ui.strong(*title);
+                            }
                         }
                     });
                 }
@@ -2853,7 +3076,7 @@ impl Proto {
                                         }
                                     }
                                     (_, 0) => {
-                                        ui.label(RichText::new(fmt_day(TODAY)).weak());
+                                        cell_label(ui, RichText::new(fmt_day(TODAY)).weak());
                                     }
                                     (_, c) => {
                                         let text = self.cell_text(this, c);
@@ -2871,7 +3094,7 @@ impl Proto {
                                 };
                                 drawn(ui);
                             }
-                            grid_lines(ui, lines);
+                            grid_lines(ui);
                             if cursor_here {
                                 let stroke =
                                     egui::Stroke::new(2.0, ui.visuals().selection.stroke.color);
@@ -2972,6 +3195,15 @@ impl Proto {
                 let current = self.variant.key().to_uppercase();
                 for (&(key, label, applies), (_, hint)) in TOGGLES.iter().zip(TOGGLE_KEYS) {
                     let relevant = applies == "all" || applies.split(' ').any(|a| a == current);
+                    if key == "gridlines" {
+                        let text = format!("{hint}   [{applies}] Gridlines: {}", gridlines_name(self.t.gridlines));
+                        let r = ui.selectable_label(false, text);
+                        self.h.track(&r, "dock: toggle gridlines");
+                        if r.clicked() {
+                            self.set_gridlines(None, "click");
+                        }
+                        continue;
+                    }
                     let mut value = *self.t.get_mut(key).unwrap();
                     let text = RichText::new(format!("{hint}   [{applies}] {label}"));
                     let r = ui.checkbox(&mut value, if relevant { text } else { text.weak() });
