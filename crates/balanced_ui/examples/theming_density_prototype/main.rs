@@ -479,6 +479,9 @@ const TOGGLES: &[(&str, &str)] = &[
 
 const SCALES: [u32; 4] = [100, 125, 150, 200];
 
+/// Left inset for the Register's first column, so its text doesn't touch the edge.
+const FIRST_COL_INSET: f32 = 6.0;
+
 /// (key, label) for the gridline cycle: rules between rows, between columns, or both.
 const GRIDS: [(&str, &str); 4] = [
     ("off", "off"),
@@ -1674,6 +1677,9 @@ impl Proto {
                                 ui.strong(title);
                             });
                         } else {
+                            if title == "Date" {
+                                ui.add_space(FIRST_COL_INSET);
+                            }
                             ui.strong(title);
                         }
                     });
@@ -1742,6 +1748,9 @@ impl Proto {
                                     ui.label(rt);
                                 });
                             } else {
+                                if col == "date" {
+                                    ui.add_space(FIRST_COL_INSET);
+                                }
                                 ui.label(rt);
                             }
                             // The cell's painter clips the gaps between cells, where the lines
@@ -1761,9 +1770,12 @@ impl Proto {
                             let ppp = ui.ctx().pixels_per_point();
                             let snap = |v: f32| ((v * ppp).floor() + 0.5) / ppp;
                             let line = egui::Stroke::new(1.0 / ppp, line.color);
-                            if grid_cols {
+                            // Each cell rules its own left edge: a rule on the right edge would be
+                            // covered by the next cell's stripe, which egui_extras paints across
+                            // the gap.
+                            if grid_cols && col != "date" {
                                 painter.vline(
-                                    snap(rect.right() + pad.x),
+                                    snap(rect.left() - pad.x),
                                     rect.y_range().expand(pad.y),
                                     line,
                                 );
