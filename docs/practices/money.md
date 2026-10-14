@@ -17,11 +17,11 @@ Every rounding names its `RoundingPolicy` (`BankersEven` or `HalfAwayFromZero`),
 
 ## Floats
 
-Amounts are built from text or integers. `clippy.toml` bans `Decimal`'s float conversions; `Decimal::try_from(f64)` goes through `TryFrom` and slips past the ban, so review flags it. `rust_decimal`'s `serde-float` feature stays off; serialised amounts are strings.
+Amounts are built from text or integers. `clippy.toml` bans `Decimal`'s float conversions. `Decimal::try_from(f64)` and `f64::try_from(Decimal)` go through `TryFrom` and slip past the ban, so review flags them. `rust_decimal`'s `serde-float` feature stays off; serialised amounts are strings.
 
 ## Showing amounts
 
-- **`Localizer::format_amount(amount, currency, style)` is the only way an amount reaches the screen.** It formats in the formatting locale (`1.234,50 $` for USD in `de-DE`) with the locale's standard minus sign. `Money` has no `Display`, so `{}` on it fails to compile.
+- **`Localizer::format_amount(amount, currency, style)` is the only way an amount reaches the screen.** It formats in the formatting locale (`1.234,50 $` for USD in `de-DE`) with the locale's standard minus sign. It never rounds: an amount with more decimal places than its currency shows all of them. `Money` has no `Display`, so `{}` on it fails to compile.
 - **Style:** `AmountStyle::Bare` in Register cells, `AmountStyle::Symbol` in the Account bar, totals, and anywhere currencies mix.
 - **`balanced_i18n` doesn't know `Money`.** `balanced_ui` converts at the call: `Currency::new(code.as_str(), code.decimal_places())` and `money.amount()`.
 - **In messages**, pass the formatted string as a Fluent argument (see [i18n](i18n.md)).

@@ -189,9 +189,14 @@ impl Money {
 impl std::ops::Neg for Money {
     type Output = Self;
 
+    /// The amount with its sign flipped. Zero stays positive zero.
     fn neg(self) -> Self {
+        let mut amount = -self.amount;
+        if amount.is_zero() {
+            amount.set_sign_positive(true);
+        }
         Self {
-            amount: -self.amount,
+            amount,
             currency: self.currency,
         }
     }
@@ -227,6 +232,8 @@ pub enum MoneyError {
 
 #[cfg(test)]
 mod tests {
+    use std::hash::BuildHasher as _;
+
     use rust_decimal_macros::dec;
 
     use super::*;
@@ -324,6 +331,25 @@ mod tests {
             Money::new(Decimal::MAX, currency("USD")),
             Err(MoneyError::Overflow)
         );
+    }
+
+    #[test]
+    fn rounding_an_amount_too_large_for_the_decimal_places_is_an_error() {
+        let rounded = Money::rounded(Decimal::MAX, currency("USD"), RoundingPolicy::BankersEven);
+
+        assert_eq!(rounded, Err(MoneyError::Overflow));
+    }
+
+    #[test]
+    fn negated_zero_is_the_same_value_as_zero() {
+        let zero = Money::zero(currency("USD"));
+        let hasher = std::hash::RandomState::new();
+
+        let negated = -zero;
+
+        assert_eq!(negated, zero);
+        assert_eq!(hasher.hash_one(negated), hasher.hash_one(zero));
+        assert_eq!(negated.amount().to_string(), "0.00");
     }
 
     #[test]

@@ -171,8 +171,8 @@ impl Localizer {
     ///
     /// The amount shows exactly the currency's decimal places, and a negative amount
     /// gets the locale's standard minus sign. `amount` should already be at the
-    /// currency's decimal places, as a `Money` amount is; any extra digits are
-    /// rounded half away from zero, for display only.
+    /// currency's decimal places, as a `Money` amount is. An amount with more
+    /// significant decimal places shows all of them: display never rounds.
     pub fn format_amount(&self, amount: Decimal, currency: Currency, style: AmountStyle) -> String {
         money::format_amount(&self.formatting_locale, amount, currency, style)
     }
@@ -402,6 +402,17 @@ mod tests {
 
         assert_eq!(text, "-1.234,50\u{a0}$");
         assert_eq!(i18n.parse_amount(&text, 2), Ok(amount));
+    }
+
+    #[test]
+    fn pseudo_locale_amounts_parse_back() {
+        let i18n = Localizer::pseudo().unwrap();
+        let usd = Currency::new("USD", 2).unwrap();
+        let amount = Decimal::new(-123_450, 2);
+
+        let text = i18n.format_amount(amount, usd, AmountStyle::Symbol);
+
+        assert_eq!(i18n.parse_amount(&text, 2), Ok(amount), "{text:?}");
     }
 
     #[test]
