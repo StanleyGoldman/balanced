@@ -1752,7 +1752,10 @@ impl Proto {
                             let painter = ui
                                 .ctx()
                                 .layer_painter(ui.layer_id())
-                                .with_clip_rect(ui.clip_rect().expand2(pad).intersect(view));
+                                // One extra point, or a line on the gap's edge is clipped away.
+                                .with_clip_rect(
+                                    ui.clip_rect().expand2(pad + egui::Vec2::splat(1.0)).intersect(view),
+                                );
                             // Snap to a pixel centre: at fractional scales an unsnapped 1 pt line
                             // straddles two pixels and antialiases almost to nothing.
                             let ppp = ui.ctx().pixels_per_point();
