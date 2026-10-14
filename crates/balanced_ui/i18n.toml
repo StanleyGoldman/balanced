@@ -1,0 +1,7 @@
+# Read by `fl!` at compile time: it checks every message id and argument against the
+# fallback language's file in `assets_dir`.
+fallback_language = "en-US"
+
+[fluent]
+assets_dir = "../balanced_i18n/locales"
+domain = "balanced"

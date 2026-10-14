@@ -5,5 +5,26 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[dependencies]
+fluent-bundle.workspace = true
+i18n-embed.workspace = true
+icu_calendar.workspace = true
+icu_datetime.workspace = true
+icu_decimal.workspace = true
+icu_locale.workspace = true
+icu_provider.workspace = true
+rust-embed.workspace = true
+sys-locale.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+unic-langid.workspace = true
+
+[dev-dependencies]
+fluent-syntax.workspace = true
+
 [lints]
 workspace = true
+
+[features]
+# `Localizer::for_tests`, for other crates' tests.
+test-support = []

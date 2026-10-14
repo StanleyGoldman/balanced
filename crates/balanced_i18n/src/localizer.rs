@@ -1,0 +1,375 @@
+//! [`Localizer`]: the text languages, the formatting locale and their lookups.
+
+use i18n_embed::LanguageLoader as _;
+use i18n_embed::fluent::FluentLanguageLoader;
+use icu_calendar::types::Weekday;
+use icu_calendar::{Date, Iso};
+use icu_locale::{LanguageIdentifier, Locale, locale};
+use rust_embed::Embed;
+
+use crate::I18nError;
+use crate::chain::{SOURCE_LANGUAGE, fallback_chain};
+use crate::format::{Formatters, format_fluent_value};
+use crate::missing::log_missing_messages;
+use crate::pseudo::{self, PSEUDO_LANGUAGE};
+
+/// The `.ftl` files, one folder per shipped language.
+#[derive(Embed)]
+#[folder = "locales/"]
+struct Locales;
+
+/// Whether Fluent wraps placeables in bidi isolation marks (U+2068, U+2069).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Isolation {
+    /// The app's setting: placeables keep their own direction.
+    On,
+    /// The test setting: strings compare equal to plain literals.
+    #[cfg(any(test, feature = "test-support"))]
+    Off,
+}
+
+/// The Fluent domain, which names each language's file: `balanced.ftl`.
+const DOMAIN: &str = "balanced";
+
+/// Looks up user-interface text in the text language and formats numbers and dates
+/// in the formatting locale.
+///
+/// The two are set apart: a `de-AT` user can read German text with Swiss number
+/// formatting. Text falls back along the chain the text language picks (see
+/// `docs/practices/i18n.md`), and formatting always follows the formatting locale.
+///
+/// Building a `Localizer`, or changing its formatting locale, also sets how numbers
+/// inside messages are formatted on the calling thread. Look text up on that
+/// thread.
+#[derive(Debug)]
+pub struct Localizer {
+    loader: FluentLanguageLoader,
+    text_language: LanguageIdentifier,
+    formatting_locale: Locale,
+    formatters: Formatters,
+    isolation: Isolation,
+}
+
+impl Localizer {
+    /// The pseudo-locale tag. Its text is `en-US`, accented, lengthened and
+    /// bracketed.
+    pub const PSEUDO_LANGUAGE: LanguageIdentifier = PSEUDO_LANGUAGE;
+
+    /// A localizer for `text_language`, formatting in `formatting_locale`.
+    pub fn new(
+        text_language: &LanguageIdentifier,
+        formatting_locale: &Locale,
+    ) -> Result<Self, I18nError> {
+        Self::with_isolation(text_language, formatting_locale, Isolation::On)
+    }
+
+    /// The pseudo-locale, formatting in `de-DE` so that hard-coded `.` and `,`
+    /// assumptions show up alongside untranslated text.
+    pub fn pseudo() -> Result<Self, I18nError> {
+        Self::new(&PSEUDO_LANGUAGE, &locale!("de-DE"))
+    }
+
+    /// A localizer for the operating system's locale, used for both text and
+    /// formatting. Falls back to `en-US` when the OS reports no locale or one that
+    /// doesn't parse.
+    pub fn from_os() -> Result<Self, I18nError> {
+        let os_locale = sys_locale::get_locale();
+        let locale = match os_locale.as_deref().map(Locale::try_from_str) {
+            Some(Ok(locale)) => locale,
+            Some(Err(err)) => {
+                tracing::warn!(locale = ?os_locale, %err, "OS locale doesn't parse; using {SOURCE_LANGUAGE}");
+                Locale::from(SOURCE_LANGUAGE)
+            }
+            None => Locale::from(SOURCE_LANGUAGE),
+        };
+        Self::new(&locale.id, &locale)
+    }
+
+    /// The `en-US` localizer tests use: Fluent's bidi isolation marks are off, so
+    /// strings compare equal to plain literals.
+    #[cfg(feature = "test-support")]
+    pub fn for_tests() -> Self {
+        Self::with_isolation(
+            &SOURCE_LANGUAGE,
+            &Locale::from(SOURCE_LANGUAGE),
+            Isolation::Off,
+        )
+        .expect("the embedded en-US messages and ICU4X's built-in en-US data always load")
+    }
+
+    fn with_isolation(
+        text_language: &LanguageIdentifier,
+        formatting_locale: &Locale,
+        isolation: Isolation,
+    ) -> Result<Self, I18nError> {
+        let source = to_fluent_language(&SOURCE_LANGUAGE);
+        let localizer = Self {
+            loader: FluentLanguageLoader::new(DOMAIN, source),
+            text_language: text_language.clone(),
+            formatting_locale: formatting_locale.clone(),
+            formatters: Formatters::new(formatting_locale)?,
+            isolation,
+        };
+        localizer.formatters.install_for_fluent();
+        localizer.load_text_language(text_language)?;
+        Ok(localizer)
+    }
+
+    /// Switches the text language. The change shows on the next frame.
+    pub fn set_text_language(&mut self, language: &LanguageIdentifier) -> Result<(), I18nError> {
+        self.load_text_language(language)?;
+        self.text_language = language.clone();
+        Ok(())
+    }
+
+    /// Switches the formatting locale. The change shows on the next frame.
+    pub fn set_formatting_locale(&mut self, locale: &Locale) -> Result<(), I18nError> {
+        self.formatters = Formatters::new(locale)?;
+        self.formatters.install_for_fluent();
+        self.formatting_locale = locale.clone();
+        Ok(())
+    }
+
+    /// The language text is shown in, before fallback.
+    pub fn text_language(&self) -> &LanguageIdentifier {
+        &self.text_language
+    }
+
+    /// The locale numbers and dates are formatted in.
+    pub fn formatting_locale(&self) -> &Locale {
+        &self.formatting_locale
+    }
+
+    /// The Fluent loader. Only `balanced_ui`'s `fl!` wrapper calls this, and it
+    /// passes each result through [`Self::finish`].
+    pub fn loader(&self) -> &FluentLanguageLoader {
+        &self.loader
+    }
+
+    /// Finishes a message looked up through [`Self::loader`]: brackets it in the
+    /// pseudo-locale, and returns it unchanged otherwise.
+    pub fn finish(&self, message: String) -> String {
+        if self.text_language == PSEUDO_LANGUAGE {
+            pseudo::bracket(&message)
+        } else {
+            message
+        }
+    }
+
+    /// Formats an integer with the formatting locale's digits and grouping. Money
+    /// has its own formatting.
+    pub fn format_number(&self, value: i64) -> String {
+        self.formatters.number(value)
+    }
+
+    /// Formats a date as the formatting locale writes a short date with a
+    /// four-digit year: `10/4/2026` in `en-US`, `04.10.2026` in `de-DE`.
+    pub fn format_date(&self, date: Date<Iso>) -> String {
+        self.formatters.date(date)
+    }
+
+    /// The day weeks start on in the formatting locale. A `-u-fw-` extension on
+    /// the locale overrides the region's default.
+    pub fn first_weekday(&self) -> Weekday {
+        self.formatters.first_weekday()
+    }
+
+    fn load_text_language(&self, language: &LanguageIdentifier) -> Result<(), I18nError> {
+        let is_pseudo = *language == PSEUDO_LANGUAGE;
+        let chain = if is_pseudo {
+            vec![SOURCE_LANGUAGE]
+        } else {
+            fallback_chain(language, &shipped_languages())
+        };
+        let chain: Vec<_> = chain.iter().map(to_fluent_language).collect();
+        self.loader.load_languages(&Locales, &chain)?;
+        let isolating = self.isolation == Isolation::On;
+        self.loader.with_bundles_mut(|bundle| {
+            bundle.set_formatter(Some(format_fluent_value));
+            bundle.set_use_isolating(isolating);
+            bundle.set_transform(is_pseudo.then_some(pseudo::transform as _));
+        });
+        if cfg!(debug_assertions) {
+            log_missing_messages(&self.loader, &chain, self.loader.fallback_language());
+        }
+        Ok(())
+    }
+}
+
+/// The languages with a folder under `locales/`, sorted.
+fn shipped_languages() -> Vec<LanguageIdentifier> {
+    let mut languages: Vec<LanguageIdentifier> = Locales::iter()
+        .filter_map(|path| {
+            let (folder, _) = path.split_once('/')?;
+            let language = LanguageIdentifier::try_from_str(folder)
+                .expect("the locales test checks every folder is named by a language tag");
+            Some(language)
+        })
+        .collect();
+    languages.sort_by_cached_key(ToString::to_string);
+    languages.dedup();
+    languages
+}
+
+/// Converts an ICU4X language identifier to the `unic-langid` one Fluent uses.
+fn to_fluent_language(language: &LanguageIdentifier) -> unic_langid::LanguageIdentifier {
+    language
+        .to_string()
+        .parse()
+        .expect("a valid ICU4X language identifier is a valid unic-langid one")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use fluent_bundle::FluentValue;
+    use icu_locale::langid;
+
+    use super::*;
+    use crate::missing::missing_messages;
+
+    /// Looks `id` up with one argument.
+    fn text_with(
+        i18n: &Localizer,
+        id: &str,
+        name: &'static str,
+        value: FluentValue<'static>,
+    ) -> String {
+        i18n.loader()
+            .get_args_concrete(id, HashMap::from([(name, value)]))
+    }
+
+    /// A localizer whose strings compare equal to plain literals.
+    fn localizer(text_language: &LanguageIdentifier, formatting_locale: &Locale) -> Localizer {
+        Localizer::with_isolation(text_language, formatting_locale, Isolation::Off).unwrap()
+    }
+
+    #[test]
+    fn regional_german_reads_the_german_file() {
+        let i18n = localizer(&langid!("de-AT"), &locale!("de-AT"));
+
+        assert_eq!(i18n.loader().get("menu-file"), "Datei");
+    }
+
+    #[test]
+    fn untranslated_message_falls_back_to_en_us() {
+        let i18n = localizer(&langid!("de-AT"), &locale!("de-AT"));
+
+        assert_eq!(i18n.loader().get("register-column-amount"), "Amount");
+    }
+
+    #[test]
+    fn german_plurals_select_by_count() {
+        let i18n = localizer(&langid!("de"), &locale!("de-DE"));
+        let count = |n: i64| text_with(&i18n, "register-transaction-count", "count", n.into());
+
+        assert_eq!(count(1), "1 Buchung");
+        assert_eq!(count(2), "2 Buchungen");
+    }
+
+    #[test]
+    fn numbers_in_text_follow_the_formatting_locale_when_text_falls_back() {
+        let i18n = localizer(&langid!("ja-JP"), &locale!("de-DE"));
+        let text = text_with(&i18n, "register-transaction-count", "count", 1234.into());
+
+        assert_eq!(text, "1.234 transactions");
+    }
+
+    #[test]
+    fn pseudo_locale_transforms_text_but_not_arguments() {
+        let i18n =
+            Localizer::with_isolation(&PSEUDO_LANGUAGE, &locale!("de-DE"), Isolation::Off).unwrap();
+
+        let text = i18n.finish(text_with(
+            &i18n,
+            "account-bar-total",
+            "amount",
+            "1.234,50 €".into(),
+        ));
+
+        assert_eq!(text, "[Ťööťååĺ: 1.234,50 €]");
+    }
+
+    #[test]
+    fn switching_text_language_takes_effect() {
+        let mut i18n = localizer(&langid!("en-US"), &locale!("en-US"));
+
+        i18n.set_text_language(&langid!("de-DE")).unwrap();
+
+        assert_eq!(i18n.loader().get("menu-file"), "Datei");
+        assert_eq!(i18n.text_language(), &langid!("de-DE"));
+    }
+
+    #[test]
+    fn switching_formatting_locale_takes_effect() {
+        let mut i18n = localizer(&langid!("en-US"), &locale!("en-US"));
+
+        i18n.set_formatting_locale(&locale!("de-DE")).unwrap();
+
+        assert_eq!(i18n.format_number(1234), "1.234");
+        assert_eq!(i18n.formatting_locale(), &locale!("de-DE"));
+    }
+
+    #[test]
+    fn bidi_isolation_is_on_in_the_app() {
+        let i18n = Localizer::new(&langid!("en-US"), &locale!("en-US")).unwrap();
+
+        let text = text_with(&i18n, "account-bar-total", "amount", "$5.00".into());
+
+        assert_eq!(text, "Total: \u{2068}$5.00\u{2069}");
+    }
+
+    #[test]
+    fn finish_leaves_real_languages_unchanged() {
+        let i18n = localizer(&langid!("de"), &locale!("de-DE"));
+
+        assert_eq!(i18n.finish("Datei".to_owned()), "Datei");
+    }
+
+    #[test]
+    fn lists_messages_the_german_file_lacks() {
+        let i18n = localizer(&langid!("de"), &locale!("de-DE"));
+        let chain: Vec<_> = [langid!("de"), SOURCE_LANGUAGE]
+            .iter()
+            .map(to_fluent_language)
+            .collect();
+
+        let missing =
+            missing_messages(i18n.loader(), &chain, &to_fluent_language(&SOURCE_LANGUAGE));
+
+        let de = to_fluent_language(&langid!("de"));
+        let ids: Vec<_> = missing
+            .iter()
+            .map(|message| (&message.language, message.id.as_str()))
+            .collect();
+        assert_eq!(
+            ids,
+            [(&de, "menu-help-about"), (&de, "register-column-amount")]
+        );
+    }
+
+    #[test]
+    fn formats_dates_and_weeks_in_the_formatting_locale() {
+        let i18n = localizer(&langid!("en-US"), &locale!("de-DE"));
+        let date = Date::try_new_iso(2026, 10, 4).unwrap();
+
+        assert_eq!(i18n.format_date(date), "04.10.2026");
+        assert_eq!(i18n.first_weekday(), Weekday::Monday);
+    }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn test_localizer_is_en_us_without_isolation_marks() {
+        let i18n = Localizer::for_tests();
+
+        let text = text_with(&i18n, "account-bar-total", "amount", "$5.00".into());
+
+        assert_eq!(text, "Total: $5.00");
+    }
+
+    #[test]
+    fn ships_en_us_and_german() {
+        assert_eq!(shipped_languages(), [langid!("de"), langid!("en-US")]);
+    }
+}

@@ -13,6 +13,7 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
   - `fmt`
   - `clippy`, with `-D warnings`
   - `test`
+  - `locales`: reports how many messages each translation lacks, without failing (see [i18n](i18n.md#translations))
   - `deny`, which is `cargo deny check`
   - `typos`
   - `todo`: every `TODO` or `FIXME` in a `.rs` or `.toml` file is written `TODO(#123)`
