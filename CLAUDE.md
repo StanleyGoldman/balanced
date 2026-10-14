@@ -23,6 +23,14 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 - Ask one question per round; two or three only when tightly coupled. This overrides the grilling skill's whole-frontier rounds.
 - Number questions `Q<n>/<total>` across the ticket's whole grilling session: `n` is the question's position in that ticket, `total` your current estimate of the questions it needs. Revise `total` as answers come in, e.g. `Q3/5`, then `Q4/7`.
 - When the user has no strong preference on a ticket, answer its remaining questions with your recommendations, then summarize the decisions and flag anything surprising, such as an answer that contradicts an earlier decision.
+- Tag each recommendation with its confidence, so the user knows where to spend attention:
+  - `firm`: a documented fact settles it (ADR, `CONTEXT.md`, existing code). Cite the source.
+  - `leaning`: a judgment call. Give the one-line reason.
+  - `coin-flip`: a real tradeoff that needs the user's input.
+- Tag each question `cheap` or `expensive` to reverse. A public API, a data format, or an ADR-level choice is `expensive`.
+- Settle `firm` questions yourself. List them at the end under "Assumed, shout if wrong" and ask only the rest.
+- Batch `cheap` questions tagged `firm` or `leaning` into one round. The user replies "accept all" or names the exceptions. This overrides the one-question-per-round rule for these questions.
+- Post the resolution comment in the shape given in `docs/agents/grilling.md`.
 
 ### Subagents
 
