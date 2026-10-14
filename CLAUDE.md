@@ -30,9 +30,7 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 
 ### Prototypes
 
-- Push every prototype to its own branch and open a **draft** PR for it, titled `PROTOTYPE: <what it prototypes>`.
-- The PR description states what the prototype set out to answer, plus a running Q&A about what it showed.
-- When the prototype session ends, close the PR unmerged and leave a pointer to it on the prototype's issue.
+- Read `docs/agents/prototypes.md` before planning, building, running or closing a prototype.
 
 ### Research
 
