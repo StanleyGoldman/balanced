@@ -56,6 +56,12 @@ skip = [
   # png 0.18.1 (latest; via image, in balanced_prototype_harness) depends on miniz_oxide 0.8
   # directly and on 0.9 through its deflate backend. Drop this when png settles on one.
   { crate = "miniz_oxide@0.8.9", reason = "png 0.18.1 pulls both 0.8 and 0.9" },
+  # Proc-macro and build-time only. ICU4X 2.3 (displaydoc) is on syn 3; i18n-embed's
+  # macros, rust-embed and thiserror are still on syn 2. Drop this when they move.
+  { crate = "syn@2.0.119", reason = "i18n-embed-fl, rust-embed and thiserror use syn 2; ICU4X uses syn 3" },
+  # i18n-embed 0.16 and i18n-config 0.4.8 (latest) still use thiserror 1; Balanced is on 2.
+  { crate = "thiserror@1.0.69", reason = "i18n-embed 0.16 and i18n-config 0.4.8 use thiserror 1" },
+  { crate = "thiserror-impl@1.0.69", reason = "comes with thiserror 1, above" },
 ]
 
 [sources]
