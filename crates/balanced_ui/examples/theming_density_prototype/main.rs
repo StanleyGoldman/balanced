@@ -459,8 +459,8 @@ const VARIANT_KEYS: [(egui::Key, &str); 4] = [
     (egui::Key::D, "D"),
 ];
 
-/// (key, label). Every toggle applies to every variant. `scale` and `font` cycle through
-/// their values instead of flipping.
+/// (key, label). Every toggle applies to every variant. `scale`, `font` and `grid` cycle
+/// through their values instead of flipping.
 const TOGGLES: &[(&str, &str)] = &[
     ("dark", "Dark theme"),
     ("dense", "Dense rows (the Preference)"),
@@ -478,6 +478,18 @@ const TOGGLES: &[(&str, &str)] = &[
 ];
 
 const SCALES: [u32; 4] = [100, 125, 150, 200];
+
+/// (key, label) for the gridline cycle: rules between rows, between columns, or both.
+const GRIDS: [(&str, &str); 4] = [
+    ("off", "off"),
+    ("rows", "horizontal"),
+    ("columns", "vertical"),
+    ("both", "both"),
+];
+
+fn is_cycle(key: &str) -> bool {
+    matches!(key, "scale" | "font" | "grid")
+}
 
 /// (key, label, system font file). `None` is egui's bundled default.
 const FONTS: [(&str, &str, Option<&str>); 3] = [
@@ -503,7 +515,8 @@ struct Toggles {
     /// Index into `FONTS`.
     font: usize,
     mono_money: bool,
-    grid: bool,
+    /// Index into `GRIDS`.
+    grid: usize,
     colour_negatives: bool,
     solid_selection: bool,
     tinted_chrome: bool,
@@ -522,7 +535,6 @@ impl Toggles {
             "dense" => &mut self.dense,
             "zebra" => &mut self.zebra,
             "mono_money" => &mut self.mono_money,
-            "grid" => &mut self.grid,
             "colour_negatives" => &mut self.colour_negatives,
             "solid_selection" => &mut self.solid_selection,
             "tinted_chrome" => &mut self.tinted_chrome,
@@ -540,6 +552,7 @@ impl Toggles {
         match key {
             "scale" => json!(SCALES[self.scale]),
             "font" => json!(FONTS[self.font].0),
+            "grid" => json!(GRIDS[self.grid].0),
             _ => json!(self.get_mut(key).map(|v| *v)),
         }
     }
@@ -883,7 +896,7 @@ impl Proto {
                 scale: 0,
                 font: 0,
                 mono_money: false,
-                grid: false,
+                grid: 0,
                 colour_negatives: true,
                 solid_selection: false,
                 tinted_chrome: true,
@@ -933,11 +946,11 @@ impl Proto {
     }
 
     fn set_toggle(&mut self, key: &str, value: Option<bool>, via: &str) {
-        if key == "scale" || key == "font" {
-            let (len, cur) = if key == "scale" {
-                (SCALES.len(), self.t.scale)
-            } else {
-                (FONTS.len(), self.t.font)
+        if is_cycle(key) {
+            let (len, cur) = match key {
+                "scale" => (SCALES.len(), self.t.scale),
+                "font" => (FONTS.len(), self.t.font),
+                _ => (GRIDS.len(), self.t.grid),
             };
             self.set_choice(key, (cur + 1) % len, via);
             return;
@@ -957,14 +970,21 @@ impl Proto {
             .screenshot(format!("toggle-{key}-{}", if new { "on" } else { "off" }));
     }
 
-    /// Select entry `index` of the `scale` or `font` cycle.
+    /// Select entry `index` of the `scale`, `font` or `grid` cycle.
     fn set_choice(&mut self, key: &str, index: usize, via: &str) {
-        let name = if key == "scale" {
-            self.t.scale = index;
-            SCALES[index].to_string()
-        } else {
-            self.t.font = index;
-            FONTS[index].0.to_owned()
+        let name = match key {
+            "scale" => {
+                self.t.scale = index;
+                SCALES[index].to_string()
+            }
+            "font" => {
+                self.t.font = index;
+                FONTS[index].0.to_owned()
+            }
+            _ => {
+                self.t.grid = index;
+                GRIDS[index].0.to_owned()
+            }
         };
         let value = self.t.describe(key);
         self.h
@@ -1150,6 +1170,10 @@ impl Proto {
             },
             "font" => match FONTS.iter().position(|f| f.0 == rest) {
                 Some(i) => self.set_choice("font", i, "control"),
+                None => self.h.event("control_unknown", json!({ "command": cmd })),
+            },
+            "grid" => match GRIDS.iter().position(|g| g.0 == rest) {
+                Some(i) => self.set_choice("grid", i, "control"),
                 None => self.h.event("control_unknown", json!({ "command": cmd })),
             },
             "reload" => {
@@ -1588,12 +1612,20 @@ impl Proto {
     }
 
     /// A rough Register stub; the real grid is "Prototype the Register grid".
+    /// Payee and Category share the spare width; below the minimum the table scrolls sideways.
     fn register(&mut self, ui: &mut Ui, account: usize) {
+        egui::ScrollArea::horizontal()
+            .id_salt(("register_h", account))
+            .show(ui, |ui| self.register_table(ui, account));
+    }
+
+    fn register_table(&mut self, ui: &mut Ui, account: usize) {
         let lk = look(self.variant);
         let row_h = if self.t.dense { lk.row_dense } else { lk.row };
         let pal = self.pal;
         let money = self.money();
-        let grid = self.t.grid;
+        let grid_rows = matches!(GRIDS[self.t.grid].0, "rows" | "both");
+        let grid_cols = matches!(GRIDS[self.t.grid].0, "columns" | "both");
         let hair = lk.hairlines;
         let zebra = self.t.zebra;
         let n = self.accounts[account].txns.len();
@@ -1601,17 +1633,18 @@ impl Proto {
         let mut builder = TableBuilder::new(ui)
             .id_salt(("register", account))
             .striped(zebra)
-            .resizable(true)
+            // Not resizable: its drag handles draw column lines that would mask the gridlines toggle.
+            .resizable(false)
             .sense(Sense::click())
             .cell_layout(Layout::left_to_right(Align::Center))
             .column(Column::exact(88.0))
             .column(Column::exact(48.0))
-            .column(Column::initial(200.0).at_least(80.0))
-            .column(Column::initial(180.0).at_least(80.0))
+            .column(Column::remainder().at_least(90.0).clip(true))
+            .column(Column::remainder().at_least(90.0).clip(true))
             .column(Column::exact(24.0))
-            .column(Column::initial(96.0))
-            .column(Column::initial(96.0))
-            .column(Column::remainder().at_least(96.0));
+            .column(Column::exact(96.0))
+            .column(Column::exact(96.0))
+            .column(Column::exact(104.0));
         if let Some(r) = self.jump_to_row.take() {
             builder = builder.scroll_to_row(r.min(n.saturating_sub(1)), Some(Align::Center));
         }
@@ -1704,17 +1737,18 @@ impl Proto {
                             }
                             let line = egui::Stroke::new(1.0, pal.grid);
                             let pad = ui.spacing().item_spacing;
-                            if grid {
+                            if grid_cols {
                                 ui.painter().vline(
                                     rect.right() + pad.x / 2.0,
                                     rect.y_range(),
                                     line,
                                 );
                             }
-                            if grid || hair {
+                            // Rule along the top: the next row's stripe would paint over a bottom one.
+                            if grid_rows || hair {
                                 ui.painter().hline(
                                     rect.x_range().expand(pad.x / 2.0),
-                                    rect.bottom() + pad.y / 2.0,
+                                    rect.top() - pad.y / 2.0,
                                     line,
                                 );
                             }
@@ -1800,14 +1834,8 @@ impl Proto {
 
     /// B's context header: what is shown, plus actions that depend on it.
     fn context_header(&mut self, ui: &mut Ui) {
+        // Buttons claim the right first; the title, balance and count truncate into what's left.
         ui.horizontal(|ui| {
-            ui.heading(self.nav_title());
-            if let Nav::Account(i) = self.nav {
-                Self::money_label(ui, self.money(), self.accounts[i].balance);
-                ui.label(
-                    RichText::new(format!("{} transactions", self.accounts[i].txns.len())).weak(),
-                );
-            }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let actions: &[&str] = match self.nav {
                     Nav::Account(_) => &["More…", "Reconcile", "Filter", "+ Transaction"],
@@ -1823,6 +1851,24 @@ impl Proto {
                         );
                     }
                 }
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    // The balance can't truncate, so clip it rather than draw under the buttons.
+                    ui.shrink_clip_rect(ui.max_rect());
+                    ui.add(egui::Label::new(RichText::new(self.nav_title()).heading()).truncate());
+                    if let Nav::Account(i) = self.nav {
+                        Self::money_label(ui, self.money(), self.accounts[i].balance);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!(
+                                    "{} transactions",
+                                    self.accounts[i].txns.len()
+                                ))
+                                .weak(),
+                            )
+                            .truncate(),
+                        );
+                    }
+                });
             });
         });
     }
@@ -1993,10 +2039,11 @@ impl Proto {
                 ui.separator();
                 ui.label(RichText::new("Toggles").strong());
                 for (&(key, label), (_, hint)) in TOGGLES.iter().zip(TOGGLE_KEYS) {
-                    if key == "scale" || key == "font" {
+                    if is_cycle(key) {
                         let value = match key {
                             "scale" => format!("{}%", SCALES[self.t.scale]),
-                            _ => FONTS[self.t.font].1.to_owned(),
+                            "font" => FONTS[self.t.font].1.to_owned(),
+                            _ => GRIDS[self.t.grid].1.to_owned(),
                         };
                         let r = ui.button(format!("{hint}   {label}: {value}  (click to cycle)"));
                         self.h.track(&r, format!("dock: toggle {key}"));
