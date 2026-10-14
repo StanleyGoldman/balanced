@@ -1656,10 +1656,14 @@ impl Proto {
                     "Date", "Num", "Payee", "Category", "Clr", "Payment", "Deposit", "Balance",
                 ] {
                     h.col(|ui| {
-                        let bg = ui
-                            .max_rect()
-                            .expand2(egui::vec2(ui.spacing().item_spacing.x, 2.0));
-                        ui.painter().rect_filled(bg, 0.0, pal.header);
+                        // The cell's painter is clipped to the cell, which leaves gaps at the
+                        // column spacing; paint the band through an unclipped layer painter.
+                        let pad = ui.spacing().item_spacing / 2.0;
+                        let bg = ui.max_rect().expand2(pad);
+                        ui.ctx()
+                            .layer_painter(ui.layer_id())
+                            .with_clip_rect(bg)
+                            .rect_filled(bg, 0.0, pal.header);
                         if matches!(title, "Payment" | "Deposit" | "Balance") {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 ui.strong(title);
