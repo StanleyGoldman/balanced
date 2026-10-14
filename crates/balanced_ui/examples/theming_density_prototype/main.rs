@@ -1550,7 +1550,7 @@ impl Proto {
     /// The Account bar as a resizable left panel, with the optional Net Worth footer.
     fn account_bar(&mut self, ui: &mut Ui, id: &str, top: impl FnOnce(&mut Self, &mut Ui)) {
         let chrome = self.chrome_frame(ui);
-        Panel::left(Id::new(id))
+        let bar = Panel::left(Id::new(id))
             .resizable(true)
             .default_size(270.0)
             .min_size(180.0)
@@ -1568,9 +1568,10 @@ impl Proto {
                         egui::ScrollArea::vertical().show(ui, |ui| self.account_groups(ui));
                     });
             });
+        self.h.region(bar.response.rect, "account bar");
     }
 
-    fn status_bar(&self, ui: &mut Ui) {
+    fn status_bar(&mut self, ui: &mut Ui) {
         if !self.t.status_bar {
             return;
         }
@@ -1585,13 +1586,14 @@ impl Proto {
         };
         let status = self.status.clone();
         let chrome = self.chrome_frame(ui);
-        Panel::bottom("status_bar").frame(chrome).show(ui, |ui| {
+        let bar = Panel::bottom("status_bar").frame(chrome).show(ui, |ui| {
             Sides::new().show(
                 ui,
                 |ui| ui.label(status),
                 |ui| ui.label(RichText::new(right).weak()),
             );
         });
+        self.h.region(bar.response.rect, "status bar");
     }
 
     /// What the Main view shows for the current navigation.
@@ -1614,9 +1616,10 @@ impl Proto {
     /// A rough Register stub; the real grid is "Prototype the Register grid".
     /// Payee and Category share the spare width; below the minimum the table scrolls sideways.
     fn register(&mut self, ui: &mut Ui, account: usize) {
-        egui::ScrollArea::horizontal()
+        let out = egui::ScrollArea::horizontal()
             .id_salt(("register_h", account))
             .show(ui, |ui| self.register_table(ui, account));
+        self.h.region(out.inner_rect, "register");
     }
 
     fn register_table(&mut self, ui: &mut Ui, account: usize) {
@@ -1839,7 +1842,7 @@ impl Proto {
     /// B's context header: what is shown, plus actions that depend on it.
     fn context_header(&mut self, ui: &mut Ui) {
         // Buttons claim the right first; the title, balance and count truncate into what's left.
-        ui.horizontal(|ui| {
+        let header = ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let actions: &[&str] = match self.nav {
                     Nav::Account(_) => &["More…", "Reconcile", "Filter", "+ Transaction"],
@@ -1875,6 +1878,7 @@ impl Proto {
                 });
             });
         });
+        self.h.region(header.response.rect, "context header");
     }
 }
 
@@ -1922,10 +1926,11 @@ impl Proto {
 impl Proto {
     fn shell(&mut self, ui: &mut Ui) {
         let chrome = self.chrome_frame(ui);
-        Panel::top("d_menu").frame(chrome).show(ui, |ui| {
+        let menu = Panel::top("d_menu").frame(chrome).show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| self.menus(ui));
         });
-        Panel::top("d_tabs").frame(chrome).show(ui, |ui| {
+        self.h.region(menu.response.rect, "menu row");
+        let tabs = Panel::top("d_tabs").frame(chrome).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 16.0;
                 for (pos, tab) in TABS.iter().enumerate() {
@@ -1936,6 +1941,7 @@ impl Proto {
                 }
             });
         });
+        self.h.region(tabs.response.rect, "tab row");
         self.status_bar(ui);
         self.foldable_account_bar(ui, "d");
         let body = self.body_frame(ui);
@@ -2064,8 +2070,10 @@ impl Proto {
                     }
                 }
                 ui.separator();
+                self.h.dock_spotlight(ui);
+                ui.separator();
                 ui.label(
-                    RichText::new("A B C D or ◀ / ▶ variant · 1–0 toggles · F2 note · F3 marker · F4 hide this dock")
+                    RichText::new("A B C D or ◀ / ▶ variant · 1–0 toggles · F2 note · F3 marker · F4 hide this dock · F5 spotlight")
                         .small()
                         .weak(),
                 );
