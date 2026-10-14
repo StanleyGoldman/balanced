@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Check that a pull request shows in the Development panel of every issue its body
+# names with a closing keyword, and repair the link where GitHub missed it.
+#
+# Usage: scripts/link-pr <pr-number>
+#
+# See docs/agents/issue-tracker.md, "Linking a pull request to its issue".
+set -euo pipefail
+
+pr="${1:?usage: scripts/link-pr <pr-number>}"
+repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+owner="${repo%/*}"
+name="${repo#*/}"
+
+state="$(gh pr view "$pr" --json state --jq .state)"
+base="$(gh pr view "$pr" --json baseRefName --jq .baseRefName)"
+default="$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)"
+
+issues="$(gh pr view "$pr" --json body --jq .body \
+  | grep -oiE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?) #[0-9]+' \
+  | grep -oE '[0-9]+$' | sort -un || true)"
+if [[ -z "$issues" ]]; then
+  echo "PR #$pr: no closing keyword in its body; add 'Closes #<n>' first." >&2
+  exit 1
+fi
+
+# The PR numbers linked to an issue, closed PRs included.
+linked() {
+  gh api graphql -f query="{repository(owner:\"$owner\",name:\"$name\"){issue(number:$1){closedByPullRequestsReferences(first:50,includeClosedPrs:true){nodes{number}}}}}" \
+    --jq '.data.repository.issue.closedByPullRequestsReferences.nodes[].number'
+}
+
+missing() {
+  local out=""
+  for i in $issues; do
+    linked "$i" | grep -qx "$pr" || out+="$i "
+  done
+  echo "$out"
+}
+
+todo="$(missing)"
+if [[ -z "$todo" ]]; then
+  echo "PR #$pr is linked to: $(echo $issues)"
+  exit 0
+fi
+
+if [[ "$base" != "$default" ]]; then
+  echo "PR #$pr targets '$base', not '$default': GitHub links it only once it is retargeted. Unlinked: $todo" >&2
+  exit 1
+fi
+
+if [[ "$state" == "MERGED" ]]; then
+  echo "PR #$pr is merged and not linked to: $todo. A merged PR can't be reopened; link it by hand in the issue's Development panel." >&2
+  exit 1
+fi
+
+reopened=no
+if [[ "$state" == "CLOSED" ]]; then
+  gh pr reopen "$pr" >/dev/null
+  reopened=yes
+fi
+
+# GitHub links asynchronously; give it up to ~20 s.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  sleep 2
+  todo="$(missing)"
+  [[ -z "$todo" ]] && break
+done
+
+if [[ "$reopened" == yes ]]; then
+  gh pr close "$pr" >/dev/null
+fi
+
+if [[ -n "$todo" ]]; then
+  echo "PR #$pr still not linked to: $todo" >&2
+  exit 1
+fi
+echo "PR #$pr is linked to: $(echo $issues)"

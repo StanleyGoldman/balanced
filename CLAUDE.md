@@ -52,7 +52,7 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 ### Self-improvement
 
 - When you hit friction (a tool gotcha, a wrong assumption, a repeated workaround), record the lesson in the doc where the next agent will look, written with the `writing-for-agents` skill.
-- Write scripts or skills whenever they help you get a task done; write skills with the `writing-for-agents` skill.
+- Script any check, repair or lookup you will run again: the moment a sequence of commands proves out, save it as an executable in `scripts/` (e.g. `scripts/link-pr`), use the script from then on, and name it in the doc that calls for the task. Reach for a skill when the repeated work needs judgement rather than commands; write skills with the `writing-for-agents` skill.
 
 ### Worktrees
 
