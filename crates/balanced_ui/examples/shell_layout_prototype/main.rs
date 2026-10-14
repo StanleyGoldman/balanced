@@ -394,16 +394,18 @@ enum Variant {
     A,
     B,
     C,
+    D,
 }
 
 impl Variant {
-    const ALL: [Self; 3] = [Self::A, Self::B, Self::C];
+    const ALL: [Self; 4] = [Self::A, Self::B, Self::C, Self::D];
 
     fn key(self) -> &'static str {
         match self {
             Self::A => "a",
             Self::B => "b",
             Self::C => "c",
+            Self::D => "d",
         }
     }
 
@@ -418,6 +420,7 @@ impl Variant {
             Self::A => "A · Classic Quicken (toolbar + tab strip)",
             Self::B => "B · Compact (context header, rail)",
             Self::C => "C · Workspace (nav in Account bar, register tabs)",
+            Self::D => "D · Session pick (tab row with Accounts, header, rail, register tabs)",
         }
     }
 
@@ -443,10 +446,11 @@ const TOGGLE_KEYS: [(egui::Key, &str); 10] = [
 ];
 
 /// The key that picks each variant, in `Variant::ALL` order.
-const VARIANT_KEYS: [(egui::Key, &str); 3] = [
+const VARIANT_KEYS: [(egui::Key, &str); 4] = [
     (egui::Key::A, "A"),
     (egui::Key::B, "B"),
     (egui::Key::C, "C"),
+    (egui::Key::D, "D"),
 ];
 
 /// (key, label, applies to)
@@ -464,7 +468,7 @@ const TOGGLES: &[(&str, &str, &str)] = &[
     ("toolbar", "Toolbar", "A"),
     ("toolbar_icons_only", "Toolbar icons only", "A"),
     ("tabs_in_menu_row", "Tabs in menu row (off: own row)", "B"),
-    ("register_tabs", "Register tabs (off: one register)", "C"),
+    ("register_tabs", "Register tabs (off: one register)", "C D"),
 ];
 
 struct Toggles {
@@ -514,6 +518,8 @@ struct Proto {
     /// Selected Register row per account; shared across variants.
     selected_row: HashMap<usize, usize>,
     jump_to_row: Option<usize>,
+    /// The register the Accounts tab (variant D) returns to.
+    last_account: usize,
     /// The docked prototype controls (F4).
     dock_open: bool,
     /// Last action, shown in the Status bar so every click is visible.
@@ -551,6 +557,7 @@ impl Proto {
             open_registers: vec![0, 8],
             selected_row: HashMap::new(),
             jump_to_row: None,
+            last_account: 0,
             dock_open: true,
             status: "Ready".to_owned(),
         }
@@ -601,6 +608,7 @@ impl Proto {
 
     fn open_account(&mut self, i: usize, via: &str) {
         self.nav = Nav::Account(i);
+        self.last_account = i;
         if !self.open_registers.contains(&i) {
             self.open_registers.push(i);
         }
@@ -747,6 +755,7 @@ impl eframe::App for Proto {
             Variant::A => self.variant_a(ui),
             Variant::B => self.variant_b(ui),
             Variant::C => self.variant_c(ui),
+            Variant::D => self.variant_d(ui),
         }
 
         self.h.end_frame(&ctx);
@@ -1311,9 +1320,18 @@ impl Proto {
             });
         }
         self.status_bar(ui);
+        self.foldable_account_bar(ui, "b");
+        CentralPanel::default().show(ui, |ui| {
+            self.context_header(ui);
+            ui.separator();
+            self.main_view_body(ui);
+        });
+    }
 
+    /// B's Account bar: a « button folds it to a thin rail, » brings it back.
+    fn foldable_account_bar(&mut self, ui: &mut Ui, prefix: &str) {
         if self.t.account_bar {
-            self.account_bar(ui, "b_account_bar", |this, ui| {
+            self.account_bar(ui, &format!("{prefix}_account_bar"), |this, ui| {
                 Sides::new().show(
                     ui,
                     |ui| ui.label(RichText::new("ACCOUNTS").small().weak()),
@@ -1327,7 +1345,7 @@ impl Proto {
                 );
             });
         } else {
-            Panel::left("b_rail")
+            Panel::left(Id::new((prefix, "rail")))
                 .exact_size(28.0)
                 .resizable(false)
                 .show(ui, |ui| {
@@ -1338,36 +1356,34 @@ impl Proto {
                     }
                 });
         }
+    }
 
-        CentralPanel::default().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading(self.nav_title());
-                if let Nav::Account(i) = self.nav {
-                    Self::money_label(ui, self.accounts[i].balance);
-                    ui.label(
-                        RichText::new(format!("{} transactions", self.accounts[i].txns.len()))
-                            .weak(),
-                    );
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let actions: &[&str] = match self.nav {
-                        Nav::Account(_) => &["More…", "Reconcile", "Filter", "+ Transaction"],
-                        Nav::Tab(_) => &["More…", "Customize"],
-                    };
-                    for label in actions {
-                        let r = ui.button(*label);
-                        self.h.track(&r, format!("context header: {label}"));
-                        if r.clicked() {
-                            self.emit(
-                                &format!("AppCommand::{}", command_name(label)),
-                                "context header",
-                            );
-                        }
+    /// B's context header: what is shown, plus actions that depend on it.
+    fn context_header(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            ui.heading(self.nav_title());
+            if let Nav::Account(i) = self.nav {
+                Self::money_label(ui, self.accounts[i].balance);
+                ui.label(
+                    RichText::new(format!("{} transactions", self.accounts[i].txns.len())).weak(),
+                );
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let actions: &[&str] = match self.nav {
+                    Nav::Account(_) => &["More…", "Reconcile", "Filter", "+ Transaction"],
+                    Nav::Tab(_) => &["More…", "Customize"],
+                };
+                for label in actions {
+                    let r = ui.button(*label);
+                    self.h.track(&r, format!("context header: {label}"));
+                    if r.clicked() {
+                        self.emit(
+                            &format!("AppCommand::{}", command_name(label)),
+                            "context header",
+                        );
                     }
-                });
+                }
             });
-            ui.separator();
-            self.main_view_body(ui);
         });
     }
 }
@@ -1399,42 +1415,101 @@ impl Proto {
         }
         CentralPanel::default().show(ui, |ui| {
             if self.t.register_tabs {
-                ui.horizontal(|ui| {
-                    let mut close = None;
-                    for (pos, &i) in self.open_registers.clone().iter().enumerate() {
-                        let name = self.accounts[i].name;
-                        let r = ui.selectable_label(self.nav == Nav::Account(i), name);
-                        self.h.track(&r, format!("register tab: {name}"));
-                        if r.clicked() {
-                            self.open_account(i, "register tab");
-                        }
-                        let x = ui.small_button("×");
-                        self.h.track(&x, format!("register tab close: {name}"));
-                        if r.middle_clicked() || x.clicked() {
-                            close = Some(pos);
-                        }
-                        ui.separator();
-                    }
-                    if let Some(pos) = close {
-                        let i = self.open_registers.remove(pos);
-                        self.h.event(
-                            "register_tab_closed",
-                            json!({ "account": self.accounts[i].name }),
-                        );
-                        if self.nav == Nav::Account(i) {
-                            self.nav = self
-                                .open_registers
-                                .last()
-                                .map_or(Nav::Tab(0), |&j| Nav::Account(j));
-                        }
-                    }
-                });
+                self.register_tabs_row(ui);
             } else {
                 ui.heading(self.nav_title());
             }
             ui.separator();
             self.main_view_body(ui);
         });
+    }
+
+    /// C's closeable register tabs, one per opened account.
+    fn register_tabs_row(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            let mut close = None;
+            for (pos, &i) in self.open_registers.clone().iter().enumerate() {
+                let name = self.accounts[i].name;
+                let r = ui.selectable_label(self.nav == Nav::Account(i), name);
+                self.h.track(&r, format!("register tab: {name}"));
+                if r.clicked() {
+                    self.open_account(i, "register tab");
+                }
+                let x = ui.small_button("×");
+                self.h.track(&x, format!("register tab close: {name}"));
+                if r.middle_clicked() || x.clicked() {
+                    close = Some(pos);
+                }
+                ui.separator();
+            }
+            if let Some(pos) = close {
+                let i = self.open_registers.remove(pos);
+                self.h.event(
+                    "register_tab_closed",
+                    json!({ "account": self.accounts[i].name }),
+                );
+                if self.nav == Nav::Account(i) {
+                    self.nav = self
+                        .open_registers
+                        .last()
+                        .map_or(Nav::Tab(0), |&j| Nav::Account(j));
+                }
+            }
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Variant D: the pick from the first session. Menu row, then the tab row on its own with an
+// Accounts tab after Home; no toolbar. Accounts shows the open register under B's context
+// header, with C's register tabs as a preference. B's foldable Account bar.
+
+impl Proto {
+    fn variant_d(&mut self, ui: &mut Ui) {
+        Panel::top("d_menu").show(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| self.menus(ui));
+        });
+        Panel::top("d_tabs").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 16.0;
+                for (pos, tab) in TABS.iter().enumerate() {
+                    self.d_tab(ui, Some(pos), tab);
+                    if pos == 0 {
+                        self.d_tab(ui, None, "Accounts");
+                    }
+                }
+            });
+        });
+        self.status_bar(ui);
+        self.foldable_account_bar(ui, "d");
+        CentralPanel::default().show(ui, |ui| {
+            if matches!(self.nav, Nav::Account(_)) && self.t.register_tabs {
+                self.register_tabs_row(ui);
+                ui.separator();
+            }
+            self.context_header(ui);
+            ui.separator();
+            self.main_view_body(ui);
+        });
+    }
+
+    /// One tab in D's tab row; `None` is the Accounts tab, which reopens the last register.
+    fn d_tab(&mut self, ui: &mut Ui, pos: Option<usize>, label: &str) {
+        let selected = match pos {
+            Some(t) => self.nav == Nav::Tab(t),
+            None => matches!(self.nav, Nav::Account(_)),
+        };
+        let r = ui.selectable_label(selected, RichText::new(label).size(15.0));
+        self.h.track(&r, format!("tab: {label}"));
+        if r.clicked() {
+            match pos {
+                Some(t) => self.open_tab(t, "tab"),
+                None => {
+                    let i = self.last_account;
+                    self.open_account(i, "tab: Accounts");
+                }
+            }
+        }
     }
 }
 
@@ -1500,7 +1575,7 @@ impl Proto {
                 ui.label(RichText::new("Toggles").strong());
                 let current = self.variant.key().to_uppercase();
                 for (&(key, label, applies), (_, hint)) in TOGGLES.iter().zip(TOGGLE_KEYS) {
-                    let relevant = applies == "all" || applies == current;
+                    let relevant = applies == "all" || applies.split(' ').any(|a| a == current);
                     let mut value = *self.t.get_mut(key).unwrap();
                     let text = RichText::new(format!("{hint}   [{applies}] {label}"));
                     let r = ui.checkbox(&mut value, if relevant { text } else { text.weak() });
