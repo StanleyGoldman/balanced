@@ -4,7 +4,7 @@
 
 1. **Unit tests in `balanced_core` and `balanced_i18n`**: plain `#[test]`, plus `insta` text snapshots for structured output (formatted amounts, exports, reports). These need no GPU and no egui, and they are what mutation testing checks.
 2. **UI interaction tests in `balanced_ui`**: `egui_kittest`'s `Harness`, finding widgets by AccessKit role and label, clicking and typing, then asserting on state or node properties. These need no GPU and run on every OS.
-3. **Image snapshot tests**: a few, only for layout-critical views (the Register, the Account bar). Their CI job doesn't exist yet. It arrives with the first layout-critical view, together with its procedure in this doc.
+3. **Image snapshot tests**: a few, only for layout-critical views (the Register, the Account bar). Their check (Linux with the lavapipe software rasterizer as the source of truth) doesn't exist yet. It arrives with the first layout-critical view, together with its procedure in this doc.
 
 Prefer a core unit test to a UI test, and a UI interaction test to an image snapshot.
 
@@ -29,8 +29,7 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 
 `cargo-mutants` mutates only `balanced_core` and `balanced_i18n` (`.cargo/mutants.toml`). Each mutant runs only its own crate's tests, so core logic has to be caught by core's tests.
 
-- Before opening a PR that touches those crates, run `cargo mutants --in-diff <(git diff origin/main)`.
-- On PRs, CI runs the same check as an advisory job (`.github/workflows/mutants-pr.yml`). It reports missed mutants but doesn't fail the PR.
+- Before opening a PR that touches those crates, run `cargo xtask mutants` (needs `cargo install --locked cargo-mutants`). It mutates only the code changed since `origin/main`, and is advisory: it reports missed mutants but doesn't fail.
 - Kill a missed mutant with a test, or exclude it with a reason. Don't leave it.
 - Every exclusion (`exclude_re`, `#[mutants::skip]`) carries a comment saying why.
 - A weekly full run on `main` is planned for when there is code to mutate.

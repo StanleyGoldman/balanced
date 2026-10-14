@@ -21,7 +21,7 @@ The workspace is flat. Each crate sits in `crates/<name>/`, except `xtask/`.
 - **`balanced_ui`**: everything egui. It holds the Main window and its panels, the Register view, Dialogs, Detached windows, the theme (the one place that builds colours), `AppCommand`, and the user-action list that feeds the Menu bar and shortcuts.
 - **`balanced_core`**: the financial domain. It holds accounts, transactions, money, `DomainCommand`, the `Ledger` (`apply` and `snapshot`), undo and redo, and `DomainError`.
 - **`balanced_i18n`**: message lookup, the locale fallback chain, and locale-aware formatting of numbers, dates and money.
-- **`xtask`**: repo automation, run as `cargo xtask <task>`.
+- **`xtask`**: repo automation, run as `cargo xtask <task>`, including every check (`cargo xtask ci`).
 
 A persistence crate, `balanced_store`, comes later, below `balanced_core`.
 

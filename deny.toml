@@ -1,4 +1,4 @@
-# `cargo deny check` runs in CI. Every `skip`, licence exception or advisory ignore
+# `cargo xtask deny` runs `cargo deny check`. Every `skip`, licence exception or advisory ignore
 # carries a comment saying why.
 
 [graph]

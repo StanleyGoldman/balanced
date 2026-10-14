@@ -2,11 +2,11 @@
 
 How Balanced's Rust code is written. Code review checks changes against this file and the practice docs it points to.
 
-Tools enforce whatever they can: lint levels in `[workspace.lints]` (`Cargo.toml`), bans in `clippy.toml`, formatting in `rustfmt.toml`, dependency rules in `deny.toml`, and the jobs in `.github/workflows/`. Those files are the rule. The docs below hold only the judgement calls that tools can't check.
+Tools enforce whatever they can: lint levels in `[workspace.lints]` (`Cargo.toml`), bans in `clippy.toml`, formatting in `rustfmt.toml`, dependency rules in `deny.toml`, and the checks in `xtask`. Those files are the rule. The docs below hold only the judgement calls that tools can't check.
 
 ## Cross-cutting rules
 
-- **CI is green.** That means fmt, clippy with `-D warnings`, tests on Linux and Windows, `cargo deny check`, typos and the TODO check. Run the same commands locally before pushing (see [tooling](docs/practices/tooling.md)).
+- **`cargo xtask ci` passes before you push.** It runs fmt, clippy with `-D warnings`, the tests, `cargo deny check`, typos and the TODO check (see [tooling](docs/practices/tooling.md)).
 - **Silence a lint with `#[expect(lint, reason = "…")]`**, at the narrowest scope that works. The reason says why this case is the exception. An empty or generic reason fails review.
 - **Respect the layers.** Nothing below `balanced_ui` knows about egui, and `balanced_core` and `balanced_i18n` don't depend on each other. See [ARCHITECTURE.md](ARCHITECTURE.md).
 - **Domain changes travel as Commands.** UI code sends a `DomainCommand` or `AppCommand` and reads a snapshot back. It never mutates the domain in place. See [state](docs/practices/state.md).
@@ -27,6 +27,6 @@ Read the doc for the area you are changing:
 - [state](docs/practices/state.md): Commands, snapshots and per-window UI state. Read it when code changes domain or app state.
 - [egui](docs/practices/egui.md): panels, IDs, Dialogs, large lists, colours, accessibility and egui upgrades. Read it for any change to `balanced_ui`.
 - [testing](docs/practices/testing.md): which test layer to use, UI tests and mutation testing. Read it when writing tests.
-- [tooling](docs/practices/tooling.md): the toolchain, local checks, CI and the build cache. Read it when a check fails or before you change config.
+- [tooling](docs/practices/tooling.md): the toolchain, `cargo xtask` checks and the build cache. Read it when a check fails or before you change config.
 
 Two more docs are planned: `i18n.md` (from "Choose the internationalisation approach") and `money.md` (from "How the GUI represents money").

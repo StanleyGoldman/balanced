@@ -48,6 +48,6 @@ egui releases a breaking minor version about every two months, and it removes de
 2. Check that every egui-family dependency (`egui_table`, `egui_plot`, …) has a release for the new minor. Don't `[patch]` to git.
 3. On the current version, clear every deprecation warning.
 4. Bump all egui-family crates together in `[workspace.dependencies]`. Read the "Breaking" and "Changed" sections of the egui and egui_kittest changelogs.
-5. Run the tests. Expect snapshot changes, regenerate them from CI, and review every image diff.
+5. Run the tests. Expect snapshot changes, regenerate them on the snapshot source-of-truth machine, and review every image diff.
 6. Make one PR per egui minor, and never skip a minor.
 7. If the new egui needs a newer Rust, bump the toolchain first (see [tooling](tooling.md#toolchain)).

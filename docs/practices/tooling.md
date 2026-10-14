@@ -5,34 +5,23 @@
 - `rust-toolchain.toml` pins the exact Rust release, and `rust-version` in `Cargo.toml` names the same release. rustup installs the pinned toolchain the first time you build.
 - Bump both together in a dedicated PR, every second stable release. Fix any new clippy lints in that same PR.
 
-## Local checks
+## Checks
 
-These are the commands CI runs. Run them before pushing:
+Every check lives in `xtask` (`cargo xtask` lists them), so the same commands run locally and in whichever CI is chosen later. There is no CI yet, and it won't be GitHub Actions. When it arrives, it calls `cargo xtask ci` on Linux and Windows.
 
-```sh
-cargo fmt --all --check
-cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-cargo test --locked --workspace --all-features
-cargo deny check          # cargo install --locked cargo-deny
-typos                     # cargo install --locked typos-cli
-```
+- `cargo xtask ci` runs the following, stopping at the first failure:
+  - `fmt`
+  - `clippy`, with `-D warnings`
+  - `test`
+  - `deny`, which is `cargo deny check`
+  - `typos`
+  - `todo`: every `TODO` or `FIXME` in a `.rs` or `.toml` file is written `TODO(#123)`
+- `cargo xtask mutants [<base>]` is the advisory mutation check (see [testing](testing.md#mutation-testing)).
+- The external tools need a one-time install: `cargo install --locked cargo-deny typos-cli cargo-mutants`.
+- Warnings are allowed while you iterate. `cargo xtask clippy` denies them.
+- A new check is written as a new `xtask` task and added to `ci`, never as CI-provider config.
 
-Warnings are allowed while you iterate locally. CI denies them.
-
-## CI
-
-`.github/workflows/ci.yml` runs these jobs:
-
-- **fmt**
-- **clippy** on Linux and Windows
-- **tests** on Linux and Windows
-- **`cargo deny check`**
-- **typos**
-- **the TODO check**: every `TODO` or `FIXME` in a `.rs` or `.toml` file must be written `TODO(#123)`
-
-`mutants-pr.yml` runs the advisory mutation check (see [testing](testing.md#mutation-testing)). Caching uses `Swatinem/rust-cache`.
-
-Two jobs are still to come: the Linux lavapipe image-snapshot job, and the weekly full mutants run. Each arrives when there is code for it to check.
+Two checks are still to come: the Linux lavapipe image-snapshot run, and a periodic full mutants run. Each arrives when there is code for it to check.
 
 ## Config files
 

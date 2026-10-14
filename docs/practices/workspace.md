@@ -27,7 +27,7 @@
   foo = "1.2"  # 1.3 needs accesskit 0.25; egui 0.36 is on 0.24
   ```
 
-- `Cargo.lock` is committed, and CI builds with `--locked`.
+- `Cargo.lock` is committed, and the `xtask` checks build with `--locked`.
 
 ## Modules
 

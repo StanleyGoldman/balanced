@@ -51,7 +51,7 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 ### Worktrees
 
 - The main checkout in the repo folder belongs to the user; keep its branch as the user left it.
-- Do branch work (practice and doc updates, fixes, PR branches) in a git worktree. A subagent in its own worktree makes such a fix in the background.
+- Do branch work (practice and doc updates, fixes, PR branches) in a git worktree under `.claude/worktrees/<name>` (gitignored), never beside the repo folder. A subagent in its own worktree makes such a fix in the background.
 - In a worktree-isolated subagent, run each shell command as one plain call with literal paths. The isolation guard refuses any command it cannot prove keeps git inside the worktree, and backgrounding, loops, shell variables, and `sh <script>` all trip it, even for `curl` or `gh` downloads.
 
 ### Pull requests
