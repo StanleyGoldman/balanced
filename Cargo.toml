@@ -11,7 +11,11 @@ publish = false
 [workspace.dependencies]
 balanced_core = { path = "crates/balanced_core" }
 balanced_i18n = { path = "crates/balanced_i18n" }
+balanced_prototype_harness = { path = "crates/balanced_prototype_harness" }
 balanced_ui = { path = "crates/balanced_ui" }
+egui = { version = "0.36.2", default-features = false }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+serde_json = "1.0.154"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
