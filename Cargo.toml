@@ -14,7 +14,9 @@ balanced_core = { path = "crates/balanced_core" }
 balanced_i18n = { path = "crates/balanced_i18n" }
 balanced_prototype_harness = { path = "crates/balanced_prototype_harness" }
 balanced_ui = { path = "crates/balanced_ui" }
+eframe = "0.36.2"
 egui = { version = "0.36.2", default-features = false }
+egui_extras = "0.36.2"
 fluent-bundle = "0.16.0"
 fluent-syntax = "0.12.0"
 i18n-embed = { version = "0.16.0", features = ["fluent-system"] }
