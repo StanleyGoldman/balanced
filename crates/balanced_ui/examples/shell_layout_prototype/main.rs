@@ -26,14 +26,12 @@
     unreachable_pub
 )]
 
-mod harness;
-
 use std::collections::HashMap;
 
+use balanced_prototype_harness::{Args, Harness};
 use eframe::egui;
 use egui::{Align, Button, CentralPanel, Id, Layout, Panel, RichText, Sense, Sides, Ui};
 use egui_extras::{Column, TableBuilder};
-use harness::Harness;
 use serde_json::json;
 
 // ---------------------------------------------------------------------------------------------
@@ -350,7 +348,7 @@ fn fmt_cents(cents: i64) -> String {
     let whole = (abs / 100).to_string();
     let mut grouped = String::new();
     for (i, ch) in whole.chars().enumerate() {
-        if i > 0 && (whole.len() - i) % 3 == 0 {
+        if i > 0 && (whole.len() - i).is_multiple_of(3) {
             grouped.push(',');
         }
         grouped.push(ch);
@@ -502,7 +500,7 @@ struct Proto {
 }
 
 impl Proto {
-    fn new(args: &harness::Args) -> Self {
+    fn new(args: &Args) -> Self {
         let variant = args
             .variant
             .as_deref()
@@ -1014,7 +1012,7 @@ impl Proto {
         }
     }
 
-    fn status_bar(&mut self, ui: &mut Ui) {
+    fn status_bar(&self, ui: &mut Ui) {
         if !self.t.status_bar {
             return;
         }
@@ -1491,7 +1489,7 @@ impl Proto {
 }
 
 fn main() -> eframe::Result {
-    let args = harness::parse_args();
+    let args = Args::from_env();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Balanced — PROTOTYPE shell layout")

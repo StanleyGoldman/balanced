@@ -447,9 +447,9 @@ version = "0.0.0"
 dependencies = [
  "balanced_core",
  "balanced_i18n",
+ "balanced_prototype_harness",
  "eframe",
  "egui_extras",
- "image",
  "serde_json",
 ]
 
