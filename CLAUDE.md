@@ -30,6 +30,7 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 - Tag each question `cheap` or `expensive` to reverse. A public API, a data format, or an ADR-level choice is `expensive`.
 - Settle `firm` questions yourself. List them at the end under "Assumed, shout if wrong" and ask only the rest.
 - Batch `cheap` questions tagged `firm` or `leaning` into one round. The user replies "accept all" or names the exceptions. This overrides the one-question-per-round rule for these questions.
+- Post the resolution comment in the shape given in `docs/agents/grilling.md`.
 
 ### Subagents
 
