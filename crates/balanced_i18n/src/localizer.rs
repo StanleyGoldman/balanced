@@ -5,13 +5,15 @@ use i18n_embed::fluent::FluentLanguageLoader;
 use icu_calendar::types::Weekday;
 use icu_calendar::{Date, Iso};
 use icu_locale::{LanguageIdentifier, Locale, locale};
+use rust_decimal::Decimal;
 use rust_embed::Embed;
 
-use crate::I18nError;
 use crate::chain::{SOURCE_LANGUAGE, fallback_chain};
 use crate::format::{Formatters, format_fluent_value};
 use crate::missing::log_missing_messages;
+use crate::money::{self, AmountStyle, Currency};
 use crate::pseudo::{self, PSEUDO_LANGUAGE};
+use crate::{AmountParseError, I18nError};
 
 /// The `.ftl` files, one folder per shipped language.
 #[derive(Embed)]
@@ -157,9 +159,39 @@ impl Localizer {
     }
 
     /// Formats an integer with the formatting locale's digits and grouping. Money
-    /// has its own formatting.
+    /// has its own formatting: [`Self::format_amount`].
     pub fn format_number(&self, value: i64) -> String {
         self.formatters.number(value)
+    }
+
+    /// Formats a money amount in the formatting locale: `$1,234.50` in `en-US` and
+    /// `1.234,50 $` in `de-DE`, whatever the currency. This is the only way an
+    /// amount is shown to the user.
+    ///
+    /// The amount shows exactly the currency's decimal places, and a negative amount
+    /// gets the locale's standard minus sign. `amount` should already be at the
+    /// currency's decimal places, as a `Money` amount is; any extra digits are
+    /// rounded half away from zero, for display only.
+    pub fn format_amount(&self, amount: Decimal, currency: Currency, style: AmountStyle) -> String {
+        money::format_amount(&self.formatting_locale, amount, currency, style)
+    }
+
+    /// Reads an amount the user typed, written the formatting locale's way, for a
+    /// currency with `decimal_places` decimal places. The result is at exactly
+    /// those decimal places.
+    ///
+    /// Accepts the locale's decimal mark and group separator (a typed space stands
+    /// in for a no-break space), a leading or trailing minus, and a currency symbol
+    /// or code at either end, which is ignored. Strict about the locale: `1.234` is
+    /// one thousand two hundred and thirty-four in `de-DE`, and `1.23` is rejected
+    /// there because its group is too short. More decimal places than the currency
+    /// allows are rejected, not rounded, unless the extra digits are zeros.
+    pub fn parse_amount(
+        &self,
+        text: &str,
+        decimal_places: u32,
+    ) -> Result<Decimal, AmountParseError> {
+        money::parse_amount(self.formatters.symbols(), decimal_places, text)
     }
 
     /// Formats a date as the formatting locale writes a short date with a
@@ -347,6 +379,18 @@ mod tests {
             ids,
             [(&de, "menu-help-about"), (&de, "register-column-amount")]
         );
+    }
+
+    #[test]
+    fn formats_and_parses_amounts_in_the_formatting_locale() {
+        let i18n = localizer(&langid!("en-US"), &locale!("de-DE"));
+        let usd = Currency::new("USD", 2).unwrap();
+        let amount = Decimal::new(-123_450, 2);
+
+        let text = i18n.format_amount(amount, usd, AmountStyle::Symbol);
+
+        assert_eq!(text, "-1.234,50\u{a0}$");
+        assert_eq!(i18n.parse_amount(&text, 2), Ok(amount));
     }
 
     #[test]

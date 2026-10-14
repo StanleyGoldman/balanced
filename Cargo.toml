@@ -21,13 +21,22 @@ i18n-embed-fl = "0.10.1"
 icu_calendar = "2.3.0"
 icu_datetime = "2.3.0"
 icu_decimal = { version = "2.3.0", features = ["ryu"] }
+# Exact pin: every release breaks the API, so an upgrade is a deliberate change that the
+# money snapshot tests in `balanced_i18n` make visible. See docs/practices/money.md.
+icu_experimental = { version = "=0.6.0", default-features = false, features = ["compiled_data"] }
 icu_locale = "2.3.1"
 icu_provider = "2.3.1"
+insta = "1.49.0"
+iso_currency = "0.7.1"
 rust-embed = "8.13.0"
+# No `serde` until persistence arrives, and never `serde-float`: amounts serialise as strings.
+rust_decimal = { version = "1.43.0", default-features = false, features = ["std"] }
+rust_decimal_macros = "1.40.0"
 sys-locale = "0.3.2"
 thiserror = "2.0.21"
 tracing = "0.1.44"
 unic-langid = "0.9.6"
+zerovec = "0.11.8"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 serde_json = "1.0.154"
 

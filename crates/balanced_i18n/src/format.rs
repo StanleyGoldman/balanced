@@ -15,6 +15,7 @@ use icu_decimal::options::{DecimalFormatterOptions, GroupingStrategy};
 use icu_locale::Locale;
 
 use crate::I18nError;
+use crate::money::NumberSymbols;
 
 /// The ICU4X formatters for one formatting locale.
 #[derive(Debug)]
@@ -23,12 +24,15 @@ pub(crate) struct Formatters {
     ungrouped: DecimalFormatter,
     date: FixedCalendarDateTimeFormatter<Gregorian, YMD>,
     week: WeekInformation,
+    symbols: NumberSymbols,
 }
 
 impl Formatters {
     pub(crate) fn new(locale: &Locale) -> Result<Self, I18nError> {
+        let decimal = DecimalFormatter::try_new(locale.into(), DecimalFormatterOptions::default())?;
         Ok(Self {
-            decimal: DecimalFormatter::try_new(locale.into(), DecimalFormatterOptions::default())?,
+            symbols: NumberSymbols::new(&decimal),
+            decimal,
             ungrouped: DecimalFormatter::try_new(locale.into(), {
                 let mut options = DecimalFormatterOptions::default();
                 options.grouping_strategy = Some(GroupingStrategy::Never);
@@ -52,6 +56,10 @@ impl Formatters {
 
     pub(crate) fn first_weekday(&self) -> Weekday {
         self.week.first_weekday
+    }
+
+    pub(crate) fn symbols(&self) -> &NumberSymbols {
+        &self.symbols
     }
 
     /// Makes Fluent numbers looked up on this thread format with these formatters.

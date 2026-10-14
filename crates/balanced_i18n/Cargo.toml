@@ -11,16 +11,21 @@ i18n-embed.workspace = true
 icu_calendar.workspace = true
 icu_datetime.workspace = true
 icu_decimal.workspace = true
+icu_experimental.workspace = true
 icu_locale.workspace = true
 icu_provider.workspace = true
 rust-embed.workspace = true
+rust_decimal.workspace = true
 sys-locale.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 unic-langid.workspace = true
+zerovec.workspace = true
 
 [dev-dependencies]
 fluent-syntax.workspace = true
+insta.workspace = true
+rust_decimal_macros.workspace = true
 
 [lints]
 workspace = true

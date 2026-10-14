@@ -6,3 +6,6 @@
 
 # cargo-mutants
 mutants.out*/
+# insta writes these when a snapshot test fails; accept or reject them, never commit them.
+*.pending-snap
+*.snap.new
