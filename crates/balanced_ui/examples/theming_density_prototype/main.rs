@@ -1742,22 +1742,20 @@ impl Proto {
                             } else {
                                 ui.label(rt);
                             }
+                            // The cell's painter clips the gaps between cells, where the lines
+                            // belong, so widen its clip by half the spacing. Row rules go on the
+                            // top edge: the next row's stripe would cover a bottom one.
                             let line = egui::Stroke::new(1.0, pal.grid);
-                            let pad = ui.spacing().item_spacing;
+                            let pad = ui.spacing().item_spacing / 2.0;
+                            let painter = ui
+                                .ctx()
+                                .layer_painter(ui.layer_id())
+                                .with_clip_rect(ui.clip_rect().expand2(pad));
                             if grid_cols {
-                                ui.painter().vline(
-                                    rect.right() + pad.x / 2.0,
-                                    rect.y_range(),
-                                    line,
-                                );
+                                painter.vline(rect.right() + pad.x, rect.y_range().expand(pad.y), line);
                             }
-                            // Rule along the top: the next row's stripe would paint over a bottom one.
                             if grid_rows || hair {
-                                ui.painter().hline(
-                                    rect.x_range().expand(pad.x / 2.0),
-                                    rect.top() - pad.y / 2.0,
-                                    line,
-                                );
+                                painter.hline(rect.x_range().expand(pad.x), rect.top() - pad.y, line);
                             }
                         });
                         if resp.clicked() {
