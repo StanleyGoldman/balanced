@@ -12,4 +12,32 @@ pub enum I18nError {
     /// ICU4X has no date pattern for the formatting locale.
     #[error("no date formatting data for the locale")]
     DateFormattingData(#[from] icu_datetime::DateTimeFormatterLoadError),
+    /// The currency code is not three ASCII letters, or its decimal places don't fit.
+    #[error("invalid currency {code:?}")]
+    Currency {
+        /// The code as given.
+        code: String,
+    },
+}
+
+/// Why typed text is not an amount. `balanced_ui` shows each as an inline error on
+/// the field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum AmountParseError {
+    /// Nothing but spaces or a currency symbol was typed.
+    #[error("no amount entered")]
+    Empty,
+    /// The text is not a number written the formatting locale's way.
+    #[error("not an amount")]
+    Invalid,
+    /// The amount has more decimal places than its currency allows. Excess digits are
+    /// rejected, not rounded.
+    #[error("amounts have {decimal_places} decimal places")]
+    TooManyDecimalPlaces {
+        /// The currency's decimal places.
+        decimal_places: u32,
+    },
+    /// The amount is too large to hold.
+    #[error("amount out of range")]
+    OutOfRange,
 }

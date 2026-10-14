@@ -30,6 +30,8 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 `cargo-mutants` mutates only `balanced_core` and `balanced_i18n` (`.cargo/mutants.toml`). Each mutant runs only its own crate's tests, so core logic has to be caught by core's tests.
 
 - Before opening a PR that touches those crates, run `cargo xtask mutants` (needs `cargo install --locked cargo-mutants`). It mutates only the code changed since `origin/main`, and is advisory: it reports missed mutants but doesn't fail.
+- Run it through `cargo xtask mutants`, never `cargo mutants` directly. On Linux the xtask runs it in a systemd scope capped at 8 GB with no swap. A mutant that makes a loop allocate forever fills RAM in seconds, before the per-mutant timeout fires, and an uncapped OOM kill takes the whole terminal session with it. On other OSes there is no cap.
+- Write every loop over input so each pass provably consumes something, checked in the loop itself (see `split_number` in `balanced_i18n`'s `money.rs`). A mutant then fails the tests instead of spinning.
 - Kill a missed mutant with a test, or exclude it with a reason. Don't leave it.
 - Every exclusion (`exclude_re`, `#[mutants::skip]`) carries a comment saying why.
 - A weekly full run on `main` is planned for when there is code to mutate.

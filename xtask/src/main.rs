@@ -168,13 +168,36 @@ fn names_issue(rest: &str) -> bool {
         .is_some_and(|(number, _)| !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()))
 }
 
+/// The memory cap for a mutants run. A mutant can make a loop allocate without end,
+/// filling RAM before cargo-mutants' per-mutant timeout fires, and on Linux the
+/// kernel's OOM kill then takes the whole terminal session down with it.
+const MUTANTS_MEMORY_MAX: &str = "MemoryMax=8G";
+
+/// `command` in a memory-capped systemd scope on Linux, where the cap kills only
+/// the runaway test. Elsewhere, `command` as it is, with a warning.
+fn memory_capped(command: &[&str]) -> Command {
+    let (program, args) = command.split_first().expect("a command names its program");
+    if cfg!(target_os = "linux") {
+        let mut capped = Command::new("systemd-run");
+        capped
+            .args(["--user", "--scope", "--quiet", "-p", MUTANTS_MEMORY_MAX])
+            .args(["-p", "MemorySwapMax=0", "--"])
+            .args(command);
+        return capped;
+    }
+    eprintln!("warning: no memory cap on this OS; a runaway mutant can exhaust RAM");
+    let mut plain = Command::new(program);
+    plain.args(args);
+    plain
+}
+
 fn mutants(base: &str) -> Result<(), String> {
     let diff = output("git", &["diff", &format!("{base}...")])?;
     let diff_path = "target/mutants.diff";
     std::fs::create_dir_all("target").map_err(|err| format!("creating target/: {err}"))?;
     std::fs::write(diff_path, diff).map_err(|err| format!("writing {diff_path}: {err}"))?;
-    let status = Command::new("cargo")
-        .args(["mutants", "--in-diff", diff_path, "--no-shuffle"])
+    let mutants = ["cargo", "mutants", "--in-diff", diff_path, "--no-shuffle"];
+    let status = memory_capped(&mutants)
         .status()
         .map_err(|err| format!("running cargo mutants: {err}"))?;
     // Advisory until balanced_core and balanced_i18n reach zero missed mutants:

@@ -27,7 +27,6 @@ Read the doc for the area you are changing:
 - [state](docs/practices/state.md): Commands, snapshots and per-window UI state. Read it when code changes domain or app state.
 - [egui](docs/practices/egui.md): panels, IDs, Dialogs, large lists, colours, accessibility and egui upgrades. Read it for any change to `balanced_ui`.
 - [i18n](docs/practices/i18n.md): Fluent messages, the `fl!` macro, translations, the two locales and the pseudo-locale. Read it when adding user-visible text, a number or date shown to the user, or a locale.
+- [money](docs/practices/money.md): `Money`, rounding, and formatting and parsing amounts. Read it when code holds, combines, shows or reads an amount.
 - [testing](docs/practices/testing.md): which test layer to use, UI tests and mutation testing. Read it when writing tests.
 - [tooling](docs/practices/tooling.md): the toolchain, `cargo xtask` checks and the build cache. Read it when a check fails or before you change config.
-
-One more doc is planned: `money.md` (from "How the GUI represents money").

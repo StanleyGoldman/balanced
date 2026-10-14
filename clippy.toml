@@ -20,6 +20,15 @@ disallowed-methods = [
 
   { path = "egui_extras::TableBody::row", reason = "lays out every row each frame; use `rows` or `heterogeneous_rows`" },
 
+  # No floats near money: a float can't hold most decimal fractions exactly. The
+  # `num_traits` bans also cover other number types; nothing in Balanced needs them.
+  { path = "rust_decimal::Decimal::from_f64_retain", reason = "money is never a float; parse text or build from integers", allow-invalid = true },
+  { path = "rust_decimal::Decimal::from_f32_retain", reason = "money is never a float; parse text or build from integers", allow-invalid = true },
+  { path = "num_traits::FromPrimitive::from_f64", reason = "money is never a float; parse text or build from integers", allow-invalid = true },
+  { path = "num_traits::FromPrimitive::from_f32", reason = "money is never a float; parse text or build from integers", allow-invalid = true },
+  { path = "num_traits::ToPrimitive::to_f64", reason = "money is never a float; format it with `balanced_i18n`", allow-invalid = true },
+  { path = "num_traits::ToPrimitive::to_f32", reason = "money is never a float; format it with `balanced_i18n`", allow-invalid = true },
+
   # Only the binary installs a tracing subscriber; libraries emit through `tracing` alone.
   { path = "tracing::subscriber::set_global_default", reason = "only the binary installs a subscriber" },
   { path = "tracing_subscriber::fmt::init", reason = "only the binary installs a subscriber" },
