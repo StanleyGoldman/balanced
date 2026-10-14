@@ -9,6 +9,7 @@ rust-version = "1.99"
 publish = false
 
 [workspace.dependencies]
+anyhow = "1.0.104"
 balanced_core = { path = "crates/balanced_core" }
 balanced_i18n = { path = "crates/balanced_i18n" }
 balanced_prototype_harness = { path = "crates/balanced_prototype_harness" }
