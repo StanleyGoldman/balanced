@@ -37,11 +37,11 @@ The agent follows the user through the app's own output. Build these in:
 - **F2** opens a one-line note box written into the log; **F3** drops a marker plus a screenshot.
 - **Control file**: the app polls a file (`--control <path>`) for commands from the agent: switch variant, flip a toggle, jump to a row, reload data. Use it to set up a scenario before asking the user to try it.
 
-The first prototype builds the harness; later prototypes copy it from that prototype's branch.
+The harness lives in `crates/balanced_ui/examples/shell_layout_prototype/harness.rs` on branch `prototype/shell-layout`. Copy that file into each new prototype and follow the contract in its header.
 
 ## Running a session
 
-1. When the prototype builds, ask the user for clearance to launch.
+1. When the prototype builds, ask the user for clearance to launch. Every launch needs it, including your own scripted control-file runs: the window opens on the user's desktop and takes keyboard focus, so it logs whatever they were typing elsewhere. An unfocused window is also throttled on Wayland, so a scripted run stalls while the user works in another app.
 2. On a yes, start it yourself as a background process; the window opens on the user's desktop. Tell them it's up.
 3. Watch the event log as it grows (the Monitor tool), and read screenshots when a variant or toggle changes or the user drops a marker.
 4. Turn what you see into questions and Q&A entries on the PR: hesitations, Esc right after starting an edit, Tab landing somewhere the user leaves at once, slow frames.
