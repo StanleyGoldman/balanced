@@ -54,7 +54,7 @@ egui releases a breaking minor version about every two months, and it removes de
 
 ## Gotchas
 
-- egui's default proportional fonts (Ubuntu-Light, NotoEmoji, emoji-icon-font) lack ▸ ▾ ▼ ⋯ and draw a box in their place; ⏵ ⏷ ◀ ▶ render. Check a glyph with `fc-query --format='%{charset}' <font>` against the fonts in the `epaint_default_fonts` crate.
+- egui's default proportional fonts (Ubuntu-Light, NotoEmoji, emoji-icon-font) lack ▸ ▾ ▼ ⋯ and the arrows ← →, and draw a box in their place; ⏵ ⏷ ◀ ▶ render. Check a glyph with `fc-query --format='%{charset}' <font>` against the fonts in the `epaint_default_fonts` crate.
 - `egui::MenuBar` takes the whole row. Anything sharing the row (tabs, a search box) goes inside its closure.
 - To pin a footer under a scrolling list in a side panel, nest a `Panel::bottom` and then a `CentralPanel` inside the side panel.
 - On Wayland, winit 0.30 ignores window levels and parent windows, so no second OS window can be kept above the Main window there.
