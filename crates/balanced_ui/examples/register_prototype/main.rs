@@ -816,6 +816,8 @@ struct CellEdit {
 #[derive(Clone, Copy, Default)]
 struct Keys {
     enter: bool,
+    /// Ctrl+Enter: add the draft row's transaction from any cell.
+    ctrl_enter: bool,
     esc: bool,
     tab: bool,
     back_tab: bool,
@@ -1291,7 +1293,7 @@ impl Proto {
                 striping: true,
                 dense: false,
                 entry_bar_top: false,
-                enter_down: true,
+                enter_down: false,
                 balance_follows_sort: false,
                 dark: false,
             },
@@ -2180,15 +2182,23 @@ impl Proto {
             return Keys::default();
         }
         let ac_open = self.ac.open;
-        ctx.input_mut(|i| Keys {
-            enter: i.consume_key(Modifiers::NONE, Key::Enter),
-            esc: i.consume_key(Modifiers::NONE, Key::Escape),
-            tab: i.consume_key(Modifiers::NONE, Key::Tab),
-            back_tab: i.consume_key(Modifiers::SHIFT, Key::Tab),
-            down: ac_open && i.consume_key(Modifiers::NONE, Key::ArrowDown),
-            up: ac_open && i.consume_key(Modifiers::NONE, Key::ArrowUp),
-            alt_down: i.consume_key(Modifiers::ALT, Key::ArrowDown),
-            field,
+        // `consume_key` ignores Shift and Alt the pattern leaves out, so a plain-key pattern
+        // also eats Shift+Tab and Alt+Down: take the modified keys first.
+        ctx.input_mut(|i| {
+            let ctrl_enter = i.consume_key(Modifiers::COMMAND, Key::Enter);
+            let back_tab = i.consume_key(Modifiers::SHIFT, Key::Tab);
+            let alt_down = i.consume_key(Modifiers::ALT, Key::ArrowDown);
+            Keys {
+                enter: i.consume_key(Modifiers::NONE, Key::Enter),
+                ctrl_enter,
+                esc: i.consume_key(Modifiers::NONE, Key::Escape),
+                tab: i.consume_key(Modifiers::NONE, Key::Tab),
+                back_tab,
+                down: ac_open && i.consume_key(Modifiers::NONE, Key::ArrowDown),
+                up: ac_open && i.consume_key(Modifiers::NONE, Key::ArrowUp),
+                alt_down,
+                field,
+            }
         })
     }
 
@@ -2308,17 +2318,25 @@ impl Proto {
             self.picker = None;
             return;
         }
-        if keys.enter {
-            if !self.commit_cell(ctx, "enter") {
+        if keys.ctrl_enter {
+            if !self.commit_cell(ctx, "ctrl+enter") {
                 return;
             }
             if row == Sel::New {
-                // Enter on the draft row adds the transaction.
-                self.save_draft(ctx, "enter");
-            } else if self.t.enter_down {
-                self.move_cursor(1, 0, "enter");
+                self.save_draft(ctx, "ctrl+enter");
+            }
+        } else if keys.enter {
+            if !self.commit_cell(ctx, "enter") {
+                return;
+            }
+            if self.t.enter_down {
+                if row == Sel::New {
+                    self.save_draft(ctx, "enter");
+                } else {
+                    self.move_cursor(1, 0, "enter");
+                }
             } else {
-                self.move_cursor(0, 1, "enter");
+                self.enter_right(ctx, row, col);
             }
         } else if keys.tab || keys.back_tab || clicked {
             let back = keys.back_tab;
@@ -2350,6 +2368,27 @@ impl Proto {
                     self.move_cursor(if back { -1 } else { 1 }, 0, via);
                     self.col = edge.copied().unwrap_or(1);
                 }
+            }
+        }
+    }
+
+    /// Enter moving right: the cursor goes to the next editable column without editing it; past
+    /// the last it wraps to the next row's first, and on the draft row it adds the transaction.
+    fn enter_right(&mut self, ctx: &egui::Context, row: Sel, col: usize) {
+        let ed = self.editable();
+        let i = ed.iter().position(|k| *k == col).unwrap_or(0);
+        match ed.get(i + 1) {
+            Some(&next) => {
+                self.col = next;
+                self.h.event(
+                    "cursor",
+                    json!({ "row": format!("{row:?}"), "col": next, "via": "enter" }),
+                );
+            }
+            None if row == Sel::New => self.save_draft(ctx, "enter"),
+            None => {
+                self.move_cursor(1, 0, "enter");
+                self.col = ed.first().copied().unwrap_or(1);
             }
         }
     }
@@ -2407,7 +2446,11 @@ impl Proto {
         if end {
             self.move_cursor(self.order.len() as isize, 0, "key");
         }
-        if enter || f2 {
+        if enter && ctx.input(|i| i.modifiers.command) {
+            if self.sel == Sel::New {
+                self.save_draft(ctx, "ctrl+enter");
+            }
+        } else if enter || f2 {
             self.start_cell_edit(self.sel, self.col, None, "enter");
         }
         let typed: Option<String> = ctx.input(|i| {
@@ -3682,7 +3725,7 @@ impl Proto {
                         let hovered = ui
                             .ctx()
                             .pointer_hover_pos()
-                            .is_some_and(|p| rect.y_range().contains(p.y) && ui.clip_rect().x_range().contains(p.x));
+                            .is_some_and(|p| rect.y_range().contains(p.y) && p.x <= ui.clip_rect().right());
                         if self.sel != this && !hovered {
                             return;
                         }
