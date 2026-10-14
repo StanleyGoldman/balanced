@@ -520,6 +520,8 @@ struct Proto {
     jump_to_row: Option<usize>,
     /// The register the Accounts tab (variant D) returns to.
     last_account: usize,
+    /// Variant D folded the Account bar on leaving Accounts, so returning unfolds it.
+    d_auto_folded: bool,
     /// The docked prototype controls (F4).
     dock_open: bool,
     /// Last action, shown in the Status bar so every click is visible.
@@ -558,6 +560,7 @@ impl Proto {
             selected_row: HashMap::new(),
             jump_to_row: None,
             last_account: 0,
+            d_auto_folded: false,
             dock_open: true,
             status: "Ready".to_owned(),
         }
@@ -720,6 +723,9 @@ impl eframe::App for Proto {
 
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if ctx.global_style().interaction.selectable_labels {
+            ctx.all_styles_mut(|s| s.interaction.selectable_labels = false);
+        }
         if let Some(cmd) = self.h.begin_frame(&ctx) {
             self.apply_control(&ctx, &cmd);
         }
@@ -924,6 +930,43 @@ impl Proto {
         }
     }
 
+    /// One account in the Account bar: the whole row is the click target and the highlight.
+    fn account_row(ui: &mut Ui, selected: bool, name: &str, balance: i64) -> egui::Response {
+        let height = ui.spacing().interact_size.y;
+        let (rect, row) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::click());
+        let v = ui.visuals();
+        if selected {
+            ui.painter().rect_filled(rect, 2.0, v.selection.bg_fill);
+        } else if row.hovered() {
+            ui.painter()
+                .rect_filled(rect, 2.0, v.widgets.hovered.weak_bg_fill);
+        }
+        let font = egui::TextStyle::Body.resolve(ui.style());
+        let text = if selected {
+            v.selection.stroke.color
+        } else {
+            v.text_color()
+        };
+        let money = if balance < 0 { v.error_fg_color } else { text };
+        let pad = egui::vec2(14.0, 0.0);
+        ui.painter().text(
+            rect.left_center() + pad,
+            egui::Align2::LEFT_CENTER,
+            name,
+            font.clone(),
+            text,
+        );
+        ui.painter().text(
+            rect.right_center() - egui::vec2(2.0, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            fmt_cents(balance),
+            font,
+            money,
+        );
+        row
+    }
+
     /// The Account bar body: groups with totals, accounts with balances, right-click menus.
     fn account_groups(&mut self, ui: &mut Ui) {
         let gap = if self.t.dense { 2.0 } else { 8.0 };
@@ -993,14 +1036,7 @@ impl Proto {
                 .collect();
             for (i, name, balance) in rows {
                 let selected = self.nav == Nav::Account(i);
-                let (row, _) = Sides::new().show(
-                    ui,
-                    |ui| {
-                        ui.add_space(14.0);
-                        ui.selectable_label(selected, name)
-                    },
-                    |ui| Self::money_label(ui, balance),
-                );
+                let row = Self::account_row(ui, selected, name, balance);
                 self.h.track(&row, format!("account bar: {name}"));
                 if row.clicked() {
                     self.open_account(i, "account bar");
@@ -1503,8 +1539,17 @@ impl Proto {
         self.h.track(&r, format!("tab: {label}"));
         if r.clicked() {
             match pos {
-                Some(t) => self.open_tab(t, "tab"),
+                Some(t) => {
+                    if matches!(self.nav, Nav::Account(_)) && self.t.account_bar {
+                        self.set_toggle("account_bar", Some(false), "auto: left Accounts");
+                        self.d_auto_folded = true;
+                    }
+                    self.open_tab(t, "tab");
+                }
                 None => {
+                    if std::mem::take(&mut self.d_auto_folded) && !self.t.account_bar {
+                        self.set_toggle("account_bar", Some(true), "auto: back to Accounts");
+                    }
                     let i = self.last_account;
                     self.open_account(i, "tab: Accounts");
                 }
