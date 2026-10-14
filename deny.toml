@@ -1,0 +1,58 @@
+# `cargo xtask deny` runs `cargo deny check`. Every `skip`, licence exception or advisory ignore
+# carries a comment saying why.
+
+[graph]
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+  "aarch64-apple-darwin",
+]
+all-features = true
+
+[advisories]
+ignore = []
+
+[licenses]
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "ISC",
+  "MIT",
+  "OFL-1.1",
+  "Ubuntu-font-1.0",
+  "Unicode-3.0",
+  "Zlib",
+]
+unused-allowed-license = "allow"
+
+[licenses.private]
+ignore = true  # workspace crates are `publish = false` and carry no licence
+
+[bans]
+multiple-versions = "deny"  # catches a split egui/accesskit graph before it becomes a trait error
+wildcards = "deny"
+allow-wildcard-paths = true  # workspace path dependencies
+deny = [
+  # Layer rule (ARCHITECTURE.md): nothing below `balanced_ui` depends on egui or eframe.
+  # `wrappers` lists the only crates allowed a direct dependency; any other path to
+  # egui or eframe fails.
+  { crate = "egui", wrappers = [
+    "balanced_ui",
+    "eframe",
+    "egui-wgpu",
+    "egui-winit",
+    "egui_extras",
+    "egui_glow",
+    "egui_kittest",
+    "egui_table",
+  ] },
+  { crate = "eframe", wrappers = ["balanced", "balanced_ui", "egui_kittest"] },
+]
+skip = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
