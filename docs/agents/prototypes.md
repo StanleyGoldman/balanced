@@ -22,7 +22,12 @@ A prototype is throwaway code that answers one question by giving the user somet
 
 - Build 2–5 **variants** that differ in structure or interaction model, not colour.
 - Dock all prototype tooling (variant switcher, toggles) in one panel along the window's right edge, added before the variant's own panels so every variant lays out in the remaining space. Style it as tooling, and let F4 collapse it to a thin edge. Floating overlays cover the design under review. A separate OS window can't stay above the app on Wayland: winit ignores window levels and parent windows there.
-- Keys in the app window: ←/→ switch variants while no text field has focus, F2 opens a note, F3 drops a marker, F4 collapses the dock. A `--variant <key>` flag picks the starting one.
+- Keys in the app window, while no text field has focus:
+  - a letter per variant (`A`, `B`, `C`) and ←/→ to step through them;
+  - a number key per toggle (`1`–`9`, then `0`), so the user can flip one back and forth to see where it changes the screen;
+  - F2 opens a note, F3 drops a marker, F4 collapses the dock.
+
+  Label every variant and toggle in the dock with its key. A `--variant <key>` flag picks the starting variant.
 - Every menu item and button that would act in the real app logs a `command` event naming the Command it would emit (`would_emit`), so the session records what the real app would do.
 - Tag each toggle as applying to one variant or to all. Toggle state and shared data (selection, sort) survive a variant switch, so the user compares like with like.
 
@@ -54,15 +59,16 @@ You drive the prototype as well as the conversation. Through the control file yo
 
 1. Before launch, write the agenda into the PR's Q&A, one entry per question.
 2. When the prototype builds, ask the user for clearance to launch. Every launch needs it, including your own scripted control-file runs: the window opens on the user's desktop and takes keyboard focus, so it logs whatever they were typing elsewhere. An unfocused window is also throttled on Wayland, so a scripted run stalls while the user works in another app.
-3. On a yes, start it yourself as a background process and tell the user it's up. Watch the log with the Monitor tool, tailing it with `perf`, `type` and `window_focus` events filtered out.
+3. On a yes, start it yourself as a background process. Tell the user it's up, along with the keys that drive it themselves (variant letters, toggle numbers, F2–F4). Watch the log with the Monitor tool, filtered to `note`, `marker` and `session_end`; read the rest of the log when a step needs it.
 4. Guide one agenda question at a time, numbered `Step <n>/<total>`. For each step, give the user:
    - **context**: what the variants or toggles in play change, and why it matters for the question;
-   - **look at**: where on screen the difference lives;
+   - **look at**: where on screen the variant in front of the user differs, region by region. Name every toggle that applies to it, with its key, in this step's first message, not after the user asks. Save comparisons with a variant the user hasn't reached yet for when you switch to it;
    - **try**: concrete actions in a scenario you have already set up through the control file; when the step compares variants or toggles, switch them yourself one at a time and say what changed after each switch;
    - **notice**: what to pay attention to while trying it.
 
    End the step by asking for their reaction.
-5. Watch the event log as it grows (the Monitor tool), and read screenshots when a variant or toggle changes or the user drops a marker.
+5. Watch the event log as it grows (the Monitor tool), and read screenshots when a variant or toggle changes or the user drops a marker. Log events are evidence to use when the user next writes. Answer only the user's messages, and use the log in that answer.
+   - Leave the dock as the user set it. When they collapse it, switch and flip for them through the control file without reopening it.
 6. Turn what the log shows and the user doesn't say into follow-up questions: hesitations, Esc right after starting an edit, Tab landing somewhere the user leaves at once, a control never touched, slow frames.
 7. When the user's message refers to "this" or "here", line it up with the log by timestamp.
 8. A step closes on the user's answer. The log is supporting evidence of what they saw and tried, not a gate: some questions are easy to picture, and the user may answer from a glance or before trying anything. Raise a mismatch only when the log shows something that changes the answer, e.g. the user picked a variant they never opened. Record the step as a Q&A entry on the PR, citing log events where they exist, then move to the next step.
