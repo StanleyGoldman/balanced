@@ -86,6 +86,24 @@ impl Spotlight {
     }
 }
 
+/// The `rects` that lie inside no other rect of `rects`, in their original order.
+///
+/// A region and the widgets inside it often match the same target; only the region is kept.
+/// Of several equal rects, the first is kept. Rects that only partly overlap are all kept.
+pub(crate) fn outermost(rects: &[Rect]) -> Vec<Rect> {
+    rects
+        .iter()
+        .enumerate()
+        .filter(|&(i, rect)| {
+            !rects
+                .iter()
+                .enumerate()
+                .any(|(j, other)| j != i && other.contains_rect(*rect) && (other != rect || j < i))
+        })
+        .map(|(_, rect)| *rect)
+        .collect()
+}
+
 /// Rectangles that cover `screen` except the `holes`, without overlapping each other.
 ///
 /// The screen is cut into horizontal bands at every hole's top and bottom edge; within a band,
@@ -200,6 +218,46 @@ mod tests {
     fn no_targets_match_nothing() {
         let spotlight = Spotlight::default();
         assert!(!spotlight.matches("register"));
+    }
+
+    #[test]
+    fn a_region_swallows_the_widgets_inside_it() {
+        let region = rect(0.0, 0.0, 100.0, 300.0);
+        let rows: Vec<Rect> = (0..26_u8)
+            .map(|i| {
+                let top = f32::from(i) * 10.0;
+                rect(5.0, top, 95.0, top + 10.0)
+            })
+            .collect();
+        let rects: Vec<Rect> = rows.iter().copied().chain([region]).collect();
+
+        assert_eq!(outermost(&rects), vec![region]);
+    }
+
+    #[test]
+    fn partly_overlapping_rects_are_both_kept() {
+        let rects = [rect(0.0, 0.0, 50.0, 50.0), rect(25.0, 25.0, 75.0, 75.0)];
+
+        assert_eq!(outermost(&rects), rects.to_vec());
+    }
+
+    #[test]
+    fn equal_rects_are_kept_once() {
+        let r = rect(10.0, 10.0, 20.0, 20.0);
+
+        assert_eq!(outermost(&[r, r, r]), vec![r]);
+    }
+
+    #[test]
+    fn nested_rects_drop_and_separate_rects_stay() {
+        let outer = rect(0.0, 0.0, 50.0, 50.0);
+        let inner = rect(10.0, 10.0, 20.0, 20.0);
+        let innermost = rect(12.0, 12.0, 18.0, 18.0);
+        let separate = rect(60.0, 60.0, 90.0, 90.0);
+        let inside_separate = rect(70.0, 70.0, 80.0, 80.0);
+        let rects = [inner, separate, innermost, outer, inside_separate];
+
+        assert_eq!(outermost(&rects), vec![separate, outer]);
     }
 
     /// Each sample point inside the screen lies in exactly one overlay rect, or in a hole and

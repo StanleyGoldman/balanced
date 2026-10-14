@@ -21,10 +21,11 @@
 //! `spotlight off` / `spotlight on` turn it off or back on without changing the targets. A target
 //! lights every tracked widget or named region whose name contains it, ignoring case; targets are
 //! separated by `;` because names contain spaces and commas. While the spotlight is on, a
-//! translucent overlay dims the window except an outlined cut-out around each match and the panel
-//! [`Harness::dock_spotlight`] is drawn in. It only paints, so input still reaches every widget.
-//! Each change logs a `spotlight` event (`on`, `targets`, `matched`, `cause`: control, key or
-//! click) and takes a screenshot; when nothing on screen matches, nothing is drawn and one
+//! translucent overlay dims the window except an outlined cut-out around each outermost match and
+//! the panel [`Harness::dock_spotlight`] is drawn in; a match lying inside another match (a row
+//! inside its region) gets no cut-out or outline of its own. It only paints, so input still reaches
+//! every widget. Each change logs a `spotlight` event (`on`, `targets`, `matched`: the number of
+//! outermost matches drawn, `cause`: control, key or click) and takes a screenshot; when nothing on screen matches, nothing is drawn and one
 //! `spotlight_unmatched` event is logged per change.
 //!
 //! The app's side of the contract:

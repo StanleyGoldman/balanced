@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use crate::Args;
 use crate::control::ControlReader;
 use crate::log::write_event;
-use crate::spotlight::{Spotlight, SpotlightCommand, overlay_rects};
+use crate::spotlight::{Spotlight, SpotlightCommand, outermost, overlay_rects};
 
 /// Screenshots wait this long so scroll animations and egui's multi-pass layout settle.
 const SHOT_SETTLE: Duration = Duration::from_millis(350);
@@ -418,18 +418,20 @@ impl Harness {
         self.spotlight.change = Some(cause);
     }
 
-    /// The screen rects of this frame's tracked widgets and regions that the spotlight matches.
+    /// The screen rects of this frame's tracked widgets and regions that the spotlight matches,
+    /// leaving out any that lie inside another match.
     fn spotlight_matches(&self, screen: Rect) -> Vec<Rect> {
         let widgets = self.names.values().map(|t| (t.name.as_str(), t.rect));
         let regions = self
             .regions
             .iter()
             .map(|(name, rect)| (name.as_str(), *rect));
-        widgets
+        let matches: Vec<Rect> = widgets
             .chain(regions)
             .filter(|(name, rect)| rect.intersects(screen) && self.spotlight.current.matches(name))
             .map(|(_, rect)| rect)
-            .collect()
+            .collect();
+        outermost(&matches)
     }
 
     /// Log a spotlight change made this frame, then dim everything but the matches.
