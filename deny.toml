@@ -40,6 +40,7 @@ deny = [
   # `wrappers` lists the only crates allowed a direct dependency; any other path to
   # egui or eframe fails.
   { crate = "egui", wrappers = [
+    "balanced_prototype_harness",
     "balanced_ui",
     "eframe",
     "egui-wgpu",
@@ -51,7 +52,11 @@ deny = [
   ] },
   { crate = "eframe", wrappers = ["balanced", "balanced_ui", "egui_kittest"] },
 ]
-skip = []
+skip = [
+  # png 0.18.1 (latest; via image, in balanced_prototype_harness) depends on miniz_oxide 0.8
+  # directly and on 0.9 through its deflate backend. Drop this when png settles on one.
+  { crate = "miniz_oxide@0.8.9", reason = "png 0.18.1 pulls both 0.8 and 0.9" },
+]
 
 [sources]
 unknown-registry = "deny"

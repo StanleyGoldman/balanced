@@ -31,5 +31,6 @@ disallowed-methods = [
 ]
 
 disallowed-macros = [
-  { path = "egui::hex_color", reason = "use a theme colour" },
+  # Exists only with egui's `color-hex` feature; crates built without it would warn.
+  { path = "egui::hex_color", reason = "use a theme colour", allow-invalid = true },
 ]

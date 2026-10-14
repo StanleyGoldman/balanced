@@ -21,6 +21,7 @@ The workspace is flat. Each crate sits in `crates/<name>/`, except `xtask/`.
 - **`balanced_ui`**: everything egui. It holds the Main window and its panels, the Register view, Dialogs, Detached windows, the theme (the one place that builds colours), `AppCommand`, and the user-action list that feeds the Menu bar and shortcuts.
 - **`balanced_core`**: the financial domain. It holds accounts, transactions, money, `DomainCommand`, the `Ledger` (`apply` and `snapshot`), undo and redo, and `DomainError`.
 - **`balanced_i18n`**: message lookup, the locale fallback chain, and locale-aware formatting of numbers, dates and money.
+- **`balanced_prototype_harness`**: tooling for prototypes, not part of the app. It provides the event log, screenshots, F2/F3 notes and markers, and the agent's control file (see `docs/agents/prototypes.md`). It depends on egui but knows nothing of Balanced's domain. Only prototype examples use it, as a dev-dependency.
 - **`xtask`**: repo automation, run as `cargo xtask <task>`, including every check (`cargo xtask ci`).
 
 A persistence crate, `balanced_store`, comes later, below `balanced_core`.
@@ -31,5 +32,6 @@ A persistence crate, `balanced_store`, comes later, below `balanced_core`.
 - **`balanced_core` and `balanced_i18n` are siblings.** Neither depends on the other. `balanced_ui` formats core values through `balanced_i18n`.
 - **Dependencies point down only:** `balanced` → `balanced_ui` → {`balanced_core`, `balanced_i18n`}. When a second layer rule appears (for example, for `balanced_store`), add an `xtask` layer check over `cargo metadata`.
 - **The domain changes only inside `Ledger::apply`.** No UI code holds `&mut` access to domain data.
+- **`balanced_prototype_harness` stays out of the app.** Only `examples/` take it, as a dev-dependency. No crate lists it under `[dependencies]`.
 - **Only the binary installs a tracing subscriber.** `anyhow` appears only in `balanced` and `xtask`.
 - **Colours are built only in the theme module.**
