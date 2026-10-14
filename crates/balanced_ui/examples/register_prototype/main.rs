@@ -10,7 +10,7 @@
 //!
 //! The PROTOTYPE dock on the right holds the variant switcher and toggles; F4 collapses it.
 //! Keys (no text field focused): A B C / ← → switch variant, 1–9 0 flip toggles, F2 note,
-//! F3 marker. In variant C the grid owns the keyboard, so hold Alt for those keys.
+//! F3 marker, F5 spotlight. In variant C the grid owns the keyboard, so hold Alt for those keys.
 //!
 //! Fixed-seed stub data (money is whole cents in an `i64` until `Money` exists), English
 //! literals, default egui theme. None of this is production code.
@@ -897,7 +897,7 @@ fn payee_edit(
                 Some(s) => Some(s - 1),
             };
         }
-        egui::Area::new(f_popup_id(id))
+        let list = egui::Area::new(f_popup_id(id))
             .order(egui::Order::Foreground)
             .fixed_pos(r.rect.left_bottom())
             .show(ui.ctx(), |ui| {
@@ -905,12 +905,14 @@ fn payee_edit(
                     ui.set_min_width(r.rect.width().max(220.0));
                     for (i, s) in sugg.iter().enumerate() {
                         let item = ui.selectable_label(ac.sel == Some(i), &data.payees[*s]);
+                        h.track(&item, format!("autocomplete: {}", data.payees[*s]));
                         if item.clicked() {
                             picked = Some((*s, "click"));
                         }
                     }
                 });
             });
+        h.region(list.response.rect, "autocomplete list");
         if keys.enter && ac.sel.is_some() {
             picked = Some((sugg[ac.sel.unwrap_or(0)], "enter"));
             ac.enter_used = true;
@@ -1962,7 +1964,7 @@ impl Proto {
     // -- chrome -------------------------------------------------------------------------------
 
     fn status_bar(&mut self, ui: &mut Ui) {
-        Panel::bottom("status").show(ui, |ui| {
+        let r = Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(format!(
                     "Everyday Checking · {} transactions · sorted by {} {}",
@@ -1979,6 +1981,7 @@ impl Proto {
                 }
             });
         });
+        self.h.region(r.response.rect, "status bar");
     }
 
     fn row_height(&self, lines: u32) -> f32 {
@@ -1997,7 +2000,7 @@ impl Proto {
         let t = &self.data.txns[id];
         let mut open = true;
         let mut close = false;
-        egui::Window::new("Split transaction")
+        let shown = egui::Window::new("Split transaction")
             .open(&mut open)
             .collapsible(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -2032,6 +2035,9 @@ impl Proto {
                     close = true;
                 }
             });
+        if let Some(shown) = shown {
+            self.h.region(shown.response.rect, "split view");
+        }
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             close = true;
         }
@@ -2202,7 +2208,8 @@ impl Proto {
 impl Proto {
     fn variant_a(&mut self, ui: &mut Ui, keys: Keys) {
         self.status_bar(ui);
-        CentralPanel::default().show(ui, |ui| self.grid_a(ui, keys));
+        let r = CentralPanel::default().show(ui, |ui| self.grid_a(ui, keys));
+        self.h.region(r.response.rect, "register");
     }
 
     fn grid_a(&mut self, ui: &mut Ui, keys: Keys) {
@@ -2480,8 +2487,10 @@ impl Proto {
         } else {
             Panel::bottom("entry_bar")
         };
-        panel.show(ui, |ui| self.entry_bar(ui, keys));
-        CentralPanel::default().show(ui, |ui| self.grid_b(ui));
+        let r = panel.show(ui, |ui| self.entry_bar(ui, keys));
+        self.h.region(r.response.rect, "entry bar");
+        let r = CentralPanel::default().show(ui, |ui| self.grid_b(ui));
+        self.h.region(r.response.rect, "register");
     }
 
     fn entry_bar(&mut self, ui: &mut Ui, keys: Keys) {
@@ -2720,7 +2729,8 @@ const C_TITLES: [&str; 6] = ["Date", "Payee", "Category", "Memo", "Amount", "Bal
 impl Proto {
     fn variant_c(&mut self, ui: &mut Ui, _keys: Keys) {
         self.status_bar(ui);
-        CentralPanel::default().show(ui, |ui| self.grid_c(ui));
+        let r = CentralPanel::default().show(ui, |ui| self.grid_c(ui));
+        self.h.region(r.response.rect, "register");
     }
 
     fn grid_c(&mut self, ui: &mut Ui) {
@@ -2971,9 +2981,11 @@ impl Proto {
                     }
                 }
                 ui.separator();
+                self.h.dock_spotlight(ui);
+                ui.separator();
                 ui.label(
                     RichText::new(
-                        "A B C or ◀ / ▶ variant · 1–0 toggles · F2 note · F3 marker · F4 hide this dock.\nIn C the grid owns the keyboard: hold Alt for the variant and toggle keys.",
+                        "A B C or ◀ / ▶ variant · 1–0 toggles · F2 note · F3 marker · F4 hide this dock · F5 spotlight.\nIn C the grid owns the keyboard: hold Alt for the variant and toggle keys.",
                     )
                     .small()
                     .weak(),
