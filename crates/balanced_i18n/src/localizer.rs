@@ -9,7 +9,7 @@ use rust_embed::Embed;
 
 use crate::I18nError;
 use crate::chain::{SOURCE_LANGUAGE, fallback_chain};
-use crate::format::{Formatters, format_fluent_value, set_fluent_number_locale};
+use crate::format::{Formatters, format_fluent_value};
 use crate::missing::log_missing_messages;
 use crate::pseudo::{self, PSEUDO_LANGUAGE};
 
@@ -17,6 +17,16 @@ use crate::pseudo::{self, PSEUDO_LANGUAGE};
 #[derive(Embed)]
 #[folder = "locales/"]
 struct Locales;
+
+/// Whether Fluent wraps placeables in bidi isolation marks (U+2068, U+2069).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Isolation {
+    /// The app's setting: placeables keep their own direction.
+    On,
+    /// The test setting: strings compare equal to plain literals.
+    #[cfg(any(test, feature = "test-support"))]
+    Off,
+}
 
 /// The Fluent domain, which names each language's file: `balanced.ftl`.
 const DOMAIN: &str = "balanced";
@@ -37,7 +47,7 @@ pub struct Localizer {
     text_language: LanguageIdentifier,
     formatting_locale: Locale,
     formatters: Formatters,
-    isolating: bool,
+    isolation: Isolation,
 }
 
 impl Localizer {
@@ -50,7 +60,7 @@ impl Localizer {
         text_language: &LanguageIdentifier,
         formatting_locale: &Locale,
     ) -> Result<Self, I18nError> {
-        Self::with_isolation(text_language, formatting_locale, true)
+        Self::with_isolation(text_language, formatting_locale, Isolation::On)
     }
 
     /// The pseudo-locale, formatting in `de-DE` so that hard-coded `.` and `,`
@@ -79,14 +89,18 @@ impl Localizer {
     /// strings compare equal to plain literals.
     #[cfg(feature = "test-support")]
     pub fn for_tests() -> Self {
-        Self::with_isolation(&SOURCE_LANGUAGE, &Locale::from(SOURCE_LANGUAGE), false)
-            .expect("the embedded en-US messages and ICU4X's built-in en-US data always load")
+        Self::with_isolation(
+            &SOURCE_LANGUAGE,
+            &Locale::from(SOURCE_LANGUAGE),
+            Isolation::Off,
+        )
+        .expect("the embedded en-US messages and ICU4X's built-in en-US data always load")
     }
 
     fn with_isolation(
         text_language: &LanguageIdentifier,
         formatting_locale: &Locale,
-        isolating: bool,
+        isolation: Isolation,
     ) -> Result<Self, I18nError> {
         let source = to_fluent_language(&SOURCE_LANGUAGE);
         let localizer = Self {
@@ -94,9 +108,9 @@ impl Localizer {
             text_language: text_language.clone(),
             formatting_locale: formatting_locale.clone(),
             formatters: Formatters::new(formatting_locale)?,
-            isolating,
+            isolation,
         };
-        set_fluent_number_locale(formatting_locale)?;
+        localizer.formatters.install_for_fluent();
         localizer.load_text_language(text_language)?;
         Ok(localizer)
     }
@@ -111,7 +125,7 @@ impl Localizer {
     /// Switches the formatting locale. The change shows on the next frame.
     pub fn set_formatting_locale(&mut self, locale: &Locale) -> Result<(), I18nError> {
         self.formatters = Formatters::new(locale)?;
-        set_fluent_number_locale(locale)?;
+        self.formatters.install_for_fluent();
         self.formatting_locale = locale.clone();
         Ok(())
     }
@@ -169,7 +183,7 @@ impl Localizer {
         };
         let chain: Vec<_> = chain.iter().map(to_fluent_language).collect();
         self.loader.load_languages(&Locales, &chain)?;
-        let isolating = self.isolating;
+        let isolating = self.isolation == Isolation::On;
         self.loader.with_bundles_mut(|bundle| {
             bundle.set_formatter(Some(format_fluent_value));
             bundle.set_use_isolating(isolating);
@@ -187,7 +201,9 @@ fn shipped_languages() -> Vec<LanguageIdentifier> {
     let mut languages: Vec<LanguageIdentifier> = Locales::iter()
         .filter_map(|path| {
             let (folder, _) = path.split_once('/')?;
-            LanguageIdentifier::try_from_str(folder).ok()
+            let language = LanguageIdentifier::try_from_str(folder)
+                .expect("the locales test checks every folder is named by a language tag");
+            Some(language)
         })
         .collect();
     languages.sort_by_cached_key(ToString::to_string);
@@ -205,14 +221,28 @@ fn to_fluent_language(language: &LanguageIdentifier) -> unic_langid::LanguageIde
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use fluent_bundle::FluentValue;
     use icu_locale::langid;
 
     use super::*;
     use crate::missing::missing_messages;
 
+    /// Looks `id` up with one argument.
+    fn text_with(
+        i18n: &Localizer,
+        id: &str,
+        name: &'static str,
+        value: FluentValue<'static>,
+    ) -> String {
+        i18n.loader()
+            .get_args_concrete(id, HashMap::from([(name, value)]))
+    }
+
     /// A localizer whose strings compare equal to plain literals.
     fn localizer(text_language: &LanguageIdentifier, formatting_locale: &Locale) -> Localizer {
-        Localizer::with_isolation(text_language, formatting_locale, false).unwrap()
+        Localizer::with_isolation(text_language, formatting_locale, Isolation::Off).unwrap()
     }
 
     #[test]
@@ -232,11 +262,7 @@ mod tests {
     #[test]
     fn german_plurals_select_by_count() {
         let i18n = localizer(&langid!("de"), &locale!("de-DE"));
-        let count = |n: i64| {
-            let args = std::collections::HashMap::from([("count", n.into())]);
-            i18n.loader()
-                .get_args_concrete("register-transaction-count", args)
-        };
+        let count = |n: i64| text_with(&i18n, "register-transaction-count", "count", n.into());
 
         assert_eq!(count(1), "1 Buchung");
         assert_eq!(count(2), "2 Buchungen");
@@ -245,21 +271,22 @@ mod tests {
     #[test]
     fn numbers_in_text_follow_the_formatting_locale_when_text_falls_back() {
         let i18n = localizer(&langid!("ja-JP"), &locale!("de-DE"));
-        let args = std::collections::HashMap::from([("count", 1234.into())]);
-
-        let text = i18n
-            .loader()
-            .get_args_concrete("register-transaction-count", args);
+        let text = text_with(&i18n, "register-transaction-count", "count", 1234.into());
 
         assert_eq!(text, "1.234 transactions");
     }
 
     #[test]
     fn pseudo_locale_transforms_text_but_not_arguments() {
-        let i18n = Localizer::with_isolation(&PSEUDO_LANGUAGE, &locale!("de-DE"), false).unwrap();
-        let args = std::collections::HashMap::from([("amount", "1.234,50 €".into())]);
+        let i18n =
+            Localizer::with_isolation(&PSEUDO_LANGUAGE, &locale!("de-DE"), Isolation::Off).unwrap();
 
-        let text = i18n.finish(i18n.loader().get_args_concrete("account-bar-total", args));
+        let text = i18n.finish(text_with(
+            &i18n,
+            "account-bar-total",
+            "amount",
+            "1.234,50 €".into(),
+        ));
 
         assert_eq!(text, "[Ťööťååĺ: 1.234,50 €]");
     }
@@ -287,9 +314,8 @@ mod tests {
     #[test]
     fn bidi_isolation_is_on_in_the_app() {
         let i18n = Localizer::new(&langid!("en-US"), &locale!("en-US")).unwrap();
-        let args = std::collections::HashMap::from([("amount", "$5.00".into())]);
 
-        let text = i18n.loader().get_args_concrete("account-bar-total", args);
+        let text = text_with(&i18n, "account-bar-total", "amount", "$5.00".into());
 
         assert_eq!(text, "Total: \u{2068}$5.00\u{2069}");
     }
@@ -313,12 +339,13 @@ mod tests {
             missing_messages(i18n.loader(), &chain, &to_fluent_language(&SOURCE_LANGUAGE));
 
         let de = to_fluent_language(&langid!("de"));
+        let ids: Vec<_> = missing
+            .iter()
+            .map(|message| (&message.language, message.id.as_str()))
+            .collect();
         assert_eq!(
-            missing,
-            [
-                (de.clone(), "menu-help-about".to_owned()),
-                (de, "register-column-amount".to_owned()),
-            ]
+            ids,
+            [(&de, "menu-help-about"), (&de, "register-column-amount")]
         );
     }
 
@@ -335,9 +362,8 @@ mod tests {
     #[test]
     fn test_localizer_is_en_us_without_isolation_marks() {
         let i18n = Localizer::for_tests();
-        let args = std::collections::HashMap::from([("amount", "$5.00".into())]);
 
-        let text = i18n.loader().get_args_concrete("account-bar-total", args);
+        let text = text_with(&i18n, "account-bar-total", "amount", "$5.00".into());
 
         assert_eq!(text, "Total: $5.00");
     }

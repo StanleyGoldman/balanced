@@ -16,7 +16,7 @@ Tools enforce whatever they can: lint levels in `[workspace.lints]` (`Cargo.toml
 - **Name the issue in every TODO:** `TODO(#123)`.
 - **Comments describe behaviour**, as full sentences. History and justification belong in the commit message.
 - **Give every held-back dependency version a comment saying why.**
-- **Keep tests and test hooks apart.** Production code gets no trait, `pub` method or hook that exists only for tests.
+- **Keep tests and test hooks apart.** Production code gets no trait, `pub` method or hook that exists only for tests. A test helper other crates need goes behind a `test-support` feature, as `Localizer::for_tests` does.
 
 ## Practice docs
 

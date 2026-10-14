@@ -4,6 +4,7 @@
 
 -brand-name = Balanced
 -account-bar = Account bar
+-register = Register
 
 ## Menu bar
 

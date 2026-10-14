@@ -72,7 +72,11 @@ fn read_locales() -> BTreeMap<String, Locale> {
         let name = dir
             .file_name()
             .into_string()
-            .expect("locale folder names are language tags");
+            .expect("locale folder names are UTF-8");
+        assert!(
+            name.parse::<unic_langid::LanguageIdentifier>().is_ok(),
+            "locales/{name} is not named by a language tag"
+        );
         let path = dir.path().join("balanced.ftl");
         let source =
             fs::read_to_string(&path).expect("every locale folder holds a UTF-8 balanced.ftl");
@@ -137,10 +141,11 @@ impl From<&Resource<&str>> for Locale {
                 }
                 Entry::Term(term) => {
                     let id = term.id.name.to_owned();
-                    let mut variables = BTreeSet::new();
-                    locale.walk_pattern(&term.value, &mut variables);
+                    // Terms take no `$variables`; the walk collects the terms they reference.
+                    let mut ignored = BTreeSet::new();
+                    locale.walk_pattern(&term.value, &mut ignored);
                     for attribute in &term.attributes {
-                        locale.walk_pattern(&attribute.value, &mut variables);
+                        locale.walk_pattern(&attribute.value, &mut ignored);
                     }
                     locale.terms.insert(id);
                 }

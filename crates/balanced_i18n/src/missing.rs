@@ -5,22 +5,28 @@ use std::collections::BTreeSet;
 use i18n_embed::fluent::FluentLanguageLoader;
 use unic_langid::LanguageIdentifier;
 
-/// The message ids each language in `chain` lacks compared with `source`, sorted by
+/// A message a translation lacks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MissingMessage {
+    pub(crate) language: LanguageIdentifier,
+    pub(crate) id: String,
+}
+
+/// The messages each language in `chain` lacks compared with `source`, sorted by
 /// language and then id.
 pub(crate) fn missing_messages(
     loader: &FluentLanguageLoader,
     chain: &[LanguageIdentifier],
     source: &LanguageIdentifier,
-) -> Vec<(LanguageIdentifier, String)> {
+) -> Vec<MissingMessage> {
     let source_ids = message_ids(loader, source);
     let mut missing = Vec::new();
     for language in chain.iter().filter(|language| *language != source) {
         let ids = message_ids(loader, language);
-        missing.extend(
-            source_ids
-                .difference(&ids)
-                .map(|id| (language.clone(), id.clone())),
-        );
+        missing.extend(source_ids.difference(&ids).map(|id| MissingMessage {
+            language: language.clone(),
+            id: id.clone(),
+        }));
     }
     missing
 }
@@ -31,7 +37,7 @@ pub(crate) fn log_missing_messages(
     chain: &[LanguageIdentifier],
     source: &LanguageIdentifier,
 ) {
-    for (language, id) in missing_messages(loader, chain, source) {
+    for MissingMessage { language, id } in missing_messages(loader, chain, source) {
         tracing::warn!(%language, id = ?id, "message not translated; showing the {source} text");
     }
 }

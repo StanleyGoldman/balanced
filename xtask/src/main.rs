@@ -15,10 +15,11 @@ const USAGE: &str = "\
 usage: cargo xtask <task>
 
 tasks:
-  ci                run fmt, clippy, test, deny, typos and todo, stopping at the first failure
+  ci                run fmt, clippy, test, locales, deny, typos and todo, stopping at the first failure
   fmt               check formatting
   clippy            lint with warnings denied
   test              run every test
+  locales           report untranslated messages per locale
   deny              check licences, advisories, duplicate versions and layer bans
   typos             spell-check the repo
   todo              require every TODO and FIXME to name an issue, as TODO(#123)
@@ -32,6 +33,7 @@ fn main() -> ExitCode {
         ["fmt"] => fmt(),
         ["clippy"] => clippy(),
         ["test"] => test(),
+        ["locales"] => locales(),
         ["deny"] => deny(),
         ["typos"] => typos(),
         ["todo"] => todo(),
@@ -51,10 +53,11 @@ fn main() -> ExitCode {
 type Task = fn() -> Result<(), String>;
 
 fn ci() -> Result<(), String> {
-    let tasks: [(&str, Task); 6] = [
+    let tasks: [(&str, Task); 7] = [
         ("fmt", fmt),
         ("clippy", clippy),
         ("test", test),
+        ("locales", locales),
         ("deny", deny),
         ("typos", typos),
         ("todo", todo),
@@ -90,6 +93,24 @@ fn test() -> Result<(), String> {
     run(
         "cargo",
         &["test", "--locked", "--workspace", "--all-features"],
+    )
+}
+
+/// Reruns the locale-consistency test uncaptured, so its untranslated counts show.
+fn locales() -> Result<(), String> {
+    run(
+        "cargo",
+        &[
+            "test",
+            "--locked",
+            "--package",
+            "balanced_i18n",
+            "--test",
+            "locales",
+            "--quiet",
+            "--",
+            "--nocapture",
+        ],
     )
 }
 

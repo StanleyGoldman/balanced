@@ -11,7 +11,7 @@ use icu_datetime::fieldsets::YMD;
 use icu_datetime::options::YearStyle;
 use icu_decimal::DecimalFormatter;
 use icu_decimal::input::{Decimal, FloatPrecision};
-use icu_decimal::options::DecimalFormatterOptions;
+use icu_decimal::options::{DecimalFormatterOptions, GroupingStrategy};
 use icu_locale::Locale;
 
 use crate::I18nError;
@@ -20,6 +20,7 @@ use crate::I18nError;
 #[derive(Debug)]
 pub(crate) struct Formatters {
     decimal: DecimalFormatter,
+    ungrouped: DecimalFormatter,
     date: FixedCalendarDateTimeFormatter<Gregorian, YMD>,
     week: WeekInformation,
 }
@@ -28,6 +29,11 @@ impl Formatters {
     pub(crate) fn new(locale: &Locale) -> Result<Self, I18nError> {
         Ok(Self {
             decimal: DecimalFormatter::try_new(locale.into(), DecimalFormatterOptions::default())?,
+            ungrouped: DecimalFormatter::try_new(locale.into(), {
+                let mut options = DecimalFormatterOptions::default();
+                options.grouping_strategy = Some(GroupingStrategy::Never);
+                options
+            })?,
             date: FixedCalendarDateTimeFormatter::try_new(
                 locale.into(),
                 YMD::short().with_year_style(YearStyle::Full),
@@ -47,26 +53,35 @@ impl Formatters {
     pub(crate) fn first_weekday(&self) -> Weekday {
         self.week.first_weekday
     }
+
+    /// Makes Fluent numbers looked up on this thread format with these formatters.
+    pub(crate) fn install_for_fluent(&self) {
+        let numbers = FluentNumbers {
+            grouped: self.decimal.clone(),
+            ungrouped: self.ungrouped.clone(),
+        };
+        FLUENT_NUMBERS.with_borrow_mut(|cell| *cell = Some(numbers));
+    }
 }
 
 thread_local! {
-    /// The number formatter Fluent's formatter hook uses on this thread.
-    ///
-    /// The hook is a plain `fn` that sees only the bundle's text language, so the
-    /// formatting locale has to reach it through ambient state. Thread-local state
-    /// keeps parallel tests apart, and egui looks text up on the UI thread.
-    static FLUENT_NUMBERS: RefCell<Option<DecimalFormatter>> = const { RefCell::new(None) };
+    /// The number formatter Fluent's formatter hook uses on this thread, set by
+    /// [`Formatters::install_for_fluent`]. Each thread has its own, so lookups on
+    /// one thread never see another thread's formatting locale.
+    static FLUENT_NUMBERS: RefCell<Option<FluentNumbers>> = const { RefCell::new(None) };
 }
 
-/// Makes Fluent numbers looked up on this thread format in `locale`.
-pub(crate) fn set_fluent_number_locale(locale: &Locale) -> Result<(), I18nError> {
-    let formatter = DecimalFormatter::try_new(locale.into(), DecimalFormatterOptions::default())?;
-    FLUENT_NUMBERS.with_borrow_mut(|cell| *cell = Some(formatter));
-    Ok(())
+/// The formatters `NUMBER()` options choose between.
+#[derive(Debug)]
+struct FluentNumbers {
+    grouped: DecimalFormatter,
+    /// For `NUMBER($n, useGrouping: "false")`.
+    ungrouped: DecimalFormatter,
 }
 
-/// Fluent's formatter hook: writes numbers with this thread's formatter, keeping
-/// the message's minimum fraction digits.
+/// Fluent's formatter hook: writes numbers with this thread's formatter, honouring
+/// the message's `useGrouping`, `minimumFractionDigits` and `maximumFractionDigits`.
+/// Currency and percent styles are not supported: money reaches messages as text.
 ///
 /// Returns `None`, so Fluent writes the value itself, for anything other than a
 /// number, and on a thread no `Localizer` set up.
@@ -75,13 +90,20 @@ pub(crate) fn format_fluent_value<M>(value: &FluentValue<'_>, _memoizer: &M) -> 
         return None;
     };
     let mut decimal = Decimal::try_from_f64(number.value, FloatPrecision::RoundTrip).ok()?;
+    if let Some(digits) = number.options.maximum_fraction_digits {
+        decimal.round(-i16::try_from(digits).ok()?);
+    }
     if let Some(digits) = number.options.minimum_fraction_digits {
         decimal.pad_end(-i16::try_from(digits).ok()?);
     }
-    FLUENT_NUMBERS.with_borrow(|formatter| {
-        formatter
-            .as_ref()
-            .map(|formatter| formatter.format(&decimal).to_string())
+    FLUENT_NUMBERS.with_borrow(|numbers| {
+        let numbers = numbers.as_ref()?;
+        let formatter = if number.options.use_grouping {
+            &numbers.grouped
+        } else {
+            &numbers.ungrouped
+        };
+        Some(formatter.format(&decimal).to_string())
     })
 }
 
@@ -133,7 +155,7 @@ mod tests {
 
     #[test]
     fn fluent_numbers_use_the_thread_locale_and_keep_fraction_digits() {
-        set_fluent_number_locale(&locale!("de-DE")).unwrap();
+        formatters(&locale!("de-DE")).install_for_fluent();
         let mut number = fluent_bundle::types::FluentNumber::from(1234.5);
         number.options.minimum_fraction_digits = Some(2);
 
@@ -143,8 +165,20 @@ mod tests {
     }
 
     #[test]
+    fn fluent_numbers_honour_grouping_and_maximum_fraction_digits() {
+        formatters(&locale!("de-DE")).install_for_fluent();
+        let mut number = fluent_bundle::types::FluentNumber::from(1234.567);
+        number.options.use_grouping = false;
+        number.options.maximum_fraction_digits = Some(1);
+
+        let out = format_fluent_value(&FluentValue::Number(number), &());
+
+        assert_eq!(out.as_deref(), Some("1234,6"));
+    }
+
+    #[test]
     fn fluent_strings_are_left_to_fluent() {
-        set_fluent_number_locale(&locale!("de-DE")).unwrap();
+        formatters(&locale!("de-DE")).install_for_fluent();
 
         let out = format_fluent_value(&FluentValue::from("1234"), &());
 
