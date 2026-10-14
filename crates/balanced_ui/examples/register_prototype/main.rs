@@ -508,6 +508,54 @@ fn fmt_day(days: i64) -> String {
     format!("{y}-{m:02}-{d:02}")
 }
 
+/// Howard Hinnant's `days_from_civil`.
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = if m > 2 { m - 3 } else { m + 9 };
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// (year, month, day) of a day number.
+fn civil(days: i64) -> (i64, i64, i64) {
+    let t = fmt_day(days);
+    let mut it = t.split('-').map(|p| p.parse::<i64>().unwrap_or(1));
+    (
+        it.next().unwrap_or(1970),
+        it.next().unwrap_or(1),
+        it.next().unwrap_or(1),
+    )
+}
+
+fn days_in_month(y: i64, m: i64) -> i64 {
+    let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+    days_from_civil(ny, nm, 1) - days_from_civil(y, m, 1)
+}
+
+/// `2026-10-05`, `10/5/2026`, `10/5` (this year) or `t` (today); `None` if it is not a date.
+fn parse_date(text: &str) -> Option<i64> {
+    let t = text.trim();
+    if t.eq_ignore_ascii_case("t") {
+        return Some(TODAY);
+    }
+    let (y, m, d) = if let Some((y, rest)) = t.split_once('-') {
+        let (m, d) = rest.split_once('-')?;
+        (y.parse().ok()?, m.parse().ok()?, d.parse().ok()?)
+    } else {
+        let parts: Vec<&str> = t.split('/').collect();
+        let year = civil(TODAY).0;
+        match parts.as_slice() {
+            [m, d] => (year, m.parse().ok()?, d.parse().ok()?),
+            [m, d, y] => (y.parse().ok()?, m.parse().ok()?, d.parse().ok()?),
+            _ => return None,
+        }
+    };
+    ((1..=12).contains(&m) && d >= 1 && d <= days_in_month(y, m)).then(|| days_from_civil(y, m, d))
+}
+
 // ---------------------------------------------------------------------------------------------
 // Variants, toggles, sorting
 
@@ -538,7 +586,7 @@ impl Variant {
     fn label(self) -> &'static str {
         match self {
             Self::A => "A · Classic rows, edited in place",
-            Self::B => "B · Dense grid + entry bar",
+            Self::B => "B · Read-only rows + entry bar",
             Self::C => "C · Spreadsheet cells",
         }
     }
@@ -567,7 +615,11 @@ const VARIANT_KEYS: [(Key, &str); 3] = [(Key::A, "A"), (Key::B, "B"), (Key::C, "
 
 /// (key, label, applies to)
 const TOGGLES: &[(&str, &str, &str)] = &[
-    ("two_line", "Two-line rows (off: one line)", "A"),
+    (
+        "scroll_animated",
+        "Key scrolling: egui's, animated a frame late (off: same frame)",
+        "C",
+    ),
     ("running_balance", "Running balance column", "all"),
     (
         "ac_popup",
@@ -588,7 +640,9 @@ const TOGGLES: &[(&str, &str, &str)] = &[
 ];
 
 struct Toggles {
+    /// Variant A's two-line rows; fixed off since S1 ("the two line rows look terrible").
     two_line: bool,
+    scroll_animated: bool,
     running_balance: bool,
     ac_popup: bool,
     gridlines: Gridlines,
@@ -603,7 +657,7 @@ struct Toggles {
 impl Toggles {
     fn get_mut(&mut self, key: &str) -> Option<&mut bool> {
         Some(match key {
-            "two_line" => &mut self.two_line,
+            "scroll_animated" => &mut self.scroll_animated,
             "running_balance" => &mut self.running_balance,
             "ac_popup" => &mut self.ac_popup,
             "striping" => &mut self.striping,
@@ -669,7 +723,8 @@ enum Field {
 }
 
 impl Field {
-    const TAB_ORDER: [Self; 4] = [Self::Payee, Self::Amount, Self::Category, Self::Memo];
+    /// The column order (S2: "tab focus order should go by order of columns").
+    const TAB_ORDER: [Self; 4] = [Self::Payee, Self::Category, Self::Memo, Self::Amount];
 
     fn name(self) -> &'static str {
         match self {
@@ -702,6 +757,8 @@ impl Field {
 struct Edit {
     /// `None` while entering a new transaction.
     id: Option<usize>,
+    /// Variant C's draft row: the date typed or picked; `None` is today.
+    day: Option<i64>,
     payee: String,
     amount: String,
     category: String,
@@ -723,6 +780,7 @@ impl Edit {
         let t = &data.txns[id];
         Self {
             id: Some(id),
+            day: Some(t.day),
             payee: data.payees[t.payee as usize].clone(),
             amount: fmt_plain(t.amount),
             category: if t.split.is_some() {
@@ -763,6 +821,8 @@ struct Keys {
     back_tab: bool,
     down: bool,
     up: bool,
+    /// Alt+Down: open a combobox's full list, or the date picker.
+    alt_down: bool,
     /// Which field has focus.
     field: Option<Field>,
 }
@@ -774,32 +834,32 @@ struct Ac {
     last: String,
     /// Enter picked a suggestion this frame, so it must not also save.
     enter_used: bool,
+    /// The full list is open (dropdown button or Alt+Down), not just the matches while typing.
+    all: bool,
+    /// Where the list was drawn last frame, so a press on it still counts after the field
+    /// loses focus to that press.
+    rect: Option<Rect>,
+    /// A suggestion was clicked: variant C commits the cell and moves on, as Tab does.
+    clicked: bool,
 }
 
-/// Up to seven payees: prefix matches first, then substring matches.
-fn suggestions(data: &Data, query: &str) -> Vec<usize> {
+/// Matching names, prefix matches first, then substring matches; names before `skip` are never
+/// offered (category 0 is the split marker). Up to seven while typing; with `all` (the dropdown
+/// button or Alt+Down), every match, and every name when nothing is typed.
+fn suggestions(names: &[String], skip: usize, query: &str, all: bool) -> Vec<usize> {
     let q = query.trim().to_lowercase();
+    let limit = if all { usize::MAX } else { 7 };
     if q.is_empty() {
-        return Vec::new();
+        return if all {
+            (skip..names.len()).collect()
+        } else {
+            Vec::new()
+        };
     }
-    let mut out: Vec<usize> = Vec::new();
-    for (i, p) in data.payees_lc.iter().enumerate() {
-        if p.starts_with(&q) {
-            out.push(i);
-            if out.len() == 7 {
-                return out;
-            }
-        }
-    }
-    for (i, p) in data.payees_lc.iter().enumerate() {
-        if !p.starts_with(&q) && p.contains(&q) {
-            out.push(i);
-            if out.len() == 7 {
-                break;
-            }
-        }
-    }
-    out
+    let lc: Vec<String> = names.iter().map(|n| n.to_lowercase()).collect();
+    let prefix = (skip..names.len()).filter(|i| lc[*i].starts_with(&q));
+    let inner = (skip..names.len()).filter(|i| !lc[*i].starts_with(&q) && lc[*i].contains(&q));
+    prefix.chain(inner).take(limit).collect()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -933,26 +993,47 @@ fn field(
 ) -> egui::Response {
     let mut edit = egui::TextEdit::singleline(text)
         .id(f.id())
-        .lock_focus(true)
+        // Keep Esc, Tab and arrows: without `escape`, egui drops the focus on Esc before the
+        // prototype sees the key, and the edit never cancels.
+        .event_filter(egui::EventFilter {
+            tab: true,
+            horizontal_arrows: true,
+            vertical_arrows: true,
+            escape: true,
+        })
         .margin(egui::Margin::symmetric(4, 1))
         .desired_width(f32::INFINITY);
     if right {
         edit = edit.horizontal_align(Align::Max);
     }
-    let r = ui.add(edit);
+    let mut out = edit.show(ui);
+    let r = out.response.response.clone();
     if *focus == Some(f) {
         r.request_focus();
         *focus = None;
+        // Start with the cursor after the text, not before it.
+        let end = egui::text::CCursor::new(text.chars().count());
+        out.state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::one(end)));
+        out.state.store(ui.ctx(), r.id);
     }
     h.track(&r, name);
     r
 }
 
-/// The Payee field with autocomplete. Returns the response, and the payee picked this frame.
-fn payee_edit(
+/// A combobox: a text field whose suggestions come from `names` (payees or categories).
+/// Typing filters; the top match is highlighted, ↓/↑ move the highlight, Enter or Tab take it,
+/// and a click takes the clicked one. ↑ past the top clears the highlight, so Enter keeps what
+/// was typed. With `button`, a dropdown button beside the field opens the full list, as Alt+Down
+/// does. `active` keeps the list up while the edit is open even if the field lost focus.
+/// Returns the response, and the name picked this frame (an index into `names`).
+fn combo_edit(
     ui: &mut Ui,
     h: &mut Harness,
-    data: &Data,
+    names: &[String],
+    skip: usize,
+    kind: &str,
     ac: &mut Ac,
     popup_style: bool,
     keys: &Keys,
@@ -960,33 +1041,72 @@ fn payee_edit(
     focus: &mut Option<Field>,
     name: String,
     id: Field,
+    active: bool,
+    button: bool,
 ) -> (egui::Response, Option<usize>) {
-    let r = field(ui, h, id, text, focus, name, false);
-    let focused = r.has_focus();
-    let sugg = if focused {
-        suggestions(data, text)
+    let r = if button {
+        ui.horizontal(|ui| {
+            let w = (ui.available_width() - 22.0).max(40.0);
+            let r = ui
+                .scope(|ui| {
+                    ui.set_max_width(w);
+                    field(ui, h, id, text, focus, name.clone(), false)
+                })
+                .inner;
+            let b = ui.small_button("⏷");
+            h.track(&b, format!("{kind} dropdown button"));
+            if b.clicked() {
+                ac.all = !ac.all;
+                *focus = Some(id);
+                h.event(
+                    "combo_list",
+                    json!({ "kind": kind, "open": ac.all, "via": "button" }),
+                );
+            }
+            r
+        })
+        .inner
+    } else {
+        field(ui, h, id, text, focus, name.clone(), false)
+    };
+    if keys.alt_down && keys.field.is_some() {
+        ac.all = true;
+        h.event(
+            "combo_list",
+            json!({ "kind": kind, "open": true, "via": "alt+down" }),
+        );
+    }
+    let hovering = ac
+        .rect
+        .zip(ui.ctx().pointer_hover_pos())
+        .is_some_and(|(rect, p)| rect.contains(p));
+    let shown = active || r.has_focus() || hovering;
+    let sugg = if shown {
+        suggestions(names, skip, text, ac.all)
     } else {
         Vec::new()
     };
     let key = sugg
         .first()
-        .map(|i| format!("{text}|{}|{}", sugg.len(), data.payees[*i]))
+        .map(|i| format!("{text}|{}|{}|{}", sugg.len(), names[*i], ac.all))
         .unwrap_or_default();
     if key != ac.last {
         if !sugg.is_empty() {
             h.event(
                 "autocomplete_offered",
-                json!({ "typed": text, "count": sugg.len(), "top": data.payees[sugg[0]],
-                        "style": if popup_style { "list" } else { "inline" } }),
+                json!({ "kind": kind, "typed": text, "count": sugg.len(), "top": names[sugg[0]],
+                        "all": ac.all, "style": if popup_style { "list" } else { "inline" } }),
             );
         }
         ac.last = key;
-        ac.sel = None;
+        // Combobox: the top match starts highlighted, so Enter or Tab takes it.
+        ac.sel = (!sugg.is_empty()).then_some(0);
     }
-    ac.open = popup_style && !sugg.is_empty();
+    ac.open = (popup_style || ac.all) && !sugg.is_empty();
+    ac.rect = None;
 
     let mut picked: Option<(usize, &'static str)> = None;
-    if popup_style && !sugg.is_empty() {
+    if ac.open {
         if keys.down {
             ac.sel = Some(ac.sel.map_or(0, |s| (s + 1).min(sugg.len() - 1)));
         }
@@ -996,37 +1116,61 @@ fn payee_edit(
                 Some(s) => Some(s - 1),
             };
         }
-        let list = egui::Area::new(f_popup_id(id))
-            .order(egui::Order::Foreground)
-            .fixed_pos(r.rect.left_bottom())
-            .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_min_width(r.rect.width().max(220.0));
-                    for (i, s) in sugg.iter().enumerate() {
-                        let item = ui.selectable_label(ac.sel == Some(i), &data.payees[*s]);
-                        h.track(&item, format!("autocomplete: {}", data.payees[*s]));
-                        if item.clicked() {
-                            picked = Some((*s, "click"));
+        let row = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
+        let max_rows = 12;
+        let est = sugg.len().min(max_rows) as f32 * row + 16.0;
+        // Open upward when the list would run past the bottom of the window.
+        let up = r.rect.bottom() + est > ui.ctx().content_rect().bottom();
+        let area = egui::Area::new(f_popup_id(id)).order(egui::Order::Foreground);
+        let area = if up {
+            area.pivot(egui::Align2::LEFT_BOTTOM)
+                .fixed_pos(r.rect.left_top())
+        } else {
+            area.fixed_pos(r.rect.left_bottom())
+        };
+        let list = area.show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_min_width(r.rect.width().max(220.0));
+                ScrollArea::vertical()
+                    .max_height(max_rows as f32 * row)
+                    .show(ui, |ui| {
+                        for (i, s) in sugg.iter().enumerate() {
+                            let item = ui.selectable_label(ac.sel == Some(i), &names[*s]);
+                            h.track(&item, format!("autocomplete: {}", names[*s]));
+                            if (keys.down || keys.up) && ac.sel == Some(i) {
+                                item.scroll_to_me(None);
+                            }
+                            // Take the press, not the release: the press moves focus off the
+                            // field, and a list that waits for the release has gone by then.
+                            let pressed =
+                                item.hovered() && ui.input(|i| i.pointer.primary_pressed());
+                            if pressed || item.clicked() {
+                                picked = Some((*s, "click"));
+                            }
                         }
-                    }
-                });
+                    });
             });
+        });
+        ac.rect = Some(list.response.rect);
         h.region(list.response.rect, "autocomplete list");
-        if keys.enter && ac.sel.is_some() {
-            picked = Some((sugg[ac.sel.unwrap_or(0)], "enter"));
+        if keys.enter
+            && let Some(s) = ac.sel
+        {
+            picked = Some((sugg[s], "enter"));
             ac.enter_used = true;
         }
-        if keys.tab && picked.is_none() {
-            let top = ac.sel.map_or(sugg[0], |s| sugg[s]);
-            if !data.payees[top].eq_ignore_ascii_case(text.as_str()) {
-                picked = Some((top, "tab"));
-            }
+        if keys.tab
+            && picked.is_none()
+            && let Some(s) = ac.sel
+            && !names[sugg[s]].eq_ignore_ascii_case(text.as_str())
+        {
+            picked = Some((sugg[s], "tab"));
         }
-    } else if !popup_style && focused {
+    } else if !popup_style && r.has_focus() {
         let q = text.to_lowercase();
         let ghost = sugg
             .iter()
-            .find(|i| data.payees_lc[**i].starts_with(&q) && data.payees[**i].len() > text.len())
+            .find(|i| names[**i].to_lowercase().starts_with(&q) && names[**i].len() > text.len())
             .copied();
         if let Some(g) = ghost {
             let font = egui::TextStyle::Body.resolve(ui.style());
@@ -1036,7 +1180,7 @@ fn payee_edit(
                 .layout_no_wrap(text.clone(), font.clone(), color)
                 .size()
                 .x;
-            let suffix: String = data.payees[g].chars().skip(text.chars().count()).collect();
+            let suffix: String = names[g].chars().skip(text.chars().count()).collect();
             ui.painter().text(
                 egui::pos2(r.rect.left() + 4.0 + width, r.rect.center().y),
                 egui::Align2::LEFT_CENTER,
@@ -1053,11 +1197,17 @@ fn payee_edit(
     if let Some((i, via)) = picked {
         h.event(
             "autocomplete_picked",
-            json!({ "typed": text, "picked": data.payees[i], "via": via }),
+            json!({ "kind": kind, "typed": text, "picked": names[i], "via": via }),
         );
-        *text = data.payees[i].clone();
+        *text = names[i].clone();
         ac.last.clear();
         ac.sel = None;
+        ac.all = false;
+        ac.open = false;
+        if via == "click" {
+            ac.clicked = true;
+            *focus = Some(id);
+        }
         out = Some(i);
     }
     (r, out)
@@ -1102,6 +1252,18 @@ struct Proto {
     error: Option<String>,
     /// The keys taken this frame, for variant C's payee cell.
     c_keys: Keys,
+    /// Variant C's column order (kinds, see `C_TITLES`); Balance shows with toggle 2.
+    cols: Vec<usize>,
+    hidden: [bool; 6],
+    /// The date picker's month (its first day), while open.
+    picker: Option<i64>,
+    /// Variant C's body scroll offset and viewport height, from the last frame.
+    scroll_y: f32,
+    view_h: f32,
+    /// A keyboard cursor move to bring into view this frame.
+    key_scroll: Option<usize>,
+    /// A Tab taken from egui's focus navigation while the grid owns the keyboard (shift?).
+    pending_tab: Option<bool>,
     theme: Theme,
     applied: Option<ThemeSettings>,
 }
@@ -1122,6 +1284,7 @@ impl Proto {
             variant,
             t: Toggles {
                 two_line: false,
+                scroll_animated: false,
                 running_balance: true,
                 ac_popup: true,
                 gridlines: Gridlines::Off,
@@ -1153,6 +1316,13 @@ impl Proto {
             status: "Ready".to_owned(),
             error: None,
             c_keys: Keys::default(),
+            cols: (0..6).collect(),
+            hidden: [false; 6],
+            picker: None,
+            scroll_y: 0.0,
+            view_h: 0.0,
+            key_scroll: None,
+            pending_tab: None,
             theme: Theme::default(),
             applied: None,
         };
@@ -1251,7 +1421,7 @@ impl Proto {
             }
             _ => (0, Some(Align::TOP)),
         });
-        self.status = format!("Sorted by {} {}", col.name(), if asc { "↑" } else { "↓" });
+        self.status = format!("Sorted by {} {}", col.name(), if asc { "⏶" } else { "⏷" });
     }
 
     // -- editing ------------------------------------------------------------------------------
@@ -1344,7 +1514,7 @@ impl Proto {
             id
         } else {
             self.data.txns.push(Txn {
-                day: TODAY,
+                day: edit.day.unwrap_or(TODAY),
                 payee,
                 category,
                 memo: edit.memo.clone(),
@@ -1373,7 +1543,16 @@ impl Proto {
         let Some(mut edit) = self.edit.take() else {
             return;
         };
-        match self.commit_form(&edit, via) {
+        let result = match edit.id {
+            // A save that changes nothing sends nothing.
+            Some(id) if !edit.dirty => {
+                self.h
+                    .event("save_unchanged", json!({ "id": id, "via": via }));
+                Ok(id)
+            }
+            _ => self.commit_form(&edit, via),
+        };
+        match result {
             Err((f, msg)) => {
                 self.h.event(
                     "save_rejected",
@@ -1505,11 +1684,32 @@ impl Proto {
 
     // -- variant C: cells ---------------------------------------------------------------------
 
+    /// Variant C's visible columns, in order.
+    fn vis(&self) -> Vec<usize> {
+        self.cols
+            .iter()
+            .copied()
+            .filter(|&k| {
+                if k == 5 {
+                    self.t.running_balance
+                } else {
+                    !self.hidden[k]
+                }
+            })
+            .collect()
+    }
+
+    /// The visible columns a cell edit can open on, in Tab order.
+    fn editable(&self) -> Vec<usize> {
+        self.vis().into_iter().filter(|k| *k <= 4).collect()
+    }
+
     fn cell_text(&self, row: Sel, col: usize) -> String {
         match (row, col) {
             (Sel::Txn(id), c) => {
                 let t = &self.data.txns[id];
                 match c {
+                    0 => fmt_day(t.day),
                     1 => self.data.payees[t.payee as usize].clone(),
                     2 if t.split.is_some() => String::new(),
                     2 => self.data.categories[t.category as usize].clone(),
@@ -1518,6 +1718,7 @@ impl Proto {
                     _ => String::new(),
                 }
             }
+            (Sel::New, 0) => fmt_day(self.draft.day.unwrap_or(TODAY)),
             (Sel::New, 1) => self.draft.payee.clone(),
             (Sel::New, 2) => self.draft.category.clone(),
             (Sel::New, 3) => self.draft.memo.clone(),
@@ -1527,7 +1728,7 @@ impl Proto {
     }
 
     fn start_cell_edit(&mut self, row: Sel, col: usize, typed: Option<String>, via: &str) {
-        if !(1..=4).contains(&col) || row == Sel::None {
+        if col > 4 || row == Sel::None {
             self.h.event(
                 "edit_blocked",
                 json!({ "col": col, "via": via, "reason": "read-only column" }),
@@ -1553,19 +1754,39 @@ impl Proto {
             buf,
             focus: true,
         });
+        self.ac = Ac::default();
+        self.picker = None;
         self.error = None;
     }
 
-    /// Apply the cell edit. Returns whether it was accepted.
+    /// Apply the cell edit. Returns whether it was accepted. On the draft row the value only
+    /// goes into the draft; `save_draft` adds the transaction.
     fn commit_cell(&mut self, ctx: &egui::Context, via: &str) -> bool {
         let Some(ce) = self.cell.take() else {
             return true;
         };
-        let field = ["", "payee", "category", "memo", "amount"][ce.col];
+        self.picker = None;
+        let field = ["date", "payee", "category", "memo", "amount"][ce.col];
+        let value = ce.buf.trim().to_owned();
         match ce.row {
             Sel::Txn(id) => {
-                let value = ce.buf.trim().to_owned();
+                // A commit that changes nothing sends nothing.
+                if value == self.cell_text(ce.row, ce.col).trim() {
+                    self.h.event(
+                        "save_unchanged",
+                        json!({ "id": id, "field": field, "via": via }),
+                    );
+                    Self::blur(ctx);
+                    return true;
+                }
                 match ce.col {
+                    0 => match parse_date(&value) {
+                        Some(d) => self.data.txns[id].day = d,
+                        None => {
+                            let msg = format!("“{value}” is not a date");
+                            return self.reject_cell(ce, &msg, via);
+                        }
+                    },
                     1 if value.is_empty() => return self.reject_cell(ce, "Payee is required", via),
                     1 => {
                         let p = self.data.payee_index(&value).unwrap_or_else(|| {
@@ -1601,34 +1822,21 @@ impl Proto {
                 self.status = format!("Saved {field}");
             }
             Sel::New => {
-                *self.draft.text_mut(match ce.col {
-                    1 => Field::Payee,
-                    2 => Field::Category,
-                    3 => Field::Memo,
-                    _ => Field::Amount,
-                }) = ce.buf.trim().to_owned();
-                if ce.col == 4 && !self.draft.payee.is_empty() {
-                    let draft = self.draft.clone();
-                    match self.commit_form(&draft, via) {
-                        Ok(id) => {
-                            self.h
-                                .event("save", json!({ "id": id, "new": true, "via": via }));
-                            self.draft = Edit::blank();
-                            self.col = 1;
-                        }
-                        Err((_, msg)) => {
-                            return self.reject_cell(
-                                CellEdit {
-                                    row: Sel::New,
-                                    col: 4,
-                                    buf: ce.buf,
-                                    focus: true,
-                                },
-                                &msg,
-                                via,
-                            );
+                if ce.col == 0 {
+                    match parse_date(&value) {
+                        Some(d) => self.draft.day = Some(d),
+                        None => {
+                            let msg = format!("“{value}” is not a date");
+                            return self.reject_cell(ce, &msg, via);
                         }
                     }
+                } else {
+                    *self.draft.text_mut(match ce.col {
+                        1 => Field::Payee,
+                        2 => Field::Category,
+                        3 => Field::Memo,
+                        _ => Field::Amount,
+                    }) = value;
                 }
             }
             Sel::None => {}
@@ -1636,6 +1844,38 @@ impl Proto {
         self.error = None;
         Self::blur(ctx);
         true
+    }
+
+    /// Add the draft row as a transaction. On a missing payee or bad amount, reopen that cell.
+    fn save_draft(&mut self, ctx: &egui::Context, via: &str) {
+        let draft = self.draft.clone();
+        match self.commit_form(&draft, via) {
+            Ok(id) => {
+                self.h
+                    .event("save", json!({ "id": id, "new": true, "via": via }));
+                self.draft = Edit::blank();
+                self.sel = Sel::New;
+                self.col = self.editable().first().copied().unwrap_or(1);
+                self.key_scroll = Some(self.order.len());
+                self.jump = Some((self.order.len(), None));
+                Self::blur(ctx);
+            }
+            Err((f, msg)) => {
+                let col = match f {
+                    Field::Payee => 1,
+                    Field::Category => 2,
+                    Field::Memo => 3,
+                    _ => 4,
+                };
+                self.h.event(
+                    "save_rejected",
+                    json!({ "reason": msg, "col": col, "via": via }),
+                );
+                self.col = col;
+                self.start_cell_edit(Sel::New, col, None, "save rejected");
+                self.error = Some(msg);
+            }
+        }
     }
 
     fn reject_cell(&mut self, mut ce: CellEdit, msg: &str, via: &str) -> bool {
@@ -1664,13 +1904,16 @@ impl Proto {
         let n = self.order.len();
         let cur = self.pos(self.sel).unwrap_or(n);
         let to = (cur as isize + dr).clamp(0, n as isize) as usize;
-        self.col = (self.col as isize + dc).clamp(0, 5) as usize;
+        let vis = self.vis();
+        let at = vis.iter().position(|k| *k == self.col).unwrap_or(0) as isize;
+        self.col = vis[(at + dc).clamp(0, vis.len() as isize - 1) as usize];
         self.sel = self.sel_at(to);
         self.h.event(
             "cursor",
             json!({ "position": to, "col": self.col, "via": via }),
         );
         self.jump = Some((to, None));
+        self.key_scroll = Some(to);
     }
 
     // -- control file -------------------------------------------------------------------------
@@ -1944,6 +2187,7 @@ impl Proto {
             back_tab: i.consume_key(Modifiers::SHIFT, Key::Tab),
             down: ac_open && i.consume_key(Modifiers::NONE, Key::ArrowDown),
             up: ac_open && i.consume_key(Modifiers::NONE, Key::ArrowUp),
+            alt_down: i.consume_key(Modifiers::ALT, Key::ArrowDown),
             field,
         })
     }
@@ -2050,30 +2294,69 @@ impl Proto {
         }
     }
 
-    fn cell_keys(&mut self, ctx: &egui::Context, keys: Keys) {
-        if let Some(ce) = &self.cell {
-            let (col, row) = (ce.col, ce.row);
-            if keys.esc {
-                self.cancel_cell(ctx, "esc");
-            } else if keys.enter && !std::mem::take(&mut self.ac.enter_used) {
-                let down = self.t.enter_down;
-                if self.commit_cell(ctx, "enter") {
-                    if down {
-                        self.move_cursor(1, 0, "enter");
-                    } else {
-                        self.move_cursor(0, 1, "enter");
-                    }
+    /// Variant C, while a cell is being edited: Esc, Enter and Tab, after the editor has drawn
+    /// (so a combobox has already put its pick into the cell).
+    fn cell_edit_keys(&mut self, ctx: &egui::Context, keys: Keys) {
+        let Some(ce) = &self.cell else {
+            return;
+        };
+        let (col, row) = (ce.col, ce.row);
+        let clicked = std::mem::take(&mut self.ac.clicked);
+        self.ac.enter_used = false;
+        if keys.esc {
+            self.cancel_cell(ctx, "esc");
+            self.picker = None;
+            return;
+        }
+        if keys.enter {
+            if !self.commit_cell(ctx, "enter") {
+                return;
+            }
+            if row == Sel::New {
+                // Enter on the draft row adds the transaction.
+                self.save_draft(ctx, "enter");
+            } else if self.t.enter_down {
+                self.move_cursor(1, 0, "enter");
+            } else {
+                self.move_cursor(0, 1, "enter");
+            }
+        } else if keys.tab || keys.back_tab || clicked {
+            let back = keys.back_tab;
+            let via = if clicked { "click pick" } else { "tab" };
+            if !self.commit_cell(ctx, via) {
+                return;
+            }
+            // Tab walks the visible editable columns in order and keeps editing.
+            let ed = self.editable();
+            let i = ed.iter().position(|k| *k == col).unwrap_or(0);
+            let next = if back {
+                i.checked_sub(1)
+            } else {
+                (i + 1 < ed.len()).then_some(i + 1)
+            };
+            match next {
+                Some(j) => {
+                    self.col = ed[j];
+                    self.h.event(
+                        "cursor",
+                        json!({ "row": format!("{row:?}"), "col": self.col, "via": via }),
+                    );
+                    self.start_cell_edit(row, self.col, None, via);
                 }
-            } else if keys.tab || keys.back_tab {
-                let back = keys.back_tab;
-                if self.commit_cell(ctx, "tab") {
-                    let stay_row = row == Sel::New && col == 4;
-                    if !stay_row {
-                        self.move_cursor(0, if back { -1 } else { 1 }, "tab");
-                    }
-                    self.col = self.col.clamp(1, 4);
+                // Tab past the last column of the draft row adds the transaction.
+                None if row == Sel::New && !back => self.save_draft(ctx, via),
+                None => {
+                    let edge = if back { ed.last() } else { ed.first() };
+                    self.move_cursor(if back { -1 } else { 1 }, 0, via);
+                    self.col = edge.copied().unwrap_or(1);
                 }
             }
+        }
+    }
+
+    /// Variant C, while no cell is being edited: move the cursor, or start an edit.
+    fn cell_keys(&mut self, ctx: &egui::Context, _keys: Keys) {
+        if self.cell.is_some() {
             return;
         }
         if ctx.egui_wants_keyboard_input() || self.split_view.is_some() {
@@ -2092,10 +2375,14 @@ impl Proto {
                     i.key_pressed(Key::End),
                     i.key_pressed(Key::Enter),
                     i.key_pressed(Key::F2) && false,
-                    i.consume_key(Modifiers::NONE, Key::Tab),
-                    i.consume_key(Modifiers::SHIFT, Key::Tab),
+                    false,
+                    false,
                 )
             });
+        let (tab, back_tab) = match self.pending_tab.take() {
+            Some(shift) => (!shift, shift),
+            None => (tab, back_tab),
+        };
         if up {
             self.move_cursor(-1, 0, "key");
         }
@@ -2150,7 +2437,7 @@ impl Proto {
                     "Everyday Checking · {} transactions · sorted by {} {}",
                     self.order.len(),
                     self.sort.col.name(),
-                    if self.sort.asc { "↑" } else { "↓" }
+                    if self.sort.asc { "⏶" } else { "⏷" }
                 ));
                 ui.separator();
                 if let Some(err) = &self.error {
@@ -2226,6 +2513,35 @@ impl Proto {
 // The app loop
 
 impl eframe::App for Proto {
+    /// In C the grid owns Tab while no field has focus; egui would otherwise move focus to the
+    /// next widget (the dock) before the prototype sees the key.
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if self.variant != Variant::C
+            || self.split_view.is_some()
+            || ctx.memory(|m| m.focused().is_some())
+        {
+            return;
+        }
+        let mut tab = None;
+        raw.events.retain(|e| match e {
+            egui::Event::Key {
+                key: Key::Tab,
+                pressed,
+                modifiers,
+                ..
+            } => {
+                if *pressed {
+                    tab = Some(modifiers.shift);
+                }
+                false
+            }
+            _ => true,
+        });
+        if tab.is_some() {
+            self.pending_tab = tab;
+        }
+    }
+
     fn on_exit(&mut self) {
         self.h.event("session_end", json!({}));
     }
@@ -2269,6 +2585,9 @@ impl eframe::App for Proto {
         }
         self.split_window(ui);
 
+        if self.variant == Variant::C {
+            self.cell_edit_keys(&ctx, keys);
+        }
         // Enter / Esc / Tab in the form fields (A and B), after the fields have drawn.
         if self.variant != Variant::C && self.edit.is_some() {
             if keys.esc {
@@ -2485,8 +2804,8 @@ impl Proto {
                         row.col(|ui| {
                             ui.spacing_mut().item_spacing.y = 2.0;
                             ui.vertical(|ui| {
-                                let (r, p) = payee_edit(ui, &mut self.h, &self.data, &mut self.ac, popup, &ac_keys,
-                                    &mut edit.payee, &mut edit.focus, format!("payee field, {tag}"), Field::Payee);
+                                let (r, p) = combo_edit(ui, &mut self.h, &self.data.payees, 0, "payee", &mut self.ac, popup, &ac_keys,
+                                    &mut edit.payee, &mut edit.focus, format!("payee field, {tag}"), Field::Payee, false, false);
                                 field_responses.push(r.changed());
                                 picked = p;
                                 if two {
@@ -2716,15 +3035,17 @@ impl Proto {
                 ui.label(RichText::new(err).color(c));
             }
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let mut changed = false;
             ui.label("Payee");
             ui.scope(|ui| {
                 ui.set_width(260.0);
-                let (r, p) = payee_edit(
+                let (r, p) = combo_edit(
                     ui,
                     &mut self.h,
-                    &self.data,
+                    &self.data.payees,
+                    0,
+                    "payee",
                     &mut self.ac,
                     popup,
                     &keys,
@@ -2732,23 +3053,11 @@ impl Proto {
                     &mut edit.focus,
                     "entry bar: payee".to_owned(),
                     Field::Payee,
+                    false,
+                    false,
                 );
                 changed |= r.changed();
                 picked = p;
-            });
-            ui.label("Amount");
-            ui.scope(|ui| {
-                ui.set_width(100.0);
-                let r = field(
-                    ui,
-                    &mut self.h,
-                    Field::Amount,
-                    &mut edit.amount,
-                    &mut edit.focus,
-                    "entry bar: amount".to_owned(),
-                    true,
-                );
-                changed |= r.changed();
             });
             ui.label("Category");
             ui.scope(|ui| {
@@ -2781,6 +3090,20 @@ impl Proto {
                     &mut edit.focus,
                     "entry bar: memo".to_owned(),
                     false,
+                );
+                changed |= r.changed();
+            });
+            ui.label("Amount");
+            ui.scope(|ui| {
+                ui.set_width(100.0);
+                let r = field(
+                    ui,
+                    &mut self.h,
+                    Field::Amount,
+                    &mut edit.amount,
+                    &mut edit.focus,
+                    "entry bar: amount".to_owned(),
+                    true,
                 );
                 changed |= r.changed();
             });
@@ -2927,6 +3250,187 @@ impl Proto {
 
 const C_TITLES: [&str; 6] = ["Date", "Payee", "Category", "Memo", "Amount", "Balance"];
 
+/// The untitled last column: an Actions menu button per row, the column chooser in its header.
+const ACTIONS_WIDTH: f32 = 88.0;
+
+const ROW_ACTIONS: &[&str] = &[
+    "Edit",
+    "Split…",
+    "Mark Cleared",
+    "Memorize Payee",
+    "Copy Transaction",
+    "Duplicate",
+    "Void",
+    "Delete",
+];
+
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+fn c_column(kind: usize) -> Column {
+    match kind {
+        // Room for the date and, while editing, the picker button.
+        0 => Column::exact(112.0),
+        1 => Column::remainder().at_least(120.0).clip(true),
+        2 => Column::remainder().at_least(100.0).clip(true),
+        3 => Column::initial(170.0).at_least(80.0).clip(true),
+        _ => Column::exact(100.0),
+    }
+}
+
+/// The column chooser: show or hide each column (Date and Amount stay) and move it up or down.
+/// Returns the new (order, hidden, balance shown) when something changed.
+fn column_chooser(
+    ui: &mut Ui,
+    h: &mut Harness,
+    cols: &[usize],
+    hidden: &[bool; 6],
+    balance: bool,
+) -> Option<(Vec<usize>, [bool; 6], bool)> {
+    ui.set_min_width(220.0);
+    let mut order = cols.to_vec();
+    let mut hid = *hidden;
+    let mut bal = balance;
+    let mut changed = false;
+    let mut swap = None;
+    ui.label(RichText::new("Columns").strong());
+    ui.label(
+        RichText::new("One layout for every register, for now")
+            .small()
+            .weak(),
+    );
+    for (i, &k) in cols.iter().enumerate() {
+        ui.horizontal(|ui| {
+            let required = k == 0 || k == 4;
+            let mut shown = if k == 5 { bal } else { !hid[k] };
+            let r = ui.add_enabled(!required, egui::Checkbox::new(&mut shown, C_TITLES[k]));
+            h.track(&r, format!("columns: {}", C_TITLES[k]));
+            if r.changed() {
+                if k == 5 {
+                    bal = shown;
+                } else {
+                    hid[k] = !shown;
+                }
+                changed = true;
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let down = ui.add_enabled(i + 1 < cols.len(), egui::Button::new("⏷").small());
+                h.track(&down, format!("columns: move {} down", C_TITLES[k]));
+                if down.clicked() {
+                    swap = Some((i, i + 1));
+                }
+                let up = ui.add_enabled(i > 0, egui::Button::new("⏶").small());
+                h.track(&up, format!("columns: move {} up", C_TITLES[k]));
+                if up.clicked() {
+                    swap = Some((i - 1, i));
+                }
+            });
+        });
+    }
+    if let Some((a, b)) = swap {
+        order.swap(a, b);
+        changed = true;
+    }
+    changed.then_some((order, hid, bal))
+}
+
+/// A month calendar under (or above) the date cell. Returns the day clicked, and whether the
+/// month changed (so the cell editor takes the focus back).
+fn date_picker(
+    ui: &Ui,
+    h: &mut Harness,
+    anchor: Rect,
+    month: &mut i64,
+    selected: Option<i64>,
+) -> (Option<i64>, bool) {
+    let (y, m, _) = civil(*month);
+    let mut picked = None;
+    let mut nav = false;
+    let row = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
+    let est = 9.0 * row + 24.0;
+    let up = anchor.bottom() + est > ui.ctx().content_rect().bottom();
+    let area = egui::Area::new(Id::new("date_picker")).order(egui::Order::Foreground);
+    let area = if up {
+        area.pivot(egui::Align2::LEFT_BOTTOM)
+            .fixed_pos(anchor.left_top())
+    } else {
+        area.fixed_pos(anchor.left_bottom())
+    };
+    let shown = area.show(ui.ctx(), |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let prev = ui.small_button("⏴");
+                h.track(&prev, "date picker: previous month");
+                if prev.clicked() {
+                    let (py, pm) = if m == 1 { (y - 1, 12) } else { (y, m - 1) };
+                    *month = days_from_civil(py, pm, 1);
+                    nav = true;
+                }
+                ui.strong(format!("{} {y}", MONTHS[(m - 1) as usize]));
+                let next = ui.small_button("⏵");
+                h.track(&next, "date picker: next month");
+                if next.clicked() {
+                    let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+                    *month = days_from_civil(ny, nm, 1);
+                    nav = true;
+                }
+            });
+            egui::Grid::new("date_picker_days")
+                .spacing([2.0, 2.0])
+                .show(ui, |ui| {
+                    for d in ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] {
+                        ui.label(RichText::new(d).small().weak());
+                    }
+                    ui.end_row();
+                    let first = days_from_civil(y, m, 1);
+                    // 1970-01-01 was a Thursday; Sunday is column 0.
+                    let lead = (first + 4).rem_euclid(7);
+                    for _ in 0..lead {
+                        ui.label("");
+                    }
+                    let mut col = lead;
+                    for d in 1..=days_in_month(y, m) {
+                        let day = first + d - 1;
+                        let mut text = RichText::new(format!("{d:>2}"));
+                        if day == TODAY {
+                            text = text.strong();
+                        }
+                        let b = ui.selectable_label(selected == Some(day), text);
+                        h.track(&b, format!("date picker: {}", fmt_day(day)));
+                        let pressed = b.hovered() && ui.input(|i| i.pointer.primary_pressed());
+                        if pressed || b.clicked() {
+                            picked = Some(day);
+                        }
+                        col += 1;
+                        if col == 7 {
+                            ui.end_row();
+                            col = 0;
+                        }
+                    }
+                });
+            let t = ui.small_button("Today");
+            h.track(&t, "date picker: today");
+            if t.hovered() && ui.input(|i| i.pointer.primary_pressed()) {
+                picked = Some(TODAY);
+            }
+        });
+    });
+    h.region(shown.response.rect, "date picker");
+    (picked, nav)
+}
+
 impl Proto {
     fn variant_c(&mut self, ui: &mut Ui, _keys: Keys) {
         self.status_bar(ui);
@@ -2940,57 +3444,79 @@ impl Proto {
         let row_h = self.row_height(1);
         let n = self.order.len();
         set_grid(ui, &self.theme);
-        let balance = self.t.running_balance;
+        let vis = self.vis();
+        if !vis.contains(&self.col) {
+            self.col = vis[0];
+        }
         let sort = self.sort;
         let popup = self.t.ac_popup;
         let keys = self.take_keys_snapshot();
         let mut acts: Vec<Act> = Vec::new();
-        let mut builder = self.table(ui, "register_c");
-        builder = builder
-            .column(Column::exact(88.0))
-            .column(Column::remainder().at_least(120.0).clip(true))
-            .column(Column::remainder().at_least(100.0).clip(true))
-            .column(Column::initial(170.0).at_least(80.0))
-            .column(Column::exact(100.0));
-        if balance {
-            builder = builder.column(Column::exact(100.0));
+        let mut col_change = None;
+        let mut row_action: Option<(usize, &'static str)> = None;
+        // A keyboard move scrolls in the same frame, with no animation, unless toggle 1 asks for
+        // egui's own scroll_to_row (animated, applied a frame late) to compare.
+        let pitch = row_h + ui.spacing().item_spacing.y;
+        let same_frame = !self.t.scroll_animated && self.key_scroll.is_some();
+        if same_frame {
+            self.jump = None;
         }
+        // The id follows the column set, so egui_extras doesn't reuse another layout's widths.
+        let mut builder = self
+            .table(ui, &format!("register_c_{vis:?}"))
+            .animate_scrolling(self.t.scroll_animated);
+        if let Some(p) = self.key_scroll.take()
+            && same_frame
+        {
+            let top = p as f32 * pitch;
+            let bottom = top + pitch;
+            if top < self.scroll_y {
+                self.scroll_y = top;
+            } else if self.view_h > 0.0 && bottom > self.scroll_y + self.view_h {
+                self.scroll_y = bottom - self.view_h;
+            }
+            builder = builder.vertical_scroll_offset(self.scroll_y);
+        }
+        for &k in &vis {
+            builder = builder.column(c_column(k));
+        }
+        builder = builder.column(Column::exact(ACTIONS_WIDTH));
         self.jump = None;
         let out = builder
-            .header(self.row_height(1) + 2.0, |mut hd| {
-                for (i, title) in C_TITLES.iter().enumerate().take(5 + usize::from(balance)) {
+            .header(row_h + 2.0, |mut hd| {
+                for &k in &vis {
                     hd.col(|ui| {
                         header_band(ui);
-                        match i {
-                            0 => {
-                                sort_header(ui, &mut self.h, sort, SortCol::Date, title, &mut acts)
-                            }
-                            1 => {
-                                sort_header(ui, &mut self.h, sort, SortCol::Payee, title, &mut acts)
-                            }
-                            2 => sort_header(
-                                ui,
-                                &mut self.h,
-                                sort,
-                                SortCol::Category,
-                                title,
-                                &mut acts,
-                            ),
-                            4 => sort_header(
-                                ui,
-                                &mut self.h,
-                                sort,
-                                SortCol::Amount,
-                                title,
-                                &mut acts,
-                            ),
+                        let title = C_TITLES[k];
+                        match k {
+                            0 => sort_header(ui, &mut self.h, sort, SortCol::Date, title, &mut acts),
+                            1 => sort_header(ui, &mut self.h, sort, SortCol::Payee, title, &mut acts),
+                            2 => sort_header(ui, &mut self.h, sort, SortCol::Category, title, &mut acts),
+                            4 => sort_header(ui, &mut self.h, sort, SortCol::Amount, title, &mut acts),
                             5 => money_header(ui, title),
                             _ => {
-                                ui.strong(*title);
+                                ui.strong(title);
                             }
                         }
                     });
                 }
+                // The Actions column has no title; its header holds the column chooser.
+                hd.col(|ui| {
+                    header_band(ui);
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.add_space(Theme::EDGE_INSET);
+                        let b = ui.small_button("⚙").on_hover_text("Show, hide and order columns");
+                        self.h.track(&b, "header: columns button");
+                        let (cols, hidden, bal) = (self.cols.clone(), self.hidden, self.t.running_balance);
+                        egui::Popup::menu(&b)
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .show(|ui| {
+                                if let Some(c) = column_chooser(ui, &mut self.h, &cols, &hidden, bal) {
+                                    col_change = Some(c);
+                                }
+                            });
+                    });
+                });
             })
             .body(|body| {
                 body.rows(row_h, n + 1, |mut row| {
@@ -3001,7 +3527,7 @@ impl Proto {
                         Sel::New
                     };
                     row.set_selected(self.sel == this);
-                    for col in 0..5 + usize::from(balance) {
+                    for &col in &vis {
                         let cursor_here = self.sel == this && self.col == col;
                         let editing_here = self
                             .cell
@@ -3016,30 +3542,75 @@ impl Proto {
                                     "{} cell editor, row {pos}",
                                     C_TITLES[col].to_lowercase()
                                 );
-                                if col == 1 {
-                                    let (_, picked) = payee_edit(
-                                        ui,
-                                        &mut self.h,
-                                        &self.data,
-                                        &mut self.ac,
-                                        popup,
-                                        &keys,
-                                        &mut ce.buf,
-                                        &mut focus,
-                                        name,
-                                        Field::Cell,
-                                    );
-                                    let _ = picked;
-                                } else {
-                                    field(
-                                        ui,
-                                        &mut self.h,
-                                        Field::Cell,
-                                        &mut ce.buf,
-                                        &mut focus,
-                                        name,
-                                        col == 4,
-                                    );
+                                match col {
+                                    0 => {
+                                        let anchor = ui.max_rect();
+                                        let button = ui
+                                            .horizontal(|ui| {
+                                                let w = (ui.available_width() - 22.0).max(40.0);
+                                                ui.scope(|ui| {
+                                                    ui.set_max_width(w);
+                                                    field(ui, &mut self.h, Field::Cell, &mut ce.buf, &mut focus, name, false);
+                                                });
+                                                let b = ui.small_button("📅");
+                                                self.h.track(&b, format!("date picker button, row {pos}"));
+                                                b.clicked()
+                                            })
+                                            .inner;
+                                        if button || keys.alt_down {
+                                            self.picker = if button && self.picker.is_some() {
+                                                None
+                                            } else {
+                                                let (y, m, _) = civil(parse_date(&ce.buf).unwrap_or(TODAY));
+                                                Some(days_from_civil(y, m, 1))
+                                            };
+                                            self.h.event(
+                                                "date_popup",
+                                                json!({ "open": self.picker.is_some(), "via": if button { "button" } else { "alt+down" } }),
+                                            );
+                                            focus = Some(Field::Cell);
+                                        }
+                                        if let Some(month) = &mut self.picker {
+                                            let (picked, nav) = date_picker(ui, &mut self.h, anchor, month, parse_date(&ce.buf));
+                                            if nav {
+                                                focus = Some(Field::Cell);
+                                            }
+                                            if let Some(d) = picked {
+                                                self.h.event("date_pick", json!({ "day": fmt_day(d), "row": pos }));
+                                                ce.buf = fmt_day(d);
+                                                self.picker = None;
+                                                // Picking commits the cell and moves on, as Tab does.
+                                                self.ac.clicked = true;
+                                            }
+                                        }
+                                    }
+                                    1 => {
+                                        let (_, picked) = combo_edit(
+                                            ui, &mut self.h, &self.data.payees, 0, "payee", &mut self.ac, popup,
+                                            &keys, &mut ce.buf, &mut focus, name, Field::Cell, true, false,
+                                        );
+                                        // Picking a payee on the draft row fills its usual category.
+                                        if let Some(p) = picked
+                                            && this == Sel::New
+                                            && self.draft.category.trim().is_empty()
+                                        {
+                                            self.draft.category = self.data.categories
+                                                [self.data.payee_category[p] as usize]
+                                                .clone();
+                                        }
+                                    }
+                                    2 => {
+                                        combo_edit(
+                                            ui, &mut self.h, &self.data.categories, 1, "category", &mut self.ac,
+                                            popup, &keys, &mut ce.buf, &mut focus, name, Field::Cell, true, true,
+                                        );
+                                    }
+                                    _ => {
+                                        field(ui, &mut self.h, Field::Cell, &mut ce.buf, &mut focus, name, col == 4);
+                                    }
+                                }
+                                if focus.is_some() {
+                                    ce.focus = true;
                                 }
                             } else {
                                 let mut drawn = |ui: &mut Ui| match (this, col) {
@@ -3047,46 +3618,35 @@ impl Proto {
                                         let t = &self.data.txns[id];
                                         match c {
                                             0 => cell_label(ui, fmt_day(t.day)),
-                                            1 => {
-                                                cell_label(ui, &self.data.payees[t.payee as usize])
-                                            }
+                                            1 => cell_label(ui, &self.data.payees[t.payee as usize]),
                                             2 if t.split.is_some() => {
                                                 if ui.link("[Split]").clicked() {
                                                     acts.push(Act::Split(id));
                                                 }
                                             }
-                                            2 => cell_label(
-                                                ui,
-                                                &self.data.categories[t.category as usize],
-                                            ),
+                                            2 => cell_label(ui, &self.data.categories[t.category as usize]),
                                             3 => cell_label(ui, RichText::new(&t.memo).weak()),
                                             4 => {
-                                                ui.with_layout(
-                                                    Layout::right_to_left(Align::Center),
-                                                    |ui| money_label(ui, t.amount),
-                                                );
+                                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                                    money_label(ui, t.amount)
+                                                });
                                             }
                                             _ => {
                                                 let b = self.view_bal[pos];
-                                                ui.with_layout(
-                                                    Layout::right_to_left(Align::Center),
-                                                    |ui| money_label(ui, b),
-                                                );
+                                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                                    money_label(ui, b)
+                                                });
                                             }
                                         }
                                     }
-                                    (_, 0) => {
-                                        cell_label(ui, RichText::new(fmt_day(TODAY)).weak());
-                                    }
                                     (_, c) => {
                                         let text = self.cell_text(this, c);
-                                        if text.is_empty() && c == 1 && self.draft.payee.is_empty()
-                                        {
-                                            ui.label(
-                                                RichText::new("type to add a transaction")
-                                                    .weak()
-                                                    .italics(),
-                                            );
+                                        if c == 1 && self.draft.payee.is_empty() {
+                                            ui.label(RichText::new("type to add a transaction").weak().italics());
+                                        } else if c == 4 || c == 5 {
+                                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                                ui.label(RichText::new(text).weak());
+                                            });
                                         } else {
                                             cell_label(ui, RichText::new(text).weak());
                                         }
@@ -3096,8 +3656,7 @@ impl Proto {
                             }
                             grid_lines(ui);
                             if cursor_here {
-                                let stroke =
-                                    egui::Stroke::new(2.0, ui.visuals().selection.stroke.color);
+                                let stroke = egui::Stroke::new(2.0, ui.visuals().selection.stroke.color);
                                 ui.painter().rect_stroke(
                                     ui.max_rect().shrink(0.5),
                                     0.0,
@@ -3106,10 +3665,7 @@ impl Proto {
                                 );
                             }
                         });
-                        self.h.track(
-                            &r,
-                            format!("{} cell, row {pos}", C_TITLES[col].to_lowercase()),
-                        );
+                        self.h.track(&r, format!("{} cell, row {pos}", C_TITLES[col].to_lowercase()));
                         if !editing_here {
                             if r.double_clicked() {
                                 acts.push(Act::CellEdit(this, col));
@@ -3118,10 +3674,82 @@ impl Proto {
                             }
                         }
                     }
+                    // Actions: a menu button on the selected row and the row under the pointer.
+                    row.col(|ui| {
+                        grid_lines(ui);
+                        let Sel::Txn(id) = this else { return };
+                        let rect = ui.max_rect();
+                        let hovered = ui
+                            .ctx()
+                            .pointer_hover_pos()
+                            .is_some_and(|p| rect.y_range().contains(p.y) && ui.clip_rect().x_range().contains(p.x));
+                        if self.sel != this && !hovered {
+                            return;
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.add_space(Theme::EDGE_INSET);
+                            let m = ui.menu_button("Actions ⏷", |ui| {
+                                for &label in ROW_ACTIONS {
+                                    let b = ui.button(label);
+                                    self.h.track(&b, format!("actions: {label}, row {pos}"));
+                                    if b.clicked() {
+                                        row_action = Some((id, label));
+                                        ui.close();
+                                    }
+                                }
+                            });
+                            self.h.track(&m.response, format!("actions button, row {pos}"));
+                        });
+                    });
                 });
             });
-        self.h.scroll("register", out.state.offset.y, row_h + 3.0);
+        self.h.scroll("register", out.state.offset.y, pitch);
+        self.scroll_y = out.state.offset.y;
+        self.view_h = out.inner_rect.height();
         self.apply_acts(acts);
+        if let Some((order, hidden, bal)) = col_change {
+            self.cols = order;
+            self.hidden = hidden;
+            self.t.running_balance = bal;
+            let names: Vec<&str> = self.vis().iter().map(|k| C_TITLES[*k]).collect();
+            let hid: Vec<&str> = self
+                .cols
+                .iter()
+                .filter(|k| !self.vis().contains(k))
+                .map(|k| C_TITLES[*k])
+                .collect();
+            self.h.event(
+                "columns",
+                json!({ "shown": names, "hidden": hid,
+                        "would_emit": format!("AppCommand::SetPreference(RegisterColumns {{ shown: {names:?}, hidden: {hid:?} }})") }),
+            );
+            if let Some(p) = self.pos(self.sel) {
+                self.jump = Some((p, Some(Align::Center)));
+            }
+            self.h.screenshot("columns");
+        }
+        if let Some((id, label)) = row_action {
+            let would = match label {
+                "Edit" => format!("start a cell edit on transaction {id}"),
+                "Split…" => format!("AppCommand::OpenSplit {{ id: {id} }}"),
+                "Copy Transaction" => format!("AppCommand::CopyTransaction {{ id: {id} }}"),
+                other => format!("DomainCommand::{} {{ id: {id} }}", other.replace(' ', "")),
+            };
+            self.h.event(
+                "command",
+                json!({ "would_emit": would, "source": "actions menu", "action": label }),
+            );
+            match label {
+                "Edit" => {
+                    let first = self.editable().into_iter().find(|k| *k == 1).unwrap_or(1);
+                    self.sel = Sel::Txn(id);
+                    self.col = first;
+                    self.start_cell_edit(Sel::Txn(id), first, None, "actions menu");
+                }
+                "Split…" => self.open_split(id, "actions menu"),
+                _ => self.status = format!("Would {label}: transaction {id}"),
+            }
+        }
     }
 
     /// The keys consumed at the top of the frame are not kept; the payee field only needs the
