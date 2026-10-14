@@ -1,78 +1,71 @@
 #!/usr/bin/env bash
-# Check that a pull request shows in the Development panel of every issue its body
-# names with a closing keyword, and repair the link where GitHub missed it.
+# link-pr <pr>: make PR <pr> show in the Development panel of every issue its body
+# names with a closing keyword (Closes/Fixes/Resolves #n). Policy:
+# docs/agents/issue-tracker.md, "Linking a pull request to its issue".
 #
-# Usage: .claude/scripts/link-pr <pr-number>
+# Output: one JSON line on stdout, always.
+#   {"pr":N,"issues":[..],"linked":[..],"missing":[..],"status":S,"action":A,"next":T}
+#   status  ok          every issue linked                                  exit 0
+#           no-keyword  body names no issue                                 exit 1
+#           stacked     base isn't the default branch; links on retarget    exit 1
+#           merged      merged and unlinked; no reopen possible             exit 1
+#           failed      still unlinked after the repair                     exit 1
+#   action  none | reopened-and-closed (a closed PR was reopened to link, then closed)
+#   next    what to do when status != ok; empty when ok
+# Exit 2: bad usage. gh/network errors exit non-zero with gh's message on stderr.
 #
-# See docs/agents/issue-tracker.md, "Linking a pull request to its issue".
+# Repair: a closed PR is reopened, polled up to ~20 s for GitHub to link it, then
+# closed again. An open PR on the default branch is only polled.
 set -euo pipefail
 
-pr="${1:?usage: .claude/scripts/link-pr <pr-number>}"
-repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
-owner="${repo%/*}"
-name="${repo#*/}"
+pr="${1:-}"
+[[ "$pr" =~ ^[0-9]+$ ]] || { echo '{"status":"usage","next":"call: .claude/scripts/link-pr <pr-number>"}'; exit 2; }
 
+repo="$(gh repo view --json nameWithOwner,defaultBranchRef --jq '"\(.nameWithOwner) \(.defaultBranchRef.name)"')"
+default="${repo#* }"; repo="${repo% *}"
+owner="${repo%/*}"; name="${repo#*/}"
 state="$(gh pr view "$pr" --json state --jq .state)"
 base="$(gh pr view "$pr" --json baseRefName --jq .baseRefName)"
-default="$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)"
-
 issues="$(gh pr view "$pr" --json body --jq .body \
   | grep -oiE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?) #[0-9]+' \
-  | grep -oE '[0-9]+$' | sort -un || true)"
-if [[ -z "$issues" ]]; then
-  echo "PR #$pr: no closing keyword in its body; add 'Closes #<n>' first." >&2
-  exit 1
-fi
+  | grep -oE '[0-9]+$' | sort -un | tr '\n' ' ' || true)"
 
-# The PR numbers linked to an issue, closed PRs included.
-linked() {
-  gh api graphql -f query="{repository(owner:\"$owner\",name:\"$name\"){issue(number:$1){closedByPullRequestsReferences(first:50,includeClosedPrs:true){nodes{number}}}}}" \
-    --jq '.data.repository.issue.closedByPullRequestsReferences.nodes[].number'
-}
+json_list() { local out=""; for x in $1; do out+="${out:+,}$x"; done; echo "[$out]"; }
 
-missing() {
-  local out=""
+# Partition $issues into linked / missing, counting closed PRs too.
+check() {
+  linked=""; missing=""
   for i in $issues; do
-    linked "$i" | grep -qx "$pr" || out+="$i "
+    if gh api graphql -f query="{repository(owner:\"$owner\",name:\"$name\"){issue(number:$i){closedByPullRequestsReferences(first:50,includeClosedPrs:true){nodes{number}}}}}" \
+      --jq '.data.repository.issue.closedByPullRequestsReferences.nodes[].number' | grep -qx "$pr"; then
+      linked+="$i "
+    else
+      missing+="$i "
+    fi
   done
-  echo "$out"
 }
 
-todo="$(missing)"
-if [[ -z "$todo" ]]; then
-  echo "PR #$pr is linked to: $(echo $issues)"
-  exit 0
-fi
+emit() { # status action next exit
+  printf '{"pr":%s,"issues":%s,"linked":%s,"missing":%s,"status":"%s","action":"%s","next":"%s"}\n' \
+    "$pr" "$(json_list "$issues")" "$(json_list "$linked")" "$(json_list "$missing")" "$1" "$2" "$3"
+  exit "$4"
+}
 
-if [[ "$base" != "$default" ]]; then
-  echo "PR #$pr targets '$base', not '$default': GitHub links it only once it is retargeted. Unlinked: $todo" >&2
-  exit 1
-fi
+linked=""; missing=""
+[[ -n "$issues" ]] || emit no-keyword none "add a 'Closes #<n>' line to the PR body (gh pr edit $pr --body-file ...), then rerun" 1
 
-if [[ "$state" == "MERGED" ]]; then
-  echo "PR #$pr is merged and not linked to: $todo. A merged PR can't be reopened; link it by hand in the issue's Development panel." >&2
-  exit 1
-fi
+check
+[[ -z "$missing" ]] && emit ok none "" 0
+[[ "$base" == "$default" ]] || emit stacked none "rerun after the PR is retargeted to $default (its base PR merges)" 1
+[[ "$state" == "MERGED" ]] && emit merged none "tell the user: link it by hand in each missing issue's Development panel" 1
 
-reopened=no
-if [[ "$state" == "CLOSED" ]]; then
-  gh pr reopen "$pr" >/dev/null
-  reopened=yes
-fi
-
-# GitHub links asynchronously; give it up to ~20 s.
+action=none
+if [[ "$state" == "CLOSED" ]]; then gh pr reopen "$pr" >/dev/null; action=reopened; fi
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  sleep 2
-  todo="$(missing)"
-  [[ -z "$todo" ]] && break
+  sleep 2; check
+  [[ -z "$missing" ]] && break
 done
+if [[ "$action" == reopened ]]; then gh pr close "$pr" >/dev/null; action=reopened-and-closed; fi
 
-if [[ "$reopened" == yes ]]; then
-  gh pr close "$pr" >/dev/null
-fi
-
-if [[ -n "$todo" ]]; then
-  echo "PR #$pr still not linked to: $todo" >&2
-  exit 1
-fi
-echo "PR #$pr is linked to: $(echo $issues)"
+[[ -z "$missing" ]] && emit ok "$action" "" 0
+emit failed "$action" "check the keyword syntax in the PR body, rerun once; if it still fails, tell the user" 1
