@@ -6,17 +6,60 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use egui::{Align2, Context, Id, Key, Response};
+use egui::{
+    Align2, Color32, Context, Id, Key, LayerId, Mesh, Order, Rect, Response, RichText, Stroke,
+    StrokeKind, Ui,
+};
 use serde_json::{Value, json};
 
 use crate::Args;
 use crate::control::ControlReader;
 use crate::log::write_event;
+use crate::spotlight::{Spotlight, SpotlightCommand, overlay_rects};
 
 /// Screenshots wait this long so scroll animations and egui's multi-pass layout settle.
 const SHOT_SETTLE: Duration = Duration::from_millis(350);
 /// A scroll gesture ends after this long without movement.
 const SCROLL_REST: Duration = Duration::from_millis(300);
+/// How far a spotlight cut-out extends past the widget or region it lights.
+const SPOTLIGHT_PAD: f32 = 4.0;
+
+/// A widget named through [`Harness::track`], and where it was drawn this frame.
+#[derive(Debug)]
+struct Tracked {
+    name: String,
+    rect: Rect,
+}
+
+/// The spotlight and the bookkeeping for painting and logging it.
+#[derive(Debug, Default)]
+struct SpotlightState {
+    current: Spotlight,
+    /// A change made this frame, logged once `end_frame` knows what it matches.
+    change: Option<SpotlightCause>,
+    /// Whether "nothing matches" has been logged since the last change.
+    unmatched_logged: bool,
+    /// The panel `dock_spotlight` drew in this frame, which the overlay leaves undimmed.
+    dock_rect: Option<Rect>,
+}
+
+/// What changed the spotlight, as logged.
+#[derive(Debug, Clone, Copy)]
+enum SpotlightCause {
+    Control,
+    Key,
+    Click,
+}
+
+impl SpotlightCause {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Control => "control",
+            Self::Key => "key",
+            Self::Click => "click",
+        }
+    }
+}
 
 #[derive(Debug)]
 struct Gesture {
@@ -52,8 +95,13 @@ pub struct Harness {
     last_frame_ms: Arc<AtomicU64>,
     commands: VecDeque<String>,
     start: Instant,
-    names: HashMap<Id, String>,
-    prev_names: HashMap<Id, String>,
+    names: HashMap<Id, Tracked>,
+    prev_names: HashMap<Id, Tracked>,
+    /// Regions named through [`Harness::region`] this frame.
+    regions: Vec<(String, Rect)>,
+    spotlight: SpotlightState,
+    /// Whether a text field had keyboard focus at the start of this frame.
+    typing: bool,
     focused: Option<Id>,
     clicked_this_frame: bool,
     tab_this_frame: bool,
@@ -94,6 +142,9 @@ impl Harness {
             start: now,
             names: HashMap::new(),
             prev_names: HashMap::new(),
+            regions: Vec::new(),
+            spotlight: SpotlightState::default(),
+            typing: false,
             focused: None,
             clicked_this_frame: false,
             tab_this_frame: false,
@@ -121,7 +172,7 @@ impl Harness {
         }
     }
 
-    /// Name a widget for the log, and log clicks and right-clicks on it.
+    /// Name a widget for the log and the spotlight, and log clicks and right-clicks on it.
     pub fn track(&mut self, response: &Response, name: impl Into<String>) {
         let name = name.into();
         if response.clicked() {
@@ -130,7 +181,32 @@ impl Harness {
         if response.secondary_clicked() {
             self.event("right_click", json!({ "widget": name }));
         }
-        self.names.insert(response.id, name);
+        let rect = response.rect.intersect(response.interact_rect);
+        self.names.insert(response.id, Tracked { name, rect });
+    }
+
+    /// Name a region larger than one widget (`"register"`, `"account bar"`) for the spotlight.
+    /// Call it every frame the region is drawn, with its screen rect.
+    pub fn region(&mut self, rect: Rect, name: impl Into<String>) {
+        self.regions.push((name.into(), rect));
+    }
+
+    /// Draw the dock's spotlight row: a "Spotlight (F5)" checkbox and the current targets.
+    /// The panel it is drawn in stays undimmed while the spotlight is on.
+    pub fn dock_spotlight(&mut self, ui: &mut Ui) {
+        self.spotlight.dock_rect = Some(ui.clip_rect());
+        let mut on = self.spotlight.current.is_on();
+        let response = ui.checkbox(&mut on, "Spotlight (F5)");
+        self.track(&response, "dock: spotlight");
+        if response.changed() {
+            self.set_spotlight_on(on, SpotlightCause::Click);
+        }
+        let targets = if self.spotlight.current.targets().is_empty() {
+            "no targets".to_owned()
+        } else {
+            self.spotlight.current.targets().join("; ")
+        };
+        ui.label(RichText::new(targets).small().weak());
     }
 
     /// Queue a screenshot of the window, saved beside the log as `<seq>-<label>.png`.
@@ -180,12 +256,18 @@ impl Harness {
         }
     }
 
-    /// Call first in `ui()`. Returns at most one control command for the app to apply.
+    /// Call first in `ui()`. Returns at most one control command for the app to apply; the
+    /// harness applies its own `spotlight` commands and returns `None` for them.
     pub fn begin_frame(&mut self, ctx: &Context) -> Option<String> {
         let now_ms = u64::try_from(self.start.elapsed().as_millis()).unwrap_or(u64::MAX);
         self.last_frame_ms.store(now_ms, Ordering::Relaxed);
         self.start_control_reader(ctx);
-        self.prev_names = std::mem::take(&mut self.names);
+        // Swapping keeps both maps' capacity, so thousands of tracked cells don't reallocate.
+        std::mem::swap(&mut self.prev_names, &mut self.names);
+        self.names.clear();
+        self.regions.clear();
+        self.spotlight.dock_rect = None;
+        self.typing = ctx.egui_wants_keyboard_input();
         self.dt_ms = ctx.input(|i| i.unstable_dt) * 1000.0;
 
         let events = ctx.input(|i| i.events.clone());
@@ -202,6 +284,11 @@ impl Harness {
             if let Some(command) = &command {
                 self.event("control", json!({ "command": command }));
             }
+            if let Some(spotlight) = command.as_deref().and_then(SpotlightCommand::parse) {
+                self.spotlight.current.apply(spotlight);
+                self.spotlight.change = Some(SpotlightCause::Control);
+                return None;
+            }
             command
         } else {
             None
@@ -211,6 +298,7 @@ impl Harness {
     /// Call last in `ui()`.
     pub fn end_frame(&mut self, ctx: &Context) {
         self.log_focus_change(ctx);
+        self.paint_spotlight(ctx);
         self.note_box(ctx);
 
         if self.shot_in_flight.is_none()
@@ -250,8 +338,8 @@ impl Harness {
 
     fn name_of(&self, id: Option<Id>) -> Value {
         id.map_or(Value::Null, |id| {
-            let name = self.names.get(&id).or_else(|| self.prev_names.get(&id));
-            name.map_or_else(|| json!(format!("unnamed {id:?}")), |n| json!(n))
+            let tracked = self.names.get(&id).or_else(|| self.prev_names.get(&id));
+            tracked.map_or_else(|| json!(format!("unnamed {id:?}")), |t| json!(t.name))
         })
     }
 
@@ -292,6 +380,10 @@ impl Harness {
             self.screenshot(format!("marker-{n}"));
             return;
         }
+        if key == Key::F5 && !repeat && !self.typing && self.note.is_none() {
+            self.set_spotlight_on(!self.spotlight.current.is_on(), SpotlightCause::Key);
+            return;
+        }
         if key == Key::Tab {
             self.tab_this_frame = true;
         }
@@ -318,6 +410,81 @@ impl Harness {
                 json!({ "key": key.name(), "repeat": repeat, "ctrl": modifiers.command,
                         "shift": modifiers.shift, "alt": modifiers.alt, "field": field }),
             );
+        }
+    }
+
+    fn set_spotlight_on(&mut self, on: bool, cause: SpotlightCause) {
+        self.spotlight.current.set_on(on);
+        self.spotlight.change = Some(cause);
+    }
+
+    /// The screen rects of this frame's tracked widgets and regions that the spotlight matches.
+    fn spotlight_matches(&self, screen: Rect) -> Vec<Rect> {
+        let widgets = self.names.values().map(|t| (t.name.as_str(), t.rect));
+        let regions = self
+            .regions
+            .iter()
+            .map(|(name, rect)| (name.as_str(), *rect));
+        widgets
+            .chain(regions)
+            .filter(|(name, rect)| rect.intersects(screen) && self.spotlight.current.matches(name))
+            .map(|(_, rect)| rect)
+            .collect()
+    }
+
+    /// Log a spotlight change made this frame, then dim everything but the matches.
+    fn paint_spotlight(&mut self, ctx: &Context) {
+        let change = self.spotlight.change.take();
+        if change.is_none() && !self.spotlight.current.is_on() {
+            return;
+        }
+        let screen = ctx.content_rect();
+        let lit = self.spotlight_matches(screen);
+        let on = self.spotlight.current.is_on();
+        if let Some(cause) = change {
+            let fields = json!({
+                "on": on,
+                "targets": self.spotlight.current.targets(),
+                "matched": lit.len(),
+                "cause": cause.as_str(),
+            });
+            self.event("spotlight", fields);
+            self.screenshot(if on { "spotlight-on" } else { "spotlight-off" });
+            self.spotlight.unmatched_logged = false;
+        }
+        if !on || self.spotlight.current.targets().is_empty() {
+            return;
+        }
+        if lit.is_empty() {
+            if !self.spotlight.unmatched_logged {
+                self.spotlight.unmatched_logged = true;
+                let fields = json!({ "targets": self.spotlight.current.targets() });
+                self.event("spotlight_unmatched", fields);
+            }
+            return;
+        }
+
+        let lit: Vec<Rect> = lit.iter().map(|r| r.expand(SPOTLIGHT_PAD)).collect();
+        let holes: Vec<Rect> = lit
+            .iter()
+            .copied()
+            .chain(self.spotlight.dock_rect)
+            .collect();
+        // The overlay must darken in light and dark themes alike, so it isn't a theme colour.
+        let shade = Color32::from_black_alpha(140);
+        // One unfeathered mesh, so neighbouring rects meet without seams.
+        let mut mesh = Mesh::default();
+        for rect in overlay_rects(screen, &holes) {
+            mesh.add_colored_rect(rect, shade);
+        }
+        let painter = ctx.layer_painter(LayerId::new(
+            Order::Foreground,
+            Id::new("harness_spotlight"),
+        ));
+        painter.add(mesh);
+        let stroke = Stroke::new(2.0, ctx.global_style().visuals.selection.stroke.color);
+        for rect in lit {
+            painter.rect_stroke(rect, 0.0, stroke, StrokeKind::Outside);
         }
     }
 

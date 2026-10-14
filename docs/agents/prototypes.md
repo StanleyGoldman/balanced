@@ -25,7 +25,7 @@ A prototype is throwaway code that answers one question by giving the user somet
 - Keys in the app window, while no text field has focus:
   - a letter per variant (`A`, `B`, `C`) and ←/→ to step through them;
   - a number key per toggle (`1`–`9`, then `0`), so the user can flip one back and forth to see where it changes the screen;
-  - F2 opens a note, F3 drops a marker, F4 collapses the dock.
+  - F2 opens a note, F3 drops a marker, F4 collapses the dock, F5 turns the spotlight on or off.
 
   Label every variant and toggle in the dock with its key. A `--variant <key>` flag picks the starting variant.
 - Every menu item and button that would act in the real app logs a `command` event naming the Command it would emit (`would_emit`), so the session records what the real app would do.
@@ -45,11 +45,12 @@ The agent follows the user through the app's own output. Build these in:
   Log intent, never a raw mouse-position stream.
 - **Screenshots**: the app captures its own window (`ViewportCommand::Screenshot`) as PNGs beside the log on every variant switch and toggle flip.
 - **F2** opens a one-line note box written into the log; **F3** drops a marker plus a screenshot.
-- **Control file**: you append commands to the file at `--control <path>`, one per line; each is logged as a `control` event followed by its effect. Commands already in the file at launch run first, which sets up an opening scenario. Every prototype supports `variant <key>`, `toggle <key> [on|off]`, `screenshot [label]`, `dock on|off`, `reload` and `quit`, plus navigation verbs for its own domain (the shell layout has `account <index|name>`, `tab <index|name>` and `row <n>`).
+- **Spotlight** dims the window except outlined cut-outs around the named controls, so the user's eye lands where the step points. Its targets match, case-insensitively as substrings, the names given through `track` and `region`. **F5** or the dock's "Spotlight (F5)" row (`dock_spotlight`) turns it on or off; each change logs a `spotlight` event (`on`, `targets`, `matched`, `cause`) and a screenshot, and a `spotlight_unmatched` event means nothing on screen matched.
+- **Control file**: you append commands to the file at `--control <path>`, one per line; each is logged as a `control` event followed by its effect. Commands already in the file at launch run first, which sets up an opening scenario. Every prototype supports `variant <key>`, `toggle <key> [on|off]`, `screenshot [label]`, `dock on|off`, `reload` and `quit`, and the harness itself handles `spotlight <target>[; <target>…]` (sets the targets, `;`-separated because names hold spaces and commas, and turns it on) and `spotlight off|on` (keeps the targets), plus navigation verbs for its own domain (the shell layout has `account <index|name>`, `tab <index|name>` and `row <n>`).
 - **Wayland throttling**: a covered or unfocused window gets no frames. A background thread still reads the control file, but commands apply on the next frame, so they wait until the window is visible. `quit` always lands: the thread exits the process once no frame has run for 2 s.
 - Screenshots wait 350 ms so scroll animations and egui's multi-pass layout settle, and land as `<seq>-<label>.png`. The log also records `window_focus` changes and `session_end`.
 
-The harness is the `balanced_prototype_harness` crate on `main`. Use it as a dev-dependency, not a copy, and follow the contract in its crate docs (`cargo doc -p balanced_prototype_harness --open`, or `src/lib.rs`): build a `Harness` from `Args::from_env()`, call `begin_frame` first and `end_frame` last in `ui()`, `track` named widgets, and log `session_end` from `App::on_exit`. When a prototype needs a harness feature that's missing, add it to the crate in its own PR from `main`, with tests, rather than patching it inside the prototype. The shell layout prototype (`prototype/shell-layout`) is a full example of an app wired to it.
+The harness is the `balanced_prototype_harness` crate on `main`. Use it as a dev-dependency, not a copy, and follow the contract in its crate docs (`cargo doc -p balanced_prototype_harness --open`, or `src/lib.rs`): build a `Harness` from `Args::from_env()`, call `begin_frame` first and `end_frame` last in `ui()`, `track` named widgets, name larger areas with `region` each frame, draw `dock_spotlight` in the dock, and log `session_end` from `App::on_exit`. When a prototype needs a harness feature that's missing, add it to the crate in its own PR from `main`, with tests, rather than patching it inside the prototype. The shell layout prototype (`prototype/shell-layout`) is a full example of an app wired to it.
 
 ## Running a session
 
@@ -59,10 +60,10 @@ You drive the prototype as well as the conversation. Through the control file yo
 
 1. Before launch, write the agenda into the PR's Q&A, one entry per question.
 2. When the prototype builds, ask the user for clearance to launch. Every launch needs it, including your own scripted control-file runs: the window opens on the user's desktop and takes keyboard focus, so it logs whatever they were typing elsewhere. An unfocused window is also throttled on Wayland, so a scripted run stalls while the user works in another app.
-3. On a yes, start it yourself as a background process. Tell the user it's up, along with the keys that drive it themselves (variant letters, toggle numbers, F2–F4). Watch the log with the Monitor tool, filtered to `note`, `marker` and `session_end`; read the rest of the log when a step needs it.
+3. On a yes, start it yourself as a background process. Tell the user it's up, along with the keys that drive it themselves (variant letters, toggle numbers, F2–F5). Watch the log with the Monitor tool, filtered to `note`, `marker` and `session_end`; read the rest of the log when a step needs it.
 4. Guide one agenda question at a time, numbered `Step <n>/<total>`. For each step, give the user:
    - **context**: what the variants or toggles in play change, and why it matters for the question;
-   - **look at**: where on screen the variant in front of the user differs, region by region. Name every toggle that applies to it, with its key, in this step's first message, not after the user asks. Save comparisons with a variant the user hasn't reached yet for when you switch to it;
+   - **look at**: where on screen the variant in front of the user differs, region by region; `spotlight` the region you name, and send `spotlight off` before the user explores freely. Name every toggle that applies to it, with its key, in this step's first message, not after the user asks. Save comparisons with a variant the user hasn't reached yet for when you switch to it;
    - **try**: concrete actions in a scenario you have already set up through the control file; when the step compares variants or toggles, switch them yourself one at a time and say what changed after each switch;
    - **notice**: what to pay attention to while trying it.
 
