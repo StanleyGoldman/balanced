@@ -17,7 +17,7 @@ const SOURCE: &str = "en-US";
 
 /// What the check needs from one `.ftl` file.
 #[derive(Debug, Default)]
-struct Locale {
+struct LocaleFile {
     /// Each message's patterns by key (`id` or `id.attribute`), with the variables
     /// each pattern uses.
     patterns: BTreeMap<String, BTreeSet<String>>,
@@ -64,7 +64,7 @@ fn translations_match_the_source() {
     );
 }
 
-fn read_locales() -> BTreeMap<String, Locale> {
+fn read_locales() -> BTreeMap<String, LocaleFile> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");
     let mut locales = BTreeMap::new();
     for dir in fs::read_dir(&root).expect("locales/ is readable") {
@@ -82,12 +82,12 @@ fn read_locales() -> BTreeMap<String, Locale> {
             fs::read_to_string(&path).expect("every locale folder holds a UTF-8 balanced.ftl");
         let resource = fluent_syntax::parser::parse(source.as_str())
             .unwrap_or_else(|(_, errors)| panic!("{} doesn't parse: {errors:?}", path.display()));
-        locales.insert(name, Locale::from(&resource));
+        locales.insert(name, LocaleFile::from(&resource));
     }
     locales
 }
 
-fn undefined_terms(name: &str, locale: &Locale) -> Vec<String> {
+fn undefined_terms(name: &str, locale: &LocaleFile) -> Vec<String> {
     locale
         .term_references
         .difference(&locale.terms)
@@ -95,7 +95,7 @@ fn undefined_terms(name: &str, locale: &Locale) -> Vec<String> {
         .collect()
 }
 
-fn stale_keys(name: &str, locale: &Locale, source: &Locale) -> Vec<String> {
+fn stale_keys(name: &str, locale: &LocaleFile, source: &LocaleFile) -> Vec<String> {
     let stale_patterns = locale
         .patterns
         .keys()
@@ -108,7 +108,7 @@ fn stale_keys(name: &str, locale: &Locale, source: &Locale) -> Vec<String> {
     stale_patterns.chain(stale_terms).collect()
 }
 
-fn variable_mismatches(name: &str, locale: &Locale, source: &Locale) -> Vec<String> {
+fn variable_mismatches(name: &str, locale: &LocaleFile, source: &LocaleFile) -> Vec<String> {
     locale
         .patterns
         .iter()
@@ -121,7 +121,7 @@ fn variable_mismatches(name: &str, locale: &Locale, source: &Locale) -> Vec<Stri
         .collect()
 }
 
-impl From<&Resource<&str>> for Locale {
+impl From<&Resource<&str>> for LocaleFile {
     fn from(resource: &Resource<&str>) -> Self {
         let mut locale = Self::default();
         for entry in &resource.body {
@@ -156,7 +156,7 @@ impl From<&Resource<&str>> for Locale {
     }
 }
 
-impl Locale {
+impl LocaleFile {
     fn add_pattern(&mut self, key: String, pattern: &Pattern<&str>) {
         let mut variables = BTreeSet::new();
         self.walk_pattern(pattern, &mut variables);
@@ -217,5 +217,96 @@ impl Locale {
         for argument in &arguments.named {
             self.walk_inline(&argument.value, variables);
         }
+    }
+}
+
+/// Checks of the check itself, on small inline files.
+mod check {
+    use super::*;
+
+    fn parse(ftl: &str) -> LocaleFile {
+        let resource = fluent_syntax::parser::parse(ftl).expect("test file parses");
+        LocaleFile::from(&resource)
+    }
+
+    #[test]
+    fn flags_a_message_en_us_lacks() {
+        let source = parse("menu-file = File\n");
+        let translation = parse("menu-file = Datei\nmenu-old = Alt\n");
+
+        let failures = stale_keys("de", &translation, &source);
+
+        assert_eq!(failures, ["de: menu-old is not in en-US"]);
+    }
+
+    #[test]
+    fn flags_an_attribute_en_us_lacks() {
+        let source = parse("total = Total\n");
+        let translation = parse("total = Summe\n    .tooltip = Summe\n");
+
+        let failures = stale_keys("de", &translation, &source);
+
+        assert_eq!(failures, ["de: total.tooltip is not in en-US"]);
+    }
+
+    #[test]
+    fn flags_a_term_en_us_lacks() {
+        let source = parse("-brand-name = Balanced\n");
+        let translation = parse("-brand-name = Balanced\n-old-term = Alt\n");
+
+        let failures = stale_keys("de", &translation, &source);
+
+        assert_eq!(failures, ["de: term -old-term is not in en-US"]);
+    }
+
+    #[test]
+    fn flags_a_renamed_variable() {
+        let source = parse("total = Total: { $amount }\n");
+        let translation = parse("total = Summe: { $betrag }\n");
+
+        let failures = variable_mismatches("de", &translation, &source);
+
+        assert_eq!(
+            failures,
+            [r#"de: total uses variables {"betrag"}, en-US uses {"amount"}"#]
+        );
+    }
+
+    #[test]
+    fn finds_variables_inside_selectors_and_function_calls() {
+        let source = parse(
+            "count = { $count ->\n    [one] one\n   *[other] { NUMBER($count) } of { $total }\n}\n",
+        );
+        let translation = parse("count = { $count } von { NUMBER($total) }\n");
+
+        let failures = variable_mismatches("de", &translation, &source);
+
+        assert_eq!(failures, Vec::<String>::new());
+    }
+
+    #[test]
+    fn flags_a_term_used_but_not_defined() {
+        let translation = parse("about = Über { -brand-name }\n");
+
+        let failures = undefined_terms("de", &translation);
+
+        assert_eq!(
+            failures,
+            ["de: uses term -brand-name but doesn't define it"]
+        );
+    }
+
+    #[test]
+    fn a_missing_message_is_not_a_failure() {
+        let source = parse("menu-file = File\nmenu-edit = Edit\n");
+        let translation = parse("menu-file = Datei\n");
+
+        let failures: Vec<_> = stale_keys("de", &translation, &source)
+            .into_iter()
+            .chain(variable_mismatches("de", &translation, &source))
+            .chain(undefined_terms("de", &translation))
+            .collect();
+
+        assert_eq!(failures, Vec::<String>::new());
     }
 }

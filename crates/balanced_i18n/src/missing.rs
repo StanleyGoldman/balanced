@@ -1,49 +1,94 @@
-//! Messages a translation lacks, which Fluent fills from `en-US` without a word.
+//! Messages and attributes a translation lacks, which Fluent fills from `en-US`
+//! without a word.
 
 use std::collections::BTreeSet;
 
 use i18n_embed::fluent::FluentLanguageLoader;
 use unic_langid::LanguageIdentifier;
 
-/// A message a translation lacks.
+/// A message or attribute a translation lacks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MissingMessage {
     pub(crate) language: LanguageIdentifier,
-    pub(crate) id: String,
+    /// The message id, or `id.attribute` for an attribute.
+    pub(crate) key: String,
 }
 
-/// The messages each language in `chain` lacks compared with `source`, sorted by
-/// language and then id.
+/// The messages and attributes each language in `chain` lacks compared with
+/// `source`, sorted by language and then key.
 pub(crate) fn missing_messages(
     loader: &FluentLanguageLoader,
     chain: &[LanguageIdentifier],
     source: &LanguageIdentifier,
 ) -> Vec<MissingMessage> {
-    let source_ids = message_ids(loader, source);
+    let source_keys = message_keys(loader, source);
     let mut missing = Vec::new();
     for language in chain.iter().filter(|language| *language != source) {
-        let ids = message_ids(loader, language);
-        missing.extend(source_ids.difference(&ids).map(|id| MissingMessage {
+        let keys = message_keys(loader, language);
+        missing.extend(source_keys.difference(&keys).map(|key| MissingMessage {
             language: language.clone(),
-            id: id.clone(),
+            key: key.clone(),
         }));
     }
     missing
 }
 
-/// Logs each message a language in `chain` lacks, once per load.
+/// Logs each message or attribute a language in `chain` lacks, once per load.
 pub(crate) fn log_missing_messages(
     loader: &FluentLanguageLoader,
     chain: &[LanguageIdentifier],
     source: &LanguageIdentifier,
 ) {
-    for MissingMessage { language, id } in missing_messages(loader, chain, source) {
-        tracing::warn!(%language, id = ?id, "message not translated; showing the {source} text");
+    for MissingMessage { language, key } in missing_messages(loader, chain, source) {
+        tracing::warn!(%language, key = ?key, "message not translated; showing the {source} text");
     }
 }
 
-fn message_ids(loader: &FluentLanguageLoader, language: &LanguageIdentifier) -> BTreeSet<String> {
+/// Each message id in `language`, and `id.attribute` for each of its attributes.
+fn message_keys(loader: &FluentLanguageLoader, language: &LanguageIdentifier) -> BTreeSet<String> {
     loader.with_message_iter(language, |messages| {
-        messages.map(|message| message.id.name.to_owned()).collect()
+        messages
+            .flat_map(|message| {
+                let id = message.id.name;
+                let attributes = message
+                    .attributes
+                    .iter()
+                    .map(move |attribute| format!("{id}.{}", attribute.id.name));
+                std::iter::once(id.to_owned()).chain(attributes)
+            })
+            .collect()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use i18n_embed::LanguageLoader as _;
+    use rust_embed::Embed;
+
+    use super::*;
+
+    /// A source file and a translation that has every message but lacks an attribute.
+    #[derive(Embed)]
+    #[folder = "tests/fixtures/missing/"]
+    struct Fixtures;
+
+    #[test]
+    fn lists_an_attribute_the_translation_lacks() {
+        let source: LanguageIdentifier = "en-US".parse().unwrap();
+        let de: LanguageIdentifier = "de".parse().unwrap();
+        let loader = FluentLanguageLoader::new("balanced", source.clone());
+        loader
+            .load_languages(&Fixtures, &[de.clone(), source.clone()])
+            .unwrap();
+
+        let missing = missing_messages(&loader, &[de.clone(), source.clone()], &source);
+
+        assert_eq!(
+            missing,
+            [MissingMessage {
+                language: de,
+                key: "total.tooltip".to_owned(),
+            }]
+        );
+    }
 }

@@ -112,8 +112,9 @@ impl Localizer {
             formatters: Formatters::new(formatting_locale)?,
             isolation,
         };
-        localizer.formatters.install_for_fluent();
         localizer.load_text_language(text_language)?;
+        // Only a localizer that is returned changes how this thread formats numbers.
+        localizer.formatters.install_for_fluent();
         Ok(localizer)
     }
 
@@ -334,6 +335,16 @@ mod tests {
     }
 
     #[test]
+    fn switching_from_the_pseudo_locale_drops_accents_and_brackets() {
+        let mut i18n =
+            Localizer::with_isolation(&PSEUDO_LANGUAGE, &locale!("de-DE"), Isolation::Off).unwrap();
+
+        i18n.set_text_language(&langid!("en-US")).unwrap();
+
+        assert_eq!(i18n.finish(i18n.loader().get("menu-file")), "File");
+    }
+
+    #[test]
     fn switching_formatting_locale_takes_effect() {
         let mut i18n = localizer(&langid!("en-US"), &locale!("en-US"));
 
@@ -373,7 +384,7 @@ mod tests {
         let de = to_fluent_language(&langid!("de"));
         let ids: Vec<_> = missing
             .iter()
-            .map(|message| (&message.language, message.id.as_str()))
+            .map(|message| (&message.language, message.key.as_str()))
             .collect();
         assert_eq!(
             ids,
