@@ -2156,7 +2156,7 @@ fn variant_a(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
 }
 
 fn rows_scroll(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
-    let h = (ui.available_height() - 44.0).max(120.0);
+    let h = 430.0;
     egui::ScrollArea::vertical()
         .id_salt("manage_rows")
         .max_height(h)
@@ -2196,11 +2196,30 @@ fn tree(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out, inline_remove:
                 }
             };
             ui.add_space(indent);
-            let w = ui.available_width() - if inline_remove { 150.0 } else { 0.0 };
-            let r = ui.add_sized(
-                [w.max(80.0), h],
-                egui::Button::selectable(sel, text).frame_when_inactive(false),
-            );
+            let w = ui.available_width() - if inline_remove { 150.0 } else { 90.0 };
+            // A left-aligned click row: sections bold at the left edge, accounts indented under
+            // them, a separator drawn as a line.
+            let (rect, r) = ui.allocate_exact_size(vec2(w.max(80.0), h), Sense::click());
+            if r.hovered() && !sel {
+                ui.painter()
+                    .rect_filled(rect, 2.0, ui.visuals().widgets.hovered.weak_bg_fill);
+            }
+            if matches!(item, Item::Separator { .. }) {
+                ui.painter().hline(
+                    rect.x_range().shrink(4.0),
+                    rect.center().y,
+                    Stroke::new(1.5, ui.visuals().weak_text_color()),
+                );
+            } else {
+                let galley = egui::WidgetText::from(text).into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Truncate),
+                    rect.width() - 8.0,
+                    egui::TextStyle::Body,
+                );
+                let pos = egui::pos2(rect.left() + 4.0, rect.center().y - galley.size().y / 2.0);
+                ui.painter().galley(pos, galley, ui.visuals().text_color());
+            }
             if r.clicked() {
                 m.sel = Some(k);
                 out.events.push(("manage_select", json!({ "item": label })));
@@ -2219,9 +2238,7 @@ fn tree(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out, inline_remove:
                 } else {
                     ""
                 };
-                if inline_remove {
-                    ui.label(RichText::new(tag).small().weak());
-                }
+                ui.label(RichText::new(tag).small().weak());
             }
             if inline_remove && !matches!(item, Item::Account(_)) {
                 let r = ui.small_button("Remove");
@@ -2267,7 +2284,8 @@ fn section_combo(ui: &mut Ui, m: &Manage, k: usize, w: f32, out: &mut Out) {
 
 /// Variant B: tree on the left, details of the selected item on the right.
 fn variant_b(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
-    let h = (ui.available_height() - 44.0).max(120.0);
+    // A fixed height: the resizable window would otherwise grow to fit the whole tree.
+    let h = 430.0;
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(320.0);
