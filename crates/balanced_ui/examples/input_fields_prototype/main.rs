@@ -3205,10 +3205,11 @@ impl Proto {
                 }
                 ui.separator();
                 self.h.dock_spotlight(ui);
+                self.h.dock_prompt(ui);
                 ui.separator();
                 ui.label(
                     RichText::new(
-                        "A B C or ⏴/⏵ variant · 1–0 toggles (while no field has focus) · F2 note · F3 marker · F4 hide dock · F5 spotlight",
+                        "A B C or ⏴/⏵ variant · 1–0 toggles (while no field has focus) · F2 note · F3 marker · F4 hide dock · F5 spotlight · F6 prompt",
                     )
                     .small()
                     .weak(),
@@ -3276,6 +3277,7 @@ impl eframe::App for Proto {
             self.set_dock(!self.dock_open, "key");
         }
         self.dock(ui);
+        self.h.prompt_panel(ui);
         self.main_panel(ui);
         self.h.end_frame(&ctx);
     }
