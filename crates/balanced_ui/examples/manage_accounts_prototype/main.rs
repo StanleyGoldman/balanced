@@ -1,30 +1,32 @@
-//! PROTOTYPE, throwaway: Manage Accounts and the Account bar sections.
+//! PROTOTYPE, throwaway: Manage Accounts and the Account bar.
 //!
 //! Question (ticket #76): how does the Manage Accounts dialog edit, hide and close accounts, and
-//! with "Group accounts by type" off, how do user-named sections and separators look in the
-//! Account bar and how are they arranged?
+//! how are accounts arranged in the Account bar?
 //!
-//! Three variants differ in how Manage Accounts is structured:
-//!   A  Account List table: one table holds the whole layout, details inline on each row
-//!   B  Tree + details: the layout as a tree on the left, the selected item's details on the right
-//!   C  Two tabs: an Accounts tab (details table) and a Layout tab (sections, separators, order)
+//! Decided in the session: no user-named sections or separators in v1. The Account bar uses
+//! Quicken's fixed groups (Banking, Investing, Property & Debt), each split into fixed
+//! sub-groups by account kind, and accounts reorder only within their sub-group.
+//!
+//! Two variants differ in how Manage Accounts is structured:
+//!   A  Account List table: one table, grouped like the Account bar, details inline on each row
+//!   B  List + details: the grouped list on the left, the selected account's details on the right
 //!
 //! Run:
 //!   cargo run -p balanced_ui --example manage_accounts_prototype -- \
-//!     [--variant a|b|c] [--log <dir>/events.jsonl] [--control <dir>/control.txt]
+//!     [--variant a|b] [--log <dir>/events.jsonl] [--control <dir>/control.txt]
 //!
 //! The PROTOTYPE dock on the right holds the variant switcher and toggles; F4 collapses it.
-//! A / B / C or ← / → switch variant, 1–9 and 0 flip toggles, F2 note, F3 marker, F5 spotlight,
-//! F6 prompt panel.
+//! A / B or ← / → switch variant, 1–9 flip toggles, F2 note, F3 marker, F5 spotlight, F6 prompt.
 //!
 //! Control-file verbs (besides the harness's `prompt` and `spotlight`): `variant <key>`,
 //! `toggle <key> [on|off]`, `screenshot [label]`, `dock on|off`, `reload`, `quit`,
 //! `account <index|name>`, `tab <index|name>`, `dialog manage`, `ok`, `cancel`,
-//! `select <account or section name>` (in the open Manage Accounts), `page accounts|layout`
-//! (variant C's tabs), `fold <section>`, `unfold <section>`.
+//! `select <account>` (in the open Manage Accounts), `fold <group|closed>`,
+//! `unfold <group|closed>`.
 //!
 //! The Main window follows the decided shell layout (#15) and the real theme module (#16).
-//! Manage Accounts is a heavy Dialog (#19): title bar, movable, resizable, app-modal, dimming.
+//! Manage Accounts is a heavy Dialog (#19): title bar, movable, resizable, app-modal, dimming,
+//! and never bigger than its window.
 //! Fixed-seed stub data, English literals, en-US dates. None of this is production code.
 
 #![allow(
@@ -55,6 +57,7 @@
     clippy::disallowed_methods,
     clippy::collapsible_if,
     clippy::collapsible_else_if,
+    clippy::type_complexity,
     dead_code,
     missing_debug_implementations,
     unreachable_pub
@@ -86,38 +89,42 @@ use theme::{Theme, ThemeSettings};
 
 const SEED: u64 = 0x00ba_1a9c_ed76;
 
+/// Quicken's fixed Account bar groups. Each has fixed sub-groups, one per account kind, which
+/// the Account bar marks off with a thin line.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Group {
     Banking,
-    Credit,
     Investing,
     PropertyDebt,
 }
 
 impl Group {
-    const ALL: [Self; 4] = [
-        Self::Banking,
-        Self::Credit,
-        Self::Investing,
-        Self::PropertyDebt,
-    ];
+    const ALL: [Self; 3] = [Self::Banking, Self::Investing, Self::PropertyDebt];
 
     fn name(self) -> &'static str {
         match self {
             Self::Banking => "Banking",
-            Self::Credit => "Credit Cards",
             Self::Investing => "Investing",
             Self::PropertyDebt => "Property & Debt",
         }
     }
+
+    fn kinds(self) -> &'static [Kind] {
+        match self {
+            Self::Banking => &[Kind::Checking, Kind::Savings, Kind::Credit],
+            Self::Investing => &[Kind::Investment, Kind::Retirement],
+            Self::PropertyDebt => &[Kind::Asset, Kind::Loan],
+        }
+    }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Kind {
     Checking,
     Savings,
     Credit,
     Investment,
+    Retirement,
     Asset,
     Loan,
 }
@@ -128,17 +135,30 @@ impl Kind {
             Self::Checking => "Checking",
             Self::Savings => "Savings",
             Self::Credit => "Credit card",
-            Self::Investment => "Investment",
+            Self::Investment => "Brokerage",
+            Self::Retirement => "Retirement",
             Self::Asset => "Asset",
             Self::Loan => "Loan",
         }
     }
 
+    /// The sub-group's heading, where one is shown.
+    fn plural(self) -> &'static str {
+        match self {
+            Self::Checking => "Checking",
+            Self::Savings => "Savings",
+            Self::Credit => "Credit cards",
+            Self::Investment => "Investments",
+            Self::Retirement => "Retirement",
+            Self::Asset => "Assets",
+            Self::Loan => "Liabilities",
+        }
+    }
+
     fn group(self) -> Group {
         match self {
-            Self::Checking | Self::Savings => Group::Banking,
-            Self::Credit => Group::Credit,
-            Self::Investment => Group::Investing,
+            Self::Checking | Self::Savings | Self::Credit => Group::Banking,
+            Self::Investment | Self::Retirement => Group::Investing,
             Self::Asset | Self::Loan => Group::PropertyDebt,
         }
     }
@@ -162,9 +182,9 @@ const ACCOUNT_SPECS: &[(&str, Kind, usize, i64)] = &[
     ("Brokerage", Kind::Investment, 1_200, 2_000_000),
     ("HSA", Kind::Investment, 500, 100_000),
     ("529 College Fund", Kind::Investment, 500, 200_000),
-    ("401(k)", Kind::Investment, 900, 3_000_000),
-    ("Roth IRA", Kind::Investment, 600, 800_000),
-    ("Traditional IRA", Kind::Investment, 500, 1_200_000),
+    ("401(k)", Kind::Retirement, 900, 3_000_000),
+    ("Roth IRA", Kind::Retirement, 600, 800_000),
+    ("Traditional IRA", Kind::Retirement, 500, 1_200_000),
     ("House", Kind::Asset, 500, 35_000_000),
     ("Car", Kind::Asset, 500, 2_800_000),
     ("Mortgage", Kind::Loan, 500, -28_000_000),
@@ -172,44 +192,6 @@ const ACCOUNT_SPECS: &[(&str, Kind, usize, i64)] = &[
     ("Student Loan", Kind::Loan, 500, -3_500_000),
     ("Personal Loan", Kind::Loan, 500, -600_000),
     ("Boat Loan", Kind::Loan, 300, -1_500_000),
-];
-
-/// The seeded user layout: `#name` is a section, `---` a separator, anything else an account.
-const SEED_LAYOUT: &[&str] = &[
-    "#Everyday",
-    "Everyday Checking",
-    "Joint Checking",
-    "Bills Checking",
-    "---",
-    "Cash",
-    "Old Checking",
-    "#Savings goals",
-    "High-Yield Savings",
-    "Emergency Fund",
-    "Holiday Savings",
-    "Kids' Savings",
-    "#Credit",
-    "Visa Rewards",
-    "Mastercard",
-    "Store Card",
-    "Travel Card",
-    "#Investments",
-    "Brokerage",
-    "HSA",
-    "529 College Fund",
-    "#Retirement",
-    "401(k)",
-    "Roth IRA",
-    "Traditional IRA",
-    "#Home & loans",
-    "House",
-    "Car",
-    "---",
-    "Mortgage",
-    "Car Loan",
-    "Student Loan",
-    "Personal Loan",
-    "Boat Loan",
 ];
 
 const SPENDING: &[(&str, &str, i64)] = &[
@@ -332,13 +314,13 @@ fn generate() -> Vec<Account> {
                         let (p, c, typical) = SPENDING[rng.below(SPENDING.len() as u64) as usize];
                         (p, c, -rng.around(typical))
                     }
-                    Kind::Investment if roll < 40 => {
+                    Kind::Investment | Kind::Retirement if roll < 40 => {
                         ("Contribution", "[Everyday Checking]", rng.around(50_000))
                     }
-                    Kind::Investment if roll < 75 => {
+                    Kind::Investment | Kind::Retirement if roll < 75 => {
                         ("Market Gain", "Investments:Unrealized", rng.around(60_000))
                     }
-                    Kind::Investment => {
+                    Kind::Investment | Kind::Retirement => {
                         ("Market Loss", "Investments:Unrealized", -rng.around(45_000))
                     }
                     Kind::Asset if roll < if name == "Car" { 15 } else { 60 } => {
@@ -428,159 +410,72 @@ fn fmt_day(days: i64) -> String {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The Account bar layout: a flat list. A section owns the accounts below it up to the next
-// section; a separator is a divider between two accounts.
+// Account order: one list of account ids. Within a sub-group (one kind) accounts show in this
+// order; nothing moves across sub-groups.
 
-#[derive(Clone, PartialEq, Eq)]
-enum Item {
-    Section { id: u64, name: String },
-    Separator { id: u64 },
-    Account(usize),
-}
-
-impl Item {
-    fn is_section(&self) -> bool {
-        matches!(self, Item::Section { .. })
-    }
-}
-
-fn seed_layout(accounts: &[Account]) -> Vec<Item> {
-    let mut id = 0;
-    SEED_LAYOUT
+/// The accounts of `kind` in `order`, filtered by `keep`.
+fn members(
+    order: &[usize],
+    accounts: &[Account],
+    kind: Kind,
+    keep: impl Fn(usize) -> bool,
+) -> Vec<usize> {
+    order
         .iter()
-        .map(|&s| {
-            id += 1;
-            if let Some(name) = s.strip_prefix('#') {
-                Item::Section {
-                    id,
-                    name: name.to_owned(),
-                }
-            } else if s == "---" {
-                Item::Separator { id }
-            } else {
-                Item::Account(accounts.iter().position(|a| a.name == s).unwrap())
-            }
-        })
+        .copied()
+        .filter(|&i| accounts[i].kind == kind && keep(i))
         .collect()
 }
 
-/// The layout range `item` moves as: a section takes its accounts with it.
-fn block(layout: &[Item], i: usize) -> std::ops::Range<usize> {
-    if layout[i].is_section() {
-        let end = layout[i + 1..]
-            .iter()
-            .position(Item::is_section)
-            .map_or(layout.len(), |p| i + 1 + p);
-        i..end
-    } else {
-        i..i + 1
-    }
-}
-
-/// Move the item at `from` (with its block) so it lands before index `to` of the current layout.
-/// A section only lands on a section boundary, so it never splits another section.
-fn move_item(layout: &mut Vec<Item>, from: usize, mut to: usize) -> bool {
-    let b = block(layout, from);
-    if layout[from].is_section() {
-        while to < layout.len() && !layout[to].is_section() && to > 0 {
-            to += 1;
-        }
-    }
-    if to >= b.start && to <= b.end {
+/// Move account `id` so it sits just before (or after) account `target`.
+fn move_in_order(order: &mut Vec<usize>, id: usize, target: usize, before: bool) -> bool {
+    if id == target {
         return false;
     }
-    let moved: Vec<Item> = layout.drain(b.clone()).collect();
-    if to > b.start {
-        to -= b.len();
-    }
-    for (k, it) in moved.into_iter().enumerate() {
-        layout.insert(to + k, it);
-    }
+    let from = order.iter().position(|&i| i == id).unwrap();
+    order.remove(from);
+    let at = order.iter().position(|&i| i == target).unwrap();
+    order.insert(if before { at } else { at + 1 }, id);
     true
 }
 
-/// One step up or down, as the ↑ / ↓ buttons do. An account steps across a section header into
-/// the neighbouring section; a section steps past the whole neighbouring section.
-fn step_item(layout: &mut Vec<Item>, i: usize, up: bool) -> bool {
-    if layout[i].is_section() {
-        if up {
-            let Some(prev) = layout[..i].iter().rposition(Item::is_section) else {
-                return move_item(layout, i, 0);
-            };
-            move_item(layout, i, prev)
-        } else {
-            let b = block(layout, i);
-            if b.end >= layout.len() {
-                return false;
-            }
-            let next = block(layout, b.end);
-            move_item(layout, i, next.end)
-        }
-    } else if up {
-        i > 0 && {
-            layout.swap(i, i - 1);
-            true
-        }
-    } else {
-        i + 1 < layout.len() && {
-            layout.swap(i, i + 1);
-            true
-        }
-    }
-}
-
-/// The section id an account at layout index `i` belongs to.
-fn section_of(layout: &[Item], i: usize) -> Option<u64> {
-    layout[..i].iter().rev().find_map(|it| match it {
-        Item::Section { id, .. } => Some(*id),
-        _ => None,
-    })
-}
-
-/// Move the account at `from` to the end of section `to` (`None`: before the first section).
-fn move_to_section(layout: &mut Vec<Item>, from: usize, to: Option<u64>) {
-    let item = layout.remove(from);
-    let at = match to {
-        None => layout
-            .iter()
-            .position(Item::is_section)
-            .unwrap_or(layout.len()),
-        Some(sid) => {
-            let start = layout
-                .iter()
-                .position(|it| matches!(it, Item::Section { id, .. } if *id == sid))
-                .unwrap();
-            block(layout, start).end
-        }
+/// Swap account `id` with its neighbour of the same kind among `visible`, as ↑ / ↓ do.
+fn step_in_order(order: &mut [usize], visible: &[usize], id: usize, up: bool) -> bool {
+    let Some(p) = visible.iter().position(|&i| i == id) else {
+        return false;
     };
-    layout.insert(at, item);
+    let other = if up {
+        p.checked_sub(1).map(|q| visible[q])
+    } else {
+        visible.get(p + 1).copied()
+    };
+    let Some(other) = other else { return false };
+    let a = order.iter().position(|&i| i == id).unwrap();
+    let b = order.iter().position(|&i| i == other).unwrap();
+    order.swap(a, b);
+    true
 }
 
-fn sections(layout: &[Item]) -> Vec<(u64, String)> {
-    layout
-        .iter()
-        .filter_map(|it| match it {
-            Item::Section { id, name } => Some((*id, name.clone())),
-            _ => None,
-        })
-        .collect()
-}
-
-/// Dragging a layout item, in the Account bar or in Manage Accounts.
+/// Dragging an account, in the Account bar or in Manage Accounts.
 #[derive(Clone)]
 struct Drag {
-    from: usize,
+    id: usize,
+    kind: Kind,
     label: String,
     place: &'static str,
 }
 
-/// Call after drawing a row at layout index `index` covering `rect`: while a layout item from
-/// `place` is dragged over the row, mark where it would land; on release, report the move.
-fn drop_zone(ui: &Ui, place: &str, rect: Rect, index: usize, out: &mut Option<(usize, usize)>) {
+/// A drop: (dragged account, target account, before the target).
+type Drop = Option<(usize, usize, bool)>;
+
+/// Call after drawing account `target`'s row covering `rect`: while an account of the same kind
+/// from `place` is dragged over it, mark where it would land; on release, report the drop. A drag
+/// over another sub-group shows nothing, because accounts move only within their sub-group.
+fn drop_zone(ui: &Ui, place: &str, rect: Rect, target: usize, kind: Kind, out: &mut Drop) {
     let Some(p) = DragAndDrop::payload::<Drag>(ui.ctx()) else {
         return;
     };
-    if p.place != place {
+    if p.place != place || p.kind != kind {
         return;
     }
     let Some(pos) = ui.ctx().pointer_interact_pos() else {
@@ -600,17 +495,17 @@ fn drop_zone(ui: &Ui, place: &str, rect: Rect, index: usize, out: &mut Option<(u
         Stroke::new(2.0, ui.visuals().selection.stroke.color),
     );
     if ui.input(|i| i.pointer.any_released()) {
-        *out = Some((p.from, if before { index } else { index + 1 }));
+        *out = Some((p.id, target, before));
     }
 }
 
-/// A grip that starts a drag of layout item `from`, and the ghost that follows the pointer.
-fn start_drag(r: &egui::Response, from: usize, label: &str, place: &'static str) {
+fn start_drag(r: &egui::Response, id: usize, kind: Kind, label: &str, place: &'static str) {
     if r.drag_started() {
         DragAndDrop::set_payload(
             &r.ctx,
             Drag {
-                from,
+                id,
+                kind,
                 label: label.to_owned(),
                 place,
             },
@@ -636,6 +531,52 @@ fn drag_ghost(ctx: &Context) {
     }
 }
 
+#[derive(Clone, Copy)]
+enum Arrow {
+    Up,
+    Down,
+    Right,
+}
+
+/// A small filled triangle; the theme's font has no arrow glyphs.
+fn paint_arrow(painter: &egui::Painter, c: egui::Pos2, dir: Arrow, color: Color32) {
+    let s = 4.0;
+    let pts = match dir {
+        Arrow::Up => vec![
+            c + vec2(-s, s * 0.6),
+            c + vec2(s, s * 0.6),
+            c + vec2(0.0, -s * 0.8),
+        ],
+        Arrow::Down => vec![
+            c + vec2(-s, -s * 0.6),
+            c + vec2(s, -s * 0.6),
+            c + vec2(0.0, s * 0.8),
+        ],
+        Arrow::Right => vec![
+            c + vec2(-s * 0.6, -s),
+            c + vec2(-s * 0.6, s),
+            c + vec2(s * 0.8, 0.0),
+        ],
+    };
+    painter.add(Shape::convex_polygon(pts, color, Stroke::NONE));
+}
+
+/// Six dots, the drag grip.
+fn paint_grip(painter: &egui::Painter, c: egui::Pos2, color: Color32) {
+    for dx in [-2.5, 2.5] {
+        for dy in [-5.0, 0.0, 5.0] {
+            painter.circle_filled(c + vec2(dx, dy), 1.3, color);
+        }
+    }
+}
+
+fn arrow_button(ui: &mut Ui, dir: Arrow) -> egui::Response {
+    let r = ui.add(Button::new("").min_size(vec2(18.0, 18.0)));
+    let c = ui.visuals().widgets.style(&r).fg_stroke.color;
+    paint_arrow(ui.painter(), r.rect.center(), dir, c);
+    r
+}
+
 // ---------------------------------------------------------------------------------------------
 // Variants and toggles
 
@@ -643,19 +584,17 @@ fn drag_ghost(ctx: &Context) {
 enum Variant {
     A,
     B,
-    C,
 }
 
-const VARIANT_KEYS: [(Key, &str); 3] = [(Key::A, "A"), (Key::B, "B"), (Key::C, "C")];
+const VARIANT_KEYS: [(Key, &str); 2] = [(Key::A, "A"), (Key::B, "B")];
 
 impl Variant {
-    const ALL: [Self; 3] = [Self::A, Self::B, Self::C];
+    const ALL: [Self; 2] = [Self::A, Self::B];
 
     fn key(self) -> &'static str {
         match self {
             Self::A => "a",
             Self::B => "b",
-            Self::C => "c",
         }
     }
 
@@ -668,8 +607,7 @@ impl Variant {
     fn label(self) -> &'static str {
         match self {
             Self::A => "A · Account List table",
-            Self::B => "B · Tree + details",
-            Self::C => "C · Two tabs: Accounts | Layout",
+            Self::B => "B · List + details",
         }
     }
 
@@ -682,10 +620,9 @@ impl Variant {
 
 #[derive(Clone, Copy)]
 struct Opts {
-    group_by_type: bool,
-    section_totals: bool,
+    group_totals: bool,
     fold: bool,
-    sep_line: bool,
+    subgroup_lines: bool,
     closed_section: bool,
     hidden_in_nw: bool,
     bar_rearrange: bool,
@@ -697,10 +634,9 @@ struct Opts {
 impl Opts {
     fn get_mut(&mut self, key: &str) -> Option<&mut bool> {
         Some(match key {
-            "group_by_type" => &mut self.group_by_type,
-            "section_totals" => &mut self.section_totals,
+            "group_totals" => &mut self.group_totals,
             "fold" => &mut self.fold,
-            "sep_line" => &mut self.sep_line,
+            "subgroup_lines" => &mut self.subgroup_lines,
             "closed_section" => &mut self.closed_section,
             "hidden_in_nw" => &mut self.hidden_in_nw,
             "bar_rearrange" => &mut self.bar_rearrange,
@@ -715,16 +651,19 @@ impl Opts {
 /// (key, label, applies to)
 const TOGGLES: &[(&str, &str, &str)] = &[
     (
-        "group_by_type",
-        "Group accounts by type (the Preference)",
+        "group_totals",
+        "Group totals in the Account bar (a Preference, default off)",
         "all",
     ),
-    ("section_totals", "Section totals in the Account bar", "all"),
-    ("fold", "Sections fold (arrow on the header)", "all"),
-    ("sep_line", "Separator is a line (off: a blank gap)", "all"),
+    ("fold", "Groups fold (arrow on the header)", "all"),
+    (
+        "subgroup_lines",
+        "Sub-groups split by a line (off: small sub-group headings)",
+        "all",
+    ),
     (
         "closed_section",
-        "Closed accounts in a folded Closed section (off: gone from the bar)",
+        "Closed accounts in a folded Closed group (off: gone from the bar)",
         "all",
     ),
     ("hidden_in_nw", "Hidden accounts count in Net Worth", "all"),
@@ -735,12 +674,12 @@ const TOGGLES: &[(&str, &str, &str)] = &[
     ),
     (
         "dnd",
-        "Drag and drop in Manage Accounts (off: up / down buttons)",
+        "Drag in Manage Accounts (off: up / down buttons)",
         "all",
     ),
     (
         "caps",
-        "Section header in small caps (off: bold over a rule)",
+        "Group header in small caps (off: bold over a rule)",
         "all",
     ),
     (
@@ -750,7 +689,7 @@ const TOGGLES: &[(&str, &str, &str)] = &[
     ),
 ];
 
-const TOGGLE_KEYS: [(Key, &str); 10] = [
+const TOGGLE_KEYS: [(Key, &str); 9] = [
     (Key::Num1, "1"),
     (Key::Num2, "2"),
     (Key::Num3, "3"),
@@ -760,11 +699,10 @@ const TOGGLE_KEYS: [(Key, &str); 10] = [
     (Key::Num7, "7"),
     (Key::Num8, "8"),
     (Key::Num9, "9"),
-    (Key::Num0, "0"),
 ];
 
 // ---------------------------------------------------------------------------------------------
-// Manage Accounts: a draft of the accounts' editable fields and the layout
+// Manage Accounts: a draft of the accounts' editable fields and their order
 
 #[derive(Clone)]
 struct AcctEdit {
@@ -783,15 +721,10 @@ enum Confirm {
 
 struct Manage {
     accts: Vec<AcctEdit>,
-    layout: Vec<Item>,
-    /// Selected layout index.
+    order: Vec<usize>,
+    /// Selected account id.
     sel: Option<usize>,
-    /// Variant C's page: false = Accounts, true = Layout.
-    layout_page: bool,
-    next_id: u64,
     confirm: Option<Confirm>,
-    /// A section whose name field should take focus next frame.
-    focus_section: Option<u64>,
     fresh: bool,
     opener: Option<Id>,
 }
@@ -818,15 +751,15 @@ const ACCOUNTS_TAB: usize = 1;
 struct Proto {
     h: Harness,
     accounts: Vec<Account>,
-    layout: Vec<Item>,
+    order: Vec<usize>,
     selected: usize,
     selected_row: Option<usize>,
     variant: Variant,
     o: Opts,
     manage: Option<Manage>,
     forced: Option<Forced>,
-    folded: BTreeSet<u64>,
-    closed_folded: bool,
+    /// Folded groups by name, plus "Closed".
+    folded: BTreeSet<&'static str>,
     tab: usize,
     theme: Theme,
     dock_open: bool,
@@ -844,19 +777,18 @@ impl Proto {
         let mut h = Harness::new(args);
         h.event("variant", json!({ "to": variant.key(), "via": "start" }));
         let accounts = generate();
-        let layout = seed_layout(&accounts);
+        let order = (0..accounts.len()).collect();
         Self {
             h,
             accounts,
-            layout,
+            order,
             selected: 0,
             selected_row: None,
             variant,
             o: Opts {
-                group_by_type: false,
-                section_totals: true,
+                group_totals: false,
                 fold: true,
-                sep_line: true,
+                subgroup_lines: true,
                 closed_section: true,
                 hidden_in_nw: true,
                 bar_rearrange: false,
@@ -866,8 +798,7 @@ impl Proto {
             },
             manage: None,
             forced: None,
-            folded: BTreeSet::new(),
-            closed_folded: true,
+            folded: BTreeSet::from(["Closed"]),
             tab: ACCOUNTS_TAB,
             theme: Theme::new(ThemeSettings::default()),
             dock_open: true,
@@ -955,25 +886,11 @@ impl Proto {
                 deleted: a.deleted,
             })
             .collect();
-        let next_id = self
-            .layout
-            .iter()
-            .filter_map(|it| match it {
-                Item::Section { id, .. } | Item::Separator { id } => Some(*id),
-                _ => None,
-            })
-            .max()
-            .unwrap_or(0)
-            + 1;
-        let sel = select.and_then(|a| self.layout.iter().position(|it| *it == Item::Account(a)));
         self.manage = Some(Manage {
             accts,
-            layout: self.layout.clone(),
-            sel,
-            layout_page: false,
-            next_id,
+            order: self.order.clone(),
+            sel: select,
             confirm: None,
-            focus_section: None,
             fresh: true,
             opener,
         });
@@ -983,7 +900,7 @@ impl Proto {
         );
     }
 
-    /// OK in Manage Accounts: the draft replaces the accounts' fields and the layout.
+    /// OK in Manage Accounts: the draft replaces the accounts' fields and their order.
     fn apply_manage(&mut self, m: Manage) {
         let mut renamed = 0;
         let mut hidden = 0;
@@ -1010,13 +927,6 @@ impl Proto {
             a.closed = e.closed;
             a.deleted = e.deleted;
         }
-        let layout: Vec<Item> = m
-            .layout
-            .into_iter()
-            .filter(|it| !matches!(it, Item::Account(i) if self.accounts[*i].deleted))
-            .collect();
-        let layout_changed = layout != self.layout;
-        self.layout = layout;
         if renamed + hidden + closed + deleted > 0 {
             self.emit(
                 &format!(
@@ -1025,8 +935,9 @@ impl Proto {
                 "Manage Accounts OK",
             );
         }
-        if layout_changed {
-            self.emit("DomainCommand::SetAccountBarLayout", "Manage Accounts OK");
+        if m.order != self.order {
+            self.order = m.order;
+            self.emit("DomainCommand::ReorderAccounts", "Manage Accounts OK");
         }
         if self.accounts[self.selected].deleted {
             self.selected = self.accounts.iter().position(|a| !a.deleted).unwrap_or(0);
@@ -1050,8 +961,7 @@ impl Proto {
         }
     }
 
-    /// A new stub account from "+ Add Account": placed after the last account of the same type in
-    /// the layout, so it lands beside its siblings.
+    /// A new stub savings account from "+ Add Account": it lands at the end of its sub-group.
     fn add_account(&mut self) {
         self.new_count += 1;
         let name = format!("New Savings {}", self.new_count);
@@ -1071,21 +981,12 @@ impl Proto {
             closed: false,
             deleted: false,
         });
-        let at = self
-            .layout
-            .iter()
-            .rposition(
-                |it| matches!(it, Item::Account(i) if self.accounts[*i].kind == Kind::Savings),
-            )
-            .map_or(self.layout.len(), |p| p + 1);
-        self.layout.insert(at, Item::Account(idx));
+        self.order.push(idx);
         self.selected = idx;
         self.emit(
             &format!("DomainCommand::CreateAccount({name})"),
             "account bar button",
         );
-        self.h
-            .event("account_added", json!({ "name": name, "layout_index": at }));
     }
 
     fn apply_control(&mut self, ctx: &Context, cmd: &str) {
@@ -1132,50 +1033,30 @@ impl Proto {
             "dialog" if rest == "manage" => self.open_manage(None, None, "control"),
             "ok" => self.forced = Some(Forced::Ok),
             "cancel" => self.forced = Some(Forced::Cancel),
-            "select" => {
-                let needle = rest.to_lowercase();
-                let accounts = &self.accounts;
-                if let Some(m) = &mut self.manage {
-                    let found = m.layout.iter().position(|it| match it {
-                        Item::Section { name, .. } => name.to_lowercase().contains(&needle),
-                        Item::Account(i) => accounts[*i].name.to_lowercase().contains(&needle),
-                        Item::Separator { .. } => false,
-                    });
-                    match found {
-                        Some(i) => m.sel = Some(i),
-                        None => bad(self),
-                    }
-                } else {
-                    bad(self);
-                }
-            }
-            "page" => match &mut self.manage {
-                Some(m) => m.layout_page = rest == "layout",
-                None => bad(self),
+            "select" => match (self.account_index(rest), self.manage.is_some()) {
+                (Some(i), true) => self.manage.as_mut().unwrap().sel = Some(i),
+                _ => bad(self),
             },
             "fold" | "unfold" => {
                 let needle = rest.to_lowercase();
-                if needle == "closed" {
-                    self.closed_folded = verb == "fold";
-                } else {
-                    match sections(&self.layout)
-                        .into_iter()
-                        .find(|(_, n)| n.to_lowercase().contains(&needle))
-                    {
-                        Some((id, _)) => {
-                            if verb == "fold" {
-                                self.folded.insert(id);
-                            } else {
-                                self.folded.remove(&id);
-                            }
-                        }
-                        None => bad(self),
+                let name = Group::ALL
+                    .iter()
+                    .map(|g| g.name())
+                    .chain(["Closed"])
+                    .find(|n| n.to_lowercase().contains(&needle));
+                match name {
+                    Some(n) if verb == "fold" => {
+                        self.folded.insert(n);
                     }
+                    Some(n) => {
+                        self.folded.remove(n);
+                    }
+                    None => bad(self),
                 }
             }
             "reload" => {
                 self.accounts = generate();
-                self.layout = seed_layout(&self.accounts);
+                self.order = (0..self.accounts.len()).collect();
                 self.manage = None;
                 self.h.event("reload", json!({ "seed": SEED }));
             }
@@ -1303,25 +1184,26 @@ impl Proto {
         });
     }
 
-    fn section_header(
+    /// A group header: fold arrow, name, and the group total when that Preference is on.
+    fn group_header(
         &mut self,
         ui: &mut Ui,
-        id: Option<u64>,
-        name: &str,
+        name: &'static str,
         total: i64,
         count: usize,
-        folded: bool,
+        foldable: bool,
     ) -> egui::Response {
         let o = self.o;
+        let folded = foldable && self.folded.contains(name);
         let h = self.theme.row_height() + 4.0;
         let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::click());
         let v = ui.visuals().clone();
-        if r.hovered() && o.fold {
+        if r.hovered() && foldable {
             ui.painter()
                 .rect_filled(rect, 2.0, v.widgets.hovered.weak_bg_fill);
         }
         let mut x = rect.left() + 4.0;
-        if o.fold {
+        if foldable {
             paint_arrow(
                 ui.painter(),
                 egui::pos2(x + 4.0, rect.center().y),
@@ -1355,7 +1237,7 @@ impl Proto {
             font.clone(),
             color,
         );
-        if o.section_totals {
+        if o.group_totals {
             ui.painter().text(
                 rect.right_center() - vec2(12.0, 0.0),
                 Align2::RIGHT_CENTER,
@@ -1371,15 +1253,27 @@ impl Proto {
                 Stroke::new(1.0, v.widgets.noninteractive.bg_stroke.color),
             );
         }
-        self.h.track(
-            &r,
-            format!("account bar: section header {}", id.map_or(name, |_| name)),
-        );
+        self.h
+            .track(&r, format!("account bar: group header {name}"));
+        if r.clicked() && foldable {
+            let now = if self.folded.remove(name) {
+                false
+            } else {
+                self.folded.insert(name);
+                true
+            };
+            self.h
+                .event("group_fold", json!({ "group": name, "folded": now }));
+        }
         r
     }
 
-    fn separator(&self, ui: &mut Ui) {
-        if self.o.sep_line {
+    /// Between two sub-groups: a thin line, or with toggle 3 off a small heading.
+    fn subgroup_mark(&self, ui: &mut Ui, kind: Kind, first: bool) {
+        if self.o.subgroup_lines {
+            if first {
+                return;
+            }
             ui.add_space(3.0);
             let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
             ui.painter().hline(
@@ -1389,8 +1283,22 @@ impl Proto {
             );
             ui.add_space(3.0);
         } else {
-            ui.add_space(9.0);
+            ui.add_space(if first { 0.0 } else { 4.0 });
+            ui.horizontal(|ui| {
+                ui.add_space(14.0);
+                ui.label(
+                    RichText::new(kind.plural())
+                        .size(11.0)
+                        .italics()
+                        .color(ui.visuals().weak_text_color()),
+                );
+            });
         }
+    }
+
+    fn visible_in_bar(&self, i: usize) -> bool {
+        let a = &self.accounts[i];
+        !a.deleted && !a.hidden && !a.closed
     }
 
     fn account_bar(&mut self, ui: &mut Ui) {
@@ -1408,28 +1316,57 @@ impl Proto {
         });
         self.h.region(footer.response.rect, "account bar footer");
         let mut pick: Option<(usize, &'static str)> = None;
-        let mut moved = None;
+        let mut dropped: Drop = None;
         let out = egui::ScrollArea::vertical().show(ui, |ui| {
-            if self.o.group_by_type {
-                self.bar_by_type(ui, &mut pick);
-            } else {
-                self.bar_by_layout(ui, &mut pick, &mut moved);
+            for group in Group::ALL {
+                let subs: Vec<(Kind, Vec<usize>)> = group
+                    .kinds()
+                    .iter()
+                    .map(|&k| {
+                        (
+                            k,
+                            members(&self.order, &self.accounts, k, |i| self.visible_in_bar(i)),
+                        )
+                    })
+                    .filter(|(_, ids)| !ids.is_empty())
+                    .collect();
+                let count: usize = subs.iter().map(|(_, ids)| ids.len()).sum();
+                if count == 0 {
+                    continue;
+                }
+                let total = subs
+                    .iter()
+                    .flat_map(|(_, ids)| ids)
+                    .map(|&i| self.accounts[i].balance)
+                    .sum();
+                ui.add_space(2.0);
+                self.group_header(ui, group.name(), total, count, self.o.fold);
+                if self.o.fold && self.folded.contains(group.name()) {
+                    continue;
+                }
+                for (n, (kind, ids)) in subs.into_iter().enumerate() {
+                    self.subgroup_mark(ui, kind, n == 0);
+                    for i in ids {
+                        let r = self.bar_account(ui, i, &mut pick);
+                        drop_zone(ui, "bar", r.rect, i, kind, &mut dropped);
+                    }
+                }
             }
-            self.closed_section(ui, &mut pick);
+            self.closed_group(ui, &mut pick);
         });
         self.h
             .scroll("account bar", out.state.offset.y, self.theme.row_height());
         if add {
             self.add_account();
         }
-        if let Some((from, to)) = moved
-            && move_item(&mut self.layout, from, to)
+        if let Some((id, target, before)) = dropped
+            && move_in_order(&mut self.order, id, target, before)
         {
             self.h.event(
-                "layout_move",
-                json!({ "from": from, "to": to, "how": "drag", "where": "account bar" }),
+                "reorder",
+                json!({ "account": self.accounts[id].name, "target": self.accounts[target].name, "before": before, "how": "drag", "where": "account bar" }),
             );
-            self.emit("DomainCommand::SetAccountBarLayout", "account bar drag");
+            self.emit("DomainCommand::ReorderAccounts", "account bar drag");
         }
         let Some((i, what)) = pick else { return };
         match what {
@@ -1451,12 +1388,12 @@ impl Proto {
         &mut self,
         ui: &mut Ui,
         i: usize,
-        layout_index: Option<usize>,
         pick: &mut Option<(usize, &'static str)>,
     ) -> egui::Response {
-        let drag = layout_index.is_some() && self.o.bar_rearrange && !self.o.group_by_type;
+        let drag = self.o.bar_rearrange && !self.accounts[i].closed;
         let a = &self.accounts[i];
         let name = a.name.clone();
+        let kind = a.kind;
         let r = account_row(
             ui,
             self.selected == i,
@@ -1467,10 +1404,8 @@ impl Proto {
             drag,
         );
         self.h.track(&r, format!("account bar: {name}"));
-        if let Some(li) = layout_index
-            && drag
-        {
-            start_drag(&r, li, &name, "bar");
+        if drag {
+            start_drag(&r, i, kind, &name, "bar");
         }
         if r.clicked() {
             *pick = Some((i, "select"));
@@ -1493,105 +1428,14 @@ impl Proto {
         r
     }
 
-    fn visible_in_bar(&self, i: usize) -> bool {
-        let a = &self.accounts[i];
-        !a.deleted && !a.hidden && !a.closed
-    }
-
-    fn bar_by_type(&mut self, ui: &mut Ui, pick: &mut Option<(usize, &'static str)>) {
-        for group in Group::ALL {
-            let members: Vec<usize> = (0..self.accounts.len())
-                .filter(|&i| self.accounts[i].kind.group() == group && self.visible_in_bar(i))
-                .collect();
-            if members.is_empty() {
-                continue;
-            }
-            let total = members.iter().map(|&i| self.accounts[i].balance).sum();
-            let gid = 1_000_000 + group as u64;
-            let folded = self.o.fold && self.folded.contains(&gid);
-            let r = self.section_header(ui, Some(gid), group.name(), total, members.len(), folded);
-            if r.clicked() && self.o.fold {
-                self.toggle_fold(gid, group.name());
-            }
-            if folded {
-                continue;
-            }
-            for i in members {
-                self.bar_account(ui, i, None, pick);
-            }
-        }
-    }
-
-    fn toggle_fold(&mut self, id: u64, name: &str) {
-        let folded = if self.folded.remove(&id) {
-            false
-        } else {
-            self.folded.insert(id);
-            true
-        };
-        self.h
-            .event("section_fold", json!({ "section": name, "folded": folded }));
-    }
-
-    fn bar_by_layout(
-        &mut self,
-        ui: &mut Ui,
-        pick: &mut Option<(usize, &'static str)>,
-        moved: &mut Option<(usize, usize)>,
-    ) {
-        let layout = self.layout.clone();
-        let mut folded_now = false;
-        let mut k = 0;
-        while k < layout.len() {
-            match &layout[k] {
-                Item::Section { id, name } => {
-                    let b = block(&layout, k);
-                    let members: Vec<usize> = layout[b.clone()]
-                        .iter()
-                        .filter_map(|it| match it {
-                            Item::Account(i) if self.visible_in_bar(*i) => Some(*i),
-                            _ => None,
-                        })
-                        .collect();
-                    let total = members.iter().map(|&i| self.accounts[i].balance).sum();
-                    folded_now = self.o.fold && self.folded.contains(id);
-                    ui.add_space(2.0);
-                    let r =
-                        self.section_header(ui, Some(*id), name, total, members.len(), folded_now);
-                    if self.o.bar_rearrange {
-                        let r = r.interact(Sense::click_and_drag());
-                        start_drag(&r, k, name, "bar");
-                        drop_zone(ui, "bar", r.rect, k, moved);
-                    }
-                    if r.clicked() && self.o.fold {
-                        self.toggle_fold(*id, name);
-                    }
-                }
-                Item::Separator { .. } => {
-                    if !folded_now {
-                        let top = ui.cursor().top();
-                        self.separator(ui);
-                        let rect =
-                            Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
-                        drop_zone(ui, "bar", rect, k, moved);
-                    }
-                }
-                Item::Account(i) => {
-                    if !folded_now && self.visible_in_bar(*i) {
-                        let r = self.bar_account(ui, *i, Some(k), pick);
-                        drop_zone(ui, "bar", r.rect, k, moved);
-                    }
-                }
-            }
-            k += 1;
-        }
-    }
-
-    fn closed_section(&mut self, ui: &mut Ui, pick: &mut Option<(usize, &'static str)>) {
+    fn closed_group(&mut self, ui: &mut Ui, pick: &mut Option<(usize, &'static str)>) {
         if !self.o.closed_section {
             return;
         }
-        let closed: Vec<usize> = (0..self.accounts.len())
+        let closed: Vec<usize> = self
+            .order
+            .iter()
+            .copied()
             .filter(|&i| {
                 let a = &self.accounts[i];
                 !a.deleted && !a.hidden && a.closed
@@ -1602,21 +1446,11 @@ impl Proto {
         }
         ui.add_space(6.0);
         let total = closed.iter().map(|&i| self.accounts[i].balance).sum();
-        // The Closed section always folds, whatever the fold toggle says.
-        let saved = self.o.fold;
-        self.o.fold = true;
-        let r = self.section_header(ui, None, "Closed", total, closed.len(), self.closed_folded);
-        self.o.fold = saved;
-        if r.clicked() {
-            self.closed_folded = !self.closed_folded;
-            self.h.event(
-                "section_fold",
-                json!({ "section": "Closed", "folded": self.closed_folded }),
-            );
-        }
-        if !self.closed_folded {
+        // The Closed group always folds, whatever toggle 2 says.
+        self.group_header(ui, "Closed", total, closed.len(), true);
+        if !self.folded.contains("Closed") {
             for i in closed {
-                self.bar_account(ui, i, None, pick);
+                self.bar_account(ui, i, pick);
             }
         }
     }
@@ -1780,15 +1614,11 @@ fn account_row(
 // ---------------------------------------------------------------------------------------------
 // Manage Accounts
 
-/// What a Manage Accounts frame asks the host to do once the draft is released.
+/// What a Manage Accounts frame asks for once the draft is released.
 #[derive(Default)]
 struct Out {
-    moved: Option<(usize, usize, &'static str)>,
+    dropped: Drop,
     step: Option<(usize, bool)>,
-    to_section: Option<(usize, Option<u64>)>,
-    remove: Option<usize>,
-    add_section: bool,
-    add_separator: bool,
     confirm: Option<Confirm>,
     events: Vec<(&'static str, serde_json::Value)>,
     tracks: Vec<(egui::Response, String)>,
@@ -1797,10 +1627,8 @@ struct Out {
 const W_HANDLE: f32 = 46.0;
 const W_NAME: f32 = 230.0;
 const W_TYPE: f32 = 86.0;
-const W_SECTION: f32 = 130.0;
 const W_BAL: f32 = 112.0;
 const W_FLAG: f32 = 58.0;
-const W_ACT: f32 = 76.0;
 
 struct Mcx<'a> {
     accounts: &'a [Account],
@@ -1810,24 +1638,26 @@ struct Mcx<'a> {
     list_h: f32,
 }
 
-impl Mcx<'_> {
-    fn label(&self, m: &Manage, it: &Item) -> String {
-        match it {
-            Item::Section { name, .. } => name.clone(),
-            Item::Separator { .. } => "separator".to_owned(),
-            Item::Account(i) => m.accts[*i].name.clone(),
-        }
-    }
-
-    fn section_total(&self, m: &Manage, k: usize) -> i64 {
-        m.layout[block(&m.layout, k)]
-            .iter()
-            .filter_map(|it| match it {
-                Item::Account(i) if !m.accts[*i].deleted => Some(self.accounts[*i].balance),
-                _ => None,
-            })
-            .sum()
-    }
+/// Every account the Dialog lists, grouped like the Account bar: deleted-in-draft accounts stay
+/// (struck through) until OK; hidden and closed ones stay in their sub-group.
+fn grouped(cx: &Mcx<'_>, m: &Manage) -> Vec<(Group, Vec<(Kind, Vec<usize>)>)> {
+    Group::ALL
+        .iter()
+        .map(|&g| {
+            let subs = g
+                .kinds()
+                .iter()
+                .map(|&k| {
+                    (
+                        k,
+                        members(&m.order, cx.accounts, k, |i| !cx.accounts[i].deleted),
+                    )
+                })
+                .filter(|(_, ids)| !ids.is_empty())
+                .collect();
+            (g, subs)
+        })
+        .collect()
 }
 
 /// A row with a stripe/selection background painted behind its widgets.
@@ -1852,9 +1682,26 @@ fn table_row(ui: &mut Ui, row_h: f32, k: usize, selected: bool, add: impl FnOnce
     rect
 }
 
-/// The grip or the ↑ / ↓ buttons that move layout item `k`.
-fn handle(ui: &mut Ui, cx: &Mcx<'_>, m: &Manage, k: usize, out: &mut Out) {
-    let label = cx.label(m, &m.layout[k]);
+fn group_row(ui: &mut Ui, name: &str) {
+    ui.add_space(6.0);
+    ui.label(RichText::new(name).strong().size(14.0));
+}
+
+fn subgroup_row(ui: &mut Ui, kind: Kind) {
+    ui.horizontal(|ui| {
+        ui.add_space(W_HANDLE);
+        ui.label(
+            RichText::new(kind.plural())
+                .italics()
+                .color(ui.visuals().weak_text_color()),
+        );
+    });
+}
+
+/// The grip or the ↑ / ↓ buttons that move account `i` within its sub-group.
+fn handle(ui: &mut Ui, cx: &Mcx<'_>, m: &Manage, i: usize, out: &mut Out) {
+    let label = m.accts[i].name.clone();
+    let kind = cx.accounts[i].kind;
     ui.allocate_ui_with_layout(
         vec2(W_HANDLE, cx.row_h),
         Layout::left_to_right(Align::Center),
@@ -1868,76 +1715,21 @@ fn handle(ui: &mut Ui, cx: &Mcx<'_>, m: &Manage, k: usize, out: &mut Out) {
                     ui.visuals().weak_text_color()
                 };
                 paint_grip(ui.painter(), rect.center(), c);
-                start_drag(&r, k, &label, "manage");
+                start_drag(&r, i, kind, &label, "manage");
                 out.tracks.push((r, format!("manage: grip {label}")));
             } else {
                 let up = arrow_button(ui, Arrow::Up);
                 if up.clicked() {
-                    out.step = Some((k, true));
+                    out.step = Some((i, true));
                 }
                 out.tracks.push((up, format!("manage: up {label}")));
                 let down = arrow_button(ui, Arrow::Down);
                 if down.clicked() {
-                    out.step = Some((k, false));
+                    out.step = Some((i, false));
                 }
                 out.tracks.push((down, format!("manage: down {label}")));
             }
         },
-    );
-}
-
-#[derive(Clone, Copy)]
-enum Arrow {
-    Up,
-    Down,
-    Right,
-}
-
-/// A small filled triangle; the theme's font has no arrow glyphs.
-fn paint_arrow(painter: &egui::Painter, c: egui::Pos2, dir: Arrow, color: Color32) {
-    let s = 4.0;
-    let pts = match dir {
-        Arrow::Up => vec![
-            c + vec2(-s, s * 0.6),
-            c + vec2(s, s * 0.6),
-            c + vec2(0.0, -s * 0.8),
-        ],
-        Arrow::Down => vec![
-            c + vec2(-s, -s * 0.6),
-            c + vec2(s, -s * 0.6),
-            c + vec2(0.0, s * 0.8),
-        ],
-        Arrow::Right => vec![
-            c + vec2(-s * 0.6, -s),
-            c + vec2(-s * 0.6, s),
-            c + vec2(s * 0.8, 0.0),
-        ],
-    };
-    painter.add(Shape::convex_polygon(pts, color, Stroke::NONE));
-}
-
-/// Six dots, the drag grip.
-fn paint_grip(painter: &egui::Painter, c: egui::Pos2, color: Color32) {
-    for dx in [-2.5, 2.5] {
-        for dy in [-5.0, 0.0, 5.0] {
-            painter.circle_filled(c + vec2(dx, dy), 1.3, color);
-        }
-    }
-}
-
-fn arrow_button(ui: &mut Ui, dir: Arrow) -> egui::Response {
-    let r = ui.add(Button::new("").min_size(vec2(18.0, 18.0)));
-    let c = ui.visuals().widgets.style(&r).fg_stroke.color;
-    paint_arrow(ui.painter(), r.rect.center(), dir, c);
-    r
-}
-
-fn separator_line(ui: &mut Ui, w: f32) {
-    let (rect, _) = ui.allocate_exact_size(vec2(w, 10.0), Sense::hover());
-    ui.painter().hline(
-        rect.x_range(),
-        rect.center().y,
-        Stroke::new(1.5, ui.visuals().weak_text_color()),
     );
 }
 
@@ -2011,39 +1803,21 @@ fn delete_button(ui: &mut Ui, m: &Manage, i: usize, out: &mut Out) {
         .push((r, format!("manage: delete {}", m.accts[i].name)));
 }
 
-fn section_name_edit(ui: &mut Ui, m: &mut Manage, k: usize, w: f32, out: &mut Out) {
-    let focus = m.focus_section;
-    if let Item::Section { id, name } = &mut m.layout[k] {
-        let r = ui.add(
-            egui::TextEdit::singleline(name)
-                .desired_width(w)
-                .font(egui::TextStyle::Body)
-                .text_color(ui.visuals().strong_text_color()),
-        );
-        if focus == Some(*id) {
-            r.request_focus();
-            m.focus_section = None;
-        }
-        if r.changed() {
-            out.events.push((
-                "manage_edit",
-                json!({ "section": name.clone(), "renamed": true }),
-            ));
-        }
-        if r.gained_focus() {
-            m.sel = Some(k);
-        }
-        out.tracks.push((r, format!("manage: section name {name}")));
-    }
+fn rows_scroll(ui: &mut Ui, cx: &Mcx<'_>, add: impl FnOnce(&mut Ui)) {
+    egui::ScrollArea::vertical()
+        .id_salt("manage_rows")
+        .max_height(cx.list_h)
+        .auto_shrink([false, false])
+        .show(ui, add);
 }
 
-/// Variant A: one table holds the whole layout, details inline.
+/// Variant A: one table grouped like the Account bar, details inline on each row.
 fn variant_a(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
     let h = cx.row_h;
     ui.horizontal(|ui| {
         ui.add_space(W_HANDLE);
         for (t, w) in [
-            ("Name", W_NAME + 14.0),
+            ("Name", W_NAME + 8.0),
             ("Type", W_TYPE),
             ("Balance", W_BAL),
             ("Hidden", W_FLAG),
@@ -2055,70 +1829,34 @@ fn variant_a(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
         }
     });
     ui.separator();
-    let mut drop = None;
+    let groups = grouped(cx, m);
+    let mut dropped = None;
     rows_scroll(ui, cx, |ui| {
-        let mut in_section = false;
-        for k in 0..m.layout.len() {
-            let sel = m.sel == Some(k);
-            let item = m.layout[k].clone();
-            let rect = table_row(ui, h, k, sel, |ui| {
-                handle(ui, cx, m, k, out);
-                match &item {
-                    Item::Section { .. } => {
-                        in_section = true;
-                        fixed(ui, W_NAME + 14.0, h, false, |ui| {
-                            section_name_edit(ui, m, k, W_NAME, out);
-                        });
-                        fixed(ui, W_TYPE, h, false, |ui| {
-                            ui.label(RichText::new("Section").weak().italics());
-                        });
-                        // No total on a section row: the user's call in the session.
-                        fixed(ui, W_BAL, h, true, |_| {});
-                        ui.add_space(W_FLAG * 2.0);
-                        let r = ui.small_button("Remove");
-                        if r.clicked() {
-                            out.remove = Some(k);
-                        }
-                        out.tracks
-                            .push((r, format!("manage: remove section {}", cx.label(m, &item))));
-                    }
-                    Item::Separator { .. } => {
-                        // Same columns as a section row, so Remove lines up.
-                        fixed(ui, W_NAME + 14.0, h, false, |ui| {
-                            let indent = if in_section { 14.0 } else { 0.0 };
-                            ui.add_space(indent);
-                            separator_line(ui, W_NAME - indent - 8.0);
-                        });
-                        fixed(ui, W_TYPE, h, false, |ui| {
-                            ui.label(RichText::new("Separator").weak().italics());
-                        });
-                        fixed(ui, W_BAL, h, true, |_| {});
-                        ui.add_space(W_FLAG * 2.0);
-                        let r = ui.small_button("Remove");
-                        if r.clicked() {
-                            out.remove = Some(k);
-                        }
-                        out.tracks
-                            .push((r, format!("manage: remove separator row {k}")));
-                    }
-                    Item::Account(i) => {
-                        let i = *i;
-                        fixed(ui, W_NAME + 14.0, h, false, |ui| {
-                            if in_section {
-                                ui.add_space(14.0);
-                            }
+        let mut k = 0;
+        for (g, subs) in groups {
+            if subs.is_empty() {
+                continue;
+            }
+            group_row(ui, g.name());
+            for (kind, ids) in subs {
+                subgroup_row(ui, kind);
+                for i in ids {
+                    k += 1;
+                    let sel = m.sel == Some(i);
+                    let rect = table_row(ui, h, k, sel, |ui| {
+                        handle(ui, cx, m, i, out);
+                        fixed(ui, W_NAME + 8.0, h, false, |ui| {
                             if m.accts[i].deleted {
                                 ui.label(RichText::new(&m.accts[i].name).strikethrough().weak());
                             } else {
                                 let r = ui.add(
-                                    egui::TextEdit::singleline(&mut m.accts[i].name).desired_width(
-                                        W_NAME - if in_section { 14.0 } else { 0.0 },
-                                    ),
+                                    egui::TextEdit::singleline(&mut m.accts[i].name)
+                                        .desired_width(W_NAME),
                                 );
                                 if r.gained_focus() {
-                                    m.sel = Some(k);
+                                    m.sel = Some(i);
                                 }
-                                if m.fresh && m.sel == Some(k) {
+                                if m.fresh && sel {
                                     r.request_focus();
                                 }
                                 if r.changed() {
@@ -2146,325 +1884,156 @@ fn variant_a(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
                             ui.add_space(8.0);
                             delete_button(ui, m, i, out);
                         }
-                    }
+                    });
+                    drop_zone(ui, "manage", rect, i, kind, &mut dropped);
                 }
-            });
-            drop_zone(ui, "manage", rect, k, &mut drop);
+            }
         }
     });
-    if let Some((from, to)) = drop {
-        out.moved = Some((from, to, "drag"));
+    if dropped.is_some() {
+        out.dropped = dropped;
     }
 }
 
-fn rows_scroll(ui: &mut Ui, cx: &Mcx<'_>, add: impl FnOnce(&mut Ui)) {
-    let h = cx.list_h;
-    egui::ScrollArea::vertical()
-        .id_salt("manage_rows")
-        .max_height(h)
-        .auto_shrink([false, false])
-        .show(ui, add);
-}
-
-/// The layout as a tree of selectable rows: variant B's left side and variant C's Layout tab.
-fn tree(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out, inline_remove: bool) {
-    let h = cx.row_h;
-    let mut drop = None;
-    let mut in_section = false;
-    for k in 0..m.layout.len() {
-        let item = m.layout[k].clone();
-        let sel = m.sel == Some(k);
-        let label = cx.label(m, &item);
-        let rect = table_row(ui, h, k, sel, |ui| {
-            handle(ui, cx, m, k, out);
-            let (text, indent) = match &item {
-                Item::Section { .. } => {
-                    in_section = true;
-                    (RichText::new(&label).strong(), 0.0)
-                }
-                Item::Separator { .. } => (
-                    RichText::new("separator").weak().italics(),
-                    if in_section { 14.0 } else { 0.0 },
-                ),
-                Item::Account(i) => {
-                    let e = &m.accts[*i];
-                    let mut t = RichText::new(&e.name);
-                    if e.deleted {
-                        t = t.strikethrough().weak();
-                    } else if e.hidden || e.closed {
-                        t = t.weak();
-                    }
-                    (t, if in_section { 14.0 } else { 0.0 })
-                }
-            };
-            ui.add_space(indent);
-            let w = ui.available_width() - if inline_remove { 150.0 } else { 90.0 };
-            // A left-aligned click row: sections bold at the left edge, accounts indented under
-            // them, a separator drawn as a line.
-            let (rect, r) = ui.allocate_exact_size(vec2(w.max(80.0), h), Sense::click());
-            if r.hovered() && !sel {
-                ui.painter()
-                    .rect_filled(rect, 2.0, ui.visuals().widgets.hovered.weak_bg_fill);
-            }
-            if matches!(item, Item::Separator { .. }) {
-                ui.painter().hline(
-                    rect.x_range().shrink(4.0),
-                    rect.center().y,
-                    Stroke::new(1.5, ui.visuals().weak_text_color()),
-                );
-            } else {
-                let galley = egui::WidgetText::from(text).into_galley(
-                    ui,
-                    Some(egui::TextWrapMode::Truncate),
-                    rect.width() - 8.0,
-                    egui::TextStyle::Body,
-                );
-                let pos = egui::pos2(rect.left() + 4.0, rect.center().y - galley.size().y / 2.0);
-                ui.painter().galley(pos, galley, ui.visuals().text_color());
-            }
-            if r.clicked() {
-                m.sel = Some(k);
-                out.events.push(("manage_select", json!({ "item": label })));
-            }
-            out.tracks.push((r, format!("manage: tree {label}")));
-            if let Item::Account(i) = item {
-                let e = &m.accts[i];
-                let tag = if e.deleted {
-                    "will be deleted"
-                } else if e.closed && e.hidden {
-                    "closed · hidden"
-                } else if e.closed {
-                    "closed"
-                } else if e.hidden {
-                    "hidden"
-                } else {
-                    ""
-                };
-                ui.label(RichText::new(tag).small().weak());
-            }
-            if inline_remove && !matches!(item, Item::Account(_)) {
-                let r = ui.small_button("Remove");
-                if r.clicked() {
-                    out.remove = Some(k);
-                }
-                out.tracks.push((r, format!("manage: remove {label}")));
-            }
-        });
-        drop_zone(ui, "manage", rect, k, &mut drop);
-    }
-    if let Some((from, to)) = drop {
-        out.moved = Some((from, to, "drag"));
-    }
-}
-
-fn section_combo(ui: &mut Ui, m: &Manage, k: usize, w: f32, out: &mut Out) {
-    let current = section_of(&m.layout, k);
-    let secs = sections(&m.layout);
-    let shown = current
-        .and_then(|c| secs.iter().find(|(id, _)| *id == c).map(|(_, n)| n.clone()))
-        .unwrap_or_else(|| "(no section)".to_owned());
-    let Item::Account(i) = m.layout[k] else {
-        return;
-    };
-    let name = m.accts[i].name.clone();
-    let mut pick = current;
-    let r = egui::ComboBox::from_id_salt(("section_combo", k))
-        .selected_text(shown)
-        .width(w)
-        .show_ui(ui, |ui| {
-            ui.selectable_value(&mut pick, None, "(no section)");
-            for (id, n) in &secs {
-                ui.selectable_value(&mut pick, Some(*id), n);
-            }
-        });
-    out.tracks
-        .push((r.response, format!("manage: section of {name}")));
-    if pick != current {
-        out.to_section = Some((k, pick));
-    }
-}
-
-/// Variant B: tree on the left, details of the selected item on the right.
+/// Variant B: the grouped list on the left, the selected account's details on the right.
 fn variant_b(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
-    // A fixed height: the resizable window would otherwise grow to fit the whole tree.
-    let h = cx.list_h;
+    let h = cx.row_h;
+    let groups = grouped(cx, m);
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
-            ui.set_width(320.0);
+            ui.set_width(340.0);
+            let mut dropped = None;
             egui::ScrollArea::vertical()
-                .id_salt("manage_tree")
-                .max_height(h)
+                .id_salt("manage_list")
+                .max_height(cx.list_h)
                 .auto_shrink([false, false])
-                .show(ui, |ui| tree(ui, cx, m, out, false));
+                .show(ui, |ui| {
+                    let mut k = 0;
+                    for (g, subs) in groups {
+                        if subs.is_empty() {
+                            continue;
+                        }
+                        group_row(ui, g.name());
+                        for (kind, ids) in subs {
+                            subgroup_row(ui, kind);
+                            for i in ids {
+                                k += 1;
+                                let sel = m.sel == Some(i);
+                                let rect = table_row(ui, h, k, sel, |ui| {
+                                    handle(ui, cx, m, i, out);
+                                    let e = &m.accts[i];
+                                    let mut t = RichText::new(&e.name);
+                                    if e.deleted {
+                                        t = t.strikethrough().weak();
+                                    } else if e.hidden || e.closed {
+                                        t = t.weak();
+                                    }
+                                    let tag = if e.deleted {
+                                        "will be deleted"
+                                    } else if e.closed && e.hidden {
+                                        "closed · hidden"
+                                    } else if e.closed {
+                                        "closed"
+                                    } else if e.hidden {
+                                        "hidden"
+                                    } else {
+                                        ""
+                                    };
+                                    let w = ui.available_width() - 90.0;
+                                    let (rect, r) =
+                                        ui.allocate_exact_size(vec2(w.max(80.0), h), Sense::click());
+                                    if r.hovered() && !sel {
+                                        ui.painter().rect_filled(
+                                            rect,
+                                            2.0,
+                                            ui.visuals().widgets.hovered.weak_bg_fill,
+                                        );
+                                    }
+                                    let galley = egui::WidgetText::from(t).into_galley(
+                                        ui,
+                                        Some(egui::TextWrapMode::Truncate),
+                                        rect.width() - 8.0,
+                                        egui::TextStyle::Body,
+                                    );
+                                    let pos = egui::pos2(
+                                        rect.left() + 4.0,
+                                        rect.center().y - galley.size().y / 2.0,
+                                    );
+                                    ui.painter().galley(pos, galley, ui.visuals().text_color());
+                                    if r.clicked() {
+                                        m.sel = Some(i);
+                                        out.events.push((
+                                            "manage_select",
+                                            json!({ "account": cx.accounts[i].name }),
+                                        ));
+                                    }
+                                    out.tracks
+                                        .push((r, format!("manage: list {}", cx.accounts[i].name)));
+                                    ui.label(RichText::new(tag).small().weak());
+                                });
+                                drop_zone(ui, "manage", rect, i, kind, &mut dropped);
+                            }
+                        }
+                    }
+                });
+            if dropped.is_some() {
+                out.dropped = dropped;
+            }
         });
         ui.separator();
         ui.vertical(|ui| {
-            let Some(k) = m.sel.filter(|k| *k < m.layout.len()) else {
-                ui.label(RichText::new("Select an account, section or separator.").weak());
+            let Some(i) = m.sel else {
+                ui.label(RichText::new("Select an account.").weak());
                 return;
             };
-            match m.layout[k].clone() {
-                Item::Account(i) => {
-                    let a = &cx.accounts[i];
-                    ui.heading(&m.accts[i].name);
-                    ui.label(
-                        RichText::new(format!("{} · balance {}", a.kind.name(), fmt_cents(a.balance)))
-                            .weak(),
-                    );
-                    ui.add_space(8.0);
-                    if m.accts[i].deleted {
-                        ui.label("This account will be deleted when you press OK.");
-                        return;
-                    }
-                    egui::Grid::new("details").num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
-                        ui.label("Name");
-                        let r = ui.add(egui::TextEdit::singleline(&mut m.accts[i].name).desired_width(220.0));
-                        if m.fresh {
-                            r.request_focus();
-                        }
-                        if r.changed() {
-                            out.events.push(("manage_edit", json!({ "account": a.name, "renamed": true })));
-                        }
-                        out.tracks.push((r, format!("manage: name {}", a.name)));
-                        ui.end_row();
-                        ui.label("Section");
-                        section_combo(ui, m, k, 220.0, out);
-                        ui.end_row();
-                        ui.label("Show");
-                        ui.vertical(|ui| flags(ui, cx, m, i, out, true));
-                        ui.end_row();
-                    });
-                    ui.add_space(10.0);
-                    ui.label(
-                        RichText::new(
-                            "Hidden: left out of the Account bar, still in reports and Net Worth.\nClosed: read-only, moves to the Closed section.",
-                        )
-                        .small()
-                        .weak(),
-                    );
-                    ui.add_space(10.0);
-                    delete_button(ui, m, i, out);
-                }
-                Item::Section { .. } => {
-                    ui.label(RichText::new("Section").weak());
-                    section_name_edit(ui, m, k, 220.0, out);
-                    let b = block(&m.layout, k);
-                    let n = m.layout[b].iter().filter(|it| matches!(it, Item::Account(_))).count();
-                    ui.label(
-                        RichText::new(format!("{n} accounts"))
-                            .weak(),
-                    );
-                    ui.add_space(10.0);
-                    let r = ui.button("Remove section");
-                    if r.clicked() {
-                        out.remove = Some(k);
-                    }
-                    out.tracks.push((r, "manage: remove section (details)".to_owned()));
-                    ui.label(
-                        RichText::new("Its accounts join the section above.").small().weak(),
-                    );
-                }
-                Item::Separator { .. } => {
-                    ui.label(RichText::new("Separator").weak());
-                    let r = ui.button("Remove separator");
-                    if r.clicked() {
-                        out.remove = Some(k);
-                    }
-                    out.tracks.push((r, "manage: remove separator (details)".to_owned()));
-                }
+            let a = &cx.accounts[i];
+            ui.heading(&m.accts[i].name);
+            ui.label(
+                RichText::new(format!(
+                    "{} · {} · balance {}",
+                    a.kind.group().name(),
+                    a.kind.name(),
+                    fmt_cents(a.balance)
+                ))
+                .weak(),
+            );
+            ui.add_space(8.0);
+            if m.accts[i].deleted {
+                ui.label("This account will be deleted when you press OK.");
+                return;
             }
+            egui::Grid::new("details")
+                .num_columns(2)
+                .spacing([10.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label("Name");
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut m.accts[i].name).desired_width(220.0),
+                    );
+                    if m.fresh {
+                        r.request_focus();
+                    }
+                    if r.changed() {
+                        out.events
+                            .push(("manage_edit", json!({ "account": a.name, "renamed": true })));
+                    }
+                    out.tracks.push((r, format!("manage: name {}", a.name)));
+                    ui.end_row();
+                    ui.label("Show");
+                    ui.vertical(|ui| flags(ui, cx, m, i, out, true));
+                    ui.end_row();
+                });
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new(
+                    "Hidden: left out of the Account bar, still in reports and Net Worth.\nClosed: read-only, moves to the Closed group.",
+                )
+                .small()
+                .weak(),
+            );
+            ui.add_space(10.0);
+            delete_button(ui, m, i, out);
         });
-    });
-}
-
-/// Variant C: an Accounts tab (details table) and a Layout tab.
-fn variant_c(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
-    ui.horizontal(|ui| {
-        for (page, label) in [(false, "Accounts"), (true, "Layout")] {
-            let r = ui.selectable_label(m.layout_page == page, label);
-            if r.clicked() {
-                m.layout_page = page;
-                out.events.push(("manage_page", json!({ "page": label })));
-            }
-            out.tracks.push((r, format!("manage: page {label}")));
-        }
-    });
-    ui.separator();
-    if m.layout_page {
-        rows_scroll(ui, cx, |ui| tree(ui, cx, m, out, true));
-        return;
-    }
-    let h = cx.row_h;
-    ui.horizontal(|ui| {
-        for (t, w) in [
-            ("Name", W_NAME),
-            ("Type", W_TYPE),
-            ("Section", W_SECTION + 8.0),
-            ("Balance", W_BAL),
-            ("Hidden", W_FLAG),
-            ("Closed", W_FLAG),
-        ] {
-            fixed(ui, w, h, t == "Balance", |ui| {
-                ui.strong(t);
-            });
-        }
-    });
-    ui.separator();
-    rows_scroll(ui, cx, |ui| {
-        let order: Vec<(usize, usize)> = m
-            .layout
-            .iter()
-            .enumerate()
-            .filter_map(|(k, it)| match it {
-                Item::Account(i) => Some((k, *i)),
-                _ => None,
-            })
-            .collect();
-        for (row, (k, i)) in order.into_iter().enumerate() {
-            table_row(ui, h, row, m.sel == Some(k), |ui| {
-                fixed(ui, W_NAME, h, false, |ui| {
-                    if m.accts[i].deleted {
-                        ui.label(RichText::new(&m.accts[i].name).strikethrough().weak());
-                    } else {
-                        let r = ui.add(
-                            egui::TextEdit::singleline(&mut m.accts[i].name)
-                                .desired_width(W_NAME - 6.0),
-                        );
-                        if r.gained_focus() {
-                            m.sel = Some(k);
-                        }
-                        if m.fresh && m.sel == Some(k) {
-                            r.request_focus();
-                        }
-                        if r.changed() {
-                            out.events.push((
-                                "manage_edit",
-                                json!({ "account": cx.accounts[i].name, "renamed": true }),
-                            ));
-                        }
-                        out.tracks
-                            .push((r, format!("manage: name {}", cx.accounts[i].name)));
-                    }
-                });
-                fixed(ui, W_TYPE, h, false, |ui| {
-                    ui.label(RichText::new(cx.accounts[i].kind.name()).weak());
-                });
-                fixed(ui, W_SECTION + 8.0, h, false, |ui| {
-                    section_combo(ui, m, k, W_SECTION, out)
-                });
-                fixed(ui, W_BAL, h, true, |ui| {
-                    money_label(ui, cx.accounts[i].balance)
-                });
-                if m.accts[i].deleted {
-                    ui.label(RichText::new("will be deleted").small());
-                } else {
-                    ui.add_space(14.0);
-                    flags(ui, cx, m, i, out, false);
-                    ui.add_space(8.0);
-                    delete_button(ui, m, i, out);
-                }
-            });
-        }
     });
 }
 
@@ -2478,18 +2047,18 @@ impl Proto {
         let free = !ctx.egui_wants_keyboard_input();
         let esc = ctx.input(|i| i.key_pressed(Key::Escape));
         let enter = free && ctx.input(|i| i.key_pressed(Key::Enter));
+        let screen = ctx.content_rect();
 
         let cx = Mcx {
             accounts: &self.accounts,
             o: self.o,
             row_h: self.theme.row_height(),
-            // The window minus the Dialog's title, description, tabs and footer, and a margin.
-            list_h: (ctx.content_rect().height() - 300.0).clamp(160.0, 430.0),
+            // The window minus the Dialog's title, description and footer, and a margin.
+            list_h: (screen.height() - 260.0).clamp(160.0, 470.0),
         };
         let mut out = Out::default();
 
         // Backdrop: dims the Main window and swallows its clicks.
-        let screen = ctx.content_rect();
         egui::Area::new(Id::new("manage_backdrop"))
             .order(Order::Foreground)
             .fixed_pos(screen.min)
@@ -2516,17 +2085,15 @@ impl Proto {
             .default_size(vec2(820.0, 560.0))
             .min_size(vec2(640.0, 300.0))
             // A Dialog never outgrows the window it opens in.
-            .max_size(ctx.content_rect().size() - vec2(48.0, 48.0))
+            .max_size(screen.size() - vec2(48.0, 48.0))
             .constrain(true)
             .pivot(Align2::CENTER_CENTER)
             .default_pos(screen.center())
             .show(ctx, |ui| {
                 ui.label(
-                    RichText::new(if cx.o.group_by_type {
-                        "Rename, hide, close or delete accounts. The Account bar groups by type now (Tools → Preferences); your sections apply when grouping is off. Nothing is saved until OK."
-                    } else {
-                        "Rename, hide, close or delete accounts, and arrange the Account bar. Nothing is saved until OK."
-                    })
+                    RichText::new(
+                        "Rename, hide, close, delete or reorder accounts. Accounts move only within their sub-group. Nothing is saved until OK.",
+                    )
                     .small()
                     .weak(),
                 );
@@ -2534,35 +2101,26 @@ impl Proto {
                 match variant {
                     Variant::A => variant_a(ui, &cx, &mut m, &mut out),
                     Variant::B => variant_b(ui, &cx, &mut m, &mut out),
-                    Variant::C => variant_c(ui, &cx, &mut m, &mut out),
                 }
                 ui.separator();
-                let layout_controls = variant != Variant::C || m.layout_page;
-                let mut left = Vec::new();
-                let mut right = Vec::new();
+                let mut buttons = Vec::new();
                 Sides::new().show(
                     ui,
+                    |_| {},
                     |ui| {
-                        if layout_controls {
-                            left.push((ui.button("+ Section"), "manage: + Section".to_owned()));
-                            left.push((ui.button("+ Separator"), "manage: + Separator".to_owned()));
-                        }
-                    },
-                    |ui| {
-                        right.push((ui.button("Cancel"), "manage: Cancel".to_owned()));
+                        buttons.push((ui.button("Cancel"), "manage: Cancel"));
                         let fill = ui.visuals().selection.bg_fill;
                         let r = ui.add(Button::new(RichText::new("OK").strong()).fill(fill));
-                        right.push((r, "manage: OK".to_owned()));
+                        buttons.push((r, "manage: OK"));
                     },
                 );
-                for (r, name) in left.into_iter().chain(right) {
-                    match name.as_str() {
-                        "manage: + Section" => out.add_section = r.clicked(),
-                        "manage: + Separator" => out.add_separator = r.clicked(),
-                        "manage: Cancel" => cancel = r.clicked(),
-                        _ => ok = r.clicked(),
+                for (r, name) in buttons {
+                    if name == "manage: OK" {
+                        ok = r.clicked();
+                    } else {
+                        cancel = r.clicked();
                     }
-                    out.tracks.push((r, name));
+                    out.tracks.push((r, name.to_owned()));
                 }
             });
         if let Some(r) = &shown {
@@ -2620,6 +2178,7 @@ impl Proto {
                     ui.add_space(12.0);
                     ui.separator();
                     let mut res = None;
+                    let mut buttons = Vec::new();
                     Sides::new().show(
                         ui,
                         |_| {},
@@ -2628,36 +2187,40 @@ impl Proto {
                                 let fill = ui.visuals().selection.bg_fill;
                                 let r = ui
                                     .add(Button::new(RichText::new(ok_label).strong()).fill(fill));
-                                out.tracks.push((r.clone(), format!("confirm: {ok_label}")));
-                                let c = ui.button("Cancel");
-                                out.tracks.push((c.clone(), "confirm: Cancel".to_owned()));
-                                if r.clicked() || ctx.input(|i| i.key_pressed(Key::Enter)) {
-                                    res = Some(true);
-                                } else if c.clicked() || esc {
-                                    res = Some(false);
-                                }
+                                buttons.push((r, format!("confirm: {ok_label}"), true));
+                                buttons.push((
+                                    ui.button("Cancel"),
+                                    "confirm: Cancel".to_owned(),
+                                    false,
+                                ));
                             } else {
-                                let r = ui.button("OK");
-                                out.tracks.push((r.clone(), "confirm: OK".to_owned()));
-                                if r.clicked() || esc || ctx.input(|i| i.key_pressed(Key::Enter)) {
-                                    res = Some(false);
-                                }
+                                buttons.push((ui.button("OK"), "confirm: OK".to_owned(), false));
                             }
                         },
                     );
+                    for (r, name, yes) in buttons {
+                        if r.clicked() {
+                            res = Some(yes);
+                        }
+                        out.tracks.push((r, name));
+                    }
+                    if res.is_none() {
+                        if ok_label.is_some() && ctx.input(|i| i.key_pressed(Key::Enter)) {
+                            res = Some(true);
+                        } else if esc
+                            || (ok_label.is_none() && ctx.input(|i| i.key_pressed(Key::Enter)))
+                        {
+                            res = Some(false);
+                        }
+                    }
                     res
                 });
             confirm_done = resp.inner;
         }
 
-        // Release `cx` before changing the draft structure.
         let Out {
-            moved,
+            dropped,
             step,
-            to_section,
-            remove,
-            add_section,
-            add_separator,
             confirm,
             events,
             tracks,
@@ -2689,77 +2252,40 @@ impl Proto {
                 "confirm",
                 json!({ "what": what, "account": self.accounts[i].name, "ok": done }),
             );
-        } else if m.confirm.is_none() {
-            if let Some(c) = confirm {
-                m.confirm = Some(c);
-            }
+        } else if m.confirm.is_none()
+            && let Some(c) = confirm
+        {
+            m.confirm = Some(c);
         }
         let confirm_open = m.confirm.is_some() || confirm_done.is_some();
 
-        if let Some((from, to, how)) = moved
-            && move_item(&mut m.layout, from, to)
+        if let Some((id, target, before)) = dropped
+            && move_in_order(&mut m.order, id, target, before)
         {
             self.h.event(
-                "layout_move",
-                json!({ "from": from, "to": to, "how": how, "where": "manage" }),
+                "reorder",
+                json!({ "account": self.accounts[id].name, "target": self.accounts[target].name, "before": before, "how": "drag", "where": "manage" }),
             );
-            m.sel = None;
+            m.sel = Some(id);
         }
-        if let Some((k, up)) = step {
-            let item = m.layout[k].clone();
-            if step_item(&mut m.layout, k, up) {
-                m.sel = m.layout.iter().position(|it| *it == item);
-                self.h.event(
-                    "layout_move",
-                    json!({ "from": k, "to": m.sel, "how": if up { "up" } else { "down" }, "where": "manage" }),
-                );
-            }
-        }
-        if let Some((k, sec)) = to_section {
-            let item = m.layout[k].clone();
-            move_to_section(&mut m.layout, k, sec);
-            m.sel = m.layout.iter().position(|it| *it == item);
-            self.h.event(
-                "layout_move",
-                json!({ "from": k, "to": m.sel, "how": "section combo", "where": "manage" }),
-            );
-        }
-        if let Some(k) = remove {
-            let it = m.layout.remove(k);
-            m.sel = None;
-            self.h.event(
-                "layout_remove",
-                json!({ "what": if it.is_section() { "section" } else { "separator" } }),
-            );
-        }
-        if add_section {
-            let id = m.next_id;
-            m.next_id += 1;
-            m.layout.push(Item::Section {
-                id,
-                name: "New section".to_owned(),
+        if let Some((id, up)) = step {
+            let kind = self.accounts[id].kind;
+            let visible = members(&m.order, &self.accounts, kind, |i| {
+                !self.accounts[i].deleted
             });
-            m.sel = Some(m.layout.len() - 1);
-            m.focus_section = Some(id);
-            if variant == Variant::C {
-                m.layout_page = true;
+            if step_in_order(&mut m.order, &visible, id, up) {
+                self.h.event(
+                    "reorder",
+                    json!({ "account": self.accounts[id].name, "how": if up { "up" } else { "down" }, "where": "manage" }),
+                );
+                m.sel = Some(id);
             }
-            self.h.event("layout_add", json!({ "what": "section" }));
-        }
-        if add_separator {
-            let id = m.next_id;
-            m.next_id += 1;
-            let at = m.sel.map_or(m.layout.len(), |k| k + 1).min(m.layout.len());
-            m.layout.insert(at, Item::Separator { id });
-            m.sel = Some(at);
-            self.h
-                .event("layout_add", json!({ "what": "separator", "at": at }));
         }
 
         self.manage = Some(m);
         let reason = if !open {
             Some("close_button")
-        } else if ok || (forced.is_some() && matches!(forced, Some(Forced::Ok))) {
+        } else if ok || matches!(forced, Some(Forced::Ok)) {
             Some("ok")
         } else if cancel || matches!(forced, Some(Forced::Cancel)) {
             Some("cancel")
@@ -2817,7 +2343,8 @@ impl Proto {
                 ui.separator();
                 ui.label(RichText::new("Variant (Manage Accounts)").strong());
                 for (v, (_, hint)) in Variant::ALL.into_iter().zip(VARIANT_KEYS) {
-                    let r = ui.selectable_label(self.variant == v, format!("{hint}   {}", v.label()));
+                    let r =
+                        ui.selectable_label(self.variant == v, format!("{hint}   {}", v.label()));
                     self.h.track(&r, format!("dock: variant {}", v.key()));
                     if r.clicked() {
                         self.set_variant(v, "click");
@@ -2845,7 +2372,7 @@ impl Proto {
                 ui.separator();
                 ui.label(
                     RichText::new(
-                        "A–C or ◀ / ▶ variant · 1–9, 0 toggles · F2 note · F3 marker · F4 hide this dock · F5 spotlight · F6 prompt",
+                        "A / B or left / right variant · 1–9 toggles · F2 note · F3 marker · F4 hide this dock · F5 spotlight · F6 prompt",
                     )
                     .small()
                     .weak(),
@@ -2855,27 +2382,10 @@ impl Proto {
 }
 
 fn main() -> eframe::Result {
-    // `PROTO_DUMP=1` prints the stub balances and exits, to check them without a window.
-    if std::env::var_os("PROTO_DUMP").is_some() {
-        let accounts = generate();
-        for a in &accounts {
-            let min = a.txns.iter().map(|t| t.balance).min().unwrap_or(0);
-            println!(
-                "{:<20} {:>16} min {:>16} txns {}",
-                a.name,
-                fmt_cents(a.balance),
-                fmt_cents(min),
-                a.txns.len()
-            );
-        }
-        let nw: i64 = accounts.iter().map(|a| a.balance).sum();
-        println!("net worth {}", fmt_cents(nw));
-        return Ok(());
-    }
     let args = Args::from_env();
     let options = eframe::NativeOptions {
         viewport: ViewportBuilder::default()
-            .with_title("Balanced — PROTOTYPE Manage Accounts and Account bar sections")
+            .with_title("Balanced — PROTOTYPE Manage Accounts and the Account bar")
             .with_inner_size([1400.0, 860.0]),
         ..Default::default()
     };
