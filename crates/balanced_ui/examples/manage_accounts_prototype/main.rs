@@ -2070,8 +2070,8 @@ fn variant_a(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
                         fixed(ui, W_TYPE, h, false, |ui| {
                             ui.label(RichText::new("Section").weak().italics());
                         });
-                        let total = cx.section_total(m, k);
-                        fixed(ui, W_BAL, h, true, |ui| money_label(ui, total));
+                        // No total on a section row: the user's call in the session.
+                        fixed(ui, W_BAL, h, true, |_| {});
                         ui.add_space(W_FLAG * 2.0);
                         let r = ui.small_button("Remove");
                         if r.clicked() {
@@ -2331,7 +2331,7 @@ fn variant_b(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
                     let b = block(&m.layout, k);
                     let n = m.layout[b].iter().filter(|it| matches!(it, Item::Account(_))).count();
                     ui.label(
-                        RichText::new(format!("{n} accounts · total {}", fmt_cents(cx.section_total(m, k))))
+                        RichText::new(format!("{n} accounts"))
                             .weak(),
                     );
                     ui.add_space(10.0);
