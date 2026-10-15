@@ -720,7 +720,7 @@ const TOGGLES: &[(&str, &str, &str)] = &[
         "all",
     ),
     ("section_totals", "Section totals in the Account bar", "all"),
-    ("fold", "Sections fold (▸ / ▾)", "all"),
+    ("fold", "Sections fold (arrow on the header)", "all"),
     ("sep_line", "Separator is a line (off: a blank gap)", "all"),
     (
         "closed_section",
@@ -735,7 +735,7 @@ const TOGGLES: &[(&str, &str, &str)] = &[
     ),
     (
         "dnd",
-        "Drag and drop in Manage Accounts (off: ↑ / ↓ buttons)",
+        "Drag and drop in Manage Accounts (off: up / down buttons)",
         "all",
     ),
     (
@@ -2081,19 +2081,17 @@ fn variant_a(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
                             .push((r, format!("manage: remove section {}", cx.label(m, &item))));
                     }
                     Item::Separator { .. } => {
-                        fixed(
-                            ui,
-                            W_NAME + 14.0 + W_TYPE + W_BAL + W_FLAG * 2.0,
-                            h,
-                            false,
-                            |ui| {
-                                if in_section {
-                                    ui.add_space(14.0);
-                                }
-                                separator_line(ui, 260.0);
-                                ui.label(RichText::new("separator").weak().italics());
-                            },
-                        );
+                        // Same columns as a section row, so Remove lines up.
+                        fixed(ui, W_NAME + 14.0, h, false, |ui| {
+                            let indent = if in_section { 14.0 } else { 0.0 };
+                            ui.add_space(indent);
+                            separator_line(ui, W_NAME - indent - 8.0);
+                        });
+                        fixed(ui, W_TYPE, h, false, |ui| {
+                            ui.label(RichText::new("Separator").weak().italics());
+                        });
+                        fixed(ui, W_BAL, h, true, |_| {});
+                        ui.add_space(W_FLAG * 2.0);
                         let r = ui.small_button("Remove");
                         if r.clicked() {
                             out.remove = Some(k);
