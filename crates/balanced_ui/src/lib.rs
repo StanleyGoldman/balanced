@@ -1,8 +1,11 @@
 //! The egui user interface: the Main window, its panels, Dialogs and Detached windows.
 
+mod app;
+mod command;
 mod i18n;
-#[expect(
-    dead_code,
-    reason = "the reference shell's widgets are its first callers"
-)]
+mod main_window;
+mod route;
 mod theme;
+mod user_action;
+
+pub use app::App;

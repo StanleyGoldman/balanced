@@ -15,6 +15,8 @@ balanced_i18n = { path = "crates/balanced_i18n" }
 balanced_prototype_harness = { path = "crates/balanced_prototype_harness" }
 balanced_ui = { path = "crates/balanced_ui" }
 egui = { version = "0.36.2", default-features = false }
+eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
+egui_kittest = { version = "0.36.2", features = ["eframe"] }
 fluent-bundle = "0.16.0"
 fluent-syntax = "0.12.0"
 i18n-embed = { version = "0.16.0", features = ["fluent-system"] }
@@ -36,6 +38,7 @@ rust_decimal_macros = "1.40.0"
 sys-locale = "0.3.2"
 thiserror = "2.0.21"
 tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 unic-langid = "0.9.6"
 zerovec = "0.11.8"
 image = { version = "0.25.10", default-features = false, features = ["png"] }

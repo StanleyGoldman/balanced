@@ -7,6 +7,7 @@
 )]
 
 use balanced_core::Money;
+use eframe::egui;
 use egui::{
     Color32, CornerRadius, FontFamily, FontId, Frame, Margin, Rect, RichText, Shape, Stroke,
     TextStyle, Vec2, vec2,
@@ -17,6 +18,13 @@ use egui::{
 pub(crate) enum Scheme {
     #[default]
     Light,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the Preferences dialog (#99) is the first to choose it"
+        )
+    )]
     Dark,
 }
 
@@ -25,6 +33,13 @@ pub(crate) enum Scheme {
 pub(crate) enum Density {
     #[default]
     Normal,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the Preferences dialog (#99) is the first to choose it"
+        )
+    )]
     Dense,
 }
 
@@ -34,9 +49,30 @@ pub(crate) enum Gridlines {
     #[default]
     Off,
     /// A rule between rows.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the Register Preferences (#100) are the first to choose them"
+        )
+    )]
     Horizontal,
     /// A rule between columns.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the Register Preferences (#100) are the first to choose them"
+        )
+    )]
     Vertical,
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the Register Preferences (#100) are the first to choose them"
+        )
+    )]
     Both,
 }
 
@@ -79,6 +115,7 @@ const COLUMN_GAP: f32 = 8.0;
 const MAX_BUTTON_PADDING_Y: f32 = 3.0;
 
 /// Space around the text of the Net Worth footer.
+#[expect(dead_code, reason = "the Account bar (#84) draws the Net Worth footer")]
 const FOOTER_MARGIN: Margin = Margin::symmetric(8, 6);
 
 /// The colours of one [`Scheme`].
@@ -175,6 +212,7 @@ pub(crate) struct Theme {
 
 impl Theme {
     /// Space between the Register's edge and the text in its first and last columns.
+    #[expect(dead_code, reason = "the Register (#85) is the first caller")]
     pub(crate) const EDGE_INSET: f32 = 6.0;
 
     pub(crate) fn new(settings: ThemeSettings) -> Self {
@@ -270,6 +308,7 @@ impl Theme {
     }
 
     /// The height of a Register row, and of a button or text field.
+    #[expect(dead_code, reason = "the Register (#85) is the first caller")]
     pub(crate) fn row_height(&self) -> f32 {
         self.sizes.row
     }
@@ -281,23 +320,30 @@ impl Theme {
     }
 
     /// The Net Worth footer under the Account bar: chrome, with room around its text.
+    #[expect(dead_code, reason = "the Account bar (#84) draws the Net Worth footer")]
     pub(crate) fn footer_frame(&self) -> Frame {
         self.chrome_frame().inner_margin(FOOTER_MARGIN)
     }
 
     /// The fill of the Register's column header band.
+    #[expect(dead_code, reason = "the Register (#85) is the first caller")]
     pub(crate) fn header_fill(&self) -> Color32 {
         self.palette.header
     }
 
     /// Whether the Register stripes alternate rows: pass it to `TableBuilder::striped`.
     /// Only the Register stripes, so the style leaves `Visuals::striped` off.
+    #[expect(dead_code, reason = "the Register (#85) is the first caller")]
     pub(crate) fn alternating_rows(&self) -> bool {
         self.settings.alternating_rows
     }
 
     /// The fill behind row `row` of a list laid out by hand, counting from 0 at the top:
     /// the even rows, as `egui_extras` stripes them. Paint it before the row's gridlines.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the Register (#85) is the first caller")
+    )]
     pub(crate) fn stripe(&self, row: usize) -> Option<Color32> {
         (self.settings.alternating_rows && row.is_multiple_of(2)).then_some(self.palette.stripe)
     }
@@ -310,6 +356,10 @@ impl Theme {
     /// bottom would be covered by the next cell's fill. The first column (`column` 0) has
     /// no gap to its left. Rules sit on a pixel centre and are one pixel wide: at a
     /// fractional scale, an unsnapped line straddles two pixels and fades to almost nothing.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the Register (#85) is the first caller")
+    )]
     pub(crate) fn cell_rules(
         &self,
         cell: Rect,
@@ -350,6 +400,10 @@ impl Theme {
     /// show. The clip widens by half the gap plus one point, without which a rule on the
     /// clip's edge is cut off, and stays inside the viewport so rules never paint over
     /// the panels around the Register.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the Register (#85) is the first caller")
+    )]
     pub(crate) fn rule_clip(&self, cell_clip: Rect, viewport: Rect) -> Rect {
         cell_clip
             .expand2(self.item_spacing() / 2.0 + Vec2::splat(1.0))
@@ -362,6 +416,10 @@ impl Theme {
     }
 
     /// `text`, the formatted `amount`, styled for display.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the Register (#85) is the first caller")
+    )]
     pub(crate) fn amount(&self, amount: &Money, text: impl Into<String>) -> RichText {
         let text = RichText::new(text);
         let text = if self.settings.monospace_money {

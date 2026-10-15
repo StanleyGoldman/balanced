@@ -8,10 +8,11 @@ publish.workspace = true
 [dependencies]
 balanced_core.workspace = true
 balanced_i18n.workspace = true
-egui.workspace = true
+eframe.workspace = true
 i18n-embed-fl.workspace = true
 
 [dev-dependencies]
+egui_kittest.workspace = true
 balanced_i18n = { workspace = true, features = ["test-support"] }
 rust_decimal.workspace = true
 rust_decimal_macros.workspace = true
