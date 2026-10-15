@@ -8,12 +8,12 @@ use crate::i18n::fl;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Route {
     /// A top-level tab.
-    Tab(Tab),
+    Tab(TopLevelTab),
 }
 
 /// A top-level tab in the Main window's tab row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum Tab {
+pub(crate) enum TopLevelTab {
     #[default]
     Home,
     Accounts,
@@ -24,8 +24,9 @@ pub(crate) enum Tab {
     PropertyDebt,
 }
 
-impl Tab {
-    /// Every tab, in tab-row order.
+impl TopLevelTab {
+    /// Every tab, in tab-row order. A new tab goes here as well as in the matches
+    /// below, which the compiler checks; it can't check this list.
     pub(crate) const ALL: [Self; 7] = [
         Self::Home,
         Self::Accounts,

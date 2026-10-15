@@ -5,14 +5,14 @@ use eframe::egui::{self, CentralPanel, MenuBar, Panel};
 
 use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::i18n::fl;
-use crate::route::{Route, Tab};
+use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
 
 /// What the Main window shows. None of it outlives the run: every run starts on Home.
 #[derive(Debug, Default)]
 pub(crate) struct MainWindow {
-    tab: Tab,
+    tab: TopLevelTab,
     status: Option<StatusMessage>,
 }
 
@@ -52,9 +52,7 @@ impl MainWindow {
             .show(ui, |ui| self.tab_row(ui, i18n, commands));
         Panel::left("account_bar")
             .frame(theme.chrome_frame())
-            .show(ui, |ui| {
-                ui.heading(fl!(i18n, "account-bar-title"));
-            });
+            .show(ui, |_| {});
         CentralPanel::default().show(ui, |ui| {
             ui.label(self.tab.placeholder(i18n));
         });
@@ -84,7 +82,7 @@ impl MainWindow {
 
     fn tab_row(&self, ui: &mut egui::Ui, i18n: &Localizer, commands: &CommandSender) {
         ui.horizontal(|ui| {
-            for tab in Tab::ALL {
+            for tab in TopLevelTab::ALL {
                 if ui
                     .selectable_label(tab == self.tab, tab.label(i18n))
                     .clicked()

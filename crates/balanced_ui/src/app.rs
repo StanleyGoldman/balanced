@@ -22,7 +22,7 @@ pub struct App {
     ledger: Ledger,
     theme: Theme,
     commands: CommandSender,
-    received: Receiver<AppCommand>,
+    command_receiver: Receiver<AppCommand>,
     main_window: MainWindow,
 }
 
@@ -36,13 +36,13 @@ impl App {
                 &i18n,
                 "main-window-title"
             )));
-        let (commands, received) = CommandSender::new(cc.egui_ctx.clone());
+        let (commands, command_receiver) = CommandSender::new(cc.egui_ctx.clone());
         Self {
             i18n,
             ledger,
             theme,
             commands,
-            received,
+            command_receiver,
             main_window: MainWindow::default(),
         }
     }
@@ -59,7 +59,7 @@ impl App {
 impl eframe::App for App {
     /// Applies every Command sent since the last frame.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        while let Ok(command) = self.received.try_recv() {
+        while let Ok(command) = self.command_receiver.try_recv() {
             self.apply(ctx, command);
         }
     }
