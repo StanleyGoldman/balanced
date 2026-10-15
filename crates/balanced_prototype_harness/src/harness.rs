@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 use crate::Args;
 use crate::control::ControlReader;
 use crate::log::write_event;
+use crate::prompt::PromptCommand;
 use crate::spotlight::{Spotlight, SpotlightCommand, outermost, overlay_rects};
 
 /// Screenshots wait this long so scroll animations and egui's multi-pass layout settle.
@@ -41,6 +42,16 @@ struct SpotlightState {
     unmatched_logged: bool,
     /// The panel `dock_spotlight` drew in this frame, which the overlay leaves undimmed.
     dock_rect: Option<Rect>,
+}
+
+/// The agent's current instruction and the panel [`Harness::prompt_panel`] draws it in.
+#[derive(Debug, Default)]
+struct PromptState {
+    text: Option<String>,
+    /// Whether the user put the panel away (F6 or the dock checkbox).
+    hidden: bool,
+    /// The panel drawn this frame, which the spotlight leaves undimmed.
+    rect: Option<Rect>,
 }
 
 /// What changed the spotlight, as logged.
@@ -100,6 +111,7 @@ pub struct Harness {
     /// Regions named through [`Harness::region`] this frame.
     regions: Vec<(String, Rect)>,
     spotlight: SpotlightState,
+    prompt: PromptState,
     /// Whether a text field had keyboard focus at the start of this frame.
     typing: bool,
     focused: Option<Id>,
@@ -144,6 +156,7 @@ impl Harness {
             prev_names: HashMap::new(),
             regions: Vec::new(),
             spotlight: SpotlightState::default(),
+            prompt: PromptState::default(),
             typing: false,
             focused: None,
             clicked_this_frame: false,
@@ -209,6 +222,53 @@ impl Harness {
         ui.label(RichText::new(targets).small().weak());
     }
 
+    /// Draw the agent's current `prompt` text in a panel along the bottom of the window, or
+    /// nothing while there is none. Call it before the app's `CentralPanel`, so the app's content
+    /// sits above it rather than under it. The panel stays undimmed while the spotlight is on.
+    pub fn prompt_panel(&mut self, ui: &mut Ui) {
+        let Some(text) = self.prompt.text.clone().filter(|_| !self.prompt.hidden) else {
+            return;
+        };
+        let visuals = ui.visuals().clone();
+        let frame = egui::Frame::side_top_panel(ui.style())
+            .fill(
+                visuals
+                    .selection
+                    .bg_fill
+                    .gamma_multiply(0.25)
+                    .blend(visuals.panel_fill),
+            )
+            .stroke(Stroke::new(1.0, visuals.selection.stroke.color));
+        egui::Panel::bottom("harness_prompt")
+            .resizable(false)
+            .frame(frame)
+            .show(ui, |ui| {
+                self.prompt.rect = Some(ui.clip_rect());
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(text).size(15.0));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new("F2 reply · F6 hide").small().weak());
+                    });
+                });
+            });
+    }
+
+    /// Draw the dock's prompt row: a "Prompt (F6)" checkbox that puts the prompt panel away or
+    /// brings it back.
+    pub fn dock_prompt(&mut self, ui: &mut Ui) {
+        let mut shown = !self.prompt.hidden;
+        let response = ui.checkbox(&mut shown, "Prompt (F6)");
+        self.track(&response, "dock: prompt");
+        if response.changed() {
+            self.set_prompt_shown(shown, "click");
+        }
+    }
+
+    fn set_prompt_shown(&mut self, shown: bool, cause: &str) {
+        self.prompt.hidden = !shown;
+        self.event("prompt_shown", json!({ "shown": shown, "cause": cause }));
+    }
+
     /// Queue a screenshot of the window, saved beside the log as `<seq>-<label>.png`.
     pub fn screenshot(&mut self, label: impl Into<String>) {
         if self.dir.is_some() {
@@ -267,6 +327,7 @@ impl Harness {
         self.names.clear();
         self.regions.clear();
         self.spotlight.dock_rect = None;
+        self.prompt.rect = None;
         self.typing = ctx.egui_wants_keyboard_input();
         self.dt_ms = ctx.input(|i| i.unstable_dt) * 1000.0;
 
@@ -287,6 +348,16 @@ impl Harness {
             if let Some(spotlight) = command.as_deref().and_then(SpotlightCommand::parse) {
                 self.spotlight.current.apply(spotlight);
                 self.spotlight.change = Some(SpotlightCause::Control);
+                return None;
+            }
+            if let Some(prompt) = command.as_deref().and_then(PromptCommand::parse) {
+                self.prompt.text = match prompt {
+                    PromptCommand::Clear => None,
+                    PromptCommand::Show(text) => Some(text),
+                };
+                // A new instruction brings a put-away panel back, so it isn't missed.
+                self.prompt.hidden = false;
+                self.event("prompt", json!({ "text": self.prompt.text }));
                 return None;
             }
             command
@@ -384,6 +455,10 @@ impl Harness {
             self.set_spotlight_on(!self.spotlight.current.is_on(), SpotlightCause::Key);
             return;
         }
+        if key == Key::F6 && !repeat && !self.typing && self.note.is_none() {
+            self.set_prompt_shown(self.prompt.hidden, "key");
+            return;
+        }
         if key == Key::Tab {
             self.tab_this_frame = true;
         }
@@ -471,6 +546,7 @@ impl Harness {
             .iter()
             .copied()
             .chain(self.spotlight.dock_rect)
+            .chain(self.prompt.rect)
             .collect();
         // The overlay must darken in light and dark themes alike, so it isn't a theme colour.
         let shade = Color32::from_black_alpha(140);
