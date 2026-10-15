@@ -1736,6 +1736,42 @@ impl Proto {
         }
     }
 
+    /// Decided in step 1: an amount field takes only characters an amount can hold, so letters
+    /// never reach it. Allowed: digits, the locale's marks, a sign, the account currency's
+    /// symbol, and with the calculator on its operators.
+    fn drop_disallowed_amount_chars(&mut self, ui: &mut Ui) {
+        let f = self.f();
+        let symbol = f.l10n.format_amount(
+            Decimal::ONE,
+            i18n_currency(self.code()),
+            AmountStyle::Symbol,
+        );
+        let calc = self.t.calc;
+        let allowed = |c: char| {
+            c.is_ascii_digit()
+                || c == f.dec
+                || c == f.grp
+                || c == '-'
+                || (symbol.contains(c) && !c.is_ascii_digit() && !c.is_whitespace())
+                || (calc && "+-*/()x× ".contains(c))
+        };
+        let mut dropped = String::new();
+        ui.input_mut(|i| {
+            for event in &mut i.events {
+                if let Event::Text(t) | Event::Paste(t) = event {
+                    dropped.extend(t.chars().filter(|&c| !allowed(c)));
+                    t.retain(allowed);
+                }
+            }
+            i.events
+                .retain(|e| !matches!(e, Event::Text(t) | Event::Paste(t) if t.is_empty()));
+        });
+        if !dropped.is_empty() {
+            self.h
+                .event("amount_chars_dropped", json!({ "chars": dropped }));
+        }
+    }
+
     fn commit_money(&mut self, ed: &mut TextEd) -> bool {
         let raw = ed.buf.clone();
         match self.parse_money(&raw) {
@@ -1777,6 +1813,9 @@ impl Proto {
         let mut ed = std::mem::take(&mut self.money_ed);
         if !focused && ed.error.is_none() && !ed.dirty {
             ed.buf = self.amt(self.row.amount);
+        }
+        if focused {
+            self.drop_disallowed_amount_chars(ui);
         }
         let out = self.edit_box(ui, &mut ed, id, "amount field", 150.0, true, "0", None);
         let leave = leave.or(out.lost.then_some(Leave::Blur));
