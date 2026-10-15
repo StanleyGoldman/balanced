@@ -1076,6 +1076,8 @@ struct Proto {
     /// Variant C money: digits typed so far (cents-first) and the sign.
     cents: String,
     neg: bool,
+    /// Whether the cents box had focus last frame, so a focus gained by any route loads it.
+    cents_focused: bool,
     /// Calendar popup: the highlighted day.
     pick: Option<Date>,
     pick_rect: Option<Rect>,
@@ -1182,6 +1184,7 @@ impl Proto {
             seg_error: None,
             cents: String::new(),
             neg: false,
+            cents_focused: false,
             pick: None,
             pick_rect: None,
             cal_btn: None,
@@ -1574,6 +1577,8 @@ impl Proto {
         hint: &str,
         popup: Option<Rect>,
     ) -> BoxOut {
+        // The grid sizes a column from last frame's widest cell, so claim the width up front.
+        ui.set_min_width(width);
         let mut te = egui::TextEdit::singleline(&mut ed.buf)
             .id(id)
             .desired_width(width)
@@ -1815,7 +1820,7 @@ impl Proto {
     fn money_cents(&mut self, ui: &mut Ui, id: Id) {
         let field = Field::Amount;
         let leave = self.leave_key(ui, field);
-        let focused = ui.memory(|m| m.has_focus(id));
+        let focused = self.cents_focused;
         let width = 150.0;
         let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::click());
         let resp = ui.interact(rect, id, Sense::click());
@@ -1827,8 +1832,13 @@ impl Proto {
         if focused_now && !focused {
             let a = self.row.amount;
             self.neg = a.is_some_and(|m| m.is_negative());
-            self.cents = a.map_or_else(String::new, |m| m.amount().abs().mantissa().to_string());
+            self.cents = a.map_or_else(String::new, |m| {
+                let mut minor = m.amount().abs();
+                minor.rescale(self.dp());
+                minor.mantissa().to_string()
+            });
         }
+        self.cents_focused = focused_now;
         if focused_now && leave.is_none() {
             ui.memory_mut(|m| m.set_focus_lock_filter(id, CELL_KEYS));
             let (mut cents, mut neg) = (std::mem::take(&mut self.cents), self.neg);
@@ -2286,6 +2296,12 @@ impl Proto {
         if focused && !was_focused {
             self.set_segs(self.row.date);
             self.seg = 0;
+        } else if !focused && self.seg_error.is_none() {
+            // Show the row's date even when C was entered without editing it.
+            self.segs = self
+                .row
+                .date
+                .map_or([None; 3], |d| [Some(d.d), Some(d.m), Some(d.y as u32)]);
         }
         let mut leave = None;
         if focused {
