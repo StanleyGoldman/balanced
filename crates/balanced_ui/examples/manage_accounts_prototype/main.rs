@@ -1774,10 +1774,12 @@ fn hidden_box(ui: &mut Ui, m: &mut Manage, i: usize, out: &mut Out, labelled: bo
 
 /// Closing is an action with a confirm, so it is a button, not a checkbox (user's note: "something
 /// that incurs a dialog probably should not be a checkbox"). A closed account shows Reopen.
-fn close_control(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, i: usize, out: &mut Out) {
+fn close_control(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, i: usize, out: &mut Out, label: bool) {
     let name = m.accts[i].name.clone();
     if m.accts[i].closed {
-        ui.label(RichText::new("Closed").weak());
+        if label {
+            ui.label(RichText::new("Closed").weak());
+        }
         let r = ui.small_button("Reopen");
         if r.clicked() {
             m.accts[i].closed = false;
@@ -1880,6 +1882,15 @@ fn variant_a(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
                         });
                         fixed(ui, W_TYPE, h, false, |ui| {
                             ui.label(RichText::new(cx.accounts[i].kind.name()).weak());
+                            // The closed state reads with the account, so the Status column
+                            // holds only the button, always in the same place.
+                            if m.accts[i].closed {
+                                ui.label(
+                                    RichText::new("closed")
+                                        .small()
+                                        .color(ui.visuals().warn_fg_color),
+                                );
+                            }
                         });
                         fixed(ui, W_BAL, h, true, |ui| {
                             money_label(ui, cx.accounts[i].balance)
@@ -1892,7 +1903,7 @@ fn variant_a(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
                             hidden_box(ui, m, i, out, false);
                             ui.add_space(W_FLAG - 24.0);
                             fixed(ui, W_STATUS, h, false, |ui| {
-                                close_control(ui, cx, m, i, out)
+                                close_control(ui, cx, m, i, out, false)
                             });
                             delete_button(ui, m, i, out);
                         }
@@ -2039,7 +2050,7 @@ fn variant_b(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
                         if !m.accts[i].closed {
                             ui.label("Open");
                         }
-                        close_control(ui, cx, m, i, out);
+                        close_control(ui, cx, m, i, out, true);
                     });
                     ui.end_row();
                 });
