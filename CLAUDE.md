@@ -76,9 +76,11 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 - Do branch work (practice and doc updates, fixes, PR branches) in a git worktree under `.claude/worktrees/<name>` (gitignored), never beside the repo folder. A subagent in its own worktree makes such a fix in the background.
 - In a worktree-isolated subagent, run each shell command as one plain call with literal paths. The isolation guard refuses any command it cannot prove keeps git inside the worktree, and backgrounding, loops, shell variables, and `sh <script>` all trip it, even for `curl` or `gh` downloads.
 
-### Implementing
+### Implementation
 
-- When running the `implement` skill, load `/tdd` as soon as you have read the ticket and the code it touches, before writing any code or test. Its first step, agreeing the seams with the user, is part of planning.
+- Load the `tdd` skill before writing the first test or line of code of an `/implement` run; the skill names `/tdd` only in passing, so it won't load unless you call it.
+- Run each slice red before green. A test that has only failed to compile, or was written after its code, has never been red: break the code it covers, watch the test fail, then restore the code.
+- A red counts only when the failing assertion is the behaviour under test. Read the panic in the `cargo test` output; a setup assertion failing, or a `get_by_role_and_label` that finds no node, proves nothing.
 
 ### Pull requests
 
