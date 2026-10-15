@@ -2216,6 +2216,11 @@ impl Proto {
                     res
                 });
             confirm_done = resp.inner;
+            // The heavy Dialog is raised every frame, so raise the confirm above it.
+            ctx.move_to_top(egui::LayerId::new(
+                Order::Foreground,
+                Id::new("manage_confirm"),
+            ));
         }
 
         let Out {
