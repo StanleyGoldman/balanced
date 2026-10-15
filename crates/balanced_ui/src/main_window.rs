@@ -38,31 +38,28 @@ impl MainWindow {
         }
     }
 
-    /// Closes the current Register tab, if the Accounts tab shows one.
-    pub(crate) fn close_register_tab(&mut self) {
+    /// Applies `change` to the Register tabs, if the Accounts tab shows them.
+    pub(crate) fn change_register_tabs(&mut self, change: impl FnOnce(&mut RegisterTabs)) {
         if self.shows_registers() {
-            self.registers.close_current();
-        }
-    }
-
-    /// Moves to the next Register tab, if the Accounts tab shows the Register tabs.
-    pub(crate) fn next_register_tab(&mut self) {
-        if self.shows_registers() {
-            self.registers.next();
-        }
-    }
-
-    /// Moves to the previous Register tab, if the Accounts tab shows the Register tabs.
-    pub(crate) fn previous_register_tab(&mut self) {
-        if self.shows_registers() {
-            self.registers.previous();
+            change(&mut self.registers);
         }
     }
 
     /// Whether the Main view shows the Register tabs: the Accounts tab is active and
     /// a tab is open.
     fn shows_registers(&self) -> bool {
-        self.tab == TopLevelTab::Accounts && !self.registers.tabs().is_empty()
+        self.tab == TopLevelTab::Accounts && self.registers.len() > 0
+    }
+
+    /// Whether `action` can act now. Its menu item is disabled while it can't.
+    fn can_act(&self, action: UserAction) -> bool {
+        match action {
+            UserAction::CloseRegisterTab => self.shows_registers(),
+            UserAction::NextRegisterTab | UserAction::PreviousRegisterTab => {
+                self.shows_registers() && self.registers.len() > 1
+            }
+            UserAction::Quit | UserAction::About => true,
+        }
     }
 
     /// Shows `message` in the Status bar.
@@ -174,56 +171,36 @@ impl MainWindow {
     }
 
     fn menu_bar(&self, ui: &mut egui::Ui, i18n: &Localizer, commands: &CommandSender) {
-        let shows_registers = self.shows_registers();
-        let several_registers = shows_registers && self.registers.tabs().len() > 1;
         MenuBar::new().ui(ui, |ui| {
             ui.menu_button(fl!(i18n, "menu-file"), |ui| {
-                Self::menu_item(
-                    ui,
-                    i18n,
-                    commands,
-                    UserAction::CloseRegisterTab,
-                    shows_registers,
-                );
+                self.menu_item(ui, i18n, commands, UserAction::CloseRegisterTab);
                 ui.separator();
-                Self::menu_item(ui, i18n, commands, UserAction::Quit, true);
+                self.menu_item(ui, i18n, commands, UserAction::Quit);
             });
             ui.menu_button(fl!(i18n, "menu-view"), |ui| {
-                Self::menu_item(
-                    ui,
-                    i18n,
-                    commands,
-                    UserAction::NextRegisterTab,
-                    several_registers,
-                );
-                Self::menu_item(
-                    ui,
-                    i18n,
-                    commands,
-                    UserAction::PreviousRegisterTab,
-                    several_registers,
-                );
+                self.menu_item(ui, i18n, commands, UserAction::NextRegisterTab);
+                self.menu_item(ui, i18n, commands, UserAction::PreviousRegisterTab);
             });
             ui.menu_button(fl!(i18n, "menu-help"), |ui| {
-                Self::menu_item(ui, i18n, commands, UserAction::About, true);
+                self.menu_item(ui, i18n, commands, UserAction::About);
             });
         });
     }
 
-    /// The menu item for `action`, with its Shortcut text. A disabled item is shown
-    /// but can't be chosen.
+    /// The menu item for `action`, with its Shortcut text, disabled while the action
+    /// can't act.
     fn menu_item(
+        &self,
         ui: &mut egui::Ui,
         i18n: &Localizer,
         commands: &CommandSender,
         action: UserAction,
-        enabled: bool,
     ) {
         let mut button = egui::Button::new(action.label(i18n));
         if let Some(chord) = keymap::chord(action) {
             button = button.shortcut_text(keymap::shortcut_text(chord, i18n, ui.ctx().os()));
         }
-        if ui.add_enabled(enabled, button).clicked() {
+        if ui.add_enabled(self.can_act(action), button).clicked() {
             commands.send(action.command());
         }
     }

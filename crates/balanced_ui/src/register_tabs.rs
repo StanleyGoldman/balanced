@@ -5,8 +5,7 @@ use balanced_core::{AccountId, LedgerView};
 use balanced_i18n::Localizer;
 use eframe::egui::accesskit::Role;
 use eframe::egui::{
-    self, Rect, Sense, Stroke, TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2,
-    vec2,
+    self, Rect, Sense, TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 
 use crate::i18n::fl;
@@ -15,7 +14,7 @@ use crate::route::OpenIn;
 
 /// One open Register and the account it shows.
 #[derive(Debug)]
-pub(crate) struct RegisterTab {
+struct RegisterTab {
     account: AccountId,
     register: Register,
 }
@@ -26,10 +25,6 @@ impl RegisterTab {
             account,
             register: Register::default(),
         }
-    }
-
-    pub(crate) fn account(&self) -> AccountId {
-        self.account
     }
 }
 
@@ -60,7 +55,7 @@ impl RegisterTabs {
     }
 
     /// Makes the tab at `index` current. An index past the last tab does nothing.
-    pub(crate) fn select(&mut self, index: usize) {
+    fn select(&mut self, index: usize) {
         if index < self.tabs.len() {
             self.current = index;
         }
@@ -68,7 +63,7 @@ impl RegisterTabs {
 
     /// Closes the tab at `index`. The tab to its right becomes current if it was, or
     /// the one to its left when it was the last.
-    pub(crate) fn close(&mut self, index: usize) {
+    fn close(&mut self, index: usize) {
         if index >= self.tabs.len() {
             return;
         }
@@ -97,35 +92,42 @@ impl RegisterTabs {
         }
     }
 
-    pub(crate) fn tabs(&self) -> &[RegisterTab] {
-        &self.tabs
+    /// How many tabs are open.
+    pub(crate) fn len(&self) -> usize {
+        self.tabs.len()
     }
 
     /// The account in the current tab, or `None` while no tab is open.
     pub(crate) fn current_account(&self) -> Option<AccountId> {
-        self.tabs.get(self.current).map(RegisterTab::account)
+        self.tabs.get(self.current).map(|tab| tab.account)
     }
 
     /// The current tab's Register, or `None` while no tab is open.
     pub(crate) fn current_register_mut(&mut self) -> Option<&mut Register> {
         self.tabs.get_mut(self.current).map(|tab| &mut tab.register)
     }
-}
 
-impl RegisterTabs {
     /// Draws the tab strip, one tab per open Register labelled with its account's name
-    /// in `view`. Clicking a tab makes it current, and clicking its × closes it.
+    /// in `view`, and reports it to AccessKit as a tab list. A tab whose account is gone
+    /// from `view` is left out. Clicking a tab makes it current, and clicking its ×
+    /// closes it.
     pub(crate) fn show_strip(&mut self, ui: &mut egui::Ui, i18n: &Localizer, view: &LedgerView) {
         let mut select = None;
         let mut close = None;
         ui.horizontal(|ui| {
+            ui.ctx()
+                .accesskit_node_builder(ui.unique_id(), |node| node.set_role(Role::TabList));
             for (index, tab) in self.tabs.iter().enumerate() {
-                let name = view
-                    .account(tab.account)
-                    .map(|summary| summary.account().name().to_owned())
-                    .unwrap_or_default();
-                let clicked = tab_widget(ui, i18n, tab.account, &name, index == self.current);
-                match clicked {
+                let Some(summary) = view.account(tab.account) else {
+                    continue;
+                };
+                let state = if index == self.current {
+                    TabState::Current
+                } else {
+                    TabState::Other
+                };
+                let name = summary.account().name();
+                match tab_widget(ui, i18n, tab.account, name, state) {
                     Some(TabPart::Tab) => select = Some(index),
                     Some(TabPart::Close) => close = Some(index),
                     None => {}
@@ -139,6 +141,13 @@ impl RegisterTabs {
             self.close(index);
         }
     }
+}
+
+/// Whether a Register tab is the current one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TabState {
+    Current,
+    Other,
 }
 
 /// The part of a Register tab that was clicked.
@@ -155,8 +164,9 @@ fn tab_widget(
     i18n: &Localizer,
     account: AccountId,
     name: &str,
-    current: bool,
+    state: TabState,
 ) -> Option<TabPart> {
+    let current = state == TabState::Current;
     let padding = ui.spacing().button_padding;
     let height = ui.spacing().interact_size.y;
     let close_size = height - padding.y * 2.0;
@@ -210,7 +220,7 @@ fn tab_widget(
                 .rect_filled(close_rect, 0.0, close_visuals.weak_bg_fill);
         }
         let cross = close_rect.shrink(close_size / 4.0);
-        let stroke = Stroke::new(1.0, visuals.text_color());
+        let stroke = visuals.fg_stroke;
         ui.painter()
             .line_segment([cross.left_top(), cross.right_bottom()], stroke);
         ui.painter()

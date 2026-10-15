@@ -9,6 +9,7 @@ use eframe::egui;
 use crate::command::{AppCommand, CommandSender};
 use crate::i18n::fl;
 use crate::main_window::MainWindow;
+use crate::register_tabs::RegisterTabs;
 use crate::theme::Theme;
 
 /// Balanced's eframe application.
@@ -46,9 +47,15 @@ impl App {
     fn apply(&mut self, ctx: &egui::Context, command: AppCommand) {
         match command {
             AppCommand::Navigate(route) => self.main_window.navigate(route),
-            AppCommand::CloseRegisterTab => self.main_window.close_register_tab(),
-            AppCommand::NextRegisterTab => self.main_window.next_register_tab(),
-            AppCommand::PreviousRegisterTab => self.main_window.previous_register_tab(),
+            AppCommand::CloseRegisterTab => self
+                .main_window
+                .change_register_tabs(RegisterTabs::close_current),
+            AppCommand::NextRegisterTab => {
+                self.main_window.change_register_tabs(RegisterTabs::next);
+            }
+            AppCommand::PreviousRegisterTab => self
+                .main_window
+                .change_register_tabs(RegisterTabs::previous),
             AppCommand::ShowStatus(message) => self.main_window.show_status(message),
             AppCommand::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }

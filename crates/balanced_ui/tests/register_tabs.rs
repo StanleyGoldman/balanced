@@ -111,24 +111,48 @@ fn ctrl_f4_closes_the_current_tab() {
     assert_eq!(tabs(&harness), ["Everyday Checking", "Emergency Fund"]);
 }
 
+/// Makes the Register tab named `name` current by clicking it.
+fn select_tab(harness: &mut Harness<'static, App>, name: &str) {
+    harness.get_by_role_and_label(Role::Tab, name).click();
+    harness.run();
+}
+
 #[test]
-fn ctrl_tab_moves_to_the_next_tab_and_wraps_to_the_first() {
+fn ctrl_tab_moves_to_the_next_tab() {
+    let mut harness = three_tabs();
+    select_tab(&mut harness, "Everyday Checking");
+
+    press(&mut harness, Modifiers::COMMAND, Key::Tab);
+
+    assert_eq!(current_tab(&harness), "Emergency Fund");
+}
+
+#[test]
+fn ctrl_tab_wraps_from_the_last_tab_to_the_first() {
     let mut harness = three_tabs();
 
     press(&mut harness, Modifiers::COMMAND, Key::Tab);
 
     assert_eq!(current_tab(&harness), "Everyday Checking");
-    press(&mut harness, Modifiers::COMMAND, Key::Tab);
+}
+
+#[test]
+fn ctrl_shift_tab_moves_to_the_previous_tab() {
+    let mut harness = three_tabs();
+
+    press(
+        &mut harness,
+        Modifiers::COMMAND | Modifiers::SHIFT,
+        Key::Tab,
+    );
+
     assert_eq!(current_tab(&harness), "Emergency Fund");
 }
 
 #[test]
-fn ctrl_shift_tab_moves_to_the_previous_tab_and_wraps_to_the_last() {
+fn ctrl_shift_tab_wraps_from_the_first_tab_to_the_last() {
     let mut harness = three_tabs();
-    harness
-        .get_by_role_and_label(Role::Tab, "Everyday Checking")
-        .click();
-    harness.run();
+    select_tab(&mut harness, "Everyday Checking");
 
     press(
         &mut harness,
@@ -137,12 +161,16 @@ fn ctrl_shift_tab_moves_to_the_previous_tab_and_wraps_to_the_last() {
     );
 
     assert_eq!(current_tab(&harness), "Visa Rewards");
-    press(
-        &mut harness,
-        Modifiers::COMMAND | Modifiers::SHIFT,
-        Key::Tab,
-    );
-    assert_eq!(current_tab(&harness), "Emergency Fund");
+}
+
+#[test]
+fn register_tabs_sit_in_a_tab_list() {
+    let harness = three_tabs();
+
+    let tab = harness.get_by_role_and_label(Role::Tab, "Emergency Fund");
+
+    let parent = tab.parent().expect("a Register tab has a parent");
+    assert_eq!(parent.accesskit_node().role(), Role::TabList);
 }
 
 /// Opens the Menu bar menu named `menu`.
@@ -161,21 +189,40 @@ fn menu_item_label(harness: &Harness<'static, App>, item: &str) -> String {
         .unwrap_or_else(|| panic!("the open menu has {item}"))
 }
 
+/// Whether the menu item whose label starts with `item` is disabled.
+fn menu_item_disabled(harness: &Harness<'static, App>, item: &str) -> bool {
+    let label = menu_item_label(harness, item);
+    harness
+        .get_by_role_and_label(Role::Button, &label)
+        .accesskit_node()
+        .is_disabled()
+}
+
 #[test]
-fn the_menus_show_the_tab_shortcuts() {
+fn the_view_menu_shows_the_tab_cycling_shortcuts() {
     let mut harness = three_tabs();
 
     open_menu(&mut harness, "View");
 
-    assert_eq!(
+    let labels = [
         menu_item_label(&harness, "Next Register Tab"),
-        "Next Register Tab Ctrl+Tab"
-    );
-    assert_eq!(
         menu_item_label(&harness, "Previous Register Tab"),
-        "Previous Register Tab Ctrl+Shift+Tab"
+    ];
+    assert_eq!(
+        labels,
+        [
+            "Next Register Tab Ctrl+Tab",
+            "Previous Register Tab Ctrl+Shift+Tab"
+        ]
     );
+}
+
+#[test]
+fn the_file_menu_shows_the_close_tab_shortcut() {
+    let mut harness = three_tabs();
+
     open_menu(&mut harness, "File");
+
     assert_eq!(
         menu_item_label(&harness, "Close Register Tab"),
         "Close Register Tab Ctrl+W"
@@ -195,18 +242,22 @@ fn file_close_register_tab_closes_the_current_tab() {
 }
 
 #[test]
-fn the_tab_menu_items_are_disabled_while_no_tab_is_open() {
+fn file_close_register_tab_is_disabled_while_no_tab_is_open() {
     let mut harness = app();
+
+    open_menu(&mut harness, "File");
+
+    assert!(menu_item_disabled(&harness, "Close Register Tab"));
+}
+
+#[test]
+fn view_next_register_tab_is_disabled_while_one_tab_is_open() {
+    let mut harness = app();
+    open_in_new_tab(&mut harness, "Everyday Checking");
 
     open_menu(&mut harness, "View");
 
-    let next = menu_item_label(&harness, "Next Register Tab");
-    let next = harness.get_by_role_and_label(Role::Button, &next);
-    assert!(next.accesskit_node().is_disabled());
-    open_menu(&mut harness, "File");
-    let close = menu_item_label(&harness, "Close Register Tab");
-    let close = harness.get_by_role_and_label(Role::Button, &close);
-    assert!(close.accesskit_node().is_disabled());
+    assert!(menu_item_disabled(&harness, "Next Register Tab"));
 }
 
 #[test]
@@ -219,10 +270,7 @@ fn a_tab_keeps_its_selected_row_while_another_tab_is_current() {
     harness.run();
     open_in_new_tab(&mut harness, "Emergency Fund");
 
-    harness
-        .get_by_role_and_label(Role::Tab, "Everyday Checking")
-        .click();
-    harness.run();
+    select_tab(&mut harness, "Everyday Checking");
 
     let payee = harness.get_by_role_and_label(Role::Cell, "Fresh Market");
     assert_eq!(payee.accesskit_node().toggled(), Some(Toggled::True));
@@ -231,10 +279,7 @@ fn a_tab_keeps_its_selected_row_while_another_tab_is_current() {
 #[test]
 fn selecting_an_account_opens_it_in_the_current_tab() {
     let mut harness = three_tabs();
-    harness
-        .get_by_role_and_label(Role::Tab, "Emergency Fund")
-        .click();
-    harness.run();
+    select_tab(&mut harness, "Emergency Fund");
 
     harness
         .get_by_role_and_label(Role::Button, "Joint Checking")
@@ -252,11 +297,11 @@ fn selecting_an_account_opens_it_in_the_current_tab() {
 fn opening_an_account_that_has_a_tab_makes_its_tab_current() {
     let mut harness = three_tabs();
 
-    open_in_new_tab(&mut harness, "Everyday Checking");
-
-    assert_eq!(current_tab(&harness), "Everyday Checking");
     // A second Everyday Checking tab would share the first's AccessKit node, so the
-    // tab after the current one tells them apart.
+    // tab after the current one tells them apart: Emergency Fund follows only the
+    // first.
+    open_in_new_tab(&mut harness, "Everyday Checking");
     press(&mut harness, Modifiers::COMMAND, Key::Tab);
+
     assert_eq!(current_tab(&harness), "Emergency Fund");
 }
