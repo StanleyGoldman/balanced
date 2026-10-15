@@ -17,10 +17,13 @@ const STORAGE_KEY: &str = "layout";
 /// other version is ignored.
 const VERSION: u32 = 1;
 
-/// The Main window's layout as it is saved. A field the entry lacks takes its default.
+/// The Main window's layout as it is saved. A field the entry lacks takes its value
+/// from the first-run layout, except the version.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct Layout {
+    /// An entry with no version reads as version 0, which no layout has.
+    #[serde(default)]
     version: u32,
     account_bar_width: f32,
     /// Whether the Account bar is folded to a rail.
@@ -213,6 +216,15 @@ mod tests {
     #[test]
     fn an_unreadable_entry_falls_back_to_defaults() {
         let layout = Layout::load(Some(&storage_with("not a layout {")));
+
+        assert_eq!(layout, Layout::default());
+    }
+
+    #[test]
+    fn an_entry_without_a_version_falls_back_to_defaults() {
+        let storage = storage_with(r#"(folded_sections: ["banking"])"#);
+
+        let layout = Layout::load(Some(&storage));
 
         assert_eq!(layout, Layout::default());
     }

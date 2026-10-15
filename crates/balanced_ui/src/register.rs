@@ -132,9 +132,11 @@ impl RegisterColumn {
         let column = match self {
             Self::Payee | Self::Category => Column::remainder().at_least(MIN_FLEX_WIDTH),
             Self::Actions => Column::exact(theme.row_height() + Theme::EDGE_INSET),
-            Self::Date | Self::Number | Self::Memo | Self::Amount | Self::Balance => {
-                Column::exact(widths.width(self).unwrap_or(MIN_COLUMN_WIDTH))
-            }
+            Self::Date | Self::Number | Self::Memo | Self::Amount | Self::Balance => Column::exact(
+                widths
+                    .width(self)
+                    .expect("every column that resizes has a width"),
+            ),
         };
         column.clip(true)
     }

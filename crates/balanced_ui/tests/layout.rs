@@ -67,22 +67,30 @@ fn folded_groups_survive_a_restart() {
 }
 
 #[test]
-fn a_restart_starts_on_home_with_nothing_but_the_layout_saved() {
+fn a_restart_starts_on_home() {
     let empty = MemoryStorage::default();
     let mut first = app(&empty);
-    first
-        .get_by_role_and_label(Role::Button, "Everyday Checking")
-        .click();
-    first.run();
+    open(&mut first, "Everyday Checking");
     let storage = save(&mut first);
 
     let second = app(&storage);
 
-    let keys: Vec<&str> = storage.0.keys().map(String::as_str).collect();
-    assert_eq!(keys, ["layout"]);
-    assert!(!storage.0["layout"].contains("Everyday Checking"));
     let home = second.get_by_role_and_label(Role::Button, "Home");
     assert_eq!(home.accesskit_node().toggled(), Some(Toggled::True));
+}
+
+#[test]
+fn only_the_layout_is_saved() {
+    let empty = MemoryStorage::default();
+    let mut harness = app(&empty);
+    open(&mut harness, "Everyday Checking");
+
+    let storage = save(&mut harness);
+
+    let keys: Vec<&str> = storage.0.keys().map(String::as_str).collect();
+    assert_eq!(keys, ["layout"]);
+    // The layout names no account, so it holds neither navigation nor financial data.
+    assert!(!storage.0["layout"].contains("Everyday Checking"));
 }
 
 /// Storage holding `entry` as the saved layout.
