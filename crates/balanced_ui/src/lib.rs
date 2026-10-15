@@ -10,6 +10,7 @@ mod keymap;
 mod main_window;
 mod register;
 mod register_model;
+mod register_tabs;
 mod route;
 #[cfg(feature = "test-support")]
 pub mod testing;

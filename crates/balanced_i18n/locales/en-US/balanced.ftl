@@ -13,9 +13,12 @@ main-window-title = { -brand-name }
 ## Menu bar
 
 menu-file = File
+menu-file-close-register-tab = Close { -register } Tab
 menu-file-quit = Quit
 menu-edit = Edit
 menu-view = View
+menu-view-next-register-tab = Next { -register } Tab
+menu-view-previous-register-tab = Previous { -register } Tab
 menu-tools = Tools
 menu-help = Help
 menu-help-about = About { -brand-name }
@@ -45,6 +48,8 @@ tab-investing = Investing
 tab-investing-placeholder = Your investment accounts and holdings will appear here.
 tab-property-debt = Property & Debt
 tab-property-debt-placeholder = Your assets, loans and other debts will appear here.
+# The × on a Register tab, named for the account the tab shows.
+tab-register-close = Close { $account }
 
 ## Account bar
 
@@ -56,6 +61,9 @@ account-bar-group-investing = Investing
 account-bar-group-property-debt = Property & Debt
 account-bar-group-closed = Closed
 account-bar-net-worth = Net Worth
+# An account's right-click menu.
+account-bar-open-register = Open { -register }
+account-bar-open-in-new-tab = Open in New Tab
 
 ## Register
 
