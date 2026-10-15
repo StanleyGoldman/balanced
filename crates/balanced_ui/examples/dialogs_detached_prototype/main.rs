@@ -444,6 +444,7 @@ struct Opts {
     dim: bool,
     cascade: bool,
     diag: bool,
+    heavy: bool,
     style: DlgStyle,
     mech: Mech,
 }
@@ -460,6 +461,7 @@ impl Opts {
             "dim" => &mut self.dim,
             "cascade" => &mut self.cascade,
             "diag" => &mut self.diag,
+            "heavy" => &mut self.heavy,
             _ => return None,
         })
     }
@@ -496,6 +498,11 @@ const TOGGLES: &[(&str, &str, &str)] = &[
         "A B C",
     ),
     ("diag", "Diagnostics footer in other OS windows", "A B C"),
+    (
+        "heavy",
+        "Heavier Dialog: title bar with ✕, movable, still modal",
+        "A B E",
+    ),
 ];
 
 const TOGGLE_KEYS: [(Key, &str); 10] = [
@@ -751,6 +758,74 @@ impl Shared {
     fn forget(&self, name: &str) {
         self.stats.lock().unwrap().remove(name);
     }
+}
+
+/// One account in the Account bar, as the shell layout decided (#15): the whole row is the
+/// click target and the highlight, the name left-aligned and the balance right-aligned.
+fn account_row(
+    ui: &mut Ui,
+    selected: bool,
+    name: &str,
+    balance: i64,
+    height: f32,
+) -> egui::Response {
+    let (rect, row) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::click());
+    let v = ui.visuals();
+    if selected {
+        ui.painter().rect_filled(rect, 2.0, v.selection.bg_fill);
+    } else if row.hovered() {
+        ui.painter()
+            .rect_filled(rect, 2.0, v.widgets.hovered.weak_bg_fill);
+    }
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let text = if selected {
+        v.selection.stroke.color
+    } else {
+        v.text_color()
+    };
+    let money = if balance < 0 { v.error_fg_color } else { text };
+    ui.painter().text(
+        rect.left_center() + egui::vec2(14.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        name,
+        font.clone(),
+        text,
+    );
+    ui.painter().text(
+        rect.right_center() - egui::vec2(2.0, 0.0),
+        egui::Align2::RIGHT_CENTER,
+        fmt_cents(balance),
+        font,
+        money,
+    );
+    row
+}
+
+/// The backdrop behind a heavy Dialog: it dims the host window and swallows its clicks, as
+/// `egui::Modal`'s does, beneath the Dialog's `egui::Window`.
+fn heavy_backdrop(
+    ctx: &Context,
+    shared: &Shared,
+    host: &str,
+    uid: u64,
+    color: egui::Color32,
+    top: bool,
+    short: &str,
+) {
+    let rect = ctx.content_rect();
+    egui::Area::new(Id::new(("heavy_backdrop", uid)))
+        .order(egui::Order::Foreground)
+        .fixed_pos(rect.min)
+        .show(ctx, |ui| {
+            let (rect, r) = ui.allocate_exact_size(rect.size(), Sense::click_and_drag());
+            ui.painter().rect_filled(rect, 0.0, color);
+            if r.clicked() && top {
+                shared
+                    .sink
+                    .event("backdrop_click", json!({ "host": host, "dialog": short }));
+            }
+        });
 }
 
 /// A footer of facts about the OS window it sits in, and a spinner while stressing. The Main
@@ -1042,6 +1117,8 @@ struct DlgCx<'a> {
     opts: Opts,
     top: bool,
     forced: Option<Forced>,
+    /// The Dialog has a title bar showing its title, so the body leaves out its heading.
+    chrome: bool,
 }
 
 fn primary_button(ui: &mut Ui, label: &str) -> egui::Response {
@@ -1064,7 +1141,9 @@ fn dialog_ui(ui: &mut Ui, d: &mut Dialog, cx: &DlgCx<'_>) -> Option<Done> {
     match &mut d.kind {
         DialogKind::Confirm(c) => {
             ui.set_min_width(380.0);
-            ui.heading(&c.title);
+            if !cx.chrome {
+                ui.heading(&c.title);
+            }
             ui.add_space(6.0);
             ui.label(&c.text);
             ui.add_space(12.0);
@@ -1096,7 +1175,9 @@ fn dialog_ui(ui: &mut Ui, d: &mut Dialog, cx: &DlgCx<'_>) -> Option<Done> {
         DialogKind::Wizard(w) => wizard_ui(ui, w, cx, enter, esc),
         DialogKind::Category(c) => {
             ui.set_min_width(400.0);
-            ui.heading("New Category");
+            if !cx.chrome {
+                ui.heading("New Category");
+            }
             ui.add_space(4.0);
             egui::Grid::new("category_grid")
                 .num_columns(2)
@@ -1168,7 +1249,9 @@ fn dialog_ui(ui: &mut Ui, d: &mut Dialog, cx: &DlgCx<'_>) -> Option<Done> {
         }
         DialogKind::Manage(m) => {
             ui.set_min_width(560.0);
-            ui.heading("Manage Accounts");
+            if !cx.chrome {
+                ui.heading("Manage Accounts");
+            }
             ui.label(
                 RichText::new("Rename, hide, close or delete accounts. Nothing is saved until OK.")
                     .small()
@@ -1248,7 +1331,9 @@ fn dialog_ui(ui: &mut Ui, d: &mut Dialog, cx: &DlgCx<'_>) -> Option<Done> {
 fn wizard_ui(ui: &mut Ui, w: &mut Wizard, cx: &DlgCx<'_>, enter: bool, esc: bool) -> Option<Done> {
     let sink = &cx.shared.sink;
     ui.set_min_width(480.0);
-    ui.heading("New Account");
+    if !cx.chrome {
+        ui.heading("New Account");
+    }
     ui.horizontal(|ui| {
         for (i, label) in WIZARD_STEPS.iter().enumerate() {
             let text = RichText::new(format!("{}. {label}", i + 1));
@@ -1507,11 +1592,42 @@ fn show_dialogs(
             opts,
             top,
             forced: if top { forced.take() } else { None },
+            chrome: opts.style != DlgStyle::Modal || opts.heavy,
         };
         let uid = stack[i].uid;
         let title = stack[i].title();
         let vid = ViewportId::from_hash_of(("dialog", uid));
         let res = match opts.style {
+            DlgStyle::Modal if opts.heavy => {
+                let short = stack[i].short();
+                heavy_backdrop(ctx, shared, host, uid, backdrop, top, short);
+                let mut open = true;
+                let shown = egui::Window::new(&title)
+                    .id(Id::new(("dlgheavy", uid)))
+                    .order(egui::Order::Foreground)
+                    .open(&mut open)
+                    .collapsible(false)
+                    .resizable(false)
+                    .pivot(egui::Align2::CENTER_CENTER)
+                    .default_pos(ctx.content_rect().center())
+                    .show(ctx, |ui| dialog_ui(ui, &mut stack[i], &cx))
+                    .and_then(|r| {
+                        shared
+                            .sink
+                            .region(ctx, r.response.rect, format!("dialog: {short}"));
+                        r.inner.flatten()
+                    });
+                // Clicking the backdrop would raise it over the Dialog; keep each Dialog above
+                // its own backdrop, and later Dialogs above both.
+                let fg = egui::Order::Foreground;
+                ctx.move_to_top(egui::LayerId::new(fg, Id::new(("heavy_backdrop", uid))));
+                ctx.move_to_top(egui::LayerId::new(fg, Id::new(("dlgheavy", uid))));
+                if open {
+                    shown
+                } else {
+                    Some(Done::Cancel("close_button"))
+                }
+            }
             DlgStyle::Modal => {
                 let m = egui::Modal::new(Id::new(("dlg", uid)))
                     .backdrop_color(backdrop)
@@ -2017,6 +2133,7 @@ impl Proto {
             dim: true,
             cascade: true,
             diag: true,
+            heavy: false,
             style: variant.style(),
             mech: variant.mech(),
         };
@@ -2701,7 +2818,7 @@ impl Proto {
         });
         self.h.region(status.response.rect, "status bar");
         if self.tab == ACCOUNTS_TAB {
-            let bar = Panel::left("accounts").default_size(210.0).show(ui, |ui| {
+            let bar = Panel::left("accounts").default_size(270.0).show(ui, |ui| {
                 ui.add_enabled_ui(!blocked, |ui| self.account_bar(ui, ctx));
             });
             self.h.region(bar.response.rect, "account bar");
@@ -2832,17 +2949,17 @@ impl Proto {
                 ui.label(RichText::new(group.name()).small().strong());
                 for i in members {
                     let a = &self.accounts[i];
-                    let text = if a.closed {
-                        RichText::new(format!("{} (closed)", a.name)).weak()
+                    let name = if a.closed {
+                        format!("{} (closed)", a.name)
                     } else {
-                        RichText::new(a.name)
+                        a.name.to_owned()
                     };
-                    let r = ui.add_sized(
-                        [ui.available_width(), self.theme.row_height()],
-                        egui::Button::selectable(
-                            self.selected == i && self.nav == Nav::Register,
-                            text,
-                        ),
+                    let r = account_row(
+                        ui,
+                        self.selected == i && self.nav == Nav::Register,
+                        &name,
+                        a.balance,
+                        self.theme.row_height(),
                     );
                     self.h.track(&r, format!("account bar: {}", a.name));
                     if r.clicked() {
