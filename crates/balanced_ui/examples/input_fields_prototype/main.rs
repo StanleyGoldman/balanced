@@ -1724,10 +1724,8 @@ impl Proto {
                 Some(policy) => {
                     let m = Money::rounded(v, code, policy)
                         .map_err(|_| bad(AmountParseError::OutOfRange))?;
-                    let note = self
-                        .tr("rounded from {} ({})")
-                        .replacen("{}", &self.exact(v), 1)
-                        .replacen("{}", rounding.name(), 1);
+                    // Step 3: the user reads "rounded" plainly; the policy's name is noise.
+                    let note = self.tr("rounded from {}").replacen("{}", &self.exact(v), 1);
                     Ok((Some(m), Some(note)))
                 }
             };
