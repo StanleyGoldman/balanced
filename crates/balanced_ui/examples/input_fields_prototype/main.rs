@@ -1860,6 +1860,9 @@ impl Proto {
                     (s, false)
                 }
                 Ok((None, _)) => (self.tr("empty"), false),
+                // A calculator result that needs rounding is a complete amount: say why it
+                // won't be accepted, as leaving the cell would.
+                Err(e) if e.starts_with('=') => (e, false),
                 Err(_) => (self.tr("Not an amount yet"), false),
             })
         } else {
