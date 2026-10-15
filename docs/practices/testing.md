@@ -20,6 +20,7 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 
 - Drive the UI the way a user does: `node.click()`, or `focus()` then `type_text()`. Don't write into internal state to set up a UI test. `TextEdit` ignores AccessKit value-setting in egui 0.36.
 - Find nodes by role and label (`get_by_role_and_label`), never by screen position.
+- `accesskit_node()` returns an `accesskit_consumer` node, whose `supports_action` takes a filter as well. To ask whether a widget accepts a click, read the raw node: `node.accesskit_node().data().supports_action(Action::Click)`.
 - Labels in tests use the pinned test locale, `en-US`.
 - Double-clicks need `with_step_dt(0.01)`. With the default 0.25 s step, the second click arrives too late.
 - `Harness::output()` holds only the last frame's output, and `run()` keeps stepping until repaints stop. Output that lasts one frame, such as a `ViewportCommand` sent from `App::logic`, is gone by the time `run()` returns. Step to that frame instead: after a `click()`, one `step()` plays the click, and the next runs the `logic()` that applies the Command it sent.
