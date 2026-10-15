@@ -386,10 +386,10 @@ mod tests {
             .iter()
             .map(|message| (&message.language, message.key.as_str()))
             .collect();
-        assert_eq!(
-            ids,
-            [(&de, "menu-help-about"), (&de, "register-column-amount")]
-        );
+        // The German file grows with each feature, so check one message it lacks
+        // and one it has rather than the whole list.
+        assert!(ids.contains(&(&de, "register-column-amount")), "{ids:?}");
+        assert!(!ids.contains(&(&de, "menu-file")), "{ids:?}");
     }
 
     #[test]
