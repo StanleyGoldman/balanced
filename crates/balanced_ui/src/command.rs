@@ -2,6 +2,7 @@
 
 use std::sync::mpsc::{self, Receiver, Sender};
 
+use balanced_core::{DomainCommand, DomainError};
 use balanced_i18n::Localizer;
 use eframe::egui;
 
@@ -10,8 +11,10 @@ use crate::route::Route;
 
 /// An app-level action. UI code sends one instead of changing app or domain state
 /// itself, and `App::logic` applies it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AppCommand {
+    /// Apply a change to the ledger. A rejected change shows in the Status bar.
+    Domain(DomainCommand),
     /// Show `Route` in the Main view.
     Navigate(Route),
     /// Close the current Register tab.
@@ -33,6 +36,8 @@ pub(crate) enum StatusMessage {
     About,
     /// The answer to a command whose feature isn't built yet.
     NotAvailableYet,
+    /// Why the ledger refused a change.
+    Rejected(DomainError),
 }
 
 impl StatusMessage {
@@ -40,6 +45,15 @@ impl StatusMessage {
         match self {
             Self::About => fl!(i18n, "status-about", version = env!("CARGO_PKG_VERSION")),
             Self::NotAvailableYet => fl!(i18n, "status-not-available-yet"),
+            Self::Rejected(error) => match error {
+                DomainError::AccountClosed { .. } => fl!(i18n, "status-account-closed"),
+                DomainError::UnknownTransaction { .. } => {
+                    fl!(i18n, "status-unknown-transaction")
+                }
+                DomainError::OpeningBalancePayee { .. } => {
+                    fl!(i18n, "status-opening-balance-payee")
+                }
+            },
         }
     }
 }

@@ -3,8 +3,9 @@
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
 use balanced_ui::App;
+use eframe::App as _;
 use eframe::egui::accesskit::{Action, Role, SortDirection, Toggled};
-use eframe::egui::{CursorIcon, vec2};
+use eframe::egui::{CursorIcon, Event, Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
@@ -19,6 +20,62 @@ fn app() -> Harness<'static, App> {
 fn open(harness: &mut Harness<'static, App>, name: &str) {
     harness.get_by_role_and_label(Role::Button, name).click();
     harness.run();
+}
+
+/// Plays `event` in one frame, first passing it through the App's `raw_input_hook`
+/// as eframe does. `egui_kittest` skips the hook.
+fn send(harness: &mut Harness<'static, App>, event: Event) {
+    let ctx = harness.ctx.clone();
+    let mut input = std::mem::take(harness.input_mut());
+    input.events.push(event);
+    harness.state_mut().raw_input_hook(&ctx, &mut input);
+    *harness.input_mut() = input;
+    harness.step();
+}
+
+/// Presses `key` with `modifiers` held, then lets the App settle.
+fn press(harness: &mut Harness<'static, App>, modifiers: Modifiers, key: Key) {
+    send(
+        harness,
+        Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        },
+    );
+    harness.run();
+}
+
+/// Types `text` into whatever has the keyboard, then lets the App settle.
+fn type_text(harness: &mut Harness<'static, App>, text: &str) {
+    send(harness, Event::Text(text.to_owned()));
+    harness.run();
+}
+
+/// Opens Everyday Checking and puts the cell cursor on the cell labelled `label`.
+fn click_cell(harness: &mut Harness<'static, App>, label: &str) {
+    harness.get_by_role_and_label(Role::Cell, label).click();
+    harness.run();
+}
+
+/// The text in the open cell editor labelled `column`, or `None` when no such editor
+/// is open.
+fn editor(harness: &Harness<'static, App>, column: &str) -> Option<String> {
+    harness
+        .query_by_role_and_label(Role::TextInput, column)
+        .map(|node| node.accesskit_node().value().unwrap_or_default())
+}
+
+/// The label of the cell under the cell cursor.
+fn cursor(harness: &Harness<'static, App>) -> String {
+    let mut cursors = harness
+        .query_all_by_role(Role::Cell)
+        .filter(|cell| cell.accesskit_node().is_selected() == Some(true));
+    let cursor = cursors.next().expect("a cell holds the cell cursor");
+    assert!(cursors.next().is_none(), "one cell holds the cell cursor");
+    cursor.accesskit_node().label().unwrap_or_default()
 }
 
 /// The labels of every Register cell, top row first, each row left to right.
@@ -395,4 +452,214 @@ fn selecting_a_row_after_a_sort_with_nothing_selected_leaves_the_rows_still() {
         .find(|cell| cell.accesskit_node().toggled() == Some(Toggled::True))
         .map(|cell| cell.rect().center().y);
     assert_eq!(selected, Some(clicked.center().y));
+}
+
+#[test]
+fn enter_opens_the_cell_under_the_cursor_with_its_saved_text() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Fresh Market"));
+}
+
+#[test]
+fn typing_on_a_cell_starts_editing_it_with_the_typed_text() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+
+    type_text(&mut harness, "C");
+
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("C"));
+}
+
+#[test]
+fn enter_commits_and_moves_right_without_opening_the_next_cell() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    type_text(&mut harness, " Downtown");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    harness.get_by_role_and_label(Role::Cell, "Fresh Market Downtown");
+    assert!(harness.query_by_role(Role::TextInput).is_none());
+    assert_eq!(cursor(&harness), "Food & Dining:Groceries");
+}
+
+#[test]
+fn enter_on_the_last_cell_of_a_row_wraps_to_the_next_row() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    // Bean There's date, the row after Fresh Market's.
+    assert_eq!(cursor(&harness), "9/6/2026");
+}
+
+#[test]
+fn tab_commits_and_edits_the_next_editable_cell() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    harness.get_by_role_and_label(Role::Cell, "Corner Shop");
+    // Category isn't edited as text, so Tab passes it.
+    assert_eq!(editor(&harness, "Memo").as_deref(), Some(""));
+    assert_eq!(editor(&harness, "Payee"), None);
+}
+
+#[test]
+fn shift_tab_commits_and_edits_the_previous_editable_cell() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "September rent");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    press(&mut harness, Modifiers::SHIFT, Key::Tab);
+
+    assert_eq!(
+        editor(&harness, "Payee").as_deref(),
+        Some("Maple Property Management")
+    );
+    assert_eq!(editor(&harness, "Memo"), None);
+}
+
+#[test]
+fn escape_cancels_the_edit_and_restores_the_saved_text() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    type_text(&mut harness, " Downtown");
+
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+
+    assert!(harness.query_by_role(Role::TextInput).is_none());
+    assert_eq!(cursor(&harness), "Fresh Market");
+}
+
+#[test]
+fn clicking_another_cell_commits_the_edit() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+
+    click_cell(&mut harness, "Costco");
+
+    harness.get_by_role_and_label(Role::Cell, "Corner Shop");
+    assert!(harness.query_by_role(Role::TextInput).is_none());
+}
+
+#[test]
+fn the_arrow_keys_move_the_cell_cursor() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+
+    press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+    let down = cursor(&harness);
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+    let right = cursor(&harness);
+    press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+    let up = cursor(&harness);
+    press(&mut harness, Modifiers::NONE, Key::ArrowLeft);
+    let left = cursor(&harness);
+
+    assert_eq!(
+        [down, right, up, left],
+        [
+            "Bean There",
+            "Food & Dining:Restaurants:Coffee Shops",
+            "Food & Dining:Groceries",
+            "Fresh Market",
+        ]
+    );
+}
+
+#[test]
+fn the_cursor_row_is_the_selected_row() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+
+    press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+
+    let bean_there = harness.get_by_role_and_label(Role::Cell, "Bean There");
+    let fresh_market = harness.get_by_role_and_label(Role::Cell, "Fresh Market");
+    assert_eq!(bean_there.accesskit_node().toggled(), Some(Toggled::True));
+    assert_eq!(
+        fresh_market.accesskit_node().toggled(),
+        Some(Toggled::False)
+    );
+}
+
+#[test]
+fn a_closed_accounts_cells_do_not_open_for_editing() {
+    let mut harness = app();
+    open(&mut harness, "Closed");
+    open(&mut harness, "Old Checking");
+    click_cell(&mut harness, "Closing the account");
+
+    type_text(&mut harness, "x");
+
+    assert!(harness.query_by_role(Role::TextInput).is_none());
+    harness.get_by_label("This account is closed, so its transactions can't be changed.");
+}
+
+#[test]
+fn moving_the_cursor_below_the_view_scrolls_to_it_in_the_same_frame() {
+    let mut harness = app();
+    open(&mut harness, "Household Checking");
+    click_cell(&mut harness, "Opening Balance");
+    let net_worth = harness.get_by_role_and_label(Role::Label, "Net Worth");
+    // The Account bar's footer ends where the Register's body does.
+    let bottom = net_worth.accesskit_node().bounding_box().unwrap().y1;
+
+    for _ in 0..60 {
+        send(
+            &mut harness,
+            Event::Key {
+                key: Key::ArrowDown,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            },
+        );
+        let cell = harness
+            .query_all_by_role(Role::Cell)
+            .find(|cell| cell.accesskit_node().is_selected() == Some(true))
+            .expect("the cursor's row is laid out in the frame the cursor moves");
+        let cell_bottom = cell.accesskit_node().bounding_box().unwrap().y1;
+        assert!(
+            cell_bottom <= bottom + 8.0,
+            "{cell_bottom} is below {bottom}"
+        );
+    }
+}
+
+#[test]
+fn an_edit_starts_with_the_text_cursor_at_the_end() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::NONE, Key::Home);
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    type_text(&mut harness, "!");
+
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Fresh Market!"));
 }

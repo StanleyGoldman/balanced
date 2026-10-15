@@ -103,6 +103,11 @@ impl RegisterTabs {
     }
 
     /// The current tab's Register, or `None` while no tab is open.
+    pub(crate) fn current_register(&self) -> Option<&Register> {
+        self.tabs.get(self.current).map(|tab| &tab.register)
+    }
+
+    /// The current tab's Register, or `None` while no tab is open.
     pub(crate) fn current_register_mut(&mut self) -> Option<&mut Register> {
         self.tabs.get_mut(self.current).map(|tab| &mut tab.register)
     }
