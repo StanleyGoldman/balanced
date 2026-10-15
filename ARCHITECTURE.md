@@ -18,7 +18,7 @@ The reasons are recorded in `docs/adr/0001-command-and-snapshot-state-architectu
 The workspace is flat. Each crate sits in `crates/<name>/`, except `xtask/`.
 
 - **`balanced`**: the binary. It installs the `tracing` subscriber, calls `eframe::run_native`, and turns startup failures into `anyhow` errors. It holds no logic of its own.
-- **`balanced_ui`**: everything egui. It holds the Main window and its panels, the Register view, Dialogs, Detached windows, the theme (the one place that builds colours), `AppCommand`, and the user-action list that feeds the Menu bar and shortcuts.
+- **`balanced_ui`**: everything egui. It holds the Main window and its panels, the Register view, Dialogs, Detached windows, the theme (the one place that builds colours), `AppCommand`, and the user-action list that feeds the Menu bar and shortcuts. Behind its `test-support` feature, `testing` draws the App for image snapshots.
 - **`balanced_core`**: the financial domain. It holds accounts, transactions, money, `DomainCommand`, the `Ledger` (`apply` and `snapshot`), undo and redo, and `DomainError`.
 - **`balanced_i18n`**: message lookup, the locale fallback chain, and locale-aware formatting of numbers, dates and money.
 - **`balanced_prototype_harness`**: tooling for prototypes, not part of the app. It provides the event log, screenshots, F2/F3 notes and markers, and the agent's control file (see `docs/agents/prototypes.md`). It depends on egui but knows nothing of Balanced's domain. Only prototype examples use it, as a dev-dependency.

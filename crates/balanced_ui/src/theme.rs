@@ -19,7 +19,7 @@ pub(crate) enum Scheme {
     #[default]
     Light,
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "test-support")),
         expect(
             dead_code,
             reason = "the Preferences dialog (#99) is the first to choose it"

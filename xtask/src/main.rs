@@ -18,10 +18,11 @@ const USAGE: &str = "\
 usage: cargo xtask <task>
 
 tasks:
-  ci                run fmt, clippy, test, locales, deny, typos and todo, stopping at the first failure
+  ci                run fmt, clippy, test, snapshots, locales, deny, typos and todo, stopping at the first failure
   fmt               check formatting
   clippy            lint with warnings denied
-  test              run every test
+  test              run every test except the image snapshots
+  snapshots         check the image snapshots, on Linux only; UPDATE_SNAPSHOTS=1 rewrites failing ones
   locales           report untranslated messages per locale
   deny              check licences, advisories, duplicate versions and layer bans
   typos             spell-check the repo
@@ -44,6 +45,7 @@ fn main() -> ExitCode {
         ["fmt"] => fmt(),
         ["clippy"] => clippy(),
         ["test"] => test(),
+        ["snapshots"] => snapshots(),
         ["locales"] => locales(),
         ["deny"] => deny(),
         ["typos"] => typos(),
@@ -64,10 +66,11 @@ fn main() -> ExitCode {
 type Task = fn() -> Result<()>;
 
 fn ci() -> Result<()> {
-    let tasks: [(&str, Task); 7] = [
+    let tasks: [(&str, Task); 8] = [
         ("fmt", fmt),
         ("clippy", clippy),
         ("test", test),
+        ("snapshots", snapshots),
         ("locales", locales),
         ("deny", deny),
         ("typos", typos),
@@ -104,6 +107,30 @@ fn test() -> Result<()> {
     run(
         "cargo",
         &["test", "--locked", "--workspace", "--all-features"],
+    )
+}
+
+/// Runs the image snapshot tests, which `test` skips as ignored. Linux with the lavapipe
+/// software rasterizer is their source of truth, so elsewhere this skips them.
+fn snapshots() -> Result<()> {
+    if !cfg!(target_os = "linux") {
+        eprintln!("skipped: image snapshots are checked on Linux only");
+        return Ok(());
+    }
+    run(
+        "cargo",
+        &[
+            "test",
+            "--locked",
+            "--package",
+            "balanced_ui",
+            "--features",
+            "test-support",
+            "--test",
+            "snapshots",
+            "--",
+            "--ignored",
+        ],
     )
 }
 

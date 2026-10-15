@@ -16,6 +16,7 @@ balanced_prototype_harness = { path = "crates/balanced_prototype_harness" }
 balanced_ui = { path = "crates/balanced_ui" }
 egui = { version = "0.36.2", default-features = false }
 egui_extras = { version = "0.36.2", default-features = false }
+egui-wgpu = { version = "0.36.2", default-features = false }
 eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
 egui_kittest = { version = "0.36.2", features = ["eframe"] }
 fluent-bundle = "0.16.0"

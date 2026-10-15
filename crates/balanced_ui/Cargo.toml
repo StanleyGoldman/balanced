@@ -12,6 +12,13 @@ eframe.workspace = true
 egui_extras.workspace = true
 i18n-embed-fl.workspace = true
 icu_locale.workspace = true
+egui-wgpu = { workspace = true, optional = true }
+egui_kittest = { workspace = true, optional = true, features = ["snapshot", "wgpu"] }
+
+[features]
+# `balanced_ui::testing`, for the image snapshot tests: the App on the lavapipe renderer,
+# and the snapshot check with the project thresholds.
+test-support = ["dep:egui-wgpu", "dep:egui_kittest", "balanced_i18n/test-support"]
 
 [dev-dependencies]
 egui_kittest.workspace = true
@@ -19,6 +26,10 @@ balanced_i18n = { workspace = true, features = ["test-support"] }
 icu_locale.workspace = true
 rust_decimal.workspace = true
 rust_decimal_macros.workspace = true
+
+[[test]]
+name = "snapshots"
+required-features = ["test-support"]
 
 [lints]
 workspace = true

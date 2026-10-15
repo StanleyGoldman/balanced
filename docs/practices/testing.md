@@ -4,7 +4,7 @@
 
 1. **Unit tests in `balanced_core` and `balanced_i18n`**: plain `#[test]`, plus `insta` text snapshots for structured output (formatted amounts, exports, reports). These need no GPU and no egui, and they are what mutation testing checks.
 2. **UI interaction tests in `balanced_ui`**: `egui_kittest`'s `Harness`, finding widgets by AccessKit role and label, clicking and typing, then asserting on state or node properties. These need no GPU and run on every OS.
-3. **Image snapshot tests**: a few, only for layout-critical views (the Register, the Account bar). Their check (Linux with the lavapipe software rasterizer as the source of truth) doesn't exist yet. It arrives with the first layout-critical view, together with its procedure in this doc.
+3. **Image snapshot tests**: a few, only for layout-critical views (the Register, the Account bar). See [Image snapshots](#image-snapshots).
 
 Prefer a core unit test to a UI test, and a UI interaction test to an image snapshot.
 
@@ -25,7 +25,17 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 - `Harness::output()` holds only the last frame's output, and `run()` keeps stepping until repaints stop. Output that lasts one frame, such as a `ViewportCommand` sent from `App::logic`, is gone by the time `run()` returns. Step to that frame instead: after a `click()`, one `step()` plays the click, and the next runs the `logic()` that applies the Command it sent.
 - `step()` plays each queued event in a frame of its own. `key_press_modifiers` queues four (modifiers down, key down, key up, modifiers up), so one `step()` runs four frames and passes the one-frame output by. To step to a chord's output, queue a single `Event::Key` that carries its modifiers with `harness.event(..)`.
 - `Harness::run()` panics if the UI keeps asking for repaints. A UI that animates or shows a clock needs mocked time in its tests. When the injectable clock lands, `clippy.toml` will ban `SystemTime::now` and `Instant::now` outside it.
-- When the project snapshot helper (`balanced_ui::testing`) lands, add a `clippy.toml` ban on the raw kittest snapshot methods so that every snapshot uses the project thresholds.
+
+## Image snapshots
+
+`crates/balanced_ui/tests/snapshots.rs` holds them: the Account bar and the Register, each in light and dark. The images live in `crates/balanced_ui/tests/snapshots/`.
+
+- **Source of truth:** Linux with lavapipe, Mesa's Vulkan software rasterizer (`mesa-vulkan-drivers` on Debian and Ubuntu). `balanced_ui::testing::app` accepts no other adapter, so every Linux machine draws the same pixels. On other OSes `cargo xtask snapshots` skips them.
+- **Writing one:** build the App with `balanced_ui::testing::app(scheme)` and check it with `check_snapshot`, which holds the project thresholds. `clippy.toml` bans kittest's own snapshot methods. Mark the test `#[ignore]`, with a reason naming `cargo xtask snapshots`, so `cargo xtask test` skips it. After clicking, send `Event::PointerGone` and `run()`: kittest draws the pointer and its hover into the image.
+- **Running:** `cargo xtask snapshots`, which `cargo xtask ci` runs after `test`.
+- **Reviewing a failure:** kittest writes `<name>.new.png` and `<name>.diff.png` beside the snapshot (both gitignored). Look at both images and name every changed region. A change the code was meant to make gets updated; anything else is a bug to fix.
+- **Updating:** `UPDATE_SNAPSHOTS=1 cargo xtask snapshots` rewrites the failing snapshots. Commit each new PNG with the code that changed it, and say in the PR which views changed and why. A snapshot that fails on noise is fixed in the test setup; the thresholds stay put.
+- Add a snapshot only for a new layout-critical view.
 
 ## Mutation testing
 
