@@ -5,6 +5,7 @@ use eframe::egui::{self, CentralPanel, MenuBar, Panel};
 
 use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::i18n::fl;
+use crate::keymap::{self, KEYMAP};
 use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
@@ -37,6 +38,9 @@ impl MainWindow {
         theme: &Theme,
         commands: &CommandSender,
     ) {
+        for action in keymap::dispatch(ui.ctx(), KEYMAP) {
+            commands.send(action.command());
+        }
         Panel::top("menu_bar")
             .frame(theme.chrome_frame())
             .show(ui, |ui| Self::menu_bar(ui, i18n, commands));
@@ -75,7 +79,12 @@ impl MainWindow {
         commands: &CommandSender,
         action: UserAction,
     ) {
-        if ui.button(action.label(i18n)).clicked() {
+        let mut button = egui::Button::new(action.label(i18n));
+        if let Some(chord) = keymap::chord(action) {
+            let is_mac = ui.ctx().os() == egui::os::OperatingSystem::Mac;
+            button = button.shortcut_text(keymap::accelerator(chord, i18n, is_mac));
+        }
+        if ui.add(button).clicked() {
             commands.send(action.command());
         }
     }
