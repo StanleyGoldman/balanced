@@ -188,8 +188,8 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use super::*;
-    use crate::AccountKind;
     use crate::transaction::{NewTransaction, SplitLine};
+    use crate::{AccountKind, Allocation};
 
     fn usd_code() -> CurrencyCode {
         CurrencyCode::new("USD").unwrap()
@@ -422,5 +422,93 @@ mod tests {
         assert_eq!(split.transaction().amount(), usd(dec!(-206.27)));
         assert_eq!(split.balance(), usd(dec!(293.73)));
         assert_eq!(register[2].balance(), usd(dec!(283.73)));
+    }
+
+    #[test]
+    fn a_transaction_keeps_what_it_was_posted_with() {
+        let groceries = CategoryId::new(0);
+        let household = CategoryId::new(1);
+        let ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries"), NewCategory::new("Household")],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(500.00))).with_transactions([
+                    NewTransaction::new(date(3), "Maple", household, usd(dec!(-1450.00)))
+                        .number("1041")
+                        .memo("September rent"),
+                    NewTransaction::split(
+                        date(12),
+                        "Costco",
+                        vec![SplitLine::new(groceries, "Food", usd(dec!(-142.37)))],
+                    ),
+                ]),
+            ],
+        )
+        .unwrap();
+
+        let view = ledger.snapshot();
+
+        let register = view.accounts()[0].register();
+        let rent = register[1].transaction();
+        assert_eq!(
+            (rent.number(), rent.payee(), rent.memo(), rent.allocation()),
+            (
+                Some("1041"),
+                "Maple",
+                "September rent",
+                &Allocation::Category(household)
+            )
+        );
+        let costco = register[2].transaction();
+        let Allocation::Split(lines) = costco.allocation() else {
+            panic!("Costco was posted as a split");
+        };
+        let lines: Vec<_> = lines
+            .iter()
+            .map(|line| (line.category(), line.memo(), line.amount()))
+            .collect();
+        assert_eq!(lines, [(groceries, "Food", usd(dec!(-142.37)))]);
+        assert_eq!((costco.number(), costco.memo()), (None, ""));
+    }
+
+    #[test]
+    fn a_category_is_found_by_its_id_with_its_parent() {
+        let food = CategoryId::new(0);
+        let groceries = CategoryId::new(1);
+        let ledger = Ledger::with_accounts(
+            usd_code(),
+            [
+                NewCategory::new("Food & Dining"),
+                NewCategory::new("Groceries").under(food),
+            ],
+            [],
+        )
+        .unwrap();
+
+        let view = ledger.snapshot();
+
+        let found = |id| {
+            let category = view.category(id).unwrap();
+            (category.id(), category.name(), category.parent())
+        };
+        assert_eq!(found(food), (food, "Food & Dining", None));
+        assert_eq!(found(groceries), (groceries, "Groceries", Some(food)));
+    }
+
+    #[test]
+    #[should_panic(expected = "which is not in the ledger")]
+    fn a_transaction_in_an_unknown_category_is_a_bug() {
+        let unknown = CategoryId::new(0);
+
+        Ledger::with_accounts(
+            usd_code(),
+            [],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(1))).with_transactions([
+                    NewTransaction::new(date(2), "Fresh Market", unknown, usd(dec!(-1))),
+                ]),
+            ],
+        )
+        .ok();
     }
 }

@@ -224,3 +224,31 @@ fn generated_account(money: impl Fn(&str) -> Money) -> NewAccount {
     )
     .with_transactions(transactions)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_generated_account_has_four_transactions_a_day_and_ends_where_it_opened() {
+        let ledger = Ledger::stub();
+
+        let view = ledger.snapshot();
+
+        let generated = view
+            .accounts()
+            .iter()
+            .find(|summary| summary.account().name() == "Household Checking")
+            .unwrap();
+        let register = generated.register();
+        let dates = |index: usize| register[index].transaction().date();
+        // The opening balance, then 20,000 transactions over 5,000 days.
+        assert_eq!(register.len(), 20_001);
+        assert_eq!((dates(0), dates(4)), (date(2013, 1, 1), date(2013, 1, 1)));
+        assert_eq!(dates(5), date(2013, 1, 2));
+        assert_eq!(dates(20_000), date(2026, 9, 9));
+        let usd = CurrencyCode::new("USD").unwrap();
+        let five_hundred = Money::new("500.00".parse().unwrap(), usd).unwrap();
+        assert_eq!(generated.balance(), five_hundred);
+    }
+}
