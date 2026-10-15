@@ -21,7 +21,8 @@
 //!
 //! `prompt <text>` shows the agent's next instruction to the user in a panel along the bottom of
 //! the window (each literal `\n` is a line break), so the user can follow a walk-through without
-//! switching to the terminal and answer with F2; `prompt off` clears it. Each change logs a
+//! switching to the terminal and answer with F2; the panel flashes when its text changes, and
+//! `prompt off` clears it. Each change logs a
 //! `prompt` event. The user puts the panel away with F6 (while no text field has focus) or the
 //! dock's "Prompt (F6)" checkbox, logged as `prompt_shown`; the next `prompt` brings it back.
 //!
