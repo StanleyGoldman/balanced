@@ -2,13 +2,14 @@
 
 use balanced_core::{AccountId, AccountSummary, LedgerView};
 use balanced_i18n::Localizer;
-use eframe::egui::{self, CentralPanel, Label, MenuBar, Panel, RichText, Sides};
+use eframe::egui::{self, Button, CentralPanel, Label, MenuBar, Panel, RichText, Sides};
 
 use crate::account_bar::AccountBar;
 use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
+use crate::register::Register;
 use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
@@ -23,6 +24,8 @@ pub(crate) struct MainWindow {
     account_bar: AccountBar,
     /// The accounts of the last snapshot shown, rebuilt when it is out of date.
     accounts: Option<AccountsModel>,
+    /// The open account's Register.
+    register: Register,
 }
 
 impl MainWindow {
@@ -85,7 +88,10 @@ impl MainWindow {
                 | TopLevelTab::PropertyDebt => None,
             };
             match open_account {
-                Some(summary) => Self::context_header(ui, theme, summary, &accounts),
+                Some(summary) => {
+                    Self::context_header(ui, i18n, theme, commands, summary, &accounts);
+                    self.register.show(ui, i18n, theme, summary, view);
+                }
                 None => {
                     ui.label(self.tab.placeholder(i18n));
                 }
@@ -94,12 +100,14 @@ impl MainWindow {
         self.accounts = Some(accounts);
     }
 
-    /// The open account's name and balance, above its Register. Both clip when the
-    /// Main view is narrow.
-    // TODO(#85): show the account's Register under the header.
+    /// The open account's name and balance above its Register, with + Transaction. A
+    /// closed account's header says it is read-only, and + Transaction is disabled. The
+    /// name and balance clip when the Main view is narrow.
     fn context_header(
         ui: &mut egui::Ui,
+        i18n: &Localizer,
         theme: &Theme,
+        commands: &CommandSender,
         summary: &AccountSummary,
         accounts: &AccountsModel,
     ) {
@@ -107,10 +115,23 @@ impl MainWindow {
         let balance = accounts
             .balance(account.id())
             .expect("the model formats a balance for every account in its snapshot");
+        let closed = account.is_closed();
         Sides::new().shrink_left().truncate().show(
             ui,
-            |ui| ui.add(Label::new(RichText::new(account.name()).heading())),
-            |ui| ui.label(balance.styled(theme).heading()),
+            |ui| {
+                ui.add(Label::new(RichText::new(account.name()).heading()));
+                if closed {
+                    ui.label(fl!(i18n, "register-closed-read-only"));
+                }
+            },
+            |ui| {
+                ui.label(balance.styled(theme).heading());
+                let add = Button::new(fl!(i18n, "register-new-transaction"));
+                if ui.add_enabled(!closed, add).clicked() {
+                    // TODO(#93): go to the draft row.
+                    commands.send(AppCommand::ShowStatus(StatusMessage::NotAvailableYet));
+                }
+            },
         );
     }
 

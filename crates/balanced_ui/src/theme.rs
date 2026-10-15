@@ -211,7 +211,6 @@ pub(crate) struct Theme {
 
 impl Theme {
     /// Space between the Register's edge and the text in its first and last columns.
-    #[expect(dead_code, reason = "the Register (#85) is the first caller")]
     pub(crate) const EDGE_INSET: f32 = 6.0;
 
     pub(crate) fn new(settings: ThemeSettings) -> Self {
@@ -323,14 +322,12 @@ impl Theme {
     }
 
     /// The fill of the Register's column header band.
-    #[expect(dead_code, reason = "the Register (#85) is the first caller")]
     pub(crate) fn header_fill(&self) -> Color32 {
         self.palette.header
     }
 
     /// Whether the Register stripes alternate rows: pass it to `TableBuilder::striped`.
     /// Only the Register stripes, so the style leaves `Visuals::striped` off.
-    #[expect(dead_code, reason = "the Register (#85) is the first caller")]
     pub(crate) fn alternating_rows(&self) -> bool {
         self.settings.alternating_rows
     }
@@ -339,7 +336,7 @@ impl Theme {
     /// the even rows, as `egui_extras` stripes them. Paint it before the row's gridlines.
     #[cfg_attr(
         not(test),
-        expect(dead_code, reason = "the Register (#85) is the first caller")
+        expect(dead_code, reason = "no list is laid out by hand yet")
     )]
     pub(crate) fn stripe(&self, row: usize) -> Option<Color32> {
         (self.settings.alternating_rows && row.is_multiple_of(2)).then_some(self.palette.stripe)
@@ -353,10 +350,6 @@ impl Theme {
     /// bottom would be covered by the next cell's fill. The first column (`column` 0) has
     /// no gap to its left. Rules sit on a pixel centre and are one pixel wide: at a
     /// fractional scale, an unsnapped line straddles two pixels and fades to almost nothing.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the Register (#85) is the first caller")
-    )]
     pub(crate) fn cell_rules(
         &self,
         cell: Rect,
@@ -397,10 +390,6 @@ impl Theme {
     /// show. The clip widens by half the gap plus one point, without which a rule on the
     /// clip's edge is cut off, and stays inside the viewport so rules never paint over
     /// the panels around the Register.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the Register (#85) is the first caller")
-    )]
     pub(crate) fn rule_clip(&self, cell_clip: Rect, viewport: Rect) -> Rect {
         cell_clip
             .expand2(self.item_spacing() / 2.0 + Vec2::splat(1.0))

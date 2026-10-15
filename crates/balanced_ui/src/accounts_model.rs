@@ -3,14 +3,12 @@
 
 use std::collections::HashMap;
 
-use balanced_core::{AccountGroup, AccountId, AccountKind, Generation, LedgerView, Money};
-use balanced_i18n::{AmountStyle, Currency, Localizer};
+use balanced_core::{AccountGroup, AccountId, AccountKind, Generation, LedgerView};
+use balanced_i18n::{AmountStyle, Localizer};
 use icu_locale::Locale;
 
-use eframe::egui::RichText;
-
+use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
-use crate::theme::Theme;
 
 /// A section of the Account bar, under a heading that folds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -31,30 +29,6 @@ impl Section {
                 fl!(i18n, "account-bar-group-property-debt")
             }
             Self::Closed => fl!(i18n, "account-bar-group-closed"),
-        }
-    }
-}
-
-/// An amount and its text, formatted with its currency symbol.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct FormattedAmount {
-    money: Money,
-    text: String,
-}
-
-impl FormattedAmount {
-    /// The text, styled by `theme` for the amount's sign.
-    pub(crate) fn styled(&self, theme: &Theme) -> RichText {
-        theme.amount(&self.money, self.text.clone())
-    }
-
-    fn new(i18n: &Localizer, money: Money) -> Self {
-        let code = money.currency();
-        let currency = Currency::new(code.as_str(), code.decimal_places())
-            .expect("a `CurrencyCode` is three uppercase letters with at most 4 decimal places");
-        Self {
-            money,
-            text: i18n.format_amount(money.amount(), currency, AmountStyle::Symbol),
         }
     }
 }
@@ -172,11 +146,12 @@ impl AccountsModel {
                 .accounts()
                 .iter()
                 .map(|summary| {
-                    let balance = FormattedAmount::new(i18n, summary.balance());
+                    let balance =
+                        FormattedAmount::new(i18n, summary.balance(), AmountStyle::Symbol);
                     (summary.account().id(), balance)
                 })
                 .collect(),
-            net_worth: FormattedAmount::new(i18n, view.net_worth()),
+            net_worth: FormattedAmount::new(i18n, view.net_worth(), AmountStyle::Symbol),
         }
     }
 

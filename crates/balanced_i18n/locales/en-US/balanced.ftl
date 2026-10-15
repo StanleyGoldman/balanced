@@ -60,8 +60,22 @@ account-bar-net-worth = Net Worth
 ## Register
 
 register-column-date = Date
+# The cheque or reference number.
+register-column-number = Num
 register-column-payee = Payee
+register-column-category = Category
+register-column-memo = Memo
 register-column-amount = Amount
+register-column-balance = Balance
+# The Category cell of a transaction divided between several categories.
+register-split = [Split]
+# The Payee cell of an account's first transaction, its starting balance.
+register-opening-balance = Opening Balance
+# The menu of commands on a Register row.
+register-actions = Actions
+register-new-transaction = + Transaction
+# Beside a closed account's name, above its Register.
+register-closed-read-only = Closed — read-only
 register-transaction-count =
     { $count ->
         [one] { $count } transaction
@@ -71,3 +85,4 @@ register-transaction-count =
 ## Status bar
 
 status-about = { -brand-name } { $version }
+status-not-available-yet = Not available yet
