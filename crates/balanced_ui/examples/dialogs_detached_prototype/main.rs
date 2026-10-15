@@ -495,7 +495,7 @@ const TOGGLES: &[(&str, &str, &str)] = &[
         "Place Detached windows beside the Main window",
         "A B C",
     ),
-    ("diag", "Window diagnostics strip", "all"),
+    ("diag", "Diagnostics footer in other OS windows", "A B C"),
 ];
 
 const TOGGLE_KEYS: [(Key, &str); 10] = [
@@ -753,7 +753,15 @@ impl Shared {
     }
 }
 
-/// A one-line strip of facts about the window it sits in, and a spinner while stressing.
+/// A footer of facts about the OS window it sits in, and a spinner while stressing. The Main
+/// window's facts are in the harness's bottom panel instead.
+fn diag_footer(ui: &mut Ui, shared: &Shared, name: &str) {
+    let opts = shared.opts();
+    if opts.diag || opts.animate {
+        Panel::bottom(Id::new(("diag", name))).show(ui, |ui| diag_strip(ui, shared, name));
+    }
+}
+
 fn diag_strip(ui: &mut Ui, shared: &Shared, name: &str) {
     let opts = shared.opts();
     if !opts.diag && !opts.animate {
@@ -1558,8 +1566,8 @@ fn show_dialogs(
                     let ctx = ui.ctx().clone();
                     shared.frame_tick(&ctx, &name);
                     let mut out = None;
+                    diag_footer(ui, shared, &name);
                     CentralPanel::default().show(ui, |ui| {
-                        diag_strip(ui, shared, &name);
                         out = dialog_ui(ui, &mut stack[i], &cx);
                     });
                     if ctx.input(|i| i.viewport().close_requested()) {
@@ -1806,7 +1814,6 @@ fn register_table(
 fn detached_content(ui: &mut Ui, shared: &Shared, d: &mut Detached) {
     let ctx = ui.ctx().clone();
     let name = d.name();
-    diag_strip(ui, shared, &name);
     let mut want_close = false;
     let mut want_delete: Option<(Id, usize)> = None;
     let mut want_finish = None;
@@ -1925,6 +1932,7 @@ fn detached_viewport_ui(ui: &mut Ui, shared: &Shared, det: &Mutex<Detached>) {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
         }
     }
+    diag_footer(ui, shared, &name);
     CentralPanel::default().show(ui, |ui| detached_content(ui, shared, &mut d));
     let mut dialogs = std::mem::take(&mut d.dialogs);
     show_dialogs(&ctx, shared, &name, &mut dialogs, false);
@@ -2674,7 +2682,12 @@ impl Proto {
         let status = Panel::bottom("status").show(ui, |ui| {
             Sides::new().show(
                 ui,
-                |ui| ui.label(&self.status),
+                |ui| {
+                    if self.shared.opts().animate {
+                        ui.add(egui::Spinner::new());
+                    }
+                    ui.label(&self.status)
+                },
                 |ui| {
                     let stats = self.shared.stats.lock().unwrap();
                     let text: Vec<String> = stats
@@ -2694,8 +2707,6 @@ impl Proto {
             self.h.region(bar.response.rect, "account bar");
         }
         CentralPanel::default().show(ui, |ui| {
-            let diag = ui.scope(|ui| diag_strip(ui, &self.shared, "main"));
-            self.h.region(diag.response.rect, "window diagnostics");
             if self.tab != ACCOUNTS_TAB {
                 ui.heading(TABS[self.tab]);
                 ui.label(RichText::new("Not in this prototype. Open the Accounts tab.").weak());
