@@ -7,7 +7,10 @@ use balanced_core::{AccountGroup, AccountId, AccountKind, Generation, LedgerView
 use balanced_i18n::{AmountStyle, Currency, Localizer};
 use icu_locale::Locale;
 
+use eframe::egui::RichText;
+
 use crate::i18n::fl;
+use crate::theme::Theme;
 
 /// A section of the Account bar, under a heading that folds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -35,11 +38,16 @@ impl Section {
 /// An amount and its text, formatted with its currency symbol.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FormattedAmount {
-    pub(crate) money: Money,
-    pub(crate) text: String,
+    money: Money,
+    text: String,
 }
 
 impl FormattedAmount {
+    /// The text, styled by `theme` for the amount's sign.
+    pub(crate) fn styled(&self, theme: &Theme) -> RichText {
+        theme.amount(&self.money, self.text.clone())
+    }
+
     fn new(i18n: &Localizer, money: Money) -> Self {
         let code = money.currency();
         let currency = Currency::new(code.as_str(), code.decimal_places())
@@ -54,18 +62,42 @@ impl FormattedAmount {
 /// One account row in the Account bar.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AccountRow {
-    pub(crate) id: AccountId,
-    pub(crate) name: String,
+    id: AccountId,
+    name: String,
+    starts_sub_group: bool,
+}
+
+impl AccountRow {
+    pub(crate) fn id(&self) -> AccountId {
+        self.id
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
     /// Whether a thin line separates this row from the one above, because it starts
     /// another sub-group.
-    pub(crate) starts_sub_group: bool,
+    pub(crate) fn starts_sub_group(&self) -> bool {
+        self.starts_sub_group
+    }
 }
 
 /// A section's heading and its rows. A section with no rows is left out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SectionRows {
-    pub(crate) section: Section,
-    pub(crate) rows: Vec<AccountRow>,
+    section: Section,
+    rows: Vec<AccountRow>,
+}
+
+impl SectionRows {
+    pub(crate) fn section(&self) -> Section {
+        self.section
+    }
+
+    pub(crate) fn rows(&self) -> &[AccountRow] {
+        &self.rows
+    }
 }
 
 /// What the model was built from. It is rebuilt when any of it changes.
@@ -91,7 +123,7 @@ impl AccountsModel {
     /// Hidden accounts get no row, but keep a balance for the context header.
     /// Closed accounts are listed in the Closed section, in group order.
     pub(crate) fn new(view: &LedgerView, i18n: &Localizer) -> Self {
-        let mut open: Vec<SectionRows> = Vec::new();
+        let mut sections: Vec<SectionRows> = Vec::new();
         let mut closed = SectionRows {
             section: Section::Closed,
             rows: Vec::new(),
@@ -119,23 +151,23 @@ impl AccountsModel {
                 Section::Closed => &mut closed.rows,
                 Section::Group(_) => {
                     // The view lists accounts by group, so a new group is a new last section.
-                    if open.last().is_none_or(|last| last.section != section) {
-                        open.push(SectionRows {
+                    if sections.last().is_none_or(|last| last.section != section) {
+                        sections.push(SectionRows {
                             section,
                             rows: Vec::new(),
                         });
                     }
-                    &mut open.last_mut().expect("a section was just pushed").rows
+                    &mut sections.last_mut().expect("a section was just pushed").rows
                 }
             };
             rows.push(row);
         }
         if !closed.rows.is_empty() {
-            open.push(closed);
+            sections.push(closed);
         }
         Self {
             source: Self::source(view, i18n),
-            sections: open,
+            sections,
             balances: view
                 .accounts()
                 .iter()

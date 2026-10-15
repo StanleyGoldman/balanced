@@ -1,6 +1,6 @@
 //! Accounts: what kind each is, the fixed group its kind belongs to, and its flags.
 
-use crate::CurrencyCode;
+use crate::{CurrencyCode, Money};
 
 /// One of the fixed groups the Account bar lists accounts in, in Account bar order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -76,30 +76,6 @@ pub struct Account {
 }
 
 impl Account {
-    pub(crate) fn new(
-        id: AccountId,
-        name: String,
-        kind: AccountKind,
-        currency: CurrencyCode,
-    ) -> Self {
-        Self {
-            id,
-            name,
-            kind,
-            currency,
-            hidden: false,
-            closed: false,
-        }
-    }
-
-    pub(crate) fn set_hidden(&mut self, hidden: bool) {
-        self.hidden = hidden;
-    }
-
-    pub(crate) fn set_closed(&mut self, closed: bool) {
-        self.closed = closed;
-    }
-
     pub fn id(&self) -> AccountId {
         self.id
     }
@@ -125,6 +101,67 @@ impl Account {
     /// Whether the account is closed: its Register is read-only.
     pub fn is_closed(&self) -> bool {
         self.closed
+    }
+}
+
+/// An account to open in a new [`Ledger`].
+#[derive(Debug, Clone)]
+pub(crate) struct NewAccount {
+    name: String,
+    kind: AccountKind,
+    // TODO(#85): post the opening balance as a transaction, and compute the balance
+    // from the account's transactions.
+    opening_balance: Money,
+    hidden: bool,
+    closed: bool,
+}
+
+impl NewAccount {
+    /// An open, shown account in the currency of `opening_balance`.
+    pub(crate) fn new(name: &str, kind: AccountKind, opening_balance: Money) -> Self {
+        Self {
+            name: name.to_owned(),
+            kind,
+            opening_balance,
+            hidden: false,
+            closed: false,
+        }
+    }
+
+    /// The same account, hidden from the Account bar.
+    pub(crate) fn hidden(self) -> Self {
+        Self {
+            hidden: true,
+            ..self
+        }
+    }
+
+    /// The same account, closed.
+    pub(crate) fn closed(self) -> Self {
+        Self {
+            closed: true,
+            ..self
+        }
+    }
+
+    pub(crate) fn kind(&self) -> AccountKind {
+        self.kind
+    }
+
+    pub(crate) fn opening_balance(&self) -> Money {
+        self.opening_balance
+    }
+
+    /// The account, with `id`, in its opening balance's currency.
+    pub(crate) fn into_account(self, id: AccountId) -> Account {
+        Account {
+            id,
+            name: self.name,
+            kind: self.kind,
+            currency: self.opening_balance.currency(),
+            hidden: self.hidden,
+            closed: self.closed,
+        }
     }
 }
 

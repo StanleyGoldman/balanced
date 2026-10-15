@@ -364,7 +364,7 @@ impl Theme {
         pixels_per_point: f32,
     ) -> Vec<Shape> {
         let snap = |v| snap_to_pixel_centre(v, pixels_per_point);
-        let stroke = Stroke::new(1.0 / pixels_per_point, self.palette.grid);
+        let stroke = self.grid_stroke(pixels_per_point);
         let half_gap = self.item_spacing() / 2.0;
         let (vertical, horizontal) = match self.settings.gridlines {
             Gridlines::Off => (false, false),
@@ -414,8 +414,13 @@ impl Theme {
         Shape::hline(
             x_range,
             snap_to_pixel_centre(y, pixels_per_point),
-            Stroke::new(1.0 / pixels_per_point, self.palette.grid),
+            self.grid_stroke(pixels_per_point),
         )
+    }
+
+    /// A gridline: one pixel wide, at the display's pixels per point.
+    fn grid_stroke(&self, pixels_per_point: f32) -> Stroke {
+        Stroke::new(1.0 / pixels_per_point, self.palette.grid)
     }
 
     /// The space between widgets, which is also the gap between Register cells.

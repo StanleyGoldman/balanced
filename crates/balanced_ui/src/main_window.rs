@@ -106,7 +106,7 @@ impl MainWindow {
         Sides::new().shrink_left().truncate().show(
             ui,
             |ui| ui.add(Label::new(RichText::new(account.name()).heading())),
-            |ui| ui.label(theme.amount(&balance.money, balance.text.clone()).heading()),
+            |ui| ui.label(balance.styled(theme).heading()),
         );
     }
 

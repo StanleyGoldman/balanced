@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::account::NewAccount;
 use crate::{Account, AccountId, AccountKind, CurrencyCode, Money, MoneyError};
 
 /// Counts the changes applied to a [`Ledger`]. A window's view model rebuilds when
@@ -65,47 +66,6 @@ impl LedgerView {
     }
 }
 
-/// An account to open in a new [`Ledger`].
-#[derive(Debug, Clone)]
-pub(crate) struct NewAccount {
-    name: String,
-    kind: AccountKind,
-    // TODO(#85): post the opening balance as a transaction, and compute the balance
-    // from the account's transactions.
-    opening_balance: Money,
-    hidden: bool,
-    closed: bool,
-}
-
-impl NewAccount {
-    /// An open, shown account in the currency of `opening_balance`.
-    pub(crate) fn new(name: &str, kind: AccountKind, opening_balance: Money) -> Self {
-        Self {
-            name: name.to_owned(),
-            kind,
-            opening_balance,
-            hidden: false,
-            closed: false,
-        }
-    }
-
-    /// The same account, hidden from the Account bar.
-    pub(crate) fn hidden(self) -> Self {
-        Self {
-            hidden: true,
-            ..self
-        }
-    }
-
-    /// The same account, closed.
-    pub(crate) fn closed(self) -> Self {
-        Self {
-            closed: true,
-            ..self
-        }
-    }
-}
-
 /// The financial data. It changes only by applying a `DomainCommand`, and windows
 /// read it through [`Ledger::snapshot`].
 #[derive(Debug)]
@@ -124,24 +84,19 @@ impl Ledger {
         let mut summaries: Vec<AccountSummary> = Vec::new();
         let mut net_worth = Money::zero(currency);
         for (id, new) in (0..).zip(accounts) {
-            net_worth = net_worth.checked_add(new.opening_balance)?;
-            let mut account = Account::new(
-                AccountId::new(id),
-                new.name,
-                new.kind,
-                new.opening_balance.currency(),
-            );
-            account.set_hidden(new.hidden);
-            account.set_closed(new.closed);
+            let balance = new.opening_balance();
+            if balance.currency() != currency {
+                return Err(MoneyError::CurrencyMismatch {
+                    left: currency,
+                    right: balance.currency(),
+                });
+            }
+            net_worth = net_worth.checked_add(balance)?;
+            let kind = new.kind();
+            let account = new.into_account(AccountId::new(id));
             // Last in its sub-group: after every account of its kind or an earlier one.
-            let position = summaries.partition_point(|summary| summary.account.kind() <= new.kind);
-            summaries.insert(
-                position,
-                AccountSummary {
-                    account,
-                    balance: new.opening_balance,
-                },
-            );
+            let position = summaries.partition_point(|summary| summary.account.kind() <= kind);
+            summaries.insert(position, AccountSummary { account, balance });
         }
         Ok(Self {
             view: Arc::new(LedgerView {
