@@ -1,5 +1,7 @@
-//! Where the Main window is: the top-level tab shown in the Main view.
+//! Where the Main window is: the top-level tab shown in the Main view, and the
+//! account open under the Accounts tab.
 
+use balanced_core::AccountId;
 use balanced_i18n::Localizer;
 
 use crate::i18n::fl;
@@ -9,6 +11,8 @@ use crate::i18n::fl;
 pub(crate) enum Route {
     /// A top-level tab.
     Tab(TopLevelTab),
+    /// An account, opened under the Accounts tab.
+    Account(AccountId),
 }
 
 /// A top-level tab in the Main window's tab row.

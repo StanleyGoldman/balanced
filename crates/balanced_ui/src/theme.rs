@@ -9,8 +9,8 @@
 use balanced_core::Money;
 use eframe::egui;
 use egui::{
-    Color32, CornerRadius, FontFamily, FontId, Frame, Margin, Rect, RichText, Shape, Stroke,
-    TextStyle, Vec2, vec2,
+    Color32, CornerRadius, FontFamily, FontId, Frame, Margin, Rangef, Rect, RichText, Shape,
+    Stroke, TextStyle, Vec2, vec2,
 };
 
 /// Light or dark colours.
@@ -115,7 +115,6 @@ const COLUMN_GAP: f32 = 8.0;
 const MAX_BUTTON_PADDING_Y: f32 = 3.0;
 
 /// Space around the text of the Net Worth footer.
-#[expect(dead_code, reason = "the Account bar (#84) draws the Net Worth footer")]
 const FOOTER_MARGIN: Margin = Margin::symmetric(8, 6);
 
 /// The colours of one [`Scheme`].
@@ -307,8 +306,7 @@ impl Theme {
         style
     }
 
-    /// The height of a Register row, and of a button or text field.
-    #[expect(dead_code, reason = "the Register (#85) is the first caller")]
+    /// The height of a Register row or Account bar row, and of a button or text field.
     pub(crate) fn row_height(&self) -> f32 {
         self.sizes.row
     }
@@ -320,7 +318,6 @@ impl Theme {
     }
 
     /// The Net Worth footer under the Account bar: chrome, with room around its text.
-    #[expect(dead_code, reason = "the Account bar (#84) draws the Net Worth footer")]
     pub(crate) fn footer_frame(&self) -> Frame {
         self.chrome_frame().inner_margin(FOOTER_MARGIN)
     }
@@ -366,8 +363,8 @@ impl Theme {
         column: usize,
         pixels_per_point: f32,
     ) -> Vec<Shape> {
-        let snap = |v: f32| ((v * pixels_per_point).floor() + 0.5) / pixels_per_point;
-        let stroke = Stroke::new(1.0 / pixels_per_point, self.palette.grid);
+        let snap = |v| snap_to_pixel_centre(v, pixels_per_point);
+        let stroke = self.grid_stroke(pixels_per_point);
         let half_gap = self.item_spacing() / 2.0;
         let (vertical, horizontal) = match self.settings.gridlines {
             Gridlines::Off => (false, false),
@@ -410,16 +407,28 @@ impl Theme {
             .intersect(viewport)
     }
 
+    /// The thin line in the gap above an Account bar row that starts a sub-group,
+    /// across `x_range`, at `y` (the middle of the gap), given the display's pixels per
+    /// point. Like a gridline, it is one pixel wide on a pixel centre.
+    pub(crate) fn sub_group_rule(&self, x_range: Rangef, y: f32, pixels_per_point: f32) -> Shape {
+        Shape::hline(
+            x_range,
+            snap_to_pixel_centre(y, pixels_per_point),
+            self.grid_stroke(pixels_per_point),
+        )
+    }
+
+    /// A gridline: one pixel wide, at the display's pixels per point.
+    fn grid_stroke(&self, pixels_per_point: f32) -> Stroke {
+        Stroke::new(1.0 / pixels_per_point, self.palette.grid)
+    }
+
     /// The space between widgets, which is also the gap between Register cells.
     fn item_spacing(&self) -> Vec2 {
         vec2(COLUMN_GAP, self.sizes.gap)
     }
 
     /// `text`, the formatted `amount`, styled for display.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the Register (#85) is the first caller")
-    )]
     pub(crate) fn amount(&self, amount: &Money, text: impl Into<String>) -> RichText {
         let text = RichText::new(text);
         let text = if self.settings.monospace_money {
@@ -433,6 +442,12 @@ impl Theme {
             text
         }
     }
+}
+
+/// `v`, in points, moved to the centre of the pixel it falls in, so a one-pixel line
+/// drawn there covers exactly one pixel row or column.
+fn snap_to_pixel_centre(v: f32, pixels_per_point: f32) -> f32 {
+    ((v * pixels_per_point).floor() + 0.5) / pixels_per_point
 }
 
 impl Default for Theme {

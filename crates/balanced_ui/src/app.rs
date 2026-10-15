@@ -15,10 +15,6 @@ use crate::theme::Theme;
 #[derive(Debug)]
 pub struct App {
     i18n: Localizer,
-    #[expect(
-        dead_code,
-        reason = "the Account bar (#84) is the first reader of its snapshot"
-    )]
     ledger: Ledger,
     theme: Theme,
     commands: CommandSender,
@@ -65,7 +61,8 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let view = self.ledger.snapshot();
         self.main_window
-            .show(ui, &self.i18n, &self.theme, &self.commands);
+            .show(ui, &self.i18n, &self.theme, &self.commands, &view);
     }
 }

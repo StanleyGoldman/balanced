@@ -1,8 +1,11 @@
 //! The Main window: Menu bar, tab row, Account bar, Main view and Status bar.
 
+use balanced_core::{AccountId, AccountSummary, LedgerView};
 use balanced_i18n::Localizer;
-use eframe::egui::{self, CentralPanel, MenuBar, Panel};
+use eframe::egui::{self, CentralPanel, Label, MenuBar, Panel, RichText, Sides};
 
+use crate::account_bar::AccountBar;
+use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
@@ -14,7 +17,12 @@ use crate::user_action::UserAction;
 #[derive(Debug, Default)]
 pub(crate) struct MainWindow {
     tab: TopLevelTab,
+    /// The account open under the Accounts tab.
+    account: Option<AccountId>,
     status: Option<StatusMessage>,
+    account_bar: AccountBar,
+    /// The accounts of the last snapshot shown, rebuilt when it is out of date.
+    accounts: Option<AccountsModel>,
 }
 
 impl MainWindow {
@@ -22,6 +30,10 @@ impl MainWindow {
     pub(crate) fn navigate(&mut self, route: Route) {
         match route {
             Route::Tab(tab) => self.tab = tab,
+            Route::Account(id) => {
+                self.tab = TopLevelTab::Accounts;
+                self.account = Some(id);
+            }
         }
     }
 
@@ -30,17 +42,23 @@ impl MainWindow {
         self.status = Some(message);
     }
 
-    /// Draws the Main window's panels, outer ones first and the Main view last.
+    /// Draws the Main window's panels from `view`, outer ones first and the Main view
+    /// last.
     pub(crate) fn show(
-        &self,
+        &mut self,
         ui: &mut egui::Ui,
         i18n: &Localizer,
         theme: &Theme,
         commands: &CommandSender,
+        view: &LedgerView,
     ) {
         for action in keymap::dispatch(ui.ctx(), KEYMAP) {
             commands.send(action.command());
         }
+        let accounts = match self.accounts.take() {
+            Some(model) if model.is_current(view, i18n) => model,
+            _ => AccountsModel::new(view, i18n),
+        };
         Panel::top("menu_bar")
             .frame(theme.chrome_frame())
             .show(ui, |ui| Self::menu_bar(ui, i18n, commands));
@@ -54,12 +72,46 @@ impl MainWindow {
         Panel::top("tab_row")
             .frame(theme.chrome_frame())
             .show(ui, |ui| self.tab_row(ui, i18n, commands));
-        Panel::left("account_bar")
-            .frame(theme.chrome_frame())
-            .show(ui, |_| {});
+        self.account_bar
+            .show(ui, i18n, theme, commands, &accounts, self.account);
         CentralPanel::default().show(ui, |ui| {
-            ui.label(self.tab.placeholder(i18n));
+            let open_account = match self.tab {
+                TopLevelTab::Accounts => self.account.and_then(|id| view.account(id)),
+                TopLevelTab::Home
+                | TopLevelTab::Bills
+                | TopLevelTab::Spending
+                | TopLevelTab::Planning
+                | TopLevelTab::Investing
+                | TopLevelTab::PropertyDebt => None,
+            };
+            match open_account {
+                Some(summary) => Self::context_header(ui, theme, summary, &accounts),
+                None => {
+                    ui.label(self.tab.placeholder(i18n));
+                }
+            }
         });
+        self.accounts = Some(accounts);
+    }
+
+    /// The open account's name and balance, above its Register. Both clip when the
+    /// Main view is narrow.
+    // TODO(#85): show the account's Register under the header.
+    fn context_header(
+        ui: &mut egui::Ui,
+        theme: &Theme,
+        summary: &AccountSummary,
+        accounts: &AccountsModel,
+    ) {
+        let account = summary.account();
+        let balance = accounts
+            .balance(account.id())
+            .expect("the model formats a balance for every account in its snapshot");
+        Sides::new().shrink_left().truncate().show(
+            ui,
+            |ui| ui.add(Label::new(RichText::new(account.name()).heading())),
+            |ui| ui.label(balance.styled(theme).heading()),
+        );
     }
 
     fn menu_bar(ui: &mut egui::Ui, i18n: &Localizer, commands: &CommandSender) {

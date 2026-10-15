@@ -10,6 +10,7 @@ balanced_core.workspace = true
 balanced_i18n.workspace = true
 eframe.workspace = true
 i18n-embed-fl.workspace = true
+icu_locale.workspace = true
 
 [dev-dependencies]
 egui_kittest.workspace = true
