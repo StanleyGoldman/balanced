@@ -346,7 +346,7 @@ impl Register {
             Some(model) if model.is_current(account, view, self.sort, i18n) => model,
             _ => RegisterModel::new(summary, view, self.sort, i18n),
         };
-        let keys = Keys {
+        let keys = KeyContext {
             account,
             closed: summary.account().is_closed(),
             rows: model.rows(),
@@ -505,13 +505,18 @@ impl Register {
     ///
     /// Enter, Tab and Esc are taken before the cell editor is added, which would
     /// otherwise act on them first.
-    fn handle_keys(&mut self, ctx: &egui::Context, keys: &Keys<'_>) -> Option<f32> {
-        let tabs = std::mem::take(&mut self.tabs);
+    fn handle_keys(&mut self, ctx: &egui::Context, keys: &KeyContext<'_>) -> Option<f32> {
         if !self.owns_keyboard(ctx) {
+            self.tabs.clear();
             return None;
         }
         let cursor = self.cursor?;
-        let tab = tabs.first().map(|modifiers| {
+        let tab = (!self.tabs.is_empty()).then(|| self.tabs.remove(0));
+        if !self.tabs.is_empty() {
+            // Each Tab acts on the cell the one before it opened, so the rest wait.
+            ctx.request_repaint();
+        }
+        let tab = tab.map(|modifiers| {
             if modifiers.shift {
                 Move::PreviousEditable
             } else {
@@ -533,11 +538,13 @@ impl Register {
                 commit(&edit, keys.rows, keys.commands);
                 ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
                 let step = if enter { Move::Next } else { tab? };
-                let offset = self.move_cursor(cursor, step, keys.rows);
+                let moved = self.move_cursor(cursor, step, keys.rows)?;
+                // Tab opens the cell it moved to. With nowhere to move it opens nothing,
+                // since this frame's rows don't hold the text just committed yet.
                 if !enter {
-                    self.start_edit(ctx, keys, Start::Saved);
+                    self.start_edit(ctx, keys, EditStart::Saved);
                 }
-                return offset;
+                return moved.scroll_offset;
             }
             self.edit = Some(edit);
             return None;
@@ -554,24 +561,20 @@ impl Register {
             .map(|(_, step)| step)
         });
         if let Some(step) = pressed.or(tab) {
-            let offset = self.move_cursor(cursor, step, keys.rows);
+            let moved = self.move_cursor(cursor, step, keys.rows)?;
             if tab.is_some() {
-                self.start_edit(ctx, keys, Start::Saved);
+                self.start_edit(ctx, keys, EditStart::Saved);
             }
-            return offset;
+            return moved.scroll_offset;
         }
         if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter)) {
-            let editable = keys
-                .rows
-                .iter()
-                .find(|row| row.id() == cursor.row)
-                .and_then(|row| cursor.column.text_field(row))
-                .is_some();
-            if editable {
-                self.start_edit(ctx, keys, Start::Saved);
+            if field_at(keys.rows, cursor).is_some() {
+                self.start_edit(ctx, keys, EditStart::Saved);
                 return None;
             }
-            return self.move_cursor(cursor, Move::Next, keys.rows);
+            return self
+                .move_cursor(cursor, Move::Next, keys.rows)?
+                .scroll_offset;
         }
         let typed = ctx.input(|input| {
             input
@@ -581,20 +584,19 @@ impl Register {
         });
         if typed {
             // The editor takes the typed text in this same frame.
-            self.start_edit(ctx, keys, Start::Empty);
+            self.start_edit(ctx, keys, EditStart::Empty);
         }
         None
     }
 
-    /// Moves the cell cursor from `cursor` by `step`, and returns the scroll offset that
-    /// brings it into view when it has left it. Leaves the cursor where it is when
-    /// there is nowhere to go.
+    /// Moves the cell cursor from `cursor` by `step`. Returns `None`, leaving the
+    /// cursor where it is, when there is nowhere to go.
     fn move_cursor(
         &mut self,
         cursor: CellAddress,
         step: Move,
         rows: &[RegisterRow],
-    ) -> Option<f32> {
+    ) -> Option<Moved> {
         let columns: Vec<RegisterColumn> = RegisterColumn::ALL
             .into_iter()
             .filter(|column| column.holds_cursor())
@@ -619,6 +621,7 @@ impl Register {
                 let start = row * width + column;
                 let editable = |position: usize| {
                     let row = rows.get(position / width)?;
+                    // The remainder of a division by the width is a column index.
                     columns[position % width].text_field(row)
                 };
                 let position = if step == Move::NextEditable {
@@ -632,25 +635,25 @@ impl Register {
                 (position / width, position % width)
             }
         };
-        let (row, column) = (rows.get(row)?, *columns.get(column)?);
-        self.cursor = Some(CellAddress {
-            row: row.id(),
-            column,
-        });
-        let index = rows.iter().position(|other| other.id() == row.id())?;
-        self.rows_in_view?.offset_showing(index)
+        let address = CellAddress {
+            row: rows.get(row)?.id(),
+            column: *columns.get(column)?,
+        };
+        self.cursor = Some(address);
+        Some(Moved {
+            scroll_offset: self
+                .rows_in_view
+                .and_then(|rows_in_view| rows_in_view.offset_showing(row)),
+        })
     }
 
     /// Opens the cell under the cursor for editing, starting from `start`, when it can
     /// be edited as text. A closed account's cells can't be: the Status bar says so.
-    fn start_edit(&mut self, ctx: &egui::Context, keys: &Keys<'_>, start: Start) {
+    fn start_edit(&mut self, ctx: &egui::Context, keys: &KeyContext<'_>, start: EditStart) {
         let Some(cursor) = self.cursor else {
             return;
         };
-        let Some(row) = keys.rows.iter().find(|row| row.id() == cursor.row) else {
-            return;
-        };
-        let Some(field) = cursor.column.text_field(row) else {
+        let Some((row, field)) = field_at(keys.rows, cursor) else {
             return;
         };
         if keys.closed {
@@ -662,8 +665,8 @@ impl Register {
             return;
         }
         let text = match start {
-            Start::Saved => field.saved(row).to_owned(),
-            Start::Empty => String::new(),
+            EditStart::Saved => field.saved(row).to_owned(),
+            EditStart::Empty => String::new(),
         };
         let edit = CellEdit { cell: cursor, text };
         let id = edit.editor_id();
@@ -680,9 +683,23 @@ impl Register {
     }
 }
 
+/// A move of the cell cursor that happened.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Moved {
+    /// The scroll offset that brings the cursor into view, when it has left it.
+    scroll_offset: Option<f32>,
+}
+
+/// The row of `cell` and the field it edits as text, or `None` when its row is gone or
+/// it can't be edited as text.
+fn field_at(rows: &[RegisterRow], cell: CellAddress) -> Option<(&RegisterRow, TextField)> {
+    let row = rows.iter().find(|row| row.id() == cell.row)?;
+    Some((row, cell.column.text_field(row)?))
+}
+
 /// What a cell edit starts from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Start {
+enum EditStart {
     /// The cell's saved text, as Enter and Tab open it.
     Saved,
     /// Nothing, as typing opens it: the editor takes the typed text.
@@ -709,7 +726,7 @@ fn fully_in(viewport: Rect, rect: Rect) -> bool {
 }
 
 /// What the Register's keys act on.
-struct Keys<'a> {
+struct KeyContext<'a> {
     account: AccountId,
     closed: bool,
     rows: &'a [RegisterRow],
@@ -719,10 +736,7 @@ struct Keys<'a> {
 /// Saves `edit`'s text, trimmed, by sending one edit Command, unless it matches the
 /// saved text.
 fn commit(edit: &CellEdit, rows: &[RegisterRow], commands: &CommandSender) {
-    let Some(row) = rows.iter().find(|row| row.id() == edit.cell.row) else {
-        return;
-    };
-    let Some(field) = edit.cell.column.text_field(row) else {
+    let Some((row, field)) = field_at(rows, edit.cell) else {
         return;
     };
     let text = edit.text.trim();

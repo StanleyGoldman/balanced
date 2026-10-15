@@ -89,8 +89,8 @@ impl eframe::App for App {
         }
     }
 
-    /// Takes Tab away from egui's focus navigation while the Register owns the
-    /// keyboard, and hands it to the Register.
+    /// Takes Tab and Shift+Tab away from egui's focus navigation while the Register
+    /// owns the keyboard, and hands them to the Register.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         if self.main_window.register_takes_tab(ctx) {
             raw_input.events.retain(|event| {
@@ -103,6 +103,10 @@ impl eframe::App for App {
                 else {
                     return true;
                 };
+                // Ctrl+Tab and other chords stay with the rest of the app.
+                if !(modifiers.is_none() || modifiers.shift_only()) {
+                    return true;
+                }
                 if *pressed {
                     self.main_window.press_tab(*modifiers);
                 }

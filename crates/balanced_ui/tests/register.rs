@@ -54,7 +54,7 @@ fn type_text(harness: &mut Harness<'static, App>, text: &str) {
     harness.run();
 }
 
-/// Opens Everyday Checking and puts the cell cursor on the cell labelled `label`.
+/// Puts the cell cursor on the cell labelled `label` by clicking it.
 fn click_cell(harness: &mut Harness<'static, App>, label: &str) {
     harness.get_by_role_and_label(Role::Cell, label).click();
     harness.run();
@@ -662,4 +662,41 @@ fn an_edit_starts_with_the_text_cursor_at_the_end() {
     type_text(&mut harness, "!");
 
     assert_eq!(editor(&harness, "Payee").as_deref(), Some("Fresh Market!"));
+}
+
+#[test]
+fn tab_on_the_last_editable_cell_commits_and_closes_it() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Anniversary dinner");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    type_text(&mut harness, " out");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    harness.get_by_role_and_label(Role::Cell, "Anniversary dinner out");
+    assert!(harness.query_by_role(Role::TextInput).is_none());
+}
+
+#[test]
+fn the_register_leaves_ctrl_tab_to_the_rest_of_the_app() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    let ctrl_tab = Event::Key {
+        key: Key::Tab,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::COMMAND,
+    };
+    let mut input = eframe::egui::RawInput {
+        events: vec![ctrl_tab.clone()],
+        ..Default::default()
+    };
+
+    let ctx = harness.ctx.clone();
+    harness.state_mut().raw_input_hook(&ctx, &mut input);
+
+    assert_eq!(input.events, [ctrl_tab]);
 }
