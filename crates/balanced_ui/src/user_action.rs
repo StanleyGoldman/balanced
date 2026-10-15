@@ -1,12 +1,12 @@
-//! The user-action list: what the Menu bar offers, each action's label and the
-//! [`AppCommand`] it sends.
+//! The user-action list: what the Menu bar and the keymap offer, each action's label
+//! and the [`AppCommand`] it sends.
 
 use balanced_i18n::Localizer;
 
 use crate::command::{AppCommand, StatusMessage};
 use crate::i18n::fl;
 
-/// Something the user can do from the Menu bar.
+/// Something the user can do from the Menu bar or with a Shortcut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UserAction {
     Quit,
