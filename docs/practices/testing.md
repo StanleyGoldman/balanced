@@ -28,14 +28,13 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 
 ## Image snapshots
 
-`crates/balanced_ui/tests/snapshots.rs` holds them: the Account bar and the Register, each in light and dark. The images live in `crates/balanced_ui/tests/snapshots/`.
+The tests live in `crates/balanced_ui/tests/snapshots.rs`, and the images in `crates/balanced_ui/tests/snapshots/`.
 
 - **Source of truth:** Linux with lavapipe, Mesa's Vulkan software rasterizer (`mesa-vulkan-drivers` on Debian and Ubuntu). `balanced_ui::testing::app` accepts no other adapter, so every Linux machine draws the same pixels. On other OSes `cargo xtask snapshots` skips them.
-- **Writing one:** build the App with `balanced_ui::testing::app(scheme)` and check it with `check_snapshot`, which holds the project thresholds. `clippy.toml` bans kittest's own snapshot methods. Mark the test `#[ignore]`, with a reason naming `cargo xtask snapshots`, so `cargo xtask test` skips it. After clicking, send `Event::PointerGone` and `run()`: kittest draws the pointer and its hover into the image.
-- **Running:** `cargo xtask snapshots`, which `cargo xtask ci` runs after `test`.
+- **Writing one:** build the App with `balanced_ui::testing::app(scheme)` and check it with `check_snapshot`, which holds the project thresholds. Mark the test `#[ignore]`, with a reason naming `cargo xtask snapshots`, so `cargo xtask test` skips it. After clicking, send `Event::PointerGone` and `run()`: kittest draws the pointer and its hover into the image.
+- **Running:** `cargo xtask snapshots`.
 - **Reviewing a failure:** kittest writes `<name>.new.png` and `<name>.diff.png` beside the snapshot (both gitignored). Look at both images and name every changed region. A change the code was meant to make gets updated; anything else is a bug to fix.
 - **Updating:** `UPDATE_SNAPSHOTS=1 cargo xtask snapshots` rewrites the failing snapshots. Commit each new PNG with the code that changed it, and say in the PR which views changed and why. A snapshot that fails on noise is fixed in the test setup; the thresholds stay put.
-- Add a snapshot only for a new layout-critical view.
 
 ## Mutation testing
 

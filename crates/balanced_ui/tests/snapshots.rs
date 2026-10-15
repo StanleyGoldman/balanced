@@ -12,7 +12,7 @@ use egui_kittest::kittest::Queryable as _;
 
 /// Opens the account named `name` from the Account bar, then moves the pointer out of the
 /// window so no hover or cursor shows in the snapshot.
-fn open(harness: &mut Harness<'static, App>, name: &str) {
+fn open_account(harness: &mut Harness<'static, App>, name: &str) {
     harness.get_by_role_and_label(Role::Button, name).click();
     harness.run();
     harness.event(Event::PointerGone);
@@ -44,7 +44,7 @@ fn account_bar_dark() {
 fn register_light() {
     let mut harness = app(Theme::Light);
 
-    open(&mut harness, "Everyday Checking");
+    open_account(&mut harness, "Everyday Checking");
 
     check_snapshot(&mut harness, "register_light");
 }
@@ -54,7 +54,7 @@ fn register_light() {
 fn register_dark() {
     let mut harness = app(Theme::Dark);
 
-    open(&mut harness, "Everyday Checking");
+    open_account(&mut harness, "Everyday Checking");
 
     check_snapshot(&mut harness, "register_dark");
 }

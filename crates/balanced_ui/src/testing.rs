@@ -1,6 +1,5 @@
 //! Image snapshot support for tests: the App drawn by the lavapipe software rasterizer,
-//! and the snapshot check with the project thresholds. Snapshots are checked on Linux
-//! only, where lavapipe is the source of truth (see `docs/practices/testing.md`).
+//! and the snapshot check with the project thresholds (see `docs/practices/testing.md`).
 
 use std::sync::Arc;
 
@@ -14,11 +13,10 @@ use crate::App;
 use crate::theme::{Scheme, Theme, ThemeSettings};
 
 /// How much one pixel may differ before it counts as failing: kittest's weighted squared
-/// YIQ distance. One renderer draws every snapshot, so this only absorbs rounding noise.
+/// YIQ distance.
 const THRESHOLD: f32 = 0.6;
 
-/// How many pixels may fail before the snapshot fails. None: a moved one-pixel rule is a
-/// layout change worth seeing.
+/// How many pixels may fail before the snapshot fails: none.
 const MAX_FAILED_PIXELS: usize = 0;
 
 /// The App on stub data in the test locale and in `scheme`, wide enough to show every
@@ -51,7 +49,7 @@ pub fn app(scheme: egui::Theme) -> Harness<'static, App> {
 ///
 /// If the image differs from the snapshot, or the snapshot is missing.
 #[track_caller]
-pub fn check_snapshot<State>(harness: &mut Harness<'_, State>, name: &str) {
+pub fn check_snapshot(harness: &mut Harness<'_, App>, name: &str) {
     let options = SnapshotOptions::new()
         .threshold(THRESHOLD)
         .max_failed_pixels(MAX_FAILED_PIXELS);
