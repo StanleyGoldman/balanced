@@ -9,6 +9,7 @@ publish.workspace = true
 fluent-bundle.workspace = true
 i18n-embed.workspace = true
 icu_calendar.workspace = true
+icu_collator.workspace = true
 icu_datetime.workspace = true
 icu_decimal.workspace = true
 icu_experimental.workspace = true

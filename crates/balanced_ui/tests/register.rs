@@ -3,8 +3,8 @@
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
 use balanced_ui::App;
-use eframe::egui::accesskit::{Role, Toggled};
-use eframe::egui::vec2;
+use eframe::egui::accesskit::{Action, Role, SortDirection, Toggled};
+use eframe::egui::{CursorIcon, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
@@ -27,6 +27,27 @@ fn cells(harness: &Harness<'static, App>) -> Vec<String> {
         .query_all_by_role(Role::Cell)
         .map(|cell| cell.accesskit_node().label().unwrap_or_default())
         .collect()
+}
+
+/// The labels of the Register cells under the header `title`, top row first.
+fn column(harness: &Harness<'static, App>, title: &str) -> Vec<String> {
+    let header = harness
+        .get_by_role_and_label(Role::ColumnHeader, title)
+        .rect()
+        .x_range();
+    harness
+        .query_all_by_role(Role::Cell)
+        .filter(|cell| header.contains(cell.rect().center().x))
+        .map(|cell| cell.accesskit_node().label().unwrap_or_default())
+        .collect()
+}
+
+/// Clicks the Register header `title`.
+fn sort_by(harness: &mut Harness<'static, App>, title: &str) {
+    harness
+        .get_by_role_and_label(Role::ColumnHeader, title)
+        .click();
+    harness.run();
 }
 
 #[test]
@@ -188,4 +209,190 @@ fn opening_another_account_clears_the_selection() {
 
     let costco = harness.get_by_role_and_label(Role::Cell, "Costco");
     assert_eq!(costco.accesskit_node().toggled(), Some(Toggled::False));
+}
+
+#[test]
+fn clicking_payee_sorts_by_payee() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+
+    sort_by(&mut harness, "Payee");
+
+    assert_eq!(
+        column(&harness, "Payee"),
+        [
+            "Acme Corp",
+            "Acme Corp",
+            "Bean There",
+            "City Power & Light",
+            "Costco",
+            "Fresh Market",
+            "Maple Property Management",
+            "Opening Balance",
+            "Shell",
+            "Trattoria Roma",
+        ]
+    );
+}
+
+#[test]
+fn sorting_by_payee_blanks_the_balance() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+
+    sort_by(&mut harness, "Payee");
+
+    assert_eq!(column(&harness, "Balance"), [""; 10]);
+}
+
+#[test]
+fn opening_another_account_sorts_it_by_date() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    sort_by(&mut harness, "Payee");
+    open(&mut harness, "Closed");
+
+    open(&mut harness, "Old Checking");
+
+    assert_eq!(
+        column(&harness, "Payee"),
+        ["Opening Balance", "First Savings Bank", "Cash withdrawal"]
+    );
+}
+
+#[test]
+fn clicking_payee_again_reverses_the_sort_but_not_its_ties() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    sort_by(&mut harness, "Payee");
+
+    sort_by(&mut harness, "Payee");
+
+    let payees = column(&harness, "Payee");
+    let dates = column(&harness, "Date");
+    assert_eq!(
+        payees,
+        [
+            "Trattoria Roma",
+            "Shell",
+            "Opening Balance",
+            "Maple Property Management",
+            "Fresh Market",
+            "Costco",
+            "City Power & Light",
+            "Bean There",
+            "Acme Corp",
+            "Acme Corp",
+        ]
+    );
+    // The two Acme Corp salaries tie, so they stay oldest first.
+    assert_eq!(dates[8..], ["9/1/2026", "9/18/2026"]);
+}
+
+#[test]
+fn sorting_by_date_again_brings_the_balances_back() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    sort_by(&mut harness, "Payee");
+
+    sort_by(&mut harness, "Date");
+
+    assert_eq!(
+        column(&harness, "Balance"),
+        [
+            "1,200.00", "4,400.00", "2,950.00", "2,863.58", "2,858.83", "2,766.73", "2,560.46",
+            "2,512.26", "5,712.26", "5,647.46",
+        ]
+    );
+}
+
+#[test]
+fn a_register_opens_sorted_by_date_with_every_column_but_number_and_balance_sortable() {
+    let mut harness = app();
+
+    open(&mut harness, "Everyday Checking");
+
+    let header = |title| harness.get_by_role_and_label(Role::ColumnHeader, title);
+    let sorts = |title| {
+        let node = header(title).accesskit_node();
+        (
+            node.data().supports_action(Action::Click),
+            node.sort_direction(),
+        )
+    };
+    assert_eq!(sorts("Date"), (true, Some(SortDirection::Ascending)));
+    for title in ["Payee", "Category", "Memo", "Amount"] {
+        assert_eq!(sorts(title), (true, None), "{title}");
+    }
+    for title in ["Num", "Balance"] {
+        assert_eq!(sorts(title), (false, None), "{title}");
+    }
+}
+
+#[test]
+fn a_sortable_header_shows_a_pointing_hand() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+
+    harness
+        .get_by_role_and_label(Role::ColumnHeader, "Payee")
+        .hover();
+    harness.run();
+
+    assert_eq!(
+        harness.output().platform_output.cursor_icon,
+        CursorIcon::PointingHand
+    );
+}
+
+#[test]
+fn the_selected_row_stays_centred_after_a_sort() {
+    let mut harness = app();
+    open(&mut harness, "Household Checking");
+    harness
+        .get_by_role_and_label(Role::Cell, "Opening Balance")
+        .click();
+    harness.run();
+
+    // Of 20,001 rows, the opening balance sorts thousands of rows down by payee.
+    sort_by(&mut harness, "Payee");
+
+    let header = harness
+        .get_by_role_and_label(Role::ColumnHeader, "Payee")
+        .rect();
+    let bottom = harness
+        .query_all_by_role(Role::Cell)
+        .map(|cell| cell.rect().bottom())
+        .fold(header.bottom(), f32::max);
+    let middle = header.bottom().midpoint(bottom);
+    let selected = harness
+        .query_by_role_and_label(Role::Cell, "Opening Balance")
+        .map(|cell| cell.rect().center().y);
+    assert!(
+        selected.is_some_and(|y| (y - middle).abs() <= header.height()),
+        "the selected row is at {selected:?}, the middle at {middle}"
+    );
+}
+
+#[test]
+fn selecting_a_row_after_a_sort_with_nothing_selected_leaves_the_rows_still() {
+    let mut harness = app();
+    open(&mut harness, "Household Checking");
+    sort_by(&mut harness, "Payee");
+    // A row in the lower half of the Register, which centring would move up.
+    let payees: Vec<_> = harness
+        .query_all_by_role(Role::Cell)
+        .filter(|cell| cell.accesskit_node().label().as_deref() == Some("Acme Corp"))
+        .collect();
+    let acme = &payees[payees.len() * 3 / 4];
+    let clicked = acme.rect();
+
+    acme.click();
+    harness.run();
+
+    let selected = harness
+        .query_all_by_role(Role::Cell)
+        .find(|cell| cell.accesskit_node().toggled() == Some(Toggled::True))
+        .map(|cell| cell.rect().center().y);
+    assert_eq!(selected, Some(clicked.center().y));
 }

@@ -1,5 +1,7 @@
 //! [`Localizer`]: the text languages, the formatting locale and their lookups.
 
+use std::cmp::Ordering;
+
 use i18n_embed::LanguageLoader as _;
 use i18n_embed::fluent::FluentLanguageLoader;
 use icu_calendar::types::Weekday;
@@ -205,6 +207,11 @@ impl Localizer {
     /// the locale overrides the region's default.
     pub fn first_weekday(&self) -> Weekday {
         self.formatters.first_weekday()
+    }
+
+    /// Orders `a` and `b` as the formatting locale sorts text.
+    pub fn compare_text(&self, a: &str, b: &str) -> Ordering {
+        self.formatters.compare(a, b)
     }
 
     fn load_text_language(&self, language: &LanguageIdentifier) -> Result<(), I18nError> {
@@ -422,6 +429,16 @@ mod tests {
 
         assert_eq!(i18n.format_date(date), "04.10.2026");
         assert_eq!(i18n.first_weekday(), Weekday::Monday);
+    }
+
+    #[test]
+    fn compares_text_in_the_formatting_locale() {
+        let i18n = localizer(&langid!("en-US"), &locale!("de-DE"));
+        let mut payees = ["Zebra", "Öl", "apple"];
+
+        payees.sort_by(|a, b| i18n.compare_text(a, b));
+
+        assert_eq!(payees, ["apple", "Öl", "Zebra"]);
     }
 
     #[cfg(feature = "test-support")]
