@@ -261,7 +261,7 @@ impl Harness {
             .show(ui, |ui| {
                 self.prompt.rect = Some(ui.clip_rect());
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(text).size(15.0));
+                    ui.label(RichText::new(text).size(16.0).strong());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(RichText::new("F2 reply · F6 hide").small().weak());
                     });
