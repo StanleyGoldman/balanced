@@ -24,6 +24,8 @@ const SHOT_SETTLE: Duration = Duration::from_millis(350);
 const SCROLL_REST: Duration = Duration::from_millis(300);
 /// How long the prompt panel flashes after its text changes, so the change is noticed.
 const PROMPT_FLASH: Duration = Duration::from_millis(1600);
+/// The width kept clear for the panel's key hint.
+const PROMPT_HINT_WIDTH: f32 = 130.0;
 /// How many times it pulses in that time.
 const PROMPT_PULSES: f32 = 2.0;
 /// How far a spotlight cut-out extends past the widget or region it lights.
@@ -260,9 +262,13 @@ impl Harness {
             .frame(frame)
             .show(ui, |ui| {
                 self.prompt.rect = Some(ui.clip_rect());
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(text).size(16.0).strong());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.horizontal_top(|ui| {
+                    // Leave room for the key hint on the right, and wrap the text into the rest.
+                    let width = (ui.available_width() - PROMPT_HINT_WIDTH).max(0.0);
+                    ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
+                        ui.add(egui::Label::new(RichText::new(text).size(16.0).strong()).wrap());
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                         ui.label(RichText::new("F2 reply · F6 hide").small().weak());
                     });
                 });
