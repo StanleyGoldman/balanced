@@ -17,14 +17,18 @@
 //!
 //! The PROTOTYPE dock on the right holds the variant switcher, toggles and a live list of
 //! windows with frames per second; F4 collapses it. ← / → switch variant, F2 writes a note into
-//! the log, F3 drops a marker.
+//! the log, F3 drops a marker, F5 turns the spotlight on or off, F6 puts the prompt panel away.
 //!
 //! Control-file verbs (besides the harness's `variant`, `toggle`, `screenshot`, `dock`, `reload`,
-//! `quit`): `account <index|name>`, `dialog confirm|wizard|manage`, `ok`, `cancel`,
-//! `step next|back` (top Dialog of the Main window), `detach register [account]`,
-//! `detach reconcile [account]`, `close detached`, `focus main`.
+//! `quit`, `spotlight`, `prompt`): `account <index|name>`, `tab <index|name>`,
+//! `dialog confirm|wizard|manage|category [name]`, `ok`, `cancel`, `step next|back` (top Dialog
+//! of the Main window), `detach register [account]`, `detach reconcile [account]`,
+//! `close detached`, `focus main`.
 //!
-//! Fixed-seed stub data, English literals, default egui theme. None of this is production code.
+//! The Main window follows the decided shell layout (#15): menu row, a tab row of its own, no
+//! toolbar, a context header over the register, account editing and deleting in Manage Accounts.
+//! The look is the real theme module (#16). Fixed-seed stub data, English literals, en-US dates.
+//! None of this is production code.
 
 #![allow(
     clippy::allow_attributes,
@@ -59,6 +63,14 @@ use egui::{
 };
 use egui_extras::{Column, TableBuilder};
 use serde_json::{Value, json};
+
+// The real theme module, compiled into the example: the prototype gets the decided look
+// without making `theme` public.
+#[allow(dead_code)]
+#[path = "../../src/theme.rs"]
+mod theme;
+
+use theme::{Theme, ThemeSettings};
 
 // ---------------------------------------------------------------------------------------------
 // Stub data: fixed seed, realistic volume
@@ -397,7 +409,7 @@ fn fmt_day(days: i64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y}-{m:02}-{d:02}")
+    format!("{m}/{d}/{y}")
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -576,6 +588,9 @@ struct Sink {
     /// Responses from the root viewport, handed to `Harness::track` so it can name the widget in
     /// its focus, key and typing events.
     tracks: Arc<Mutex<Vec<(egui::Response, String)>>>,
+    /// Named areas of the root viewport, handed to `Harness::region` for the spotlight. The
+    /// spotlight paints only the Main window, so other windows' areas are dropped.
+    regions: Arc<Mutex<Vec<(Rect, String)>>>,
     start: Instant,
 }
 
@@ -584,6 +599,7 @@ impl Sink {
         Self {
             events: Arc::default(),
             tracks: Arc::default(),
+            regions: Arc::default(),
             start: Instant::now(),
         }
     }
@@ -610,6 +626,13 @@ impl Sink {
             if r.secondary_clicked() {
                 self.event("right_click", json!({ "widget": name }));
             }
+        }
+    }
+
+    /// Name an area of the Main window for the spotlight.
+    fn region(&self, ctx: &Context, rect: Rect, name: impl Into<String>) {
+        if ctx.viewport_id() == ViewportId::ROOT {
+            self.regions.lock().unwrap().push((rect, name.into()));
         }
     }
 
@@ -641,6 +664,8 @@ struct Shared {
     stats: Mutex<BTreeMap<String, ViewStats>>,
     forced: Mutex<Option<Forced>>,
     uid: AtomicU64,
+    /// Register row height from the theme, for every window's register.
+    row_h: f32,
 }
 
 impl Shared {
@@ -794,6 +819,11 @@ enum Action {
     CreateAccount(NewAccount),
     ApplyManage(Vec<ManageRow>),
     DeleteAccount(String),
+    DeleteTransaction {
+        account: String,
+        row: usize,
+    },
+    CreateCategory(String),
     CloseDetached(u64),
     Exit,
     /// Handled by the host that shows the Dialogs: mark a Manage Accounts row deleted.
@@ -810,6 +840,10 @@ impl Action {
                 format!("DomainCommand::ApplyAccountEdits({} rows)", rows.len())
             }
             Self::DeleteAccount(n) => format!("DomainCommand::DeleteAccount({n})"),
+            Self::DeleteTransaction { account, row } => {
+                format!("DomainCommand::DeleteTransaction({account}, row {row})")
+            }
+            Self::CreateCategory(n) => format!("DomainCommand::CreateCategory({n})"),
             Self::CloseDetached(id) => format!("AppCommand::CloseDetachedWindow({id})"),
             Self::Exit => "AppCommand::Exit".to_owned(),
             Self::DeleteManageRow(i) => format!("(dialog-local) DeleteRow({i})"),
@@ -859,7 +893,7 @@ impl Wizard {
             name: String::new(),
             institution: String::new(),
             opening: "0.00".to_owned(),
-            date: "2026-10-14".to_owned(),
+            date: "10/14/2026".to_owned(),
             error: None,
             focus_pending: true,
         }
@@ -895,10 +929,10 @@ impl Wizard {
         match self.step {
             1 if self.name.trim().is_empty() => Err("Enter a name for the account.".to_owned()),
             2 if self.opening_cents().is_none() => {
-                Err("Opening balance must be a number with at most two decimals.".to_owned())
+                Err("USD amounts have 2 decimal places.".to_owned())
             }
             2 if !valid_date(&self.date) => {
-                Err("Opening date must look like 2026-10-14.".to_owned())
+                Err("Not a date. Expected M/D/YYYY, for example 10/5/2026.".to_owned())
             }
             _ => Ok(()),
         }
@@ -906,8 +940,8 @@ impl Wizard {
 }
 
 fn valid_date(s: &str) -> bool {
-    let parts: Vec<&str> = s.trim().split('-').collect();
-    matches!(parts.as_slice(), [y, m, d]
+    let parts: Vec<&str> = s.trim().split('/').collect();
+    matches!(parts.as_slice(), [m, d, y]
         if y.len() == 4
             && y.parse::<u32>().is_ok()
             && m.parse::<u32>().is_ok_and(|m| (1..=12).contains(&m))
@@ -925,10 +959,31 @@ struct Manage {
     rows: Vec<ManageRow>,
 }
 
+/// New Category, as the Category combobox's `Create "x"…` row opens it (#18): prefilled with
+/// what the user typed.
+struct NewCategory {
+    name: String,
+    parent: Option<String>,
+    income: bool,
+    error: Option<String>,
+}
+
+/// Top-level categories of the stub data, for New Category's "Subcategory of".
+fn top_categories() -> Vec<&'static str> {
+    let mut v: Vec<&str> = SPENDING
+        .iter()
+        .map(|p| p.1.split(':').next().unwrap_or(p.1))
+        .collect();
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
 enum DialogKind {
     Confirm(Confirm),
     Wizard(Wizard),
     Manage(Manage),
+    Category(NewCategory),
 }
 
 struct Dialog {
@@ -945,6 +1000,7 @@ impl Dialog {
             DialogKind::Confirm(c) => c.title.clone(),
             DialogKind::Wizard(_) => "New Account".to_owned(),
             DialogKind::Manage(_) => "Manage Accounts".to_owned(),
+            DialogKind::Category(_) => "New Category".to_owned(),
         }
     }
 
@@ -953,6 +1009,7 @@ impl Dialog {
             DialogKind::Confirm(_) => "confirm",
             DialogKind::Wizard(_) => "wizard",
             DialogKind::Manage(_) => "manage",
+            DialogKind::Category(_) => "category",
         }
     }
 
@@ -961,6 +1018,7 @@ impl Dialog {
             DialogKind::Confirm(_) => vec2(420.0, 170.0),
             DialogKind::Wizard(_) => vec2(520.0, 400.0),
             DialogKind::Manage(_) => vec2(600.0, 440.0),
+            DialogKind::Category(_) => vec2(440.0, 250.0),
         }
     }
 }
@@ -1028,6 +1086,78 @@ fn dialog_ui(ui: &mut Ui, d: &mut Dialog, cx: &DlgCx<'_>) -> Option<Done> {
             out
         }
         DialogKind::Wizard(w) => wizard_ui(ui, w, cx, enter, esc),
+        DialogKind::Category(c) => {
+            ui.set_min_width(400.0);
+            ui.heading("New Category");
+            ui.add_space(4.0);
+            egui::Grid::new("category_grid")
+                .num_columns(2)
+                .show(ui, |ui| {
+                    ui.label("Name");
+                    let r = ui.add(egui::TextEdit::singleline(&mut c.name).desired_width(240.0));
+                    sink.edited(&r, "category: name", &c.name);
+                    if fresh {
+                        r.request_focus();
+                    }
+                    ui.end_row();
+                    ui.label("Subcategory of");
+                    let shown = c.parent.clone().unwrap_or_else(|| "(none)".to_owned());
+                    let r = egui::ComboBox::from_id_salt("category_parent")
+                        .selected_text(shown)
+                        .width(240.0)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut c.parent, None, "(none)");
+                            for top in top_categories() {
+                                ui.selectable_value(&mut c.parent, Some(top.to_owned()), top);
+                            }
+                        });
+                    sink.click(&r.response, "category: subcategory of");
+                    ui.end_row();
+                    ui.label("Type");
+                    ui.horizontal(|ui| {
+                        let r = ui.radio_value(&mut c.income, false, "Expense");
+                        sink.click(&r, "category: expense");
+                        let r = ui.radio_value(&mut c.income, true, "Income");
+                        sink.click(&r, "category: income");
+                    });
+                    ui.end_row();
+                });
+            match &c.error {
+                Some(e) => ui.colored_label(ui.visuals().error_fg_color, e),
+                None => ui.label(" "),
+            };
+            ui.separator();
+            let mut out = None;
+            Sides::new().show(
+                ui,
+                |_| {},
+                |ui| {
+                    let ok = primary_button(ui, "Create");
+                    sink.click(&ok, "category: Create");
+                    let cancel = ui.button("Cancel");
+                    sink.click(&cancel, "category: Cancel");
+                    if ok.clicked()
+                        || (enter && cx.forced.is_none())
+                        || cx.forced == Some(Forced::Ok)
+                    {
+                        let name = c.name.trim();
+                        if name.is_empty() {
+                            c.error = Some("Enter a name for the category.".to_owned());
+                            sink.event("category_invalid", json!({ "error": "empty name" }));
+                        } else {
+                            let full = c
+                                .parent
+                                .as_ref()
+                                .map_or_else(|| name.to_owned(), |p| format!("{p}:{name}"));
+                            out = Some(Done::Ok(Some(Action::CreateCategory(full))));
+                        }
+                    } else if cancel.clicked() || esc || cx.forced == Some(Forced::Cancel) {
+                        out = Some(Done::Cancel(if esc { "esc" } else { "cancel" }));
+                    }
+                },
+            );
+            out
+        }
         DialogKind::Manage(m) => {
             ui.set_min_width(560.0);
             ui.heading("Manage Accounts");
@@ -1312,6 +1442,23 @@ fn open_dialog(
     stack.push(d);
 }
 
+fn delete_txn_confirm(account: &str, t: &Txn, row: usize) -> DialogKind {
+    confirm(
+        "Delete transaction?",
+        &format!(
+            "Delete the {} transaction to “{}” for {}? This can't be undone.",
+            fmt_day(t.day),
+            t.payee,
+            fmt_cents(t.amount)
+        ),
+        "Delete",
+        Action::DeleteTransaction {
+            account: account.to_owned(),
+            row,
+        },
+    )
+}
+
 fn confirm(title: &str, text: &str, ok: &str, on_ok: Action) -> DialogKind {
     DialogKind::Confirm(Confirm {
         title: title.to_owned(),
@@ -1361,6 +1508,11 @@ fn show_dialogs(
                 let m = egui::Modal::new(Id::new(("dlg", uid)))
                     .backdrop_color(backdrop)
                     .show(ctx, |ui| dialog_ui(ui, &mut stack[i], &cx));
+                shared.sink.region(
+                    ctx,
+                    m.response.rect,
+                    format!("dialog: {}", stack[i].short()),
+                );
                 if m.backdrop_response.clicked() && top {
                     shared.sink.event(
                         "backdrop_click",
@@ -1369,12 +1521,20 @@ fn show_dialogs(
                 }
                 m.inner
             }
-            DlgStyle::Window => egui::Window::new(&title)
-                .id(Id::new(("dlgwin", uid)))
-                .collapsible(false)
-                .resizable(false)
-                .show(ctx, |ui| dialog_ui(ui, &mut stack[i], &cx))
-                .and_then(|r| r.inner.flatten()),
+            DlgStyle::Window => {
+                let short = stack[i].short();
+                egui::Window::new(&title)
+                    .id(Id::new(("dlgwin", uid)))
+                    .collapsible(false)
+                    .resizable(false)
+                    .show(ctx, |ui| dialog_ui(ui, &mut stack[i], &cx))
+                    .and_then(|r| {
+                        shared
+                            .sink
+                            .region(ctx, r.response.rect, format!("dialog: {short}"));
+                        r.inner.flatten()
+                    })
+            }
             DlgStyle::OsWindow => {
                 let size = stack[i].size();
                 let mut b = ViewportBuilder::default()
@@ -1602,7 +1762,7 @@ fn register_table(
         .column(Column::initial(170.0).at_least(80.0))
         .column(Column::initial(96.0))
         .column(Column::remainder().at_least(96.0))
-        .header(22.0, |mut h| {
+        .header(shared.row_h + 2.0, |mut h| {
             for t in ["Date", "Payee", "Category", "Amount", "Balance"] {
                 h.col(|ui| {
                     ui.strong(t);
@@ -1610,7 +1770,7 @@ fn register_table(
             }
         })
         .body(|body| {
-            body.rows(22.0, n, |mut row| {
+            body.rows(shared.row_h, n, |mut row| {
                 let r = n - 1 - row.index();
                 let t = &txns[r];
                 row.set_selected(*selected == Some(r));
@@ -1647,33 +1807,31 @@ fn detached_content(ui: &mut Ui, shared: &Shared, d: &mut Detached) {
     let ctx = ui.ctx().clone();
     let name = d.name();
     diag_strip(ui, shared, &name);
-    let mut want_new_account = None;
     let mut want_close = false;
-    let mut want_delete: Option<String> = None;
-    let mut want_finish = false;
+    let mut want_delete: Option<(Id, usize)> = None;
+    let mut want_finish = None;
     ui.horizontal(|ui| {
         ui.strong(&d.title);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let r = ui.button("Close");
             shared.sink.click(&r, &format!("{name}: Close"));
             want_close = r.clicked();
-            let r = ui.button("New Account…");
-            shared.sink.click(&r, &format!("{name}: New Account…"));
-            if r.clicked() {
-                want_new_account = Some(r.id);
-            }
             match &d.content {
-                DetContent::Register { account, .. } => {
-                    let r = ui.button("Delete Account…");
-                    shared.sink.click(&r, &format!("{name}: Delete Account…"));
+                DetContent::Register { txns, selected, .. } => {
+                    let r = ui.button("Delete Transaction…");
+                    shared
+                        .sink
+                        .click(&r, &format!("{name}: Delete Transaction…"));
                     if r.clicked() {
-                        want_delete = Some(account.clone());
+                        want_delete = Some((r.id, selected.unwrap_or(txns.len() - 1)));
                     }
                 }
                 DetContent::Reconcile { .. } => {
                     let r = ui.button("Finish…");
                     shared.sink.click(&r, &format!("{name}: Finish…"));
-                    want_finish = r.clicked();
+                    if r.clicked() {
+                        want_finish = Some(r.id);
+                    }
                 }
             }
         });
@@ -1717,34 +1875,21 @@ fn detached_content(ui: &mut Ui, shared: &Shared, d: &mut Detached) {
 
     let host = d.name();
     let account = d.account().to_owned();
-    if let Some(id) = want_new_account {
+    if let Some((opener, row)) = want_delete
+        && let DetContent::Register { txns, .. } = &d.content
+    {
+        let kind = delete_txn_confirm(&account, &txns[row], row);
         open_dialog(
             &ctx,
             shared,
             &host,
             &mut d.dialogs,
-            DialogKind::Wizard(Wizard::new()),
-            Some(id),
+            kind,
+            Some(opener),
             "button",
         );
     }
-    if let Some(a) = want_delete {
-        open_dialog(
-            &ctx,
-            shared,
-            &host,
-            &mut d.dialogs,
-            confirm(
-                "Delete account?",
-                &format!("Delete “{a}” and all of its transactions? This can't be undone."),
-                "Delete",
-                Action::DeleteAccount(a.clone()),
-            ),
-            None,
-            "button",
-        );
-    }
-    if want_finish {
+    if let Some(opener) = want_finish {
         open_dialog(
             &ctx,
             shared,
@@ -1758,7 +1903,7 @@ fn detached_content(ui: &mut Ui, shared: &Shared, d: &mut Detached) {
                 "Finish",
                 Action::CloseDetached(d.id),
             ),
-            None,
+            Some(opener),
             "button",
         );
     }
@@ -1811,6 +1956,19 @@ enum Nav {
     Det(u64),
 }
 
+/// The Main view's top-level tabs, in their own row under the menu bar (#15). Only Accounts has
+/// content here.
+const TABS: [&str; 7] = [
+    "Home",
+    "Accounts",
+    "Bills",
+    "Spending",
+    "Planning",
+    "Investing",
+    "Property & Debt",
+];
+const ACCOUNTS_TAB: usize = 1;
+
 struct Proto {
     h: Harness,
     shared: Arc<Shared>,
@@ -1824,6 +1982,8 @@ struct Proto {
     detached: Vec<Arc<Mutex<Detached>>>,
     next_det: u64,
     nav: Nav,
+    tab: usize,
+    theme: Theme,
     exit_confirmed: bool,
     dock_open: bool,
     status: String,
@@ -1852,6 +2012,7 @@ impl Proto {
             style: variant.style(),
             mech: variant.mech(),
         };
+        let theme = Theme::new(ThemeSettings::default());
         let (tx, rx) = mpsc::channel();
         let shared = Arc::new(Shared {
             opts: Mutex::new(o),
@@ -1860,6 +2021,7 @@ impl Proto {
             stats: Mutex::default(),
             forced: Mutex::default(),
             uid: AtomicU64::new(1),
+            row_h: theme.row_height(),
         });
         Self {
             h,
@@ -1874,6 +2036,8 @@ impl Proto {
             detached: Vec::new(),
             next_det: 1,
             nav: Nav::Register,
+            tab: ACCOUNTS_TAB,
+            theme,
             exit_confirmed: false,
             dock_open: true,
             status: "Ready".to_owned(),
@@ -1971,20 +2135,30 @@ impl Proto {
         self.open_main_dialog(ctx, DialogKind::Manage(Manage { rows }), opener, via);
     }
 
-    fn open_delete(&mut self, ctx: &Context, account: usize, opener: Option<Id>, via: &str) {
-        let name = self.accounts[account].name;
-        self.emit("AppCommand::OpenDeleteAccountConfirm", via);
-        self.open_main_dialog(
-            ctx,
-            confirm(
-                "Delete account?",
-                &format!("Delete “{name}” and all of its transactions? This can't be undone."),
-                "Delete",
-                Action::DeleteAccount(name.to_owned()),
-            ),
-            opener,
-            via,
-        );
+    /// Confirm deleting the selected register row, or the newest when none is selected.
+    fn open_delete_txn(&mut self, ctx: &Context, opener: Option<Id>, via: &str) {
+        let a = &self.accounts[self.selected];
+        let row = self.selected_row.unwrap_or(a.txns.len() - 1);
+        let kind = delete_txn_confirm(a.name, &a.txns[row], row);
+        self.emit("AppCommand::OpenDeleteTransactionConfirm", via);
+        self.open_main_dialog(ctx, kind, opener, via);
+    }
+
+    /// New Category, prefilled as the Category combobox's `Create "x"…` row would (#18).
+    fn open_category(&mut self, ctx: &Context, name: &str, opener: Option<Id>, via: &str) {
+        self.emit("AppCommand::OpenDialog(NewCategory)", via);
+        let kind = DialogKind::Category(NewCategory {
+            name: name.to_owned(),
+            parent: None,
+            income: false,
+            error: None,
+        });
+        self.open_main_dialog(ctx, kind, opener, via);
+    }
+
+    fn set_tab(&mut self, tab: usize, via: &str) {
+        self.tab = tab;
+        self.h.event("tab", json!({ "to": TABS[tab], "via": via }));
     }
 
     fn open_detached(&mut self, ctx: &Context, account: usize, reconcile: bool, via: &str) {
@@ -2120,6 +2294,12 @@ impl Proto {
                 self.selected = self.selected.min(self.accounts.len().saturating_sub(1));
                 self.status = format!("Deleted “{name}”");
             }
+            // Stub data is shared with Detached registers, so nothing is removed: the log's
+            // `would_emit` is the record.
+            Action::DeleteTransaction { account, row } => {
+                self.status = format!("Would delete row {row} of “{account}”");
+            }
+            Action::CreateCategory(name) => self.status = format!("Would create category “{name}”"),
             Action::CloseDetached(id) => self.close_detached(id, "command"),
             Action::Exit => {
                 self.exit_confirmed = true;
@@ -2149,6 +2329,7 @@ impl Proto {
                 Some(i) => {
                     self.selected = i;
                     self.nav = Nav::Register;
+                    self.tab = ACCOUNTS_TAB;
                     self.h.event(
                         "navigate",
                         json!({ "to": self.accounts[i].name, "via": "control" }),
@@ -2156,12 +2337,32 @@ impl Proto {
                 }
                 None => bad(self),
             },
-            "dialog" => match rest {
-                "confirm" => self.open_delete(ctx, self.selected, None, "control"),
-                "wizard" => self.open_wizard(ctx, None, "control"),
-                "manage" => self.open_manage(ctx, None, "control"),
-                _ => bad(self),
-            },
+            "tab" => {
+                let found = rest
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|i| *i < TABS.len())
+                    .or_else(|| {
+                        TABS.iter()
+                            .position(|t| t.to_lowercase().contains(&rest.to_lowercase()))
+                    });
+                match found {
+                    Some(t) => self.set_tab(t, "control"),
+                    None => bad(self),
+                }
+            }
+            "dialog" => {
+                let (what, arg) = rest
+                    .split_once(' ')
+                    .map_or((rest, ""), |(w, a)| (w, a.trim()));
+                match what {
+                    "confirm" => self.open_delete_txn(ctx, None, "control"),
+                    "wizard" => self.open_wizard(ctx, None, "control"),
+                    "manage" => self.open_manage(ctx, None, "control"),
+                    "category" => self.open_category(ctx, arg, None, "control"),
+                    _ => bad(self),
+                }
+            }
             "ok" => *self.shared.forced.lock().unwrap() = Some(Forced::Ok),
             "cancel" => *self.shared.forced.lock().unwrap() = Some(Forced::Cancel),
             "step" => match rest {
@@ -2215,6 +2416,10 @@ impl Proto {
         for (r, name) in tracks {
             self.h.track(&r, name);
         }
+        let regions = std::mem::take(&mut *self.shared.sink.regions.lock().unwrap());
+        for (rect, name) in regions {
+            self.h.region(rect, name);
+        }
     }
 }
 
@@ -2240,7 +2445,6 @@ impl eframe::App for Proto {
         if let Some(cmd) = self.h.begin_frame(&ctx) {
             self.apply_control(&ctx, &cmd);
         }
-        let no_dialog = self.main_dialogs.is_empty();
         if !ctx.egui_wants_keyboard_input() {
             if ctx.input(|i| i.key_pressed(Key::ArrowLeft)) {
                 self.set_variant(self.variant.step(-1), "key");
@@ -2261,9 +2465,6 @@ impl eframe::App for Proto {
         }
         if ctx.input(|i| i.key_pressed(Key::F4)) {
             self.set_dock(!self.dock_open, "key");
-        }
-        if no_dialog && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::N)) {
-            self.open_wizard(&ctx, None, "shortcut Ctrl+N");
         }
 
         // Closing the Main window.
@@ -2295,6 +2496,7 @@ impl eframe::App for Proto {
         }
 
         self.dock(ui);
+        self.h.prompt_panel(ui);
         self.main_ui(ui, &ctx);
         self.show_detached(&ctx);
 
@@ -2376,30 +2578,37 @@ impl Proto {
         }
     }
 
+    /// The decided menus (#15) cut down to what this prototype exercises, plus a Window menu for
+    /// Detached windows. Account actions live in the Account bar's right-click menu.
     fn menus(&mut self, ui: &mut Ui, ctx: &Context) {
         let sel = self.selected;
         ui.menu_button("File", |ui| {
-            if self.menu_item(ui, "File", "New Account…", "Ctrl+N") {
-                self.open_wizard(ctx, None, "menu File");
-            }
-            if self.menu_item(ui, "File", "Manage Accounts…", "") {
-                self.open_manage(ctx, None, "menu File");
-            }
-            ui.separator();
-            if self.menu_item(ui, "File", "Exit", "") {
+            if self.menu_item(ui, "File", "Exit", "Alt+F4") {
                 ctx.send_viewport_cmd(ViewportCommand::Close);
             }
         });
-        ui.menu_button("Account", |ui| {
-            if self.menu_item(ui, "Account", "Open in Detached Window", "") {
-                self.open_detached(ctx, sel, false, "menu Account");
+        ui.menu_button("View", |ui| {
+            ui.menu_button("Go To", |ui| {
+                for (t, name) in TABS.iter().enumerate() {
+                    if self.menu_item(ui, "View ▸ Go To", name, "") {
+                        self.set_tab(t, "menu");
+                    }
+                }
+            });
+        });
+        ui.menu_button("Tools", |ui| {
+            if self.menu_item(ui, "Tools", "New Account…", "") {
+                self.open_wizard(ctx, None, "menu Tools");
             }
-            if self.menu_item(ui, "Account", "Reconcile…", "") {
-                self.open_detached(ctx, sel, true, "menu Account");
+            if self.menu_item(ui, "Tools", "Manage Accounts…", "") {
+                self.open_manage(ctx, None, "menu Tools");
+            }
+            if self.menu_item(ui, "Tools", "New Category…", "") {
+                self.open_category(ctx, "", None, "menu Tools");
             }
             ui.separator();
-            if self.menu_item(ui, "Account", "Delete Account…", "") {
-                self.open_delete(ctx, sel, None, "menu Account");
+            if self.menu_item(ui, "Tools", "Reconcile Account…", "Ctrl+R") {
+                self.open_detached(ctx, sel, true, "menu Tools");
             }
         });
         ui.menu_button("Window", |ui| {
@@ -2417,6 +2626,7 @@ impl Proto {
             for (id, title) in list {
                 if self.menu_item(ui, "Window", &title, "") {
                     if self.o.mech == Mech::Tab {
+                        self.tab = ACCOUNTS_TAB;
                         self.nav = Nav::Det(id);
                     } else {
                         ctx.send_viewport_cmd_to(
@@ -2451,12 +2661,17 @@ impl Proto {
     fn main_ui(&mut self, ui: &mut Ui, ctx: &Context) {
         let blocked = !self.main_dialogs.is_empty() && self.o.style != DlgStyle::Window;
 
-        Panel::top("menu").show(ui, |ui| {
+        let menu = Panel::top("menu").show(ui, |ui| {
             ui.add_enabled_ui(!blocked, |ui| {
                 egui::MenuBar::new().ui(ui, |ui| self.menus(ui, ctx));
             });
         });
-        Panel::bottom("status").show(ui, |ui| {
+        self.h.region(menu.response.rect, "menu bar");
+        let tabs = Panel::top("tabs").show(ui, |ui| {
+            ui.add_enabled_ui(!blocked, |ui| self.tab_row(ui));
+        });
+        self.h.region(tabs.response.rect, "tab row");
+        let status = Panel::bottom("status").show(ui, |ui| {
             Sides::new().show(
                 ui,
                 |ui| ui.label(&self.status),
@@ -2471,13 +2686,24 @@ impl Proto {
                 },
             );
         });
-        Panel::left("accounts").default_size(210.0).show(ui, |ui| {
-            ui.add_enabled_ui(!blocked, |ui| self.account_bar(ui, ctx));
-        });
+        self.h.region(status.response.rect, "status bar");
+        if self.tab == ACCOUNTS_TAB {
+            let bar = Panel::left("accounts").default_size(210.0).show(ui, |ui| {
+                ui.add_enabled_ui(!blocked, |ui| self.account_bar(ui, ctx));
+            });
+            self.h.region(bar.response.rect, "account bar");
+        }
         CentralPanel::default().show(ui, |ui| {
-            diag_strip(ui, &self.shared, "main");
+            let diag = ui.scope(|ui| diag_strip(ui, &self.shared, "main"));
+            self.h.region(diag.response.rect, "window diagnostics");
+            if self.tab != ACCOUNTS_TAB {
+                ui.heading(TABS[self.tab]);
+                ui.label(RichText::new("Not in this prototype. Open the Accounts tab.").weak());
+                return;
+            }
             if self.o.mech == Mech::Tab {
-                self.tab_strip(ui, ctx);
+                let strip = ui.scope(|ui| self.register_tabs(ui, ctx));
+                self.h.region(strip.response.rect, "register tabs");
             }
             ui.add_enabled_ui(!blocked, |ui| match self.nav {
                 Nav::Register => self.register_view(ui, ctx),
@@ -2494,13 +2720,22 @@ impl Proto {
                 }
             });
         });
-        // A scrim over the Main window is part of the OS-window Dialog style, drawn by show_dialogs.
-        if blocked && self.o.style == DlgStyle::Modal {
-            // egui::Modal supplies its own backdrop; nothing to add.
-        }
     }
 
-    fn tab_strip(&mut self, ui: &mut Ui, ctx: &Context) {
+    fn tab_row(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            for (t, name) in TABS.iter().enumerate() {
+                let r = ui.selectable_label(self.tab == t, *name);
+                self.h.track(&r, format!("tab: {name}"));
+                if r.clicked() && self.tab != t {
+                    self.set_tab(t, "click");
+                }
+            }
+        });
+    }
+
+    /// Variant E: Detached windows as closeable tabs above the register, beside it.
+    fn register_tabs(&mut self, ui: &mut Ui, ctx: &Context) {
         let tabs: Vec<(u64, String)> = self
             .detached
             .iter()
@@ -2514,18 +2749,18 @@ impl Proto {
                 self.nav == Nav::Register,
                 format!("Register — {}", self.accounts[self.selected].name),
             );
-            self.h.track(&r, "tab: Register");
+            self.h.track(&r, "register tab: Register");
             if r.clicked() {
                 self.nav = Nav::Register;
             }
             for (id, title) in tabs {
                 let r = ui.selectable_label(self.nav == Nav::Det(id), &title);
-                self.h.track(&r, format!("tab: {title}"));
+                self.h.track(&r, format!("register tab: {title}"));
                 if r.clicked() {
                     self.nav = Nav::Det(id);
                 }
                 let x = ui.small_button("✕");
-                self.h.track(&x, format!("tab close: {title}"));
+                self.h.track(&x, format!("register tab close: {title}"));
                 if x.clicked()
                     && let Some(det) = self
                         .detached
@@ -2549,11 +2784,28 @@ impl Proto {
     }
 
     fn account_bar(&mut self, ui: &mut Ui, ctx: &Context) {
-        ui.heading("Accounts");
-        let mut open_detached = None;
-        let mut reconcile = None;
-        let mut delete = None;
-        let mut select = None;
+        let mut pick: Option<(usize, &'static str)> = None;
+        let footer = Panel::bottom("account_bar_footer").show(ui, |ui| {
+            let total: i64 = self
+                .accounts
+                .iter()
+                .filter(|a| !a.hidden)
+                .map(|a| a.balance)
+                .sum();
+            Sides::new().show(
+                ui,
+                |ui| ui.strong("Net Worth"),
+                |ui| ui.strong(fmt_cents(total)),
+            );
+            // Quicken's Account bar ends in an Add Account button; here it is the Main window's
+            // one button that opens a Dialog, so focus return has an opener to go back to.
+            let r = ui.add_sized([ui.available_width(), 22.0], Button::new("+ Add Account"));
+            self.h.track(&r, "account bar: + Add Account");
+            if r.clicked() {
+                self.open_wizard(ctx, Some(r.id), "account bar button");
+            }
+        });
+        self.h.region(footer.response.rect, "account bar footer");
         egui::ScrollArea::vertical().show(ui, |ui| {
             for group in Group::ALL {
                 let members: Vec<usize> = self
@@ -2575,7 +2827,7 @@ impl Proto {
                         RichText::new(a.name)
                     };
                     let r = ui.add_sized(
-                        [ui.available_width(), 22.0],
+                        [ui.available_width(), self.theme.row_height()],
                         egui::Button::selectable(
                             self.selected == i && self.nav == Nav::Register,
                             text,
@@ -2583,88 +2835,98 @@ impl Proto {
                     );
                     self.h.track(&r, format!("account bar: {}", a.name));
                     if r.clicked() {
-                        select = Some(i);
+                        pick = Some((i, "select"));
                     }
+                    // The decided account menu (#15 S5). Editing, hiding and deleting live in
+                    // Manage Accounts.
                     r.context_menu(|ui| {
-                        if self.menu_item(ui, "Account bar context", "Open in Detached Window", "")
-                        {
-                            open_detached = Some(i);
-                        }
-                        if self.menu_item(ui, "Account bar context", "Reconcile…", "") {
-                            reconcile = Some(i);
-                        }
-                        if self.menu_item(ui, "Account bar context", "Delete Account…", "") {
-                            delete = Some(i);
+                        let path = "account menu";
+                        for (label, what) in [
+                            ("Open Register", "select"),
+                            ("Open in New Tab", "tab"),
+                            ("Open in Detached Window", "detach"),
+                            ("Reconcile…", "reconcile"),
+                            ("Manage Accounts…", "manage"),
+                        ] {
+                            if what == "manage" {
+                                ui.separator();
+                            }
+                            if self.menu_item(ui, path, label, "") {
+                                pick = Some((i, what));
+                            }
                         }
                     });
                 }
             }
         });
-        if let Some(i) = select {
-            self.selected = i;
-            self.selected_row = None;
-            self.nav = Nav::Register;
-            self.h.event(
-                "navigate",
-                json!({ "to": self.accounts[i].name, "via": "click" }),
-            );
-        }
-        if let Some(i) = open_detached {
-            self.selected = i;
-            self.open_detached(ctx, i, false, "account context menu");
-        }
-        if let Some(i) = reconcile {
-            self.selected = i;
-            self.open_detached(ctx, i, true, "account context menu");
-        }
-        if let Some(i) = delete {
-            self.selected = i;
-            self.open_delete(ctx, i, None, "account context menu");
+        let Some((i, what)) = pick else { return };
+        self.selected = i;
+        self.selected_row = None;
+        match what {
+            "select" => {
+                self.nav = Nav::Register;
+                self.h.event(
+                    "navigate",
+                    json!({ "to": self.accounts[i].name, "via": "click" }),
+                );
+            }
+            "tab" => self.emit("AppCommand::OpenRegisterTab", "account menu"),
+            "detach" => self.open_detached(ctx, i, false, "account menu"),
+            "reconcile" => self.open_detached(ctx, i, true, "account menu"),
+            _ => self.open_manage(ctx, None, "account menu"),
         }
     }
 
+    /// The register under its context header (#15): the account, its balance, and the header's
+    /// actions on the right. No toolbar.
     fn register_view(&mut self, ui: &mut Ui, ctx: &Context) {
         if self.accounts.is_empty() {
-            ui.label("No accounts. Use File ▸ New Account…");
+            ui.label("No accounts. Use Tools ▸ New Account…");
             return;
         }
         self.selected = self.selected.min(self.accounts.len() - 1);
         let sel = self.selected;
-        ui.horizontal(|ui| {
+        let header = ui.horizontal(|ui| {
             ui.heading(self.accounts[sel].name);
             ui.label(RichText::new(fmt_cents(self.accounts[sel].balance)).strong());
+            ui.label(
+                RichText::new(format!("{} transactions", self.accounts[sel].txns.len())).weak(),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.menu_button("More…", |ui| {
+                    let path = "context header ▸ More…";
+                    if self.menu_item(ui, path, "Open in Detached Window", "") {
+                        self.open_detached(ctx, sel, false, "context header");
+                    }
+                    if self.menu_item(ui, path, "Delete Transaction…", "") {
+                        self.open_delete_txn(ctx, None, "context header menu");
+                    }
+                    if self.menu_item(ui, path, "Manage Accounts…", "") {
+                        self.open_manage(ctx, None, "context header menu");
+                    }
+                });
+                let r = ui.button("Reconcile");
+                self.h.track(&r, "context header: Reconcile");
+                if r.clicked() {
+                    self.open_detached(ctx, sel, true, "context header");
+                }
+                for (label, cmd) in [
+                    ("Filter", "AppCommand::FilterRegister"),
+                    ("+ Transaction", "AppCommand::NewTransaction"),
+                ] {
+                    let r = ui.button(label);
+                    self.h.track(&r, format!("context header: {label}"));
+                    if r.clicked() {
+                        self.emit(cmd, "context header");
+                    }
+                }
+            });
         });
-        ui.horizontal(|ui| {
-            let r = ui.button("New Account…");
-            self.h.track(&r, "toolbar: New Account…");
-            if r.clicked() {
-                self.open_wizard(ctx, Some(r.id), "toolbar");
-            }
-            let r = ui.button("Manage Accounts…");
-            self.h.track(&r, "toolbar: Manage Accounts…");
-            if r.clicked() {
-                self.open_manage(ctx, Some(r.id), "toolbar");
-            }
-            let r = ui.button("Delete Account…");
-            self.h.track(&r, "toolbar: Delete Account…");
-            if r.clicked() {
-                self.open_delete(ctx, sel, Some(r.id), "toolbar");
-            }
-            ui.separator();
-            let r = ui.button("Reconcile…");
-            self.h.track(&r, "toolbar: Reconcile…");
-            if r.clicked() {
-                self.open_detached(ctx, sel, true, "toolbar");
-            }
-            let r = ui.button("Open in Detached Window");
-            self.h.track(&r, "toolbar: Open in Detached Window");
-            if r.clicked() {
-                self.open_detached(ctx, sel, false, "toolbar");
-            }
-        });
+        self.h.region(header.response.rect, "context header");
         ui.separator();
         let txns = Arc::clone(&self.accounts[sel].txns);
         let shared = Arc::clone(&self.shared);
+        let top = ui.cursor().min;
         register_table(
             ui,
             &txns,
@@ -2672,6 +2934,8 @@ impl Proto {
             &mut self.selected_row,
             &shared,
         );
+        self.h
+            .region(Rect::from_min_max(top, ui.max_rect().max), "register");
     }
 
     fn dock(&mut self, ui: &mut Ui) {
@@ -2736,6 +3000,9 @@ impl Proto {
                     }
                 }
                 ui.separator();
+                self.h.dock_spotlight(ui);
+                self.h.dock_prompt(ui);
+                ui.separator();
                 ui.label(RichText::new("Windows").strong());
                 {
                     let stats = self.shared.stats.lock().unwrap();
@@ -2753,7 +3020,7 @@ impl Proto {
                 ui.separator();
                 ui.label(
                     RichText::new(
-                        "A–E or ◀ / ▶ variant · 1–9 toggles · Ctrl+N New Account · F2 note · F3 marker · F4 hide this dock",
+                        "A–E or ◀ / ▶ variant · 1–9 toggles · F2 note · F3 marker · F4 hide this dock · F5 spotlight · F6 prompt",
                     )
                     .small()
                     .weak(),
@@ -2773,6 +3040,13 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "balanced_dialogs_detached_prototype",
         options,
-        Box::new(move |_cc| Ok(Box::new(Proto::new(&args)))),
+        Box::new(move |cc| {
+            let proto = Proto::new(&args);
+            let style = proto.theme.style();
+            cc.egui_ctx.set_style_of(egui::Theme::Dark, style.clone());
+            cc.egui_ctx.set_style_of(egui::Theme::Light, style);
+            cc.egui_ctx.set_theme(egui::Theme::Light);
+            Ok(Box::new(proto))
+        }),
     )
 }
