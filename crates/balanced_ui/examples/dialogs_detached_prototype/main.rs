@@ -500,7 +500,7 @@ const TOGGLES: &[(&str, &str, &str)] = &[
     ("diag", "Diagnostics footer in other OS windows", "A B C"),
     (
         "heavy",
-        "Heavier Dialog: title bar with ✕, movable, still modal",
+        "Heavier Dialog: title bar with ×, movable, resizable, still modal",
         "A B E",
     ),
 ];
@@ -714,7 +714,7 @@ impl Shared {
                 inner: None,
             });
             let gap = now.duration_since(s.last);
-            if s.frames > 0 && gap > Duration::from_millis(750) {
+            if s.frames > 0 && gap > FRAME_GAP {
                 self.sink.event(
                     "frame_gap",
                     json!({ "window": name, "gap_ms": gap.as_millis() }),
@@ -752,6 +752,8 @@ impl Shared {
         }
         if self.opts().animate {
             ctx.request_repaint();
+        } else {
+            ctx.request_repaint_after(HEARTBEAT);
         }
     }
 
@@ -759,6 +761,12 @@ impl Shared {
         self.stats.lock().unwrap().remove(name);
     }
 }
+
+/// Every window repaints at least this often, so a long gap between its frames means the
+/// compositor throttled or froze it rather than that nothing changed.
+const HEARTBEAT: Duration = Duration::from_millis(250);
+/// A gap between one window's frames longer than this is logged as `frame_gap`.
+const FRAME_GAP: Duration = Duration::from_secs(2);
 
 /// One account in the Account bar, as the shell layout decided (#15): the whole row is the
 /// click target and the highlight, the name left-aligned and the balance right-aligned.
@@ -793,7 +801,8 @@ fn account_row(
         text,
     );
     ui.painter().text(
-        rect.right_center() - egui::vec2(2.0, 0.0),
+        // Clear of the Account bar's scroll bar.
+        rect.right_center() - egui::vec2(12.0, 0.0),
         egui::Align2::RIGHT_CENTER,
         fmt_cents(balance),
         font,
@@ -1278,7 +1287,7 @@ fn dialog_ui(ui: &mut Ui, d: &mut Dialog, cx: &DlgCx<'_>) -> Option<Done> {
                                 ui.end_row();
                                 continue;
                             }
-                            let r = ui.add(egui::TextEdit::singleline(&mut row.name).desired_width(240.0));
+                            let r = ui.add_sized([240.0, ui.spacing().interact_size.y], egui::TextEdit::singleline(&mut row.name));
                             sink.edited(&r, &format!("manage: name row {i}"), &row.name);
                             if fresh && i == 0 {
                                 r.request_focus();
@@ -1607,7 +1616,7 @@ fn show_dialogs(
                     .order(egui::Order::Foreground)
                     .open(&mut open)
                     .collapsible(false)
-                    .resizable(false)
+                    .resizable(true)
                     .pivot(egui::Align2::CENTER_CENTER)
                     .default_pos(ctx.content_rect().center())
                     .show(ctx, |ui| dialog_ui(ui, &mut stack[i], &cx))
@@ -2175,7 +2184,7 @@ impl Proto {
             "command",
             json!({ "would_emit": command, "source": source }),
         );
-        self.status = format!("{source} → {command}");
+        self.status = format!("{source}: {command}");
     }
 
     fn set_variant(&mut self, to: Variant, via: &str) {
@@ -2715,7 +2724,7 @@ impl Proto {
         ui.menu_button("View", |ui| {
             ui.menu_button("Go To", |ui| {
                 for (t, name) in TABS.iter().enumerate() {
-                    if self.menu_item(ui, "View ▸ Go To", name, "") {
+                    if self.menu_item(ui, "View > Go To", name, "") {
                         self.set_tab(t, "menu");
                     }
                 }
@@ -2887,7 +2896,7 @@ impl Proto {
                 if r.clicked() {
                     self.nav = Nav::Det(id);
                 }
-                let x = ui.small_button("✕");
+                let x = ui.small_button("×");
                 self.h.track(&x, format!("register tab close: {title}"));
                 if x.clicked()
                     && let Some(det) = self
@@ -3009,7 +3018,7 @@ impl Proto {
     /// actions on the right. No toolbar.
     fn register_view(&mut self, ui: &mut Ui, ctx: &Context) {
         if self.accounts.is_empty() {
-            ui.label("No accounts. Use Tools ▸ New Account…");
+            ui.label("No accounts. Use Tools > New Account…");
             return;
         }
         self.selected = self.selected.min(self.accounts.len() - 1);
