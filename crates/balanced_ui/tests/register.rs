@@ -212,7 +212,7 @@ fn opening_another_account_clears_the_selection() {
 }
 
 #[test]
-fn clicking_payee_sorts_by_payee_and_blanks_the_balance() {
+fn clicking_payee_sorts_by_payee() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
 
@@ -233,7 +233,31 @@ fn clicking_payee_sorts_by_payee_and_blanks_the_balance() {
             "Trattoria Roma",
         ]
     );
+}
+
+#[test]
+fn sorting_by_payee_blanks_the_balance() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+
+    sort_by(&mut harness, "Payee");
+
     assert_eq!(column(&harness, "Balance"), [""; 10]);
+}
+
+#[test]
+fn opening_another_account_sorts_it_by_date() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    sort_by(&mut harness, "Payee");
+    open(&mut harness, "Closed");
+
+    open(&mut harness, "Old Checking");
+
+    assert_eq!(
+        column(&harness, "Payee"),
+        ["Opening Balance", "First Savings Bank", "Cash withdrawal"]
+    );
 }
 
 #[test]
@@ -348,4 +372,27 @@ fn the_selected_row_stays_centred_after_a_sort() {
         selected.is_some_and(|y| (y - middle).abs() <= header.height()),
         "the selected row is at {selected:?}, the middle at {middle}"
     );
+}
+
+#[test]
+fn selecting_a_row_after_a_sort_with_nothing_selected_leaves_the_rows_still() {
+    let mut harness = app();
+    open(&mut harness, "Household Checking");
+    sort_by(&mut harness, "Payee");
+    // A row in the lower half of the Register, which centring would move up.
+    let payees: Vec<_> = harness
+        .query_all_by_role(Role::Cell)
+        .filter(|cell| cell.accesskit_node().label().as_deref() == Some("Acme Corp"))
+        .collect();
+    let acme = &payees[payees.len() * 3 / 4];
+    let clicked = acme.rect();
+
+    acme.click();
+    harness.run();
+
+    let selected = harness
+        .query_all_by_role(Role::Cell)
+        .find(|cell| cell.accesskit_node().toggled() == Some(Toggled::True))
+        .map(|cell| cell.rect().center().y);
+    assert_eq!(selected, Some(clicked.center().y));
 }

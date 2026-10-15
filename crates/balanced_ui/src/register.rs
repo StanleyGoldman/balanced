@@ -152,9 +152,9 @@ pub(crate) struct Register {
     /// The rows of the last account shown, rebuilt when they are out of date.
     model: Option<RegisterModel>,
     sort: RegisterSort,
-    /// Whether the sort changed since the rows were last shown, so the selected row
-    /// scrolls to the middle of the Register.
-    sorted: bool,
+    /// Whether the sort changed since the rows were last shown, so the selected row,
+    /// if any, scrolls to the middle of the Register.
+    centre_pending: bool,
     selected: Option<TransactionId>,
 }
 
@@ -176,6 +176,7 @@ impl Register {
             .is_some_and(|model| model.account() != account)
         {
             self.sort = RegisterSort::default();
+            self.centre_pending = false;
             self.selected = None;
         }
         let model = match self.model.take() {
@@ -183,9 +184,10 @@ impl Register {
             _ => RegisterModel::new(summary, view, self.sort, i18n),
         };
         let row_height = theme.row_height();
+        let centre_pending = std::mem::take(&mut self.centre_pending);
         let centre_on = self
             .selected
-            .filter(|_| std::mem::take(&mut self.sorted))
+            .filter(|_| centre_pending)
             .and_then(|id| model.rows().iter().position(|row| row.id() == id));
         ScrollArea::horizontal()
             .id_salt(("register_sideways", account))
@@ -193,18 +195,7 @@ impl Register {
             .show(ui, |ui| {
                 let viewport = ui.clip_rect();
                 let register_id = ui.id();
-                let scroll_offset = centre_on.map(|index| {
-                    // The body is what the header row leaves, and each row takes its
-                    // height and one gap.
-                    let gap = ui.spacing().item_spacing.y;
-                    let body = ui.available_height() - row_height - gap;
-                    #[expect(
-                        clippy::cast_precision_loss,
-                        reason = "row indices stay far below 2^24, where f32 is exact"
-                    )]
-                    let top = index as f32 * (row_height + gap);
-                    (top - (body - row_height) / 2.0).max(0.0)
-                });
+                let scroll_offset = centre_on.map(|index| centring_offset(ui, row_height, index));
                 let mut table = TableBuilder::new(ui)
                     .id_salt(("register", account))
                     .striped(theme.alternating_rows())
@@ -229,7 +220,7 @@ impl Register {
                                 };
                                 if let Some(key) = heading.show(ui, i18n, theme) {
                                     self.sort = self.sort.clicked(key);
-                                    self.sorted = true;
+                                    self.centre_pending = true;
                                     // The rows sort and scroll on the next frame.
                                     ui.ctx().request_repaint();
                                 }
@@ -276,6 +267,20 @@ impl Register {
     }
 }
 
+/// The scroll offset that puts row `index` in the middle of a Register filling `ui`,
+/// or as near as the top allows.
+fn centring_offset(ui: &egui::Ui, row_height: f32, index: usize) -> f32 {
+    // The body is what the header row leaves, and each row takes its height and one gap.
+    let gap = ui.spacing().item_spacing.y;
+    let body = ui.available_height() - row_height - gap;
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "row indices stay far below 2^24, where f32 is exact"
+    )]
+    let top = index as f32 * (row_height + gap);
+    (top - (body - row_height) / 2.0).max(0.0)
+}
+
 /// A column heading on the header band.
 struct Heading {
     column: RegisterColumn,
@@ -297,25 +302,23 @@ impl Heading {
         } = *self;
         let rect = ui.max_rect();
         let key = column.sort_key();
-        let sense = if key.is_some() {
-            Sense::click()
-        } else {
-            Sense::hover()
-        };
-        let mut response = ui.interact(rect, ui.id().with("register_heading"), sense);
-        let fill = if key.is_some() && response.hovered() {
-            ui.visuals().widgets.hovered.weak_bg_fill
-        } else {
-            theme.header_fill()
+        let id = ui.id().with("register_heading");
+        let mut fill = theme.header_fill();
+        let response = match key {
+            Some(_) => {
+                let response = ui.interact(rect, id, Sense::click());
+                if response.hovered() {
+                    fill = ui.visuals().widgets.hovered.weak_bg_fill;
+                }
+                response.on_hover_cursor(CursorIcon::PointingHand)
+            }
+            None => ui.interact(rect, id, Sense::hover()),
         };
         let band = rect.expand2(ui.spacing().item_spacing / 2.0);
         ui.ctx()
             .layer_painter(ui.layer_id())
             .with_clip_rect(band.intersect(viewport))
             .rect_filled(band, 0.0, fill);
-        if key.is_some() {
-            response = response.on_hover_cursor(CursorIcon::PointingHand);
-        }
         let direction = key
             .filter(|&key| key == sort.key())
             .map(|_| sort.direction());
@@ -324,10 +327,7 @@ impl Heading {
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(Role::ColumnHeader);
             if let Some(direction) = direction {
-                node.set_sort_direction(match direction {
-                    SortDirection::Ascending => accesskit::SortDirection::Ascending,
-                    SortDirection::Descending => accesskit::SortDirection::Descending,
-                });
+                node.set_sort_direction(direction.into());
             }
         });
         let text = paint_text(
@@ -340,6 +340,15 @@ impl Heading {
             sort_arrow(ui, column, text, direction);
         }
         key.filter(|_| response.clicked())
+    }
+}
+
+impl From<SortDirection> for accesskit::SortDirection {
+    fn from(direction: SortDirection) -> Self {
+        match direction {
+            SortDirection::Ascending => Self::Ascending,
+            SortDirection::Descending => Self::Descending,
+        }
     }
 }
 

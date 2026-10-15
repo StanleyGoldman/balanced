@@ -21,6 +21,8 @@ const CATEGORY_SEPARATOR: &str = ":";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisterRow {
     id: TransactionId,
+    /// The row's place in date order, which breaks ties in every sort.
+    place: usize,
     date: String,
     number: String,
     payee: String,
@@ -67,6 +69,21 @@ impl RegisterRow {
     /// other than by date it is `None`, since it would be out of order.
     pub(crate) fn balance(&self) -> Option<&FormattedAmount> {
         self.balance.as_ref()
+    }
+
+    /// Orders this row and `other` by `key`'s column alone.
+    fn compare(&self, other: &Self, key: SortKey, i18n: &Localizer) -> Ordering {
+        match key {
+            SortKey::Date => self.place.cmp(&other.place),
+            SortKey::Payee => i18n.compare_text(&self.payee, &other.payee),
+            SortKey::Category => i18n.compare_text(&self.category, &other.category),
+            SortKey::Memo => i18n.compare_text(&self.memo, &other.memo),
+            SortKey::Amount => self
+                .amount
+                .money()
+                .amount()
+                .cmp(&other.amount.money().amount()),
+        }
     }
 }
 
@@ -124,26 +141,15 @@ impl RegisterSort {
         Self { key, direction }
     }
 
-    /// Orders two rows, each with its place in date order. Rows that tie stay in date
-    /// order, oldest first, whichever way the sort runs.
-    fn compare(
-        self,
-        i18n: &Localizer,
-        (a, a_place): (&RegisterRow, usize),
-        (b, b_place): (&RegisterRow, usize),
-    ) -> Ordering {
-        let ordering = match self.key {
-            SortKey::Date => a_place.cmp(&b_place),
-            SortKey::Payee => i18n.compare_text(&a.payee, &b.payee),
-            SortKey::Category => i18n.compare_text(&a.category, &b.category),
-            SortKey::Memo => i18n.compare_text(&a.memo, &b.memo),
-            SortKey::Amount => a.amount.money().amount().cmp(&b.amount.money().amount()),
-        };
+    /// Orders two rows. Rows that tie stay in date order, oldest first, whichever way
+    /// the sort runs.
+    fn compare(self, i18n: &Localizer, a: &RegisterRow, b: &RegisterRow) -> Ordering {
+        let ordering = a.compare(b, self.key, i18n);
         let ordering = match self.direction {
             SortDirection::Ascending => ordering,
             SortDirection::Descending => ordering.reverse(),
         };
-        ordering.then(a_place.cmp(&b_place))
+        ordering.then(a.place.cmp(&b.place))
     }
 }
 
@@ -180,7 +186,7 @@ impl RegisterModel {
         let split = fl!(i18n, "register-split");
         let opening_balance = fl!(i18n, "register-opening-balance");
         let shows_balance = sort.key == SortKey::Date;
-        let mut rows: Vec<(RegisterRow, usize)> = summary
+        let mut rows: Vec<RegisterRow> = summary
             .register()
             .iter()
             .enumerate()
@@ -193,8 +199,9 @@ impl RegisterModel {
                     }
                     Allocation::Split(_) => (transaction.payee().to_owned(), split.clone()),
                 };
-                let row = RegisterRow {
+                RegisterRow {
                     id: transaction.id(),
+                    place,
                     date: i18n.format_date(transaction.date()),
                     number: transaction.number().unwrap_or_default().to_owned(),
                     payee,
@@ -203,14 +210,13 @@ impl RegisterModel {
                     amount: FormattedAmount::new(i18n, transaction.amount(), AmountStyle::Bare),
                     balance: shows_balance
                         .then(|| FormattedAmount::new(i18n, entry.balance(), AmountStyle::Bare)),
-                };
-                (row, place)
+                }
             })
             .collect();
-        rows.sort_by(|a, b| sort.compare(i18n, (&a.0, a.1), (&b.0, b.1)));
+        rows.sort_by(|a, b| sort.compare(i18n, a, b));
         Self {
             source: Self::source(summary.account().id(), view, sort, i18n),
-            rows: rows.into_iter().map(|(row, _)| row).collect(),
+            rows,
         }
     }
 
