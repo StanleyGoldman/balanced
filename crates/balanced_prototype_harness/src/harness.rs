@@ -22,6 +22,10 @@ use crate::spotlight::{Spotlight, SpotlightCommand, outermost, overlay_rects};
 const SHOT_SETTLE: Duration = Duration::from_millis(350);
 /// A scroll gesture ends after this long without movement.
 const SCROLL_REST: Duration = Duration::from_millis(300);
+/// How long the prompt panel flashes after its text changes, so the change is noticed.
+const PROMPT_FLASH: Duration = Duration::from_millis(1600);
+/// How many times it pulses in that time.
+const PROMPT_PULSES: f32 = 2.0;
 /// How far a spotlight cut-out extends past the widget or region it lights.
 const SPOTLIGHT_PAD: f32 = 4.0;
 
@@ -52,6 +56,8 @@ struct PromptState {
     hidden: bool,
     /// The panel drawn this frame, which the spotlight leaves undimmed.
     rect: Option<Rect>,
+    /// When the text last changed, which starts the flash.
+    changed_at: Option<Instant>,
 }
 
 /// What changed the spotlight, as logged.
@@ -230,15 +236,25 @@ impl Harness {
             return;
         };
         let visuals = ui.visuals().clone();
+        let base = visuals
+            .selection
+            .bg_fill
+            .gamma_multiply(0.25)
+            .blend(visuals.panel_fill);
+        let flash = self.prompt_flash();
+        if flash > 0.0 {
+            ui.ctx().request_repaint();
+        }
         let frame = egui::Frame::side_top_panel(ui.style())
-            .fill(
+            .fill(base.lerp_to_gamma(visuals.warn_fg_color, flash * 0.6))
+            .stroke(Stroke::new(
+                1.0 + flash * 2.0,
                 visuals
                     .selection
-                    .bg_fill
-                    .gamma_multiply(0.25)
-                    .blend(visuals.panel_fill),
-            )
-            .stroke(Stroke::new(1.0, visuals.selection.stroke.color));
+                    .stroke
+                    .color
+                    .lerp_to_gamma(visuals.warn_fg_color, flash),
+            ));
         egui::Panel::bottom("harness_prompt")
             .resizable(false)
             .frame(frame)
@@ -251,6 +267,19 @@ impl Harness {
                     });
                 });
             });
+    }
+
+    /// The flash strength now, from 1 just after the text changed down to 0 once it settles.
+    fn prompt_flash(&self) -> f32 {
+        let Some(since) = self.prompt.changed_at.map(|t| t.elapsed()) else {
+            return 0.0;
+        };
+        if since >= PROMPT_FLASH {
+            return 0.0;
+        }
+        let progress = since.as_secs_f32() / PROMPT_FLASH.as_secs_f32();
+        let pulse = 0.5 + 0.5 * (progress * PROMPT_PULSES * std::f32::consts::TAU).cos();
+        pulse * (1.0 - progress)
     }
 
     /// Draw the dock's prompt row: a "Prompt (F6)" checkbox that puts the prompt panel away or
@@ -357,6 +386,7 @@ impl Harness {
                 };
                 // A new instruction brings a put-away panel back, so it isn't missed.
                 self.prompt.hidden = false;
+                self.prompt.changed_at = Some(Instant::now());
                 self.event("prompt", json!({ "text": self.prompt.text }));
                 return None;
             }
