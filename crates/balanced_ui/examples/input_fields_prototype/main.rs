@@ -1640,7 +1640,10 @@ impl Proto {
                         frame = frame.stroke(egui::Stroke::new(1.0, colour));
                     }
                     frame.show(ui, |ui| {
-                        ui.label(RichText::new(text).small().color(colour));
+                        // One line: an Area this close to the window edge would otherwise wrap.
+                        ui.add(
+                            egui::Label::new(RichText::new(text).small().color(colour)).extend(),
+                        );
                     });
                 });
         } else {
