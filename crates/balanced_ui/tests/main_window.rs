@@ -64,3 +64,64 @@ fn file_quit_closes_the_main_window() {
     let root = &harness.output().viewport_output[&ViewportId::ROOT];
     assert_eq!(root.commands, [ViewportCommand::Close]);
 }
+
+#[test]
+fn selecting_an_account_opens_it_under_the_accounts_tab() {
+    let mut harness = app();
+
+    harness
+        .get_by_role_and_label(Role::Button, "Everyday Checking")
+        .click();
+    harness.run();
+
+    let accounts = harness.get_by_role_and_label(Role::Button, "Accounts");
+    assert_eq!(accounts.accesskit_node().toggled(), Some(Toggled::True));
+    harness.get_by_role_and_label(Role::Label, "Everyday Checking");
+    harness.get_by_role_and_label(Role::Label, "$2,450.18");
+}
+
+#[test]
+fn folding_a_group_hides_its_accounts() {
+    let mut harness = app();
+
+    harness
+        .get_by_role_and_label(Role::Button, "Banking")
+        .click();
+    harness.run();
+
+    let banking = harness.get_by_role_and_label(Role::Button, "Banking");
+    assert_eq!(banking.accesskit_node().toggled(), Some(Toggled::False));
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Everyday Checking")
+            .is_none()
+    );
+}
+
+#[test]
+fn closed_accounts_start_folded_and_unfold() {
+    let mut harness = app();
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Old Checking")
+            .is_none()
+    );
+
+    harness
+        .get_by_role_and_label(Role::Button, "Closed")
+        .click();
+    harness.run();
+
+    harness.get_by_role_and_label(Role::Button, "Old Checking");
+}
+
+#[test]
+fn hidden_accounts_are_left_out_but_count_in_net_worth() {
+    let harness = app();
+
+    let holiday_fund = harness.query_by_role_and_label(Role::Button, "Holiday Fund");
+
+    assert!(holiday_fund.is_none());
+    // The stub's Net Worth with the hidden Holiday Fund's $800.00 in it.
+    harness.get_by_role_and_label(Role::Label, "$284,800.43");
+}

@@ -42,6 +42,11 @@ tab-property-debt-placeholder = Your assets, loans and other debts will appear h
 account-bar-title = Accounts
 account-bar-total = Total: { $amount }
     .tooltip = Sum of the balances of the accounts shown in the { -account-bar }
+account-bar-group-banking = Banking
+account-bar-group-investing = Investing
+account-bar-group-property-debt = Property & Debt
+account-bar-group-closed = Closed
+account-bar-net-worth = Net Worth
 
 ## Register
 
