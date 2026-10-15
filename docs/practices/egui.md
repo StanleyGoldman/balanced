@@ -26,8 +26,35 @@ This doc applies to egui 0.36. Tutorials and examples written before 0.34 use AP
 ## Large lists
 
 - Lay out only the visible rows: `ScrollArea::show_rows`, or `TableBuilder` `body.rows`/`heterogeneous_rows`, or `egui_table`. (`TableBody::row` is banned in `clippy.toml`.)
-- Only the row being edited gets `TextEdit`s. Other rows are labels or painted text.
+- Only the cell being edited gets a `TextEdit`. Every other cell is a label or painted text.
 - Strings shown in a row come pre-formatted from the window's cached view model (see [state](state.md)).
+
+## Text entry and editable grids
+
+egui's own focus handling and widgets read keys and clicks before app code does. Most rules below **take the input first**: edit the frame's input ahead of whatever would consume it. These rules are egui mechanics. What a Register cell does on Enter, Tab or Esc is decided in the reference shell spec, not here.
+
+### Keys
+
+- **Esc:** give every cell's `TextEdit` `.event_filter(EventFilter { escape: true, ..Default::default() })`. Without it, egui drops the field's focus on Esc before app code sees the key, so the edit can't cancel or revert.
+- **Tab in a grid:** a grid that owns Tab takes it out of `RawInput` in `eframe::App::raw_input_hook`. While no widget has focus, egui's focus navigation acts on Tab before `ui()` runs and moves focus to the next widget outside the grid.
+- **Modified keys first:** `consume_key` ignores any Shift or Alt the pattern leaves out, so `consume_key(Modifiers::NONE, Key::Tab)` also eats Shift+Tab. Consume the most specific key first: Shift+Tab before Tab, Alt+↓ before ↓.
+- **Bare-letter keys:** an app key with no modifier acts only while `!ctx.egui_wants_keyboard_input()`. Otherwise the letter also lands in the focused field as text.
+
+### Typing and committing
+
+- **Refusing characters:** remove refused characters from `Event::Text` and `Event::Paste` in `ui.input_mut` before the `TextEdit` is added. Filtering the buffer afterwards flickers and moves the cursor.
+- **Cursor after a reformat:** when a commit rewrites the text (a calculator result, a reformatted amount) and focus stays in the field, move the cursor to the end through `TextEditState::load`, `cursor.set_char_range` and `store`. Otherwise the next keystroke lands at the old position: `100/3` becomes `33.33`, and the next `3` makes `333.33`.
+- **Locale change:** commit every dirty field's text under the old locale before the locale changes. Otherwise the blur commit rereads it under the new marks, and a rejected `12.345` USD becomes 12,345.00 in `de-DE`.
+
+### Popups and layout
+
+- **Lists in a cell pick on pointer press:** a combobox list or calendar shown under a focused field picks a row on `is_pointer_button_down_on()`, not `clicked()`. The press moves focus off the field, so a popup drawn only while the field has focus is gone before the release.
+- **One-line bubbles:** a hint or error in an `Area` near the window edge wraps unless its label uses `Label::extend()`.
+- **`TextEdit` in a `Grid`:** a `Grid` sizes each column from last frame's widest cell, so a `TextEdit`'s `desired_width` stays narrow until something widens the column. Call `ui.set_min_width(width)` before adding the field.
+
+### Scrolling
+
+- **Keyboard scrolling:** when the cell cursor moves past the visible edge, set `vertical_scroll_offset` (on `TableBuilder` or `ScrollArea`) from the row index times the row pitch. It applies in the same frame, unanimated. `scroll_to_row` applies a frame late and animates, so the highlight lands on a row before the row slides into view.
 
 ## Colours and theme
 

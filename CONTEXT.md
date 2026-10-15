@@ -45,3 +45,15 @@ _Avoid_: Application-level option, setting, option
 **Register**:
 The editable ledger of transactions for one account, shown in the main view.
 _Avoid_: Transaction list, ledger view
+
+**Draft row**:
+The empty row at the bottom of a register where the user types a new transaction; it becomes a transaction when added.
+_Avoid_: New row, blank row, entry row
+
+**Actions column**:
+The untitled last column of a register, holding a menu of commands for its row (e.g. Split, Void, Delete).
+_Avoid_: Row menu, context column
+
+**Column chooser**:
+The control at the right end of a register's header that shows, hides and reorders the register's columns.
+_Avoid_: Column picker, column settings
