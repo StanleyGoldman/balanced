@@ -1,5 +1,8 @@
 //! Accounts: what kind each is, the fixed group its kind belongs to, and its flags.
 
+use icu_calendar::{Date, Iso};
+
+use crate::transaction::NewTransaction;
 use crate::{CurrencyCode, Money};
 
 /// One of the fixed groups the Account bar lists accounts in, in Account bar order.
@@ -104,28 +107,43 @@ impl Account {
     }
 }
 
-/// An account to open in a new [`Ledger`].
+/// An account to open in a new [`Ledger`](crate::Ledger).
 #[derive(Debug, Clone)]
 pub(crate) struct NewAccount {
     name: String,
     kind: AccountKind,
-    // TODO(#85): post the opening balance as a transaction, and compute the balance
-    // from the account's transactions.
-    opening_balance: Money,
+    currency: CurrencyCode,
+    /// The opening balance first, then the rest in the order given.
+    transactions: Vec<NewTransaction>,
     hidden: bool,
     closed: bool,
 }
 
 impl NewAccount {
-    /// An open, shown account in the currency of `opening_balance`.
-    pub(crate) fn new(name: &str, kind: AccountKind, opening_balance: Money) -> Self {
+    /// An open, shown account in the currency of `opening_balance`, opened on `opened`.
+    pub(crate) fn new(
+        name: &str,
+        kind: AccountKind,
+        opened: Date<Iso>,
+        opening_balance: Money,
+    ) -> Self {
         Self {
             name: name.to_owned(),
             kind,
-            opening_balance,
+            currency: opening_balance.currency(),
+            transactions: vec![NewTransaction::opening_balance(opened, opening_balance)],
             hidden: false,
             closed: false,
         }
+    }
+
+    /// The same account, with `transactions` posted after its opening balance.
+    pub(crate) fn with_transactions(
+        mut self,
+        transactions: impl IntoIterator<Item = NewTransaction>,
+    ) -> Self {
+        self.transactions.extend(transactions);
+        self
     }
 
     /// The same account, hidden from the Account bar.
@@ -148,20 +166,18 @@ impl NewAccount {
         self.kind
     }
 
-    pub(crate) fn opening_balance(&self) -> Money {
-        self.opening_balance
-    }
-
-    /// The account, with `id`, in its opening balance's currency.
-    pub(crate) fn into_account(self, id: AccountId) -> Account {
-        Account {
+    /// The account, with `id`, in its opening balance's currency, and the transactions
+    /// to post to it, opening balance first.
+    pub(crate) fn into_account(self, id: AccountId) -> (Account, Vec<NewTransaction>) {
+        let account = Account {
             id,
             name: self.name,
             kind: self.kind,
-            currency: self.opening_balance.currency(),
+            currency: self.currency,
             hidden: self.hidden,
             closed: self.closed,
-        }
+        };
+        (account, self.transactions)
     }
 }
 

@@ -413,6 +413,7 @@ dependencies = [
 name = "balanced_core"
 version = "0.0.0"
 dependencies = [
+ "icu_calendar",
  "iso_currency",
  "rust_decimal",
  "rust_decimal_macros",
