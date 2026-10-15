@@ -39,6 +39,7 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 ### Wayfinder
 
 - When charting, recommend a destination of decisions or a spec. The cleared map then hands off to `/to-spec` → `/to-tickets` → `/implement`, which does the building.
+- When working a map, check its Destination and Notes against these preferences before taking a ticket. Raise any conflict with the user (e.g. a map whose Notes put execution in scope) and settle it before acting; a map charted before a preference changed keeps the old rule until someone redraws it.
 
 ### Prototypes
 
