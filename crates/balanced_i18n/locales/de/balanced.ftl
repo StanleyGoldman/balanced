@@ -12,12 +12,9 @@ menu-edit = Bearbeiten
 menu-view = Ansicht
 menu-tools = Extras
 menu-help = Hilfe
-
-## Shortcuts
-
-shortcut-modifier-ctrl = Strg
-shortcut-modifier-alt = Alt
-shortcut-modifier-shift = Umschalt
+menu-modifier-ctrl = Strg
+menu-modifier-alt = Alt
+menu-modifier-shift = Umschalt
 
 ## Account bar
 

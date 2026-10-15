@@ -1,7 +1,8 @@
 //! The keymap: one fixed table of each user action's default chords. It feeds both
-//! the Menu bar's accelerator text and the per-frame dispatcher.
+//! the Shortcut text beside menu items and the per-frame dispatcher.
 
 use balanced_i18n::Localizer;
+use eframe::egui::os::OperatingSystem;
 use eframe::egui::{self, Key, KeyboardShortcut, ModifierNames, Modifiers};
 
 use crate::i18n::fl;
@@ -22,33 +23,34 @@ impl Binding {
         }
     }
 
-    /// How many modifiers the chord holds. Command counts once, whichever key it
-    /// maps to.
+    /// How many modifiers the chord holds. Ctrl, Cmd and Command count once
+    /// between them.
     fn modifier_count(self) -> usize {
-        let Modifiers {
-            alt,
-            ctrl,
-            shift,
-            mac_cmd,
-            command,
-        } = self.chord.modifiers;
-        [alt, shift, ctrl || mac_cmd || command]
+        let Modifiers { alt, shift, .. } = self.chord.modifiers;
+        [alt, shift, self.holds_command()]
             .into_iter()
             .filter(|&held| held)
             .count()
     }
 
-    /// Whether the chord also types a character into a focused text field: a
-    /// letter, digit or symbol key with no modifier but Shift.
-    fn types_text(self) -> bool {
+    /// Whether the chord holds Ctrl, Cmd or Command.
+    fn holds_command(self) -> bool {
         let Modifiers {
-            alt,
             ctrl,
             mac_cmd,
             command,
             ..
         } = self.chord.modifiers;
-        !(alt || ctrl || mac_cmd || command) && self.chord.logical_key.name().chars().count() == 1
+        ctrl || mac_cmd || command
+    }
+
+    /// Whether the chord also types into a focused text field: Space, or a key
+    /// whose egui name is one character (a letter, digit or symbol), with no
+    /// modifier but Shift.
+    fn types_text(self) -> bool {
+        let key = self.chord.logical_key;
+        let types = key == Key::Space || key.name().chars().count() == 1;
+        types && !self.chord.modifiers.alt && !self.holds_command()
     }
 }
 
@@ -64,14 +66,19 @@ pub(crate) fn chord(action: UserAction) -> Option<KeyboardShortcut> {
         .map(|binding| binding.chord)
 }
 
-/// `chord` as a menu item shows it, such as `Ctrl+Q`, with the modifier names in
-/// the text language. On macOS, Command shows as Cmd and Alt as Option.
-pub(crate) fn accelerator(chord: KeyboardShortcut, i18n: &Localizer, is_mac: bool) -> String {
-    let alt = fl!(i18n, "shortcut-modifier-alt");
-    let ctrl = fl!(i18n, "shortcut-modifier-ctrl");
-    let shift = fl!(i18n, "shortcut-modifier-shift");
-    let mac_cmd = fl!(i18n, "shortcut-modifier-cmd");
-    let mac_alt = fl!(i18n, "shortcut-modifier-option");
+/// `chord` as Shortcut text beside a menu item, such as `Ctrl+Q`, with the
+/// modifier names in the text language. On macOS, Command shows as Cmd and Alt as
+/// Option.
+pub(crate) fn shortcut_text(
+    chord: KeyboardShortcut,
+    i18n: &Localizer,
+    os: OperatingSystem,
+) -> String {
+    let alt = fl!(i18n, "menu-modifier-alt");
+    let ctrl = fl!(i18n, "menu-modifier-ctrl");
+    let shift = fl!(i18n, "menu-modifier-shift");
+    let mac_cmd = fl!(i18n, "menu-modifier-cmd");
+    let mac_alt = fl!(i18n, "menu-modifier-option");
     let names = ModifierNames {
         is_short: false,
         alt: &alt,
@@ -81,7 +88,7 @@ pub(crate) fn accelerator(chord: KeyboardShortcut, i18n: &Localizer, is_mac: boo
         mac_alt: &mac_alt,
         concat: "+",
     };
-    chord.format(&names, is_mac)
+    chord.format(&names, os == OperatingSystem::Mac)
 }
 
 /// The user actions whose chords were pressed this frame, in the order they were
@@ -122,47 +129,49 @@ mod tests {
     const CTRL_Q: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Q);
 
     #[test]
-    fn accelerator_names_ctrl_in_english() {
+    fn shortcut_text_names_ctrl_in_english() {
         let i18n = localizer(&locale!("en-US"));
 
-        assert_eq!(accelerator(CTRL_Q, &i18n, false), "Ctrl+Q");
+        assert_eq!(shortcut_text(CTRL_Q, &i18n, OperatingSystem::Nix), "Ctrl+Q");
     }
 
     #[test]
-    fn accelerator_names_ctrl_in_german() {
+    fn shortcut_text_names_ctrl_in_german() {
         let i18n = localizer(&locale!("de-DE"));
 
-        assert_eq!(accelerator(CTRL_Q, &i18n, false), "Strg+Q");
+        assert_eq!(shortcut_text(CTRL_Q, &i18n, OperatingSystem::Nix), "Strg+Q");
     }
 
     #[test]
-    fn accelerator_names_command_on_macos() {
+    fn shortcut_text_names_command_on_macos() {
         let i18n = localizer(&locale!("en-US"));
 
-        assert_eq!(accelerator(CTRL_Q, &i18n, true), "Cmd+Q");
+        assert_eq!(shortcut_text(CTRL_Q, &i18n, OperatingSystem::Mac), "Cmd+Q");
     }
 
     #[test]
-    fn accelerator_names_every_modifier_in_german() {
+    fn shortcut_text_names_every_modifier_in_german() {
         let i18n = localizer(&locale!("de-DE"));
         let chord = KeyboardShortcut::new(
             Modifiers::COMMAND | Modifiers::ALT | Modifiers::SHIFT,
             Key::Z,
         );
 
-        assert_eq!(accelerator(chord, &i18n, false), "Strg+Alt+Umschalt+Z");
+        assert_eq!(
+            shortcut_text(chord, &i18n, OperatingSystem::Nix),
+            "Strg+Alt+Umschalt+Z"
+        );
     }
 
     /// The actions `dispatch` returns for one frame in which `key` is pressed with
     /// `modifiers` held, after `setup` has drawn a frame of its own.
     fn dispatched(
         bindings: &[Binding],
-        setup: impl FnMut(&mut egui::Ui),
+        mut setup: impl FnMut(&mut egui::Ui),
         modifiers: Modifiers,
         key: Key,
     ) -> Vec<UserAction> {
         let ctx = egui::Context::default();
-        let mut setup = setup;
         // Each frame's font textures are dropped unused: the tests paint nothing.
         ctx.run_ui(egui::RawInput::default(), |ui| setup(ui))
             .textures_delta
@@ -223,6 +232,19 @@ mod tests {
         };
 
         let actions = dispatched(&BARE_T, focus_a_field, Modifiers::NONE, Key::T);
+
+        assert_eq!(actions, []);
+    }
+
+    #[test]
+    fn dispatch_leaves_space_to_a_focused_text_field() {
+        let bindings = [Binding::new(Modifiers::NONE, Key::Space, UserAction::Quit)];
+        let mut text = String::new();
+        let focus_a_field = |ui: &mut egui::Ui| {
+            ui.text_edit_singleline(&mut text).request_focus();
+        };
+
+        let actions = dispatched(&bindings, focus_a_field, Modifiers::NONE, Key::Space);
 
         assert_eq!(actions, []);
     }

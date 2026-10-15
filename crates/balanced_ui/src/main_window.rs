@@ -81,8 +81,7 @@ impl MainWindow {
     ) {
         let mut button = egui::Button::new(action.label(i18n));
         if let Some(chord) = keymap::chord(action) {
-            let is_mac = ui.ctx().os() == egui::os::OperatingSystem::Mac;
-            button = button.shortcut_text(keymap::accelerator(chord, i18n, is_mac));
+            button = button.shortcut_text(keymap::shortcut_text(chord, i18n, ui.ctx().os()));
         }
         if ui.add(button).clicked() {
             commands.send(action.command());
