@@ -1322,14 +1322,13 @@ impl Proto {
         }
         let mut x = rect.left() + 4.0;
         if o.fold {
-            ui.painter().text(
-                egui::pos2(x, rect.center().y),
-                Align2::LEFT_CENTER,
-                if folded { "▸" } else { "▾" },
-                egui::FontId::proportional(11.0),
+            paint_arrow(
+                ui.painter(),
+                egui::pos2(x + 4.0, rect.center().y),
+                if folded { Arrow::Right } else { Arrow::Down },
                 v.weak_text_color(),
             );
-            x += 12.0;
+            x += 14.0;
         }
         let (label, font, color) = if o.caps {
             (
@@ -1755,11 +1754,9 @@ fn account_row(
         text
     };
     if drag && row.hovered() {
-        ui.painter().text(
-            rect.left_center() + vec2(2.0, 0.0),
-            Align2::LEFT_CENTER,
-            "⠿",
-            egui::FontId::proportional(11.0),
+        paint_grip(
+            ui.painter(),
+            rect.left_center() + vec2(6.0, 0.0),
             v.weak_text_color(),
         );
     }
@@ -1862,22 +1859,83 @@ fn handle(ui: &mut Ui, cx: &Mcx<'_>, m: &Manage, k: usize, out: &mut Out) {
         |ui| {
             ui.set_min_width(W_HANDLE);
             if cx.o.dnd {
-                let r = ui.add(egui::Label::new(RichText::new("⠿").weak()).sense(Sense::drag()));
+                let (rect, r) = ui.allocate_exact_size(vec2(20.0, cx.row_h), Sense::drag());
+                let c = if r.hovered() {
+                    ui.visuals().strong_text_color()
+                } else {
+                    ui.visuals().weak_text_color()
+                };
+                paint_grip(ui.painter(), rect.center(), c);
                 start_drag(&r, k, &label, "manage");
                 out.tracks.push((r, format!("manage: grip {label}")));
             } else {
-                let up = ui.small_button("↑");
+                let up = arrow_button(ui, Arrow::Up);
                 if up.clicked() {
                     out.step = Some((k, true));
                 }
                 out.tracks.push((up, format!("manage: up {label}")));
-                let down = ui.small_button("↓");
+                let down = arrow_button(ui, Arrow::Down);
                 if down.clicked() {
                     out.step = Some((k, false));
                 }
                 out.tracks.push((down, format!("manage: down {label}")));
             }
         },
+    );
+}
+
+#[derive(Clone, Copy)]
+enum Arrow {
+    Up,
+    Down,
+    Right,
+}
+
+/// A small filled triangle; the theme's font has no arrow glyphs.
+fn paint_arrow(painter: &egui::Painter, c: egui::Pos2, dir: Arrow, color: Color32) {
+    let s = 4.0;
+    let pts = match dir {
+        Arrow::Up => vec![
+            c + vec2(-s, s * 0.6),
+            c + vec2(s, s * 0.6),
+            c + vec2(0.0, -s * 0.8),
+        ],
+        Arrow::Down => vec![
+            c + vec2(-s, -s * 0.6),
+            c + vec2(s, -s * 0.6),
+            c + vec2(0.0, s * 0.8),
+        ],
+        Arrow::Right => vec![
+            c + vec2(-s * 0.6, -s),
+            c + vec2(-s * 0.6, s),
+            c + vec2(s * 0.8, 0.0),
+        ],
+    };
+    painter.add(Shape::convex_polygon(pts, color, Stroke::NONE));
+}
+
+/// Six dots, the drag grip.
+fn paint_grip(painter: &egui::Painter, c: egui::Pos2, color: Color32) {
+    for dx in [-2.5, 2.5] {
+        for dy in [-5.0, 0.0, 5.0] {
+            painter.circle_filled(c + vec2(dx, dy), 1.3, color);
+        }
+    }
+}
+
+fn arrow_button(ui: &mut Ui, dir: Arrow) -> egui::Response {
+    let r = ui.add(Button::new("").min_size(vec2(18.0, 18.0)));
+    let c = ui.visuals().widgets.style(&r).fg_stroke.color;
+    paint_arrow(ui.painter(), r.rect.center(), dir, c);
+    r
+}
+
+fn separator_line(ui: &mut Ui, w: f32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(w, 10.0), Sense::hover());
+    ui.painter().hline(
+        rect.x_range(),
+        rect.center().y,
+        Stroke::new(1.5, ui.visuals().weak_text_color()),
     );
 }
 
@@ -2032,7 +2090,8 @@ fn variant_a(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
                                 if in_section {
                                     ui.add_space(14.0);
                                 }
-                                ui.label(RichText::new("──────  separator  ──────").weak());
+                                separator_line(ui, 260.0);
+                                ui.label(RichText::new("separator").weak().italics());
                             },
                         );
                         let r = ui.small_button("Remove");
@@ -2124,7 +2183,7 @@ fn tree(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out, inline_remove:
                     (RichText::new(&label).strong(), 0.0)
                 }
                 Item::Separator { .. } => (
-                    RichText::new("──────────────").weak(),
+                    RichText::new("separator").weak().italics(),
                     if in_section { 14.0 } else { 0.0 },
                 ),
                 Item::Account(i) => {
