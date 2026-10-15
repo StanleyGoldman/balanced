@@ -3,15 +3,15 @@
 
 use balanced_core::{AccountSummary, LedgerView, TransactionId};
 use balanced_i18n::Localizer;
-use eframe::egui::accesskit::Role;
+use eframe::egui::accesskit::{self, Role};
 use eframe::egui::{
-    self, Align, Id, Layout, Popup, Rect, Response, ScrollArea, Sense, TextStyle, TextWrapMode,
-    WidgetInfo, WidgetText, WidgetType, pos2, vec2,
+    self, Align, CursorIcon, Id, Layout, Popup, Rect, Response, ScrollArea, Sense, Shape, Stroke,
+    TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, TableBuilder};
 
 use crate::i18n::fl;
-use crate::register_model::{RegisterModel, RegisterRow};
+use crate::register_model::{RegisterModel, RegisterRow, RegisterSort, SortDirection, SortKey};
 use crate::theme::Theme;
 
 /// The narrowest Payee and Category get before the Register scrolls sideways.
@@ -20,6 +20,12 @@ const MIN_FLEX_WIDTH: f32 = 120.0;
 /// The radius of each dot of the Actions menu's ⋯, and the space between their centres.
 const ACTION_DOT_RADIUS: f32 = 1.5;
 const ACTION_DOT_SPACING: f32 = 4.5;
+
+/// The sort arrow beside the sorted column's heading: its width, its height, and the
+/// space between it and the heading.
+const SORT_ARROW_WIDTH: f32 = 7.0;
+const SORT_ARROW_HEIGHT: f32 = 4.0;
+const SORT_ARROW_GAP: f32 = 4.0;
 
 /// A Register column, in the default left-to-right order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -60,6 +66,19 @@ impl RegisterColumn {
             Self::Amount => fl!(i18n, "register-column-amount"),
             Self::Balance => fl!(i18n, "register-column-balance"),
             Self::Actions => String::new(),
+        }
+    }
+
+    /// What clicking the column's heading sorts by. Number, Balance and Actions don't
+    /// sort.
+    fn sort_key(self) -> Option<SortKey> {
+        match self {
+            Self::Date => Some(SortKey::Date),
+            Self::Payee => Some(SortKey::Payee),
+            Self::Category => Some(SortKey::Category),
+            Self::Memo => Some(SortKey::Memo),
+            Self::Amount => Some(SortKey::Amount),
+            Self::Number | Self::Balance | Self::Actions => None,
         }
     }
 
@@ -125,12 +144,17 @@ struct Insets {
     right: f32,
 }
 
-/// The open account's Register: its cached rows and the selected transaction. Opening
-/// another account clears the selection. None of it outlives the run.
+/// The open account's Register: its cached rows, its sort and the selected
+/// transaction. Opening another account sorts it by date and clears the selection. None
+/// of it outlives the run.
 #[derive(Debug, Default)]
 pub(crate) struct Register {
     /// The rows of the last account shown, rebuilt when they are out of date.
     model: Option<RegisterModel>,
+    sort: RegisterSort,
+    /// Whether the sort changed since the rows were last shown, so the selected row
+    /// scrolls to the middle of the Register.
+    sorted: bool,
     selected: Option<TransactionId>,
 }
 
@@ -151,19 +175,36 @@ impl Register {
             .as_ref()
             .is_some_and(|model| model.account() != account)
         {
+            self.sort = RegisterSort::default();
             self.selected = None;
         }
         let model = match self.model.take() {
-            Some(model) if model.is_current(account, view, i18n) => model,
-            _ => RegisterModel::new(summary, view, i18n),
+            Some(model) if model.is_current(account, view, self.sort, i18n) => model,
+            _ => RegisterModel::new(summary, view, self.sort, i18n),
         };
         let row_height = theme.row_height();
+        let centre_on = self
+            .selected
+            .filter(|_| std::mem::take(&mut self.sorted))
+            .and_then(|id| model.rows().iter().position(|row| row.id() == id));
         ScrollArea::horizontal()
             .id_salt(("register_sideways", account))
             .auto_shrink(false)
             .show(ui, |ui| {
                 let viewport = ui.clip_rect();
                 let register_id = ui.id();
+                let scroll_offset = centre_on.map(|index| {
+                    // The body is what the header row leaves, and each row takes its
+                    // height and one gap.
+                    let gap = ui.spacing().item_spacing.y;
+                    let body = ui.available_height() - row_height - gap;
+                    #[expect(
+                        clippy::cast_precision_loss,
+                        reason = "row indices stay far below 2^24, where f32 is exact"
+                    )]
+                    let top = index as f32 * (row_height + gap);
+                    (top - (body - row_height) / 2.0).max(0.0)
+                });
                 let mut table = TableBuilder::new(ui)
                     .id_salt(("register", account))
                     .striped(theme.alternating_rows())
@@ -174,10 +215,25 @@ impl Register {
                 for column in RegisterColumn::ALL {
                     table = table.column(column.width(theme));
                 }
+                if let Some(offset) = scroll_offset {
+                    table = table.vertical_scroll_offset(offset);
+                }
                 table
                     .header(row_height, |mut header| {
                         for column in RegisterColumn::ALL {
-                            header.col(|ui| header_cell(ui, theme, viewport, column, i18n));
+                            header.col(|ui| {
+                                let heading = Heading {
+                                    column,
+                                    sort: self.sort,
+                                    viewport,
+                                };
+                                if let Some(key) = heading.show(ui, i18n, theme) {
+                                    self.sort = self.sort.clicked(key);
+                                    self.sorted = true;
+                                    // The rows sort and scroll on the next frame.
+                                    ui.ctx().request_repaint();
+                                }
+                            });
                         }
                     })
                     .body(|mut body| {
@@ -220,32 +276,95 @@ impl Register {
     }
 }
 
-/// A column heading on the header band. The band's fill covers the cell and half the
-/// gap around it, clipped to the Register's viewport so it never paints past it.
-fn header_cell(
-    ui: &egui::Ui,
-    theme: &Theme,
-    viewport: Rect,
+/// A column heading on the header band.
+struct Heading {
     column: RegisterColumn,
-    i18n: &Localizer,
-) {
-    let rect = ui.max_rect();
-    let band = rect.expand2(ui.spacing().item_spacing / 2.0);
-    ui.ctx()
-        .layer_painter(ui.layer_id())
-        .with_clip_rect(band.intersect(viewport))
-        .rect_filled(band, 0.0, theme.header_fill());
-    let title = column.title(i18n);
-    let response = ui.interact(rect, ui.id().with("register_heading"), Sense::hover());
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), &title));
-    ui.ctx()
-        .accesskit_node_builder(response.id, |node| node.set_role(Role::ColumnHeader));
-    paint_text(
-        ui,
-        rect,
-        column,
-        WidgetText::from(egui::RichText::new(title).strong()),
-    );
+    /// The Register's sort, which puts an arrow on the sorted column's heading.
+    sort: RegisterSort,
+    /// The visible part of the Register.
+    viewport: Rect,
+}
+
+impl Heading {
+    /// Draws the heading. The band's fill covers the cell and half the gap around it,
+    /// clipped to the Register's viewport so it never paints past it. A sortable heading
+    /// highlights under the pointer, and returns what it sorts by when clicked.
+    fn show(&self, ui: &egui::Ui, i18n: &Localizer, theme: &Theme) -> Option<SortKey> {
+        let Self {
+            column,
+            sort,
+            viewport,
+        } = *self;
+        let rect = ui.max_rect();
+        let key = column.sort_key();
+        let sense = if key.is_some() {
+            Sense::click()
+        } else {
+            Sense::hover()
+        };
+        let mut response = ui.interact(rect, ui.id().with("register_heading"), sense);
+        let fill = if key.is_some() && response.hovered() {
+            ui.visuals().widgets.hovered.weak_bg_fill
+        } else {
+            theme.header_fill()
+        };
+        let band = rect.expand2(ui.spacing().item_spacing / 2.0);
+        ui.ctx()
+            .layer_painter(ui.layer_id())
+            .with_clip_rect(band.intersect(viewport))
+            .rect_filled(band, 0.0, fill);
+        if key.is_some() {
+            response = response.on_hover_cursor(CursorIcon::PointingHand);
+        }
+        let direction = key
+            .filter(|&key| key == sort.key())
+            .map(|_| sort.direction());
+        let title = column.title(i18n);
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), &title));
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(Role::ColumnHeader);
+            if let Some(direction) = direction {
+                node.set_sort_direction(match direction {
+                    SortDirection::Ascending => accesskit::SortDirection::Ascending,
+                    SortDirection::Descending => accesskit::SortDirection::Descending,
+                });
+            }
+        });
+        let text = paint_text(
+            ui,
+            rect,
+            column,
+            WidgetText::from(egui::RichText::new(title).strong()),
+        );
+        if let (Some(direction), Some(text)) = (direction, text) {
+            sort_arrow(ui, column, text, direction);
+        }
+        key.filter(|_| response.clicked())
+    }
+}
+
+/// Paints the sort arrow beside a heading whose text is at `text`: after it, or before
+/// it in a right-aligned column. It points up when the sort ascends.
+fn sort_arrow(ui: &egui::Ui, column: RegisterColumn, text: Rect, direction: SortDirection) {
+    let x = match column.align() {
+        Align::Max => text.left() - SORT_ARROW_GAP - SORT_ARROW_WIDTH / 2.0,
+        Align::Min | Align::Center => text.right() + SORT_ARROW_GAP + SORT_ARROW_WIDTH / 2.0,
+    };
+    let centre = pos2(x, text.center().y);
+    let (half_width, half_height) = (SORT_ARROW_WIDTH / 2.0, SORT_ARROW_HEIGHT / 2.0);
+    let (tip, base) = match direction {
+        SortDirection::Ascending => (-half_height, half_height),
+        SortDirection::Descending => (half_height, -half_height),
+    };
+    ui.painter().add(Shape::convex_polygon(
+        vec![
+            centre + vec2(-half_width, base),
+            centre + vec2(half_width, base),
+            centre + vec2(0.0, tip),
+        ],
+        ui.visuals().text_color(),
+        Stroke::NONE,
+    ));
 }
 
 /// One cell of one transaction's row.
@@ -279,7 +398,9 @@ impl Cell<'_> {
             RegisterColumn::Category => row.category().into(),
             RegisterColumn::Memo => row.memo().into(),
             RegisterColumn::Amount => row.amount().styled(theme).into(),
-            RegisterColumn::Balance => row.balance().styled(theme).into(),
+            RegisterColumn::Balance => row
+                .balance()
+                .map_or_else(WidgetText::default, |balance| balance.styled(theme).into()),
             RegisterColumn::Actions => {
                 // The row's band across the whole Register, for telling whether the
                 // pointer is on this row.
@@ -333,9 +454,10 @@ fn cell_info(ui: &egui::Ui, response: &Response, selected: bool, label: &str) {
 }
 
 /// Paints `text` in `rect`, inset and aligned as `column` says, truncated to fit.
-fn paint_text(ui: &egui::Ui, rect: Rect, column: RegisterColumn, text: WidgetText) {
+/// Returns where the text went, unless `rect` is out of view.
+fn paint_text(ui: &egui::Ui, rect: Rect, column: RegisterColumn, text: WidgetText) -> Option<Rect> {
     if !ui.is_rect_visible(rect) {
-        return;
+        return None;
     }
     let Insets { left, right } = column.insets();
     let inner = Rect::from_x_y_ranges(rect.left() + left..=rect.right() - right, rect.y_range());
@@ -350,8 +472,10 @@ fn paint_text(ui: &egui::Ui, rect: Rect, column: RegisterColumn, text: WidgetTex
         Align::Min | Align::Center => inner.left(),
     };
     let top = rect.center().y - galley.size().y / 2.0;
+    let painted = Rect::from_min_size(pos2(x, top), galley.size());
     ui.painter()
-        .galley(pos2(x, top), galley, ui.visuals().text_color());
+        .galley(painted.min, galley, ui.visuals().text_color());
+    Some(painted)
 }
 
 /// The row's Actions menu: a ⋯ button on the right of the Actions cell, which opens

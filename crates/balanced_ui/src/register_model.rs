@@ -1,6 +1,7 @@
 //! [`RegisterModel`]: one account's transactions as the Register shows them, with every
 //! cell's text already formatted.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use balanced_core::{
@@ -26,7 +27,7 @@ pub(crate) struct RegisterRow {
     category: String,
     memo: String,
     amount: FormattedAmount,
-    balance: FormattedAmount,
+    balance: Option<FormattedAmount>,
 }
 
 impl RegisterRow {
@@ -62,9 +63,87 @@ impl RegisterRow {
         &self.amount
     }
 
-    /// The running balance after this transaction, as a bare number.
-    pub(crate) fn balance(&self) -> &FormattedAmount {
-        &self.balance
+    /// The running balance after this transaction, as a bare number. Under a sort
+    /// other than by date it is `None`, since it would be out of order.
+    pub(crate) fn balance(&self) -> Option<&FormattedAmount> {
+        self.balance.as_ref()
+    }
+}
+
+/// A column the Register sorts by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum SortKey {
+    Date,
+    Payee,
+    Category,
+    Memo,
+    Amount,
+}
+
+/// Which way a sort runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SortDirection {
+    /// Oldest, A to Z, or smallest first.
+    Ascending,
+    Descending,
+}
+
+/// How the Register orders its rows. Every Register opens sorted by date, oldest
+/// first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RegisterSort {
+    key: SortKey,
+    direction: SortDirection,
+}
+
+impl Default for RegisterSort {
+    fn default() -> Self {
+        Self {
+            key: SortKey::Date,
+            direction: SortDirection::Ascending,
+        }
+    }
+}
+
+impl RegisterSort {
+    pub(crate) fn key(self) -> SortKey {
+        self.key
+    }
+
+    pub(crate) fn direction(self) -> SortDirection {
+        self.direction
+    }
+
+    /// The sort after a click on `key`'s header: the same column reverses, another
+    /// sorts by it ascending.
+    pub(crate) fn clicked(self, key: SortKey) -> Self {
+        let direction = match (key == self.key, self.direction) {
+            (true, SortDirection::Ascending) => SortDirection::Descending,
+            (true, SortDirection::Descending) | (false, _) => SortDirection::Ascending,
+        };
+        Self { key, direction }
+    }
+
+    /// Orders two rows, each with its place in date order. Rows that tie stay in date
+    /// order, oldest first, whichever way the sort runs.
+    fn compare(
+        self,
+        i18n: &Localizer,
+        (a, a_place): (&RegisterRow, usize),
+        (b, b_place): (&RegisterRow, usize),
+    ) -> Ordering {
+        let ordering = match self.key {
+            SortKey::Date => a_place.cmp(&b_place),
+            SortKey::Payee => i18n.compare_text(&a.payee, &b.payee),
+            SortKey::Category => i18n.compare_text(&a.category, &b.category),
+            SortKey::Memo => i18n.compare_text(&a.memo, &b.memo),
+            SortKey::Amount => a.amount.money().amount().cmp(&b.amount.money().amount()),
+        };
+        let ordering = match self.direction {
+            SortDirection::Ascending => ordering,
+            SortDirection::Descending => ordering.reverse(),
+        };
+        ordering.then(a_place.cmp(&b_place))
     }
 }
 
@@ -73,11 +152,12 @@ impl RegisterRow {
 struct Source {
     account: AccountId,
     generation: Generation,
+    sort: RegisterSort,
     text_language: LanguageIdentifier,
     formatting_locale: Locale,
 }
 
-/// One account's Register rows, in date order.
+/// One account's Register rows, in the order of its sort.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisterModel {
     source: Source,
@@ -85,18 +165,26 @@ pub(crate) struct RegisterModel {
 }
 
 impl RegisterModel {
-    /// The Register of `summary`, an account in `view`, formatted by `i18n`.
-    pub(crate) fn new(summary: &AccountSummary, view: &LedgerView, i18n: &Localizer) -> Self {
+    /// The Register of `summary`, an account in `view`, formatted by `i18n` and
+    /// ordered by `sort`.
+    pub(crate) fn new(
+        summary: &AccountSummary,
+        view: &LedgerView,
+        sort: RegisterSort,
+        i18n: &Localizer,
+    ) -> Self {
         let mut paths = CategoryPaths {
             view,
             paths: HashMap::new(),
         };
         let split = fl!(i18n, "register-split");
         let opening_balance = fl!(i18n, "register-opening-balance");
-        let rows = summary
+        let shows_balance = sort.key == SortKey::Date;
+        let mut rows: Vec<(RegisterRow, usize)> = summary
             .register()
             .iter()
-            .map(|entry| {
+            .enumerate()
+            .map(|(place, entry)| {
                 let transaction = entry.transaction();
                 let (payee, category) = match transaction.allocation() {
                     Allocation::OpeningBalance => (opening_balance.clone(), String::new()),
@@ -105,7 +193,7 @@ impl RegisterModel {
                     }
                     Allocation::Split(_) => (transaction.payee().to_owned(), split.clone()),
                 };
-                RegisterRow {
+                let row = RegisterRow {
                     id: transaction.id(),
                     date: i18n.format_date(transaction.date()),
                     number: transaction.number().unwrap_or_default().to_owned(),
@@ -113,31 +201,41 @@ impl RegisterModel {
                     category,
                     memo: transaction.memo().to_owned(),
                     amount: FormattedAmount::new(i18n, transaction.amount(), AmountStyle::Bare),
-                    balance: FormattedAmount::new(i18n, entry.balance(), AmountStyle::Bare),
-                }
+                    balance: shows_balance
+                        .then(|| FormattedAmount::new(i18n, entry.balance(), AmountStyle::Bare)),
+                };
+                (row, place)
             })
             .collect();
+        rows.sort_by(|a, b| sort.compare(i18n, (&a.0, a.1), (&b.0, b.1)));
         Self {
-            source: Self::source(summary.account().id(), view, i18n),
-            rows,
+            source: Self::source(summary.account().id(), view, sort, i18n),
+            rows: rows.into_iter().map(|(row, _)| row).collect(),
         }
     }
 
-    /// Whether the model shows account `account` of `view` as `i18n` formats it, so
-    /// needs no rebuild.
+    /// Whether the model shows account `account` of `view` ordered by `sort`, as `i18n`
+    /// formats it, so needs no rebuild.
     pub(crate) fn is_current(
         &self,
         account: AccountId,
         view: &LedgerView,
+        sort: RegisterSort,
         i18n: &Localizer,
     ) -> bool {
-        self.source == Self::source(account, view, i18n)
+        self.source == Self::source(account, view, sort, i18n)
     }
 
-    fn source(account: AccountId, view: &LedgerView, i18n: &Localizer) -> Source {
+    fn source(
+        account: AccountId,
+        view: &LedgerView,
+        sort: RegisterSort,
+        i18n: &Localizer,
+    ) -> Source {
         Source {
             account,
             generation: view.generation(),
+            sort,
             text_language: i18n.text_language().clone(),
             formatting_locale: i18n.formatting_locale().clone(),
         }
@@ -148,7 +246,7 @@ impl RegisterModel {
         self.source.account
     }
 
-    /// The rows, oldest transaction first.
+    /// The rows, in the order of the model's sort.
     pub(crate) fn rows(&self) -> &[RegisterRow] {
         &self.rows
     }

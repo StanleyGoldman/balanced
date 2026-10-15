@@ -1,11 +1,14 @@
 //! Locale formatting through ICU4X, in the formatting locale.
 
 use std::cell::RefCell;
+use std::cmp::Ordering;
 
 use fluent_bundle::FluentValue;
 use icu_calendar::types::Weekday;
 use icu_calendar::week::WeekInformation;
 use icu_calendar::{Date, Gregorian, Iso};
+use icu_collator::options::CollatorOptions;
+use icu_collator::{Collator, CollatorBorrowed};
 use icu_datetime::FixedCalendarDateTimeFormatter;
 use icu_datetime::fieldsets::YMD;
 use icu_datetime::options::YearStyle;
@@ -24,6 +27,7 @@ pub(crate) struct Formatters {
     ungrouped: DecimalFormatter,
     date: FixedCalendarDateTimeFormatter<Gregorian, YMD>,
     week: WeekInformation,
+    collator: CollatorBorrowed<'static>,
     symbols: NumberSymbols,
 }
 
@@ -43,6 +47,7 @@ impl Formatters {
                 YMD::short().with_year_style(YearStyle::Full),
             )?,
             week: WeekInformation::try_new(locale.into())?,
+            collator: Collator::try_new(locale.into(), CollatorOptions::default())?,
         })
     }
 
@@ -52,6 +57,10 @@ impl Formatters {
 
     pub(crate) fn date(&self, date: Date<Iso>) -> String {
         self.date.format(&date.to_calendar(Gregorian)).to_string()
+    }
+
+    pub(crate) fn compare(&self, a: &str, b: &str) -> Ordering {
+        self.collator.compare(a, b)
     }
 
     pub(crate) fn first_weekday(&self) -> Weekday {
