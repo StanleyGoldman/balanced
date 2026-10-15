@@ -40,6 +40,10 @@ _Avoid_: Document tab, account tab
 A choice about how Balanced looks or behaves that belongs to the person using this computer and applies to every data file they open (e.g. dense rows, register tabs). Set in Tools → Preferences.
 _Avoid_: Application-level option, setting, option
 
+**Shortcut**:
+A key combination that runs a command from anywhere in the main window, shown beside its menu item (e.g. Ctrl+D deletes a transaction).
+_Avoid_: Hotkey, accelerator, keybinding
+
 ### Finance
 
 **Register**:
