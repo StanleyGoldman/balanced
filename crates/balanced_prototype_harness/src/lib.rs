@@ -25,6 +25,9 @@
 //! `prompt off` clears it. Each change logs a
 //! `prompt` event. The user puts the panel away with F6 (while no text field has focus) or the
 //! dock's "Prompt (F6)" checkbox, logged as `prompt_shown`; the next `prompt` brings it back.
+//! Below the prompt, the panel always shows one line of window facts: fps over the last second,
+//! frames drawn, the window's position and size, and whether it is focused or occluded. So a
+//! prototype needs no diagnostics strip of its own in the root window.
 //!
 //! `spotlight <target>[; <target>…]` sets the targets and turns the spotlight on, and
 //! `spotlight off` / `spotlight on` turn it off or back on without changing the targets. A target
@@ -55,6 +58,7 @@
 
 mod args;
 mod control;
+mod facts;
 mod harness;
 mod log;
 mod prompt;
