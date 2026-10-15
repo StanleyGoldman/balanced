@@ -1626,7 +1626,7 @@ struct Out {
 
 const W_HANDLE: f32 = 46.0;
 const W_NAME: f32 = 230.0;
-const W_TYPE: f32 = 86.0;
+const W_TYPE: f32 = 140.0;
 const W_BAL: f32 = 112.0;
 const W_FLAG: f32 = 58.0;
 const W_STATUS: f32 = 120.0;
