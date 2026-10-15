@@ -5,6 +5,7 @@ mod accounts_model;
 mod app;
 mod command;
 mod i18n;
+mod keymap;
 mod main_window;
 mod route;
 mod theme;

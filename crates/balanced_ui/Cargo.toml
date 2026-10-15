@@ -15,6 +15,7 @@ icu_locale.workspace = true
 [dev-dependencies]
 egui_kittest.workspace = true
 balanced_i18n = { workspace = true, features = ["test-support"] }
+icu_locale.workspace = true
 rust_decimal.workspace = true
 rust_decimal_macros.workspace = true
 

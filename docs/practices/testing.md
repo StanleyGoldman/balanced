@@ -23,6 +23,7 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 - Labels in tests use the pinned test locale, `en-US`.
 - Double-clicks need `with_step_dt(0.01)`. With the default 0.25 s step, the second click arrives too late.
 - `Harness::output()` holds only the last frame's output, and `run()` keeps stepping until repaints stop. Output that lasts one frame, such as a `ViewportCommand` sent from `App::logic`, is gone by the time `run()` returns. Step to that frame instead: after a `click()`, one `step()` plays the click, and the next runs the `logic()` that applies the Command it sent.
+- `step()` plays each queued event in a frame of its own. `key_press_modifiers` queues four (modifiers down, key down, key up, modifiers up), so one `step()` runs four frames and passes the one-frame output by. To step to a chord's output, queue a single `Event::Key` that carries its modifiers with `harness.event(..)`.
 - `Harness::run()` panics if the UI keeps asking for repaints. A UI that animates or shows a clock needs mocked time in its tests. When the injectable clock lands, `clippy.toml` will ban `SystemTime::now` and `Instant::now` outside it.
 - When the project snapshot helper (`balanced_ui::testing`) lands, add a `clippy.toml` ban on the raw kittest snapshot methods so that every snapshot uses the project thresholds.
 
@@ -30,7 +31,7 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 
 `cargo-mutants` mutates only `balanced_core` and `balanced_i18n` (`.cargo/mutants.toml`). Each mutant runs only its own crate's tests, so core logic has to be caught by core's tests.
 
-- Before opening a PR that touches those crates, run `cargo xtask mutants` (needs `cargo install --locked cargo-mutants`). It mutates only the code changed since `origin/main`, and is advisory: it reports missed mutants but doesn't fail.
+- Before opening a PR that touches those crates, run `cargo xtask mutants` (needs `cargo install --locked cargo-mutants`). It mutates only the code committed since `origin/main`: commit first, because on uncommitted work it prints `Diff file is empty` and tests nothing. It is advisory: it reports missed mutants but doesn't fail.
 - Run it through `cargo xtask mutants`, never `cargo mutants` directly. On Linux the xtask runs it in a systemd scope capped at 8 GB with no swap. A mutant that makes a loop allocate forever fills RAM in seconds, before the per-mutant timeout fires, and an uncapped OOM kill takes the whole terminal session with it. On other OSes there is no cap.
 - Write every loop over input so each pass provably consumes something, checked in the loop itself (see `split_number` in `balanced_i18n`'s `money.rs`). A mutant then fails the tests instead of spinning.
 - Kill a missed mutant with a test, or exclude it with a reason. Don't leave it.

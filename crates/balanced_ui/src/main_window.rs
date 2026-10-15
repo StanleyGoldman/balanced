@@ -8,6 +8,7 @@ use crate::account_bar::AccountBar;
 use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::i18n::fl;
+use crate::keymap::{self, KEYMAP};
 use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
@@ -51,6 +52,9 @@ impl MainWindow {
         commands: &CommandSender,
         view: &LedgerView,
     ) {
+        for action in keymap::dispatch(ui.ctx(), KEYMAP) {
+            commands.send(action.command());
+        }
         let accounts = match self.accounts.take() {
             Some(model) if model.is_current(view, i18n) => model,
             _ => AccountsModel::new(view, i18n),
@@ -127,7 +131,11 @@ impl MainWindow {
         commands: &CommandSender,
         action: UserAction,
     ) {
-        if ui.button(action.label(i18n)).clicked() {
+        let mut button = egui::Button::new(action.label(i18n));
+        if let Some(chord) = keymap::chord(action) {
+            button = button.shortcut_text(keymap::shortcut_text(chord, i18n, ui.ctx().os()));
+        }
+        if ui.add(button).clicked() {
             commands.send(action.command());
         }
     }

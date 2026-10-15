@@ -20,6 +20,15 @@ menu-tools = Tools
 menu-help = Help
 menu-help-about = About { -brand-name }
 
+# Modifier key names in a menu item's Shortcut text, such as Ctrl+Q.
+menu-modifier-ctrl = Ctrl
+menu-modifier-alt = Alt
+menu-modifier-shift = Shift
+# The macOS Command key.
+menu-modifier-cmd = Cmd
+# The macOS Option key.
+menu-modifier-option = Option
+
 ## Tab row
 
 tab-home = Home
