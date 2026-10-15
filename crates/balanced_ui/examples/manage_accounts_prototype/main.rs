@@ -715,7 +715,7 @@ struct AcctEdit {
 /// A light confirm stacked over Manage Accounts.
 enum Confirm {
     Delete(usize),
-    CloseWithBalance(usize),
+    Close(usize),
     RefuseClose(usize),
 }
 
@@ -1629,6 +1629,7 @@ const W_NAME: f32 = 230.0;
 const W_TYPE: f32 = 86.0;
 const W_BAL: f32 = 112.0;
 const W_FLAG: f32 = 58.0;
+const W_STATUS: f32 = 120.0;
 
 struct Mcx<'a> {
     accounts: &'a [Account],
@@ -1755,8 +1756,8 @@ fn money_label(ui: &mut Ui, cents: i64) {
     ui.label(RichText::new(fmt_cents(cents)).color(c));
 }
 
-/// Hidden and Closed checkboxes; ticking Closed on an account with a balance asks first.
-fn flags(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, i: usize, out: &mut Out, labelled: bool) {
+/// The Hidden checkbox: hiding is a plain on/off with nothing to confirm.
+fn hidden_box(ui: &mut Ui, m: &mut Manage, i: usize, out: &mut Out, labelled: bool) {
     let name = m.accts[i].name.clone();
     let mut hidden = m.accts[i].hidden;
     let r = ui.checkbox(
@@ -1769,29 +1770,37 @@ fn flags(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, i: usize, out: &mut Out, lab
             .push(("manage_edit", json!({ "account": name, "hidden": hidden })));
     }
     out.tracks.push((r, format!("manage: hidden {name}")));
-    if !labelled {
-        ui.add_space(W_FLAG - 24.0);
-    }
-    let mut closed = m.accts[i].closed;
-    let r = ui.checkbox(&mut closed, if labelled { "Closed" } else { "" });
-    if r.changed() {
-        if closed && cx.accounts[i].balance != 0 {
-            out.confirm = Some(if cx.o.refuse_close {
+}
+
+/// Closing is an action with a confirm, so it is a button, not a checkbox (user's note: "something
+/// that incurs a dialog probably should not be a checkbox"). A closed account shows Reopen.
+fn close_control(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, i: usize, out: &mut Out) {
+    let name = m.accts[i].name.clone();
+    if m.accts[i].closed {
+        ui.label(RichText::new("Closed").weak());
+        let r = ui.small_button("Reopen");
+        if r.clicked() {
+            m.accts[i].closed = false;
+            out.events
+                .push(("manage_edit", json!({ "account": name, "closed": false })));
+        }
+        out.tracks.push((r, format!("manage: reopen {name}")));
+    } else {
+        let r = ui.small_button("Close…");
+        if r.clicked() {
+            let balance = cx.accounts[i].balance;
+            out.confirm = Some(if balance != 0 && cx.o.refuse_close {
                 Confirm::RefuseClose(i)
             } else {
-                Confirm::CloseWithBalance(i)
+                Confirm::Close(i)
             });
             out.events.push((
-                "manage_close_balance",
-                json!({ "account": name, "balance": fmt_cents(cx.accounts[i].balance), "refuse": cx.o.refuse_close }),
+                "manage_close_asked",
+                json!({ "account": name, "balance": fmt_cents(balance), "refuse": cx.o.refuse_close }),
             ));
-        } else {
-            m.accts[i].closed = closed;
-            out.events
-                .push(("manage_edit", json!({ "account": name, "closed": closed })));
         }
+        out.tracks.push((r, format!("manage: close {name}")));
     }
-    out.tracks.push((r, format!("manage: closed {name}")));
 }
 
 fn delete_button(ui: &mut Ui, m: &Manage, i: usize, out: &mut Out) {
@@ -1821,7 +1830,7 @@ fn variant_a(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
             ("Type", W_TYPE),
             ("Balance", W_BAL),
             ("Hidden", W_FLAG),
-            ("Closed", W_FLAG),
+            ("Status", W_STATUS),
         ] {
             fixed(ui, w, h, t == "Balance", |ui| {
                 ui.strong(t);
@@ -1876,12 +1885,15 @@ fn variant_a(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
                             money_label(ui, cx.accounts[i].balance)
                         });
                         if m.accts[i].deleted {
-                            ui.add_space(W_FLAG * 2.0);
+                            ui.add_space(W_FLAG + W_STATUS);
                             ui.label(RichText::new("will be deleted").small());
                         } else {
                             ui.add_space(14.0);
-                            flags(ui, cx, m, i, out, false);
-                            ui.add_space(8.0);
+                            hidden_box(ui, m, i, out, false);
+                            ui.add_space(W_FLAG - 24.0);
+                            fixed(ui, W_STATUS, h, false, |ui| {
+                                close_control(ui, cx, m, i, out)
+                            });
                             delete_button(ui, m, i, out);
                         }
                     });
@@ -2020,7 +2032,15 @@ fn variant_b(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
                     out.tracks.push((r, format!("manage: name {}", a.name)));
                     ui.end_row();
                     ui.label("Show");
-                    ui.vertical(|ui| flags(ui, cx, m, i, out, true));
+                    hidden_box(ui, m, i, out, true);
+                    ui.end_row();
+                    ui.label("Status");
+                    ui.horizontal(|ui| {
+                        if !m.accts[i].closed {
+                            ui.label("Open");
+                        }
+                        close_control(ui, cx, m, i, out);
+                    });
                     ui.end_row();
                 });
             ui.add_space(10.0);
@@ -2149,12 +2169,20 @@ impl Proto {
                     ),
                     Some("Delete"),
                 ),
-                Confirm::CloseWithBalance(i) => (
+                Confirm::Close(i) if self.accounts[*i].balance != 0 => (
                     "Close account with a balance?",
                     format!(
                         "“{}” still has a balance of {}. A closed account is read-only and its balance still counts in Net Worth. Close it anyway?",
                         m.accts[*i].name,
                         fmt_cents(self.accounts[*i].balance)
+                    ),
+                    Some("Close Account"),
+                ),
+                Confirm::Close(i) => (
+                    "Close account?",
+                    format!(
+                        "Close “{}”? A closed account keeps its transactions but takes no new ones, and moves to the Closed group. You can reopen it.",
+                        m.accts[*i].name
                     ),
                     Some("Close Account"),
                 ),
@@ -2245,11 +2273,11 @@ impl Proto {
                     }
                     ("delete", i)
                 }
-                Confirm::CloseWithBalance(i) => {
+                Confirm::Close(i) => {
                     if done {
                         m.accts[i].closed = true;
                     }
-                    ("close_with_balance", i)
+                    ("close", i)
                 }
                 Confirm::RefuseClose(i) => ("refuse_close", i),
             };
