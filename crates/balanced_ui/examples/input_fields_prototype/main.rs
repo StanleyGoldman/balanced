@@ -1334,6 +1334,22 @@ impl Proto {
     }
 
     fn set_toggle(&mut self, key: &str, value: Option<bool>, via: &str) {
+        if key == "locale" {
+            // Commit typed text under the locale it was typed in, so a locale change
+            // never rereads "12.345" with the other decimal mark.
+            let mut ed = std::mem::take(&mut self.money_ed);
+            if ed.dirty {
+                self.commit_money(&mut ed);
+                ed.dirty = false;
+            }
+            self.money_ed = ed;
+            let mut ed = std::mem::take(&mut self.date_ed);
+            if ed.dirty {
+                self.commit_date(&mut ed);
+                ed.dirty = false;
+            }
+            self.date_ed = ed;
+        }
         if CYCLING.contains(&key) {
             let (len, slot) = match key {
                 "locale" => (LOCS.len(), &mut self.t.locale),
@@ -1773,7 +1789,12 @@ impl Proto {
                 self.finish_leave(ui, field, Leave::Esc, true);
             }
             Some(l) => {
-                let ok = self.commit_money(&mut ed);
+                // Unchanged since the last commit: reparsing could read it under another locale.
+                let ok = if ed.dirty {
+                    self.commit_money(&mut ed)
+                } else {
+                    ed.error.is_none()
+                };
                 self.finish_leave(ui, field, l, ok);
             }
             None => {}
@@ -2181,7 +2202,11 @@ impl Proto {
                     }
                     Some(l) => {
                         self.pick = None;
-                        let ok = self.commit_date(&mut ed);
+                        let ok = if ed.dirty {
+                            self.commit_date(&mut ed)
+                        } else {
+                            ed.error.is_none()
+                        };
                         self.finish_leave(ui, field, l, ok);
                     }
                     None => {}
