@@ -9,13 +9,16 @@ use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
+use crate::layout::Layout;
+use crate::register::ColumnWidths;
 use crate::register_tabs::RegisterTabs;
 use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
 
-/// What the Main window shows. None of it outlives the run: every run starts on Home.
-#[derive(Debug, Default)]
+/// What the Main window shows. Only its [`Layout`] outlives the run: every run starts
+/// on Home, with no Register open.
+#[derive(Debug)]
 pub(crate) struct MainWindow {
     tab: TopLevelTab,
     status: Option<StatusMessage>,
@@ -24,9 +27,34 @@ pub(crate) struct MainWindow {
     accounts: Option<AccountsModel>,
     /// The Registers open under the Accounts tab.
     registers: RegisterTabs,
+    /// The column widths every Register shares.
+    column_widths: ColumnWidths,
 }
 
 impl MainWindow {
+    /// The Main window on Home, laid out as `layout` says.
+    pub(crate) fn new(layout: &Layout) -> Self {
+        Self {
+            tab: TopLevelTab::default(),
+            status: None,
+            account_bar: AccountBar::new(layout),
+            accounts: None,
+            registers: RegisterTabs::default(),
+            column_widths: layout.column_widths(),
+        }
+    }
+
+    /// The Main window's layout as it is now, for saving.
+    pub(crate) fn layout(&self) -> Layout {
+        let bar = &self.account_bar;
+        Layout::new(
+            bar.width(),
+            bar.fold(),
+            bar.folded_sections(),
+            &self.column_widths,
+        )
+    }
+
     /// Shows `route` in the Main view.
     pub(crate) fn navigate(&mut self, route: Route) {
         match route {
@@ -141,7 +169,15 @@ impl MainWindow {
                 Some(summary) => {
                     Self::context_header(ui, i18n, theme, commands, summary, &accounts);
                     if let Some(register) = self.registers.current_register_mut() {
-                        register.show(ui, i18n, theme, commands, summary, view);
+                        register.show(
+                            ui,
+                            i18n,
+                            theme,
+                            commands,
+                            summary,
+                            view,
+                            &mut self.column_widths,
+                        );
                     }
                 }
                 None => {

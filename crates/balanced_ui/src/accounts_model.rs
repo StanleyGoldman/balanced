@@ -20,6 +20,24 @@ pub(crate) enum Section {
 }
 
 impl Section {
+    /// Every section, in the order the Account bar shows them.
+    pub(crate) const ALL: [Self; 4] = [
+        Self::Group(AccountGroup::Banking),
+        Self::Group(AccountGroup::Investing),
+        Self::Group(AccountGroup::PropertyDebt),
+        Self::Closed,
+    ];
+
+    /// The section's stable id, which the saved layout names it by.
+    pub(crate) fn id(self) -> &'static str {
+        match self {
+            Self::Group(AccountGroup::Banking) => "banking",
+            Self::Group(AccountGroup::Investing) => "investing",
+            Self::Group(AccountGroup::PropertyDebt) => "property_debt",
+            Self::Closed => "closed",
+        }
+    }
+
     /// The section's heading.
     pub(crate) fn label(self, i18n: &Localizer) -> String {
         match self {

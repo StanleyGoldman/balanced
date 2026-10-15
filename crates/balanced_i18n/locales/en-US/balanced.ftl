@@ -61,6 +61,9 @@ account-bar-group-investing = Investing
 account-bar-group-property-debt = Property & Debt
 account-bar-group-closed = Closed
 account-bar-net-worth = Net Worth
+# The buttons that fold the Account bar to a narrow rail and open it again.
+account-bar-fold = Fold the { -account-bar }
+account-bar-unfold = Unfold the { -account-bar }
 # An account's right-click menu.
 account-bar-open-register = Open { -register }
 account-bar-open-in-new-tab = Open in New Tab
@@ -75,6 +78,8 @@ register-column-category = Category
 register-column-memo = Memo
 register-column-amount = Amount
 register-column-balance = Balance
+# The handle on a column heading's right edge that resizes the column.
+register-resize-column = Resize { $column }
 # The Category cell of a transaction divided between several categories.
 register-split = [Split]
 # The Payee cell of an account's first transaction, its starting balance.

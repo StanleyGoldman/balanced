@@ -1,6 +1,8 @@
 //! The Register: one account's transactions in a table, one row each, with the running
 //! balance after each.
 
+use std::collections::{BTreeMap, HashMap};
+
 use balanced_core::{
     AccountId, AccountSummary, DomainCommand, DomainError, LedgerView, TransactionEdit,
     TransactionId,
@@ -23,6 +25,12 @@ use crate::theme::Theme;
 
 /// The narrowest Payee and Category get before the Register scrolls sideways.
 const MIN_FLEX_WIDTH: f32 = 120.0;
+
+/// The narrowest a resized column gets.
+const MIN_COLUMN_WIDTH: f32 = 24.0;
+
+/// The width of the handle inside a heading's right edge that resizes its column.
+const RESIZE_HANDLE_WIDTH: f32 = 8.0;
 
 /// The radius of each dot of the Actions menu's ⋯, and the space between their centres.
 const ACTION_DOT_RADIUS: f32 = 1.5;
@@ -62,6 +70,34 @@ impl RegisterColumn {
         Self::Actions,
     ];
 
+    /// The column's stable id, which the saved layout names it by.
+    fn id(self) -> &'static str {
+        match self {
+            Self::Date => "date",
+            Self::Number => "num",
+            Self::Payee => "payee",
+            Self::Category => "category",
+            Self::Memo => "memo",
+            Self::Amount => "amount",
+            Self::Balance => "balance",
+            Self::Actions => "actions",
+        }
+    }
+
+    /// The column's width before the user resizes it, for a column that resizes.
+    /// Payee and Category share the width the others leave, and the Actions column
+    /// fits its button, so neither resizes.
+    fn default_width(self) -> Option<f32> {
+        match self {
+            Self::Date => Some(80.0),
+            Self::Number => Some(48.0),
+            Self::Memo => Some(140.0),
+            Self::Amount => Some(90.0),
+            Self::Balance => Some(100.0),
+            Self::Payee | Self::Category | Self::Actions => None,
+        }
+    }
+
     /// The column's heading. The Actions column has none.
     fn title(self, i18n: &Localizer) -> String {
         match self {
@@ -89,18 +125,16 @@ impl RegisterColumn {
         }
     }
 
-    /// How wide the column is. Payee and Category share the width the others leave,
-    /// down to [`MIN_FLEX_WIDTH`]; below that the Register scrolls sideways.
-    // TODO(#101): take the widths from the column chooser's saved layout.
-    fn width(self, theme: &Theme) -> Column {
+    /// How wide the column is: as `widths` says for a column that resizes. Payee and
+    /// Category share the width the others leave, down to [`MIN_FLEX_WIDTH`]; below
+    /// that the Register scrolls sideways.
+    fn width(self, theme: &Theme, widths: &ColumnWidths) -> Column {
         let column = match self {
-            Self::Date => Column::exact(80.0),
-            Self::Number => Column::exact(48.0),
             Self::Payee | Self::Category => Column::remainder().at_least(MIN_FLEX_WIDTH),
-            Self::Memo => Column::exact(140.0),
-            Self::Amount => Column::exact(90.0),
-            Self::Balance => Column::exact(100.0),
             Self::Actions => Column::exact(theme.row_height() + Theme::EDGE_INSET),
+            Self::Date | Self::Number | Self::Memo | Self::Amount | Self::Balance => {
+                Column::exact(widths.width(self).unwrap_or(MIN_COLUMN_WIDTH))
+            }
         };
         column.clip(true)
     }
@@ -174,6 +208,81 @@ impl RegisterColumn {
                 left: 0.0,
                 right: 0.0,
             },
+        }
+    }
+}
+
+/// The widths of the Register columns that resize, one set shared by every Register.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ColumnWidths {
+    widths: HashMap<RegisterColumn, f32>,
+}
+
+impl Default for ColumnWidths {
+    fn default() -> Self {
+        Self::from_saved(&BTreeMap::new())
+    }
+}
+
+impl ColumnWidths {
+    /// The widths `saved` holds under column ids, raised to [`MIN_COLUMN_WIDTH`]. A
+    /// column `saved` leaves out takes its default width, and an unknown id is ignored.
+    pub(crate) fn from_saved(saved: &BTreeMap<String, f32>) -> Self {
+        let widths = RegisterColumn::ALL
+            .into_iter()
+            .filter_map(|column| {
+                let default = column.default_width()?;
+                let width = saved
+                    .get(column.id())
+                    .copied()
+                    .filter(|width| width.is_finite())
+                    .map_or(default, |width| width.max(MIN_COLUMN_WIDTH));
+                Some((column, width))
+            })
+            .collect();
+        Self { widths }
+    }
+
+    /// Every width under its column's id, for saving.
+    pub(crate) fn to_saved(&self) -> BTreeMap<String, f32> {
+        self.widths
+            .iter()
+            .map(|(column, width)| (column.id().to_owned(), *width))
+            .collect()
+    }
+
+    /// The width of `column`, unless it doesn't resize.
+    fn width(&self, column: RegisterColumn) -> Option<f32> {
+        self.widths.get(&column).copied()
+    }
+
+    /// The handle on the right edge of `column`'s heading, in the heading cell `ui`,
+    /// for a column that resizes. Dragging it resizes the column from the next frame.
+    fn resize_handle(&mut self, ui: &egui::Ui, i18n: &Localizer, column: RegisterColumn) {
+        let Some(width) = self.widths.get_mut(&column) else {
+            return;
+        };
+        // The cell clips what it holds, so the handle stays inside its right edge.
+        let cell = ui.max_rect();
+        let edge = cell.right();
+        let handle = Rect::from_x_y_ranges(edge - RESIZE_HANDLE_WIDTH..=edge, cell.y_range());
+        let id = ui.id().with("register_resize");
+        let response = ui
+            .interact(handle, id, Sense::drag())
+            .on_hover_cursor(CursorIcon::ResizeColumn);
+        let label = fl!(i18n, "register-resize-column", column = column.title(i18n));
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), &label));
+        ui.ctx()
+            .accesskit_node_builder(response.id, |node| node.set_role(Role::Splitter));
+        if response.dragged() {
+            *width = (*width + response.drag_delta().x).max(MIN_COLUMN_WIDTH);
+            ui.ctx().request_repaint();
+        }
+        if response.hovered() || response.dragged() {
+            let stroke = ui.style().interact(&response).fg_stroke;
+            ui.ctx()
+                .layer_painter(ui.layer_id())
+                .vline(edge, cell.y_range(), stroke);
         }
     }
 }
@@ -328,6 +437,7 @@ impl Register {
         commands: &CommandSender,
         summary: &AccountSummary,
         view: &LedgerView,
+        widths: &mut ColumnWidths,
     ) {
         let account = summary.account().id();
         if self
@@ -375,7 +485,7 @@ impl Register {
                     .auto_shrink(false)
                     .max_scroll_height(f32::INFINITY);
                 for column in RegisterColumn::ALL {
-                    table = table.column(column.width(theme));
+                    table = table.column(column.width(theme, widths));
                 }
                 if let Some(offset) = scroll_offset {
                     table = table.vertical_scroll_offset(offset);
@@ -396,6 +506,7 @@ impl Register {
                                     // The rows sort and scroll on the next frame.
                                     ui.ctx().request_repaint();
                                 }
+                                widths.resize_handle(ui, i18n, column);
                             });
                         }
                     })
@@ -1058,6 +1169,7 @@ mod tests {
         theme: Theme,
         commands: CommandSender,
         view: Arc<LedgerView>,
+        widths: ColumnWidths,
     }
 
     impl Shown {
@@ -1089,6 +1201,7 @@ mod tests {
             theme: Theme::default(),
             commands,
             view: Ledger::stub().snapshot(),
+            widths: ColumnWidths::default(),
         };
         let harness = Harness::builder()
             .with_size(vec2(1000.0, 400.0))
@@ -1100,13 +1213,14 @@ mod tests {
                         theme,
                         commands,
                         view,
+                        widths,
                     } = shown;
                     let summary = view
                         .accounts()
                         .iter()
                         .find(|summary| summary.account().name() == "Everyday Checking")
                         .expect("the stub has Everyday Checking");
-                    register.show(ui, i18n, theme, commands, summary, view);
+                    register.show(ui, i18n, theme, commands, summary, view, widths);
                 },
                 shown,
             );

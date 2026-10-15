@@ -10,7 +10,8 @@ The decision and the options that were rejected are in `docs/adr/0001-command-an
 | What a window shows (route, selection, sort, filter) | That window's struct | In place, during `ui()` |
 | Dialog form fields | `Option<FormState>` on the host window | In place while open. OK sends a Command, Cancel sets it to `None` |
 | Edit buffer of the Register row being edited | The Register view | In place. Enter sends a Command |
-| Scroll, hover, focus, collapsed sections | egui `Memory` | egui handles them |
+| Scroll, hover, focus | egui `Memory`, kept for the run only (`persist_egui_memory` is off) | egui handles them |
+| Window layout: Account bar width and fold, folded sections, Register column widths | `Layout` in eframe storage, built from the Main window by `App::save` | In place on the Main window; saved on eframe's timer and on exit |
 | View models (sorted row indices, formatted strings) | The window, cached | Rebuilt when `(generation, sort/filter, locale)` changes |
 
 ## Rules
