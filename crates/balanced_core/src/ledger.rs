@@ -288,4 +288,59 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn hidden_and_closed_are_independent() {
+        let ledger = Ledger::with_accounts(
+            usd_code(),
+            [
+                NewAccount::new("Shown", AccountKind::Checking, usd(dec!(1))),
+                NewAccount::new("Hidden", AccountKind::Checking, usd(dec!(1))).hidden(),
+                NewAccount::new("Closed", AccountKind::Checking, usd(dec!(1))).closed(),
+                NewAccount::new("Both", AccountKind::Checking, usd(dec!(1)))
+                    .hidden()
+                    .closed(),
+            ],
+        )
+        .unwrap();
+
+        let view = ledger.snapshot();
+
+        let flags: Vec<_> = view
+            .accounts()
+            .iter()
+            .map(|summary| {
+                let account = summary.account();
+                (account.name(), account.is_hidden(), account.is_closed())
+            })
+            .collect();
+        assert_eq!(
+            flags,
+            [
+                ("Shown", false, false),
+                ("Hidden", true, false),
+                ("Closed", false, true),
+                ("Both", true, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_account_is_found_by_its_id() {
+        let ledger = Ledger::with_accounts(
+            usd_code(),
+            [
+                NewAccount::new("Everyday", AccountKind::Checking, usd(dec!(1))),
+                NewAccount::new("Visa", AccountKind::CreditCard, usd(dec!(-2))),
+            ],
+        )
+        .unwrap();
+        let view = ledger.snapshot();
+        let visa = view.accounts()[1].account().id();
+
+        let found = view.account(visa).unwrap();
+
+        assert_eq!(found.account().name(), "Visa");
+        assert_eq!(found.balance(), usd(dec!(-2)));
+    }
 }
