@@ -149,3 +149,43 @@ fn a_closed_account_is_read_only() {
     assert!(add.accesskit_node().is_disabled());
     harness.get_by_label("Closed — read-only");
 }
+
+#[test]
+fn the_hovered_row_shows_its_actions_menu() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+
+    harness.get_by_role_and_label(Role::Cell, "Costco").hover();
+    harness.run();
+
+    let menus = harness
+        .query_all_by_role_and_label(Role::Button, "Actions")
+        .count();
+    assert_eq!(menus, 1);
+}
+
+#[test]
+fn only_the_rows_in_view_of_a_large_register_are_laid_out() {
+    let mut harness = app();
+
+    open(&mut harness, "Household Checking");
+
+    // The account has 20,001 transactions, of eight cells each; the window shows a few
+    // dozen rows.
+    let rows = harness.query_all_by_role(Role::Cell).count() / 8;
+    assert!((1..=50).contains(&rows), "{rows} rows laid out");
+}
+
+#[test]
+fn opening_another_account_clears_the_selection() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    harness.get_by_role_and_label(Role::Cell, "Costco").click();
+    harness.run();
+
+    open(&mut harness, "Joint Checking");
+    open(&mut harness, "Everyday Checking");
+
+    let costco = harness.get_by_role_and_label(Role::Cell, "Costco");
+    assert_eq!(costco.accesskit_node().toggled(), Some(Toggled::False));
+}

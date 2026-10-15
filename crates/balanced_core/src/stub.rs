@@ -150,7 +150,7 @@ impl Ledger {
                 paid(20, "Trattoria Roma", StubCategory::Restaurants, "-64.80")
                     .memo("Anniversary dinner"),
             ]);
-        // Emptied, then closed, so its read-only Register has history to show.
+        // Emptied, then closed: its read-only Register shows its history.
         let old_checking = NewAccount::new(
             "Old Checking",
             AccountKind::Checking,

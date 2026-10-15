@@ -94,22 +94,39 @@ impl RegisterColumn {
 
     /// Space between the cell's edges and its text: [`Theme::EDGE_INSET`] on the
     /// Register's outer edges, none elsewhere.
-    fn insets(self) -> (f32, f32) {
+    fn insets(self) -> Insets {
+        let edge = Theme::EDGE_INSET;
         match self {
-            Self::Date => (Theme::EDGE_INSET, 0.0),
-            Self::Actions => (0.0, Theme::EDGE_INSET),
+            Self::Date => Insets {
+                left: edge,
+                right: 0.0,
+            },
+            Self::Actions => Insets {
+                left: 0.0,
+                right: edge,
+            },
             Self::Number
             | Self::Payee
             | Self::Category
             | Self::Memo
             | Self::Amount
-            | Self::Balance => (0.0, 0.0),
+            | Self::Balance => Insets {
+                left: 0.0,
+                right: 0.0,
+            },
         }
     }
 }
 
-/// The open account's Register: its cached rows and the selected transaction. None of
-/// it outlives the run.
+/// Space between a cell's left and right edges and its text, in points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Insets {
+    left: f32,
+    right: f32,
+}
+
+/// The open account's Register: its cached rows and the selected transaction. Opening
+/// another account clears the selection. None of it outlives the run.
 #[derive(Debug, Default)]
 pub(crate) struct Register {
     /// The rows of the last account shown, rebuilt when they are out of date.
@@ -129,6 +146,13 @@ impl Register {
         view: &LedgerView,
     ) {
         let account = summary.account().id();
+        if self
+            .model
+            .as_ref()
+            .is_some_and(|model| model.account() != account)
+        {
+            self.selected = None;
+        }
         let model = match self.model.take() {
             Some(model) if model.is_current(account, view, i18n) => model,
             _ => RegisterModel::new(summary, view, i18n),
@@ -160,6 +184,7 @@ impl Register {
                         let body_viewport = body.ui_mut().clip_rect();
                         let rows = model.rows();
                         body.rows(row_height, rows.len(), |mut table_row| {
+                            // `rows` lays out indices below `rows.len()` only.
                             let row = &rows[table_row.index()];
                             let selected = self.selected == Some(row.id());
                             table_row.set_selected(selected);
@@ -269,6 +294,9 @@ impl Cell<'_> {
                 let open = Popup::is_id_open(ui.ctx(), Popup::default_response_id(&response));
                 if selected || hovered || open {
                     actions_menu(ui, i18n, &response);
+                } else {
+                    // Hidden, the menu leaves an empty cell that selects the row.
+                    cell_info(ui, &response, selected, "");
                 }
                 return response;
             }
@@ -289,12 +317,27 @@ impl Cell<'_> {
     }
 }
 
+/// Reports a cell to AccessKit as a table cell labelled `label`, toggled when its row is
+/// selected.
+fn cell_info(ui: &egui::Ui, response: &Response, selected: bool, label: &str) {
+    response.widget_info(|| {
+        WidgetInfo::selected(
+            WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            label,
+        )
+    });
+    ui.ctx()
+        .accesskit_node_builder(response.id, |node| node.set_role(Role::Cell));
+}
+
 /// Paints `text` in `rect`, inset and aligned as `column` says, truncated to fit.
 fn paint_text(ui: &egui::Ui, rect: Rect, column: RegisterColumn, text: WidgetText) {
     if !ui.is_rect_visible(rect) {
         return;
     }
-    let (left, right) = column.insets();
+    let Insets { left, right } = column.insets();
     let inner = Rect::from_x_y_ranges(rect.left() + left..=rect.right() - right, rect.y_range());
     let galley = text.into_galley(
         ui,

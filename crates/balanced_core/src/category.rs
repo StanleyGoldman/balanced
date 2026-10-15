@@ -34,7 +34,7 @@ impl Category {
 }
 
 /// A category to add to a new [`Ledger`](crate::Ledger). Its id is its position in the
-/// list of new categories, counting from 0.
+/// list of new categories, counting from 0, and its parent comes earlier in that list.
 #[derive(Debug, Clone)]
 pub(crate) struct NewCategory {
     name: String,

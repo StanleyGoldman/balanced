@@ -97,6 +97,24 @@ impl LedgerView {
         self.categories.iter().find(|category| category.id() == id)
     }
 
+    /// The names on the way from the top of the category tree down to category `id`,
+    /// ending with its own: `["Food & Dining", "Groceries"]`. `None` once it has been
+    /// deleted.
+    pub fn category_path(&self, id: CategoryId) -> Option<Vec<&str>> {
+        let mut category = self.category(id)?;
+        let mut names = vec![category.name()];
+        while let Some(parent) = category.parent() {
+            // A parent comes before its children, so each step moves to a smaller id.
+            assert!(parent < category.id(), "a parent comes before its children");
+            category = self
+                .category(parent)
+                .expect("a category's parent is in the same snapshot");
+            names.push(category.name());
+        }
+        names.reverse();
+        Some(names)
+    }
+
     /// The sum of every account's balance, hidden and closed accounts included.
     pub fn net_worth(&self) -> Money {
         self.net_worth
@@ -115,7 +133,8 @@ impl Ledger {
     /// last in its sub-group. Fails when an amount is in another currency than the
     /// ledger, or when a balance overflows.
     ///
-    /// Panics when a transaction names a category that isn't in `categories`.
+    /// Panics when a category sits under one that isn't before it in `categories`, or
+    /// when a transaction names a category that isn't in `categories`.
     pub(crate) fn with_accounts(
         currency: CurrencyCode,
         categories: impl IntoIterator<Item = NewCategory>,
@@ -125,6 +144,15 @@ impl Ledger {
             .zip(categories)
             .map(|(id, new)| new.into_category(CategoryId::new(id)))
             .collect();
+        for category in &categories {
+            if let Some(parent) = category.parent() {
+                assert!(
+                    parent < category.id(),
+                    "{:?} sits under a later category, {parent:?}",
+                    category.id()
+                );
+            }
+        }
         let mut transaction_ids = (0..).map(TransactionId::new);
         let mut summaries: Vec<AccountSummary> = Vec::new();
         let mut net_worth = Money::zero(currency);
@@ -508,6 +536,45 @@ mod tests {
                     NewTransaction::new(date(2), "Fresh Market", unknown, usd(dec!(-1))),
                 ]),
             ],
+        )
+        .ok();
+    }
+
+    #[test]
+    fn a_category_path_runs_from_the_top_of_the_tree() {
+        let food = CategoryId::new(0);
+        let restaurants = CategoryId::new(1);
+        let coffee = CategoryId::new(2);
+        let ledger = Ledger::with_accounts(
+            usd_code(),
+            [
+                NewCategory::new("Food & Dining"),
+                NewCategory::new("Restaurants").under(food),
+                NewCategory::new("Coffee Shops").under(restaurants),
+            ],
+            [],
+        )
+        .unwrap();
+
+        let view = ledger.snapshot();
+
+        assert_eq!(
+            view.category_path(coffee).unwrap(),
+            ["Food & Dining", "Restaurants", "Coffee Shops"]
+        );
+        assert_eq!(view.category_path(food).unwrap(), ["Food & Dining"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "sits under a later category")]
+    fn a_category_under_a_later_one_is_a_bug() {
+        Ledger::with_accounts(
+            usd_code(),
+            [
+                NewCategory::new("Groceries").under(CategoryId::new(1)),
+                NewCategory::new("Food & Dining"),
+            ],
+            [],
         )
         .ok();
     }

@@ -143,6 +143,11 @@ impl RegisterModel {
         }
     }
 
+    /// The account whose rows these are.
+    pub(crate) fn account(&self) -> AccountId {
+        self.source.account
+    }
+
     /// The rows, oldest transaction first.
     pub(crate) fn rows(&self) -> &[RegisterRow] {
         &self.rows
@@ -160,17 +165,9 @@ impl CategoryPaths<'_> {
     fn path(&mut self, id: CategoryId) -> &str {
         let view = self.view;
         self.paths.entry(id).or_insert_with(|| {
-            let mut names = Vec::new();
-            let mut next = Some(id);
-            while let Some(id) = next {
-                let category = view
-                    .category(id)
-                    .expect("a transaction's categories are in its snapshot");
-                names.push(category.name());
-                next = category.parent();
-            }
-            names.reverse();
-            names.join(CATEGORY_SEPARATOR)
+            view.category_path(id)
+                .expect("a transaction's categories are in its snapshot")
+                .join(CATEGORY_SEPARATOR)
         })
     }
 }
