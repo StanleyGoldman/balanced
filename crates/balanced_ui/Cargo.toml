@@ -13,9 +13,11 @@ i18n-embed-fl.workspace = true
 
 [dev-dependencies]
 balanced_i18n = { workspace = true, features = ["test-support"] }
-# PROTOTYPE: only the throwaway input-fields example uses these three.
+# PROTOTYPE: only the throwaway input-fields example uses these five.
 balanced_prototype_harness.workspace = true
 eframe.workspace = true
+icu_calendar.workspace = true
+icu_locale.workspace = true
 serde_json.workspace = true
 rust_decimal.workspace = true
 rust_decimal_macros.workspace = true

@@ -492,6 +492,8 @@ dependencies = [
  "eframe",
  "egui",
  "i18n-embed-fl",
+ "icu_calendar",
+ "icu_locale",
  "rust_decimal",
  "rust_decimal_macros",
  "serde_json",

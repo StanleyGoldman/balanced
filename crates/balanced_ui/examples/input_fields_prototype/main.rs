@@ -5,19 +5,26 @@
 //! a date field with a picker and keyboard shortcuts, and a type-to-filter category combo box,
 //! each tried in `en-US`, `de-DE` and the pseudo-locale `en-XA`.
 //!
-//! The three fields sit in a mock Register edit row. The variants A–C differ in interaction model:
-//! A is typed text with quick-fill, B is dropdown-assisted, C is structured (segments, cents-first
-//! money, two-level category).
+//! The fields sit in a mock Register: entered rows above, a draft row at the bottom, edited with
+//! the keys the Register grid prototype settled (#17): Enter commits and moves right, Tab and
+//! Shift+Tab commit and move, Esc cancels the cell, Ctrl+Enter or Enter on Amount adds the row.
+//! The variants A–C differ in interaction model: A is typed text, B is assisted (calendar and
+//! list buttons while editing, floating hints, a Create row), C is structured (date segments,
+//! cents-first money). Every variant's category is the combobox list #17 settled.
 //!
 //! Run:
 //!   cargo run -p balanced_ui --example input_fields_prototype -- \
 //!     [--variant a|b|c] [--log <dir>/events.jsonl] [--control <dir>/control.txt]
 //!
 //! The PROTOTYPE dock on the right holds the variant switcher and toggles; F4 collapses it.
-//! A–C or ← / → switch variant (while no field has focus), 1–0 flip toggles, F2 note, F3 marker.
+//! A–C or ← / → switch variant (while no field has focus), 1–0 flip toggles, F2 note, F3 marker,
+//! F5 spotlight.
 //!
-//! Fixed-seed stub data, a fixed "today" (2026-10-14), hand-rolled locale tables (ICU4X and
-//! `balanced_i18n` are not wired yet). None of this is production code.
+//! Money parses and formats through `balanced_i18n::Localizer` and is held as
+//! `balanced_core::Money`; dates display through the `Localizer` too. Typed date parsing, month
+//! and weekday names and the prototype's own strings are hand-rolled. The look is
+//! `balanced_ui::theme`. Fixed-seed stub data, a fixed "today" (2026-10-14). None of this is
+//! production code.
 
 #![allow(
     clippy::allow_attributes,
@@ -27,6 +34,7 @@
     clippy::too_many_arguments,
     clippy::wildcard_enum_match_arm,
     clippy::unwrap_used,
+    clippy::expect_used,
     clippy::str_to_string,
     clippy::disallowed_methods,
     clippy::disallowed_macros,
@@ -38,18 +46,31 @@
     clippy::manual_is_multiple_of,
     clippy::manual_clamp,
     clippy::collapsible_if,
+    clippy::arithmetic_side_effects,
     missing_debug_implementations,
     unreachable_pub
 )]
 
-use std::collections::{HashMap, VecDeque};
+// The real theme module, compiled into the example: the prototype gets the decided look
+// without making `theme` public.
+#[allow(dead_code)]
+#[path = "../../src/theme.rs"]
+mod theme;
 
+use std::collections::VecDeque;
+
+use balanced_core::{CurrencyCode, Money, RoundingPolicy};
+use balanced_i18n::{AmountParseError, AmountStyle, Currency, Localizer};
 use balanced_prototype_harness::{Args, Harness};
 use eframe::egui;
 use egui::{
     Align, CentralPanel, Event, Id, Key, Modifiers, Panel, Rect, RichText, Sense, Sides, Ui, Vec2,
 };
+use icu_calendar::types::Weekday;
+use icu_locale::{langid, locale};
+use rust_decimal::Decimal;
 use serde_json::json;
+use theme::{Theme, ThemeSettings};
 
 // ---------------------------------------------------------------------------------------------
 // Dates (proleptic Gregorian, civil-from-days arithmetic)
@@ -133,101 +154,30 @@ impl Date {
             d: self.d.min(days_in_month(y, m)),
         }
     }
+
+    fn icu(self) -> icu_calendar::Date<icu_calendar::Iso> {
+        icu_calendar::Date::try_new_iso(self.y, self.m as u8, self.d as u8).unwrap()
+    }
+
+    /// For the log and the would-emit Commands: locale-free.
+    fn iso(self) -> String {
+        format!("{:04}-{:02}-{:02}", self.y, self.m, self.d)
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
-// Locales and currencies (hand-rolled stand-ins for ICU4X)
+// Locales: `balanced_i18n` formats and parses. The prototype keeps only what it has no API
+// for: typed date parsing, month and weekday names, and its own strings.
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Loc {
     EnUs,
     DeDe,
-    /// The pseudo-locale: `en-US` text through a transform, formatting as `de-DE` (the default).
+    /// The pseudo-locale: `en-US` text through a transform, formatting as `de-DE`.
     EnXa,
 }
 
 const LOCS: [Loc; 3] = [Loc::EnUs, Loc::DeDe, Loc::EnXa];
-
-struct Fmt {
-    dec: char,
-    grp: char,
-    mdy: bool,
-    sep: char,
-    sunday_first: bool,
-    sym_after: bool,
-    pattern: &'static str,
-    months: [&'static str; 12],
-    days: [&'static str; 7],
-    day_names: [&'static str; 7],
-}
-
-const EN: Fmt = Fmt {
-    dec: '.',
-    grp: ',',
-    mdy: true,
-    sep: '/',
-    sunday_first: true,
-    sym_after: false,
-    pattern: "MM/DD/YYYY",
-    months: [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ],
-    days: ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"],
-    day_names: [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-    ],
-};
-
-const DE: Fmt = Fmt {
-    dec: ',',
-    grp: '.',
-    mdy: false,
-    sep: '.',
-    sunday_first: false,
-    sym_after: true,
-    pattern: "TT.MM.JJJJ",
-    months: [
-        "Januar",
-        "Februar",
-        "März",
-        "April",
-        "Mai",
-        "Juni",
-        "Juli",
-        "August",
-        "September",
-        "Oktober",
-        "November",
-        "Dezember",
-    ],
-    days: ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
-    day_names: [
-        "Montag",
-        "Dienstag",
-        "Mittwoch",
-        "Donnerstag",
-        "Freitag",
-        "Samstag",
-        "Sonntag",
-    ],
-};
 
 impl Loc {
     fn tag(self) -> &'static str {
@@ -237,171 +187,158 @@ impl Loc {
             Self::EnXa => "en-XA",
         }
     }
-
-    fn fmt(self) -> &'static Fmt {
-        match self {
-            Self::EnUs => &EN,
-            Self::DeDe | Self::EnXa => &DE,
-        }
-    }
 }
 
-struct Cur {
-    code: &'static str,
-    sym: &'static str,
-    dp: u32,
+/// A locale's `Localizer`, plus what the prototype reads off it (marks, date order) and the
+/// names it has no API for.
+struct Fmt {
+    l10n: Localizer,
+    dec: char,
+    grp: char,
+    mdy: bool,
+    sep: char,
+    sunday_first: bool,
+    pattern: &'static str,
+    months: [&'static str; 12],
+    days: [&'static str; 7],
+    day_names: [&'static str; 7],
 }
 
-const CURS: [Cur; 4] = [
-    Cur {
-        code: "USD",
-        sym: "$",
-        dp: 2,
-    },
-    Cur {
-        code: "EUR",
-        sym: "€",
-        dp: 2,
-    },
-    Cur {
-        code: "JPY",
-        sym: "¥",
-        dp: 0,
-    },
-    Cur {
-        code: "BHD",
-        sym: "BD",
-        dp: 3,
-    },
+const EN_MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+const DE_MONTHS: [&str; 12] = [
+    "Januar",
+    "Februar",
+    "März",
+    "April",
+    "Mai",
+    "Juni",
+    "Juli",
+    "August",
+    "September",
+    "Oktober",
+    "November",
+    "Dezember",
+];
+const EN_DAYS: [&str; 7] = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+const DE_DAYS: [&str; 7] = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+const EN_DAY_NAMES: [&str; 7] = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+];
+const DE_DAY_NAMES: [&str; 7] = [
+    "Montag",
+    "Dienstag",
+    "Mittwoch",
+    "Donnerstag",
+    "Freitag",
+    "Samstag",
+    "Sonntag",
 ];
 
-/// Amounts are held as micro-units (6 decimals) so the calculator has room; committed amounts are
-/// always rounded to the currency's decimal places.
-const MICRO: i128 = 1_000_000;
-
-fn round_dp(v: i128, dp: u32) -> i128 {
-    let unit = 10_i128.pow(6 - dp);
-    let q = v.div_euclid(unit);
-    let r = v.rem_euclid(unit);
-    let q = match (r * 2).cmp(&unit) {
-        std::cmp::Ordering::Less => q,
-        std::cmp::Ordering::Greater => q + 1,
-        std::cmp::Ordering::Equal => q + (q & 1),
-    };
-    q * unit
-}
-
-fn group_digits(digits: &str, sep: char) -> String {
-    let chars: Vec<char> = digits.chars().collect();
-    let mut out = String::new();
-    for (i, c) in chars.iter().enumerate() {
-        if i > 0 && (chars.len() - i) % 3 == 0 {
-            out.push(sep);
+impl Fmt {
+    fn new(loc: Loc) -> Self {
+        let l10n = match loc {
+            Loc::EnUs => Localizer::new(&langid!("en-US"), &locale!("en-US")),
+            Loc::DeDe => Localizer::new(&langid!("de-DE"), &locale!("de-DE")),
+            Loc::EnXa => Localizer::pseudo(),
         }
-        out.push(*c);
-    }
-    out
-}
-
-/// A bare number at the currency's decimal places (what a Register cell shows).
-fn fmt_amount(v: i128, dp: u32, f: &Fmt) -> String {
-    let v = round_dp(v, dp);
-    let minor = v.abs() / 10_i128.pow(6 - dp);
-    let scale = 10_i128.pow(dp);
-    let int = group_digits(&(minor / scale).to_string(), f.grp);
-    let mut out = String::new();
-    if v < 0 {
-        out.push('-');
-    }
-    out.push_str(&int);
-    if dp > 0 {
-        out.push(f.dec);
-        out.push_str(&format!("{:0width$}", minor % scale, width = dp as usize));
-    }
-    out
-}
-
-/// The amount with its currency symbol, placed per locale (what the Account bar would show).
-fn fmt_with_symbol(v: i128, cur: &Cur, f: &Fmt) -> String {
-    let n = fmt_amount(v, cur.dp, f);
-    if f.sym_after {
-        format!("{n}\u{a0}{}", cur.sym)
-    } else if let Some(rest) = n.strip_prefix('-') {
-        format!("-{}{rest}", cur.sym)
-    } else {
-        format!("{}{n}", cur.sym)
-    }
-}
-
-enum PErr {
-    Empty,
-    Invalid,
-    Decimals(u32),
-}
-
-/// Strict, locale-aware: the locale's decimal mark and group separator, a leading or trailing
-/// minus, a surrounding currency symbol or code (ignored). More decimals than `max_dp` fail.
-fn parse_plain(input: &str, f: &Fmt, cur: &Cur, max_dp: u32) -> Result<i128, PErr> {
-    let mut s = input.trim().to_owned();
-    if s.is_empty() {
-        return Err(PErr::Empty);
-    }
-    let mut neg = false;
-    for _ in 0..2 {
-        for tok in [cur.sym, cur.code] {
-            s = s.trim_start_matches(tok).trim().to_owned();
-            s = s.trim_end_matches(tok).trim().to_owned();
-        }
-        if let Some(rest) = s.strip_prefix(['-', '−']) {
-            neg = true;
-            s = rest.trim().to_owned();
-        } else if let Some(rest) = s.strip_prefix('+') {
-            s = rest.trim().to_owned();
-        }
-        if let Some(rest) = s.strip_suffix(['-', '−']) {
-            neg = true;
-            s = rest.trim().to_owned();
-        }
-    }
-    let parts: Vec<&str> = s.split(f.dec).collect();
-    if parts.len() > 2 {
-        return Err(PErr::Invalid);
-    }
-    let int = parts[0];
-    let frac = parts.get(1).copied().unwrap_or("");
-    if int.is_empty() && frac.is_empty() {
-        return Err(PErr::Invalid);
-    }
-    let groups: Vec<&str> = int.split(f.grp).collect();
-    let group_ok = groups.iter().enumerate().all(|(i, g)| {
-        g.chars().all(|c| c.is_ascii_digit())
-            && if groups.len() == 1 {
-                true
-            } else if i == 0 {
-                (1..=3).contains(&g.len())
-            } else {
-                g.len() == 3
+        .expect("the shipped locales load");
+        // The marks and the date order come from the formatter, not from a table.
+        let probe = l10n.format_amount(
+            Decimal::new(123_450, 2),
+            Currency::new("USD", 2).unwrap(),
+            AmountStyle::Bare,
+        );
+        let grp = probe.chars().nth(1).unwrap();
+        let dec = probe.chars().rev().nth(2).unwrap();
+        let probe_date = l10n.format_date(
+            Date {
+                y: 2026,
+                m: 10,
+                d: 5,
             }
-    });
-    if !group_ok || !frac.chars().all(|c| c.is_ascii_digit()) {
-        return Err(PErr::Invalid);
+            .icu(),
+        );
+        let mdy = probe_date.trim_start_matches('0').starts_with("10");
+        let sep = probe_date
+            .chars()
+            .find(|c| !c.is_ascii_digit())
+            .unwrap_or('/');
+        let sunday_first = l10n.first_weekday() == Weekday::Sunday;
+        let english = loc == Loc::EnUs;
+        Self {
+            l10n,
+            dec,
+            grp,
+            mdy,
+            sep,
+            sunday_first,
+            pattern: if english { "M/D/YYYY" } else { "TT.MM.JJJJ" },
+            months: if english { EN_MONTHS } else { DE_MONTHS },
+            days: if english { EN_DAYS } else { DE_DAYS },
+            day_names: if english { EN_DAY_NAMES } else { DE_DAY_NAMES },
+        }
     }
-    if frac.len() as u32 > max_dp {
-        return Err(PErr::Decimals(max_dp));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Currencies and money
+
+const CURRENCIES: [&str; 4] = ["USD", "EUR", "JPY", "BHD"];
+
+fn code_of(i: usize) -> CurrencyCode {
+    CurrencyCode::new(CURRENCIES[i]).unwrap()
+}
+
+/// The formatter's view of a currency.
+fn i18n_currency(code: CurrencyCode) -> Currency {
+    Currency::new(code.as_str(), code.decimal_places()).unwrap()
+}
+
+/// How a calculator result with more decimal places than the currency is handled.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Rounding {
+    Reject,
+    Bankers,
+    HalfAway,
+}
+
+impl Rounding {
+    const ALL: [Self; 3] = [Self::Reject, Self::Bankers, Self::HalfAway];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Reject => "reject",
+            Self::Bankers => "banker's (half to even)",
+            Self::HalfAway => "half away from zero",
+        }
     }
-    let digits: String = groups.concat();
-    let int_v: i128 = if digits.is_empty() {
-        0
-    } else {
-        digits.parse().map_err(|_| PErr::Invalid)?
-    };
-    let frac_v: i128 = if frac.is_empty() {
-        0
-    } else {
-        format!("{frac:0<6}").parse().map_err(|_| PErr::Invalid)?
-    };
-    let v = int_v * MICRO + frac_v;
-    Ok(if neg { -v } else { v })
+
+    fn policy(self) -> Option<RoundingPolicy> {
+        match self {
+            Self::Reject => None,
+            Self::Bankers => Some(RoundingPolicy::BankersEven),
+            Self::HalfAway => Some(RoundingPolicy::HalfAwayFromZero),
+        }
+    }
 }
 
 fn looks_like_expression(s: &str) -> bool {
@@ -412,17 +349,18 @@ fn looks_like_expression(s: &str) -> bool {
         })
 }
 
-/// `+ - * /` with the usual precedence and unary minus. Operands may carry up to six decimals.
-fn eval_expression(s: &str, f: &Fmt, cur: &Cur) -> Result<i128, PErr> {
-    let mut nums: Vec<i128> = Vec::new();
+/// `+ - * /` with the usual precedence and unary minus. Each operand is read by the locale's
+/// amount parser, allowing up to ten decimal places (`0.075` is a rate, not money).
+fn eval_expression(s: &str, l10n: &Localizer) -> Result<Decimal, AmountParseError> {
+    let mut nums: Vec<Decimal> = Vec::new();
     let mut ops: Vec<char> = Vec::new();
     let mut tok = String::new();
     let mut expect_operand = true;
-    let flush = |tok: &mut String, nums: &mut Vec<i128>| -> Result<(), PErr> {
+    let flush = |tok: &mut String, nums: &mut Vec<Decimal>| -> Result<(), AmountParseError> {
         if tok.trim().is_empty() {
-            return Err(PErr::Invalid);
+            return Err(AmountParseError::Invalid);
         }
-        nums.push(parse_plain(tok, f, cur, 6)?);
+        nums.push(l10n.parse_amount(tok, 10)?.normalize());
         tok.clear();
         Ok(())
     };
@@ -447,14 +385,11 @@ fn eval_expression(s: &str, f: &Fmt, cur: &Cur) -> Result<i128, PErr> {
         match op {
             '*' => {
                 let last = vals.pop().unwrap();
-                vals.push(last * n / MICRO);
+                vals.push(last.checked_mul(*n).ok_or(AmountParseError::OutOfRange)?);
             }
             '/' => {
-                if *n == 0 {
-                    return Err(PErr::Invalid);
-                }
                 let last = vals.pop().unwrap();
-                vals.push(last * MICRO / n);
+                vals.push(last.checked_div(*n).ok_or(AmountParseError::Invalid)?);
             }
             _ => {
                 adds.push(*op);
@@ -464,19 +399,9 @@ fn eval_expression(s: &str, f: &Fmt, cur: &Cur) -> Result<i128, PErr> {
     }
     let mut total = vals[0];
     for (op, v) in adds.iter().zip(vals.iter().skip(1)) {
-        if *op == '+' {
-            total += v;
-        } else {
-            total -= v;
-        }
+        total = if *op == '+' { total + v } else { total - v };
     }
-    Ok(total)
-}
-
-fn trim_micro(v: i128, f: &Fmt) -> String {
-    let s = fmt_amount(v, 6, f);
-    let s = s.trim_end_matches('0');
-    s.trim_end_matches(f.dec).to_owned()
+    Ok(total.normalize())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -547,11 +472,7 @@ fn parse_date(input: &str, f: &Fmt, partial: bool, base: Date) -> Result<Option<
 }
 
 fn fmt_date(d: Date, f: &Fmt) -> String {
-    if f.mdy {
-        format!("{:02}{}{:02}{}{}", d.m, f.sep, d.d, f.sep, d.y)
-    } else {
-        format!("{:02}{}{:02}{}{}", d.d, f.sep, d.m, f.sep, d.y)
-    }
+    f.l10n.format_date(d.icu())
 }
 
 fn fmt_date_long(d: Date, f: &Fmt) -> String {
@@ -610,12 +531,8 @@ const DE_SEED: &[(&str, &str)] = &[
     ("Date", "Datum"),
     ("Payee", "Empfänger"),
     ("Category", "Kategorie"),
-    ("Parent", "Oberkategorie"),
-    ("Subcategory", "Unterkategorie"),
     ("Amount", "Betrag"),
     ("Today", "Heute"),
-    ("Save row", "Zeile speichern"),
-    ("Entered rows", "Erfasste Zeilen"),
 ];
 
 // ---------------------------------------------------------------------------------------------
@@ -773,8 +690,6 @@ const CAT_TREE: &[(&str, &[&str])] = &[
 #[derive(Clone)]
 struct Cat {
     path: String,
-    name: String,
-    parent: Option<usize>,
     uses: u32,
     last_used: u32,
 }
@@ -782,23 +697,17 @@ struct Cat {
 fn generate_cats() -> Vec<Cat> {
     let mut rng = Lcg(SEED);
     let mut cats: Vec<Cat> = Vec::new();
-    let mut parents = Vec::new();
     for (p, _) in CAT_TREE {
-        parents.push(cats.len());
         cats.push(Cat {
             path: (*p).to_owned(),
-            name: (*p).to_owned(),
-            parent: None,
             uses: (rng.next() % 40) as u32,
             last_used: 0,
         });
     }
-    for ((p, kids), pi) in CAT_TREE.iter().zip(&parents) {
+    for (p, kids) in CAT_TREE {
         for k in *kids {
             cats.push(Cat {
                 path: format!("{p}:{k}"),
-                name: (*k).to_owned(),
-                parent: Some(*pi),
                 uses: (rng.next() % rng.next().max(1).min(400)) as u32 % 400,
                 last_used: 0,
             });
@@ -829,11 +738,6 @@ fn generate_cats() -> Vec<Cat> {
         c.uses += 300;
     }
     cats
-}
-
-struct Item {
-    cat: usize,
-    label: String,
 }
 
 type Matched = (usize, Vec<usize>);
@@ -936,9 +840,9 @@ impl Variant {
 
     fn label(self) -> &'static str {
         match self {
-            Self::A => "A · Typed: free text, quick-fill, shortcuts",
-            Self::B => "B · Assisted: dropdowns, calendar, floating hints",
-            Self::C => "C · Structured: segments, cents-first, two-level",
+            Self::A => "A · Typed: free text, inline hints",
+            Self::B => "B · Assisted: buttons while editing, floating hints, Create row",
+            Self::C => "C · Structured: date segments, cents-first money",
         }
     }
 
@@ -964,7 +868,10 @@ const TOGGLE_KEYS: [(Key, &str); 10] = [
 
 const VARIANT_KEYS: [(Key, &str); 3] = [(Key::A, "A"), (Key::B, "B"), (Key::C, "C")];
 
-/// (key, label, variants it applies to). `locale`, `currency` and `match` cycle.
+/// The toggles that cycle through values rather than flip on and off.
+const CYCLING: [&str; 4] = ["locale", "currency", "match", "rounding"];
+
+/// (key, label, variants it applies to).
 const TOGGLES: &[(&str, &str, &str)] = &[
     ("locale", "Locale", "all"),
     ("currency", "Account currency", "all"),
@@ -979,7 +886,7 @@ const TOGGLES: &[(&str, &str, &str)] = &[
     ("picker", "Calendar picker (button, Alt+Down)", "all"),
     ("match", "Category match", "all"),
     ("rank", "Category order: recent & frequent first", "all"),
-    ("preselect", "Preselect the top category match", "B C"),
+    ("rounding", "Calculator result rounding", "A B"),
 ];
 
 struct Toggles {
@@ -992,7 +899,7 @@ struct Toggles {
     picker: bool,
     match_mode: usize,
     rank: bool,
-    preselect: bool,
+    rounding: usize,
 }
 
 impl Toggles {
@@ -1004,7 +911,6 @@ impl Toggles {
             "shortcuts" => &mut self.shortcuts,
             "picker" => &mut self.picker,
             "rank" => &mut self.rank,
-            "preselect" => &mut self.preselect,
             _ => return None,
         })
     }
@@ -1012,8 +918,9 @@ impl Toggles {
     fn describe(&mut self, key: &str) -> serde_json::Value {
         match key {
             "locale" => json!(LOCS[self.locale].tag()),
-            "currency" => json!(CURS[self.currency].code),
+            "currency" => json!(CURRENCIES[self.currency]),
             "match" => json!(MatchMode::ALL[self.match_mode].name()),
+            "rounding" => json!(Rounding::ALL[self.rounding].name()),
             _ => json!(self.flag(key).map(|v| *v)),
         }
     }
@@ -1021,6 +928,70 @@ impl Toggles {
 
 // ---------------------------------------------------------------------------------------------
 // App state
+
+/// The draft row's cells, in Tab order.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Field {
+    Date,
+    Payee,
+    Category,
+    Amount,
+}
+
+impl Field {
+    const ALL: [Self; 4] = [Self::Date, Self::Payee, Self::Category, Self::Amount];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Date => "date",
+            Self::Payee => "payee",
+            Self::Category => "category",
+            Self::Amount => "amount",
+        }
+    }
+
+    fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|f| f.name() == name)
+    }
+
+    /// A fixed id, so `raw_input_hook` can tell that one of the cells has focus.
+    fn id(self) -> Id {
+        Id::new(("field", self.name()))
+    }
+
+    fn step(self, delta: isize) -> Self {
+        let i = Self::ALL.iter().position(|f| *f == self).unwrap_or(0) as isize;
+        Self::ALL[(i + delta).rem_euclid(Self::ALL.len() as isize) as usize]
+    }
+}
+
+/// How the user leaves a cell. The keys are the Register's (#17).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Leave {
+    /// Commit and move right; on Amount, commit and add the row.
+    Enter,
+    /// Commit and add the row from any cell.
+    CtrlEnter,
+    Tab,
+    BackTab,
+    /// Cancel the cell edit.
+    Esc,
+    /// Focus went elsewhere (a click, or the control file's `blur`): commit.
+    Blur,
+}
+
+impl Leave {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Enter => "enter",
+            Self::CtrlEnter => "ctrl+enter",
+            Self::Tab => "tab",
+            Self::BackTab => "shift+tab",
+            Self::Esc => "esc",
+            Self::Blur => "blur",
+        }
+    }
+}
 
 #[derive(Default)]
 struct TextEd {
@@ -1034,13 +1005,17 @@ struct TextEd {
 #[derive(Default)]
 struct Combo {
     ed: TextEd,
-    /// Text the user typed, without any quick-fill remainder (variant A).
+    /// The text the user typed.
     typed: String,
     open: bool,
+    /// The list shows every category, whatever was typed (⏷ or Alt+Down).
+    all: bool,
     hl: Option<usize>,
     /// The highlight was moved with the arrow keys.
     moved: bool,
     popup: Option<Rect>,
+    /// Variant B's ⏷ button, while editing.
+    btn: Option<Rect>,
 }
 
 enum Outcome {
@@ -1054,15 +1029,14 @@ struct Row {
     date: Option<Date>,
     payee: String,
     cat: Option<usize>,
-    amount: Option<i128>,
+    amount: Option<Money>,
 }
 
 struct Entered {
     date: Date,
     payee: String,
     cat: String,
-    amount: i128,
-    cur: usize,
+    amount: Money,
 }
 
 #[derive(Clone, Copy)]
@@ -1078,6 +1052,8 @@ enum DateAct {
 
 struct Proto {
     h: Harness,
+    theme: Theme,
+    fmts: &'static [Fmt; 3],
     variant: Variant,
     t: Toggles,
     dock_open: bool,
@@ -1085,11 +1061,13 @@ struct Proto {
     cats: Vec<Cat>,
     use_clock: u32,
     row: Row,
+    /// Oldest first; the draft row sits under the last one.
     entered: Vec<Entered>,
     emitted: VecDeque<String>,
     date_ed: TextEd,
     money_ed: TextEd,
-    combos: HashMap<&'static str, Combo>,
+    payee_ed: TextEd,
+    combo: Combo,
     /// Variant C date: day, month, year in logical order.
     segs: [Option<u32>; 3],
     seg: usize,
@@ -1101,8 +1079,12 @@ struct Proto {
     /// Calendar popup: the highlighted day.
     pick: Option<Date>,
     pick_rect: Option<Rect>,
-    pending_focus: Option<String>,
+    /// The calendar button, shown while the date cell is edited.
+    cal_btn: Option<Rect>,
+    pending_focus: Option<Field>,
     pending_blur: bool,
+    /// Tab (false) or Shift+Tab (true), taken from the raw input while a cell has focus.
+    pending_tab: Option<bool>,
     save_requested: bool,
 }
 
@@ -1120,11 +1102,40 @@ fn over(ui: &Ui, rect: Option<Rect>) -> bool {
     rect.is_some_and(|r| ui.input(|i| i.pointer.hover_pos().is_some_and(|p| r.contains(p))))
 }
 
+fn union(a: Option<Rect>, b: Option<Rect>) -> Option<Rect> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.union(b)),
+        (a, b) => a.or(b),
+    }
+}
+
+/// Picked on pointer press, not release: the press already moves focus off the field, and a
+/// click would land after the list has closed (#17).
+fn pressed(ui: &Ui, r: &egui::Response) -> bool {
+    r.hovered() && ui.input(|i| i.pointer.primary_pressed())
+}
+
+/// Keys a cell keeps for itself: without `escape`, egui drops the focus on Esc before the
+/// prototype sees the key (#17).
+const CELL_KEYS: egui::EventFilter = egui::EventFilter {
+    tab: true,
+    horizontal_arrows: true,
+    vertical_arrows: true,
+    escape: true,
+};
+
 struct BoxOut {
     resp: egui::Response,
     lost: bool,
-    enter: bool,
-    esc: bool,
+}
+
+const fn draft_row() -> Row {
+    Row {
+        date: None,
+        payee: String::new(),
+        cat: None,
+        amount: None,
+    }
 }
 
 impl Proto {
@@ -1136,10 +1147,11 @@ impl Proto {
             .unwrap_or(Variant::A);
         let mut h = Harness::new(args);
         h.event("variant", json!({ "to": variant.key(), "via": "start" }));
-        let cats = generate_cats();
-        let rent = cats.iter().position(|c| c.path == "Home:Rent");
-        Self {
+        let fmts: &'static [Fmt; 3] = Box::leak(Box::new(LOCS.map(Fmt::new)));
+        let mut proto = Self {
             h,
+            theme: Theme::new(ThemeSettings::default()),
+            fmts,
             variant,
             t: Toggles {
                 locale: 0,
@@ -1151,27 +1163,19 @@ impl Proto {
                 picker: true,
                 match_mode: 0,
                 rank: false,
-                preselect: true,
+                rounding: 0,
             },
             dock_open: true,
             status: "Ready".to_owned(),
-            cats,
+            cats: generate_cats(),
             use_clock: 100,
-            row: Row {
-                date: Some(Date {
-                    y: 2026,
-                    m: 10,
-                    d: 1,
-                }),
-                payee: "Maple Property Mgmt".to_owned(),
-                cat: rent,
-                amount: Some(-1_850 * MICRO),
-            },
+            row: draft_row(),
             entered: Vec::new(),
             emitted: VecDeque::new(),
             date_ed: TextEd::default(),
             money_ed: TextEd::default(),
-            combos: HashMap::new(),
+            payee_ed: TextEd::default(),
+            combo: Combo::default(),
             segs: [None; 3],
             seg: 0,
             seg_buf: String::new(),
@@ -1180,10 +1184,67 @@ impl Proto {
             neg: false,
             pick: None,
             pick_rect: None,
+            cal_btn: None,
             pending_focus: None,
             pending_blur: false,
+            pending_tab: None,
             save_requested: false,
+        };
+        proto.seed_rows();
+        proto.reset_row(false);
+        proto
+    }
+
+    /// A few entered rows, so the draft row sits under a Register's worth of context.
+    fn seed_rows(&mut self) {
+        let usd = code_of(0);
+        let seeds = [
+            (
+                (2026, 9, 28),
+                "Northside Grocers",
+                "Food & Dining:Groceries",
+                -84_17,
+            ),
+            ((2026, 9, 29), "Acme Payroll", "Income:Salary", 341_250),
+            (
+                (2026, 9, 30),
+                "City Power & Light",
+                "Bills & Utilities:Electricity",
+                -96_40,
+            ),
+        ];
+        for ((y, m, d), payee, cat, cents) in seeds {
+            self.entered.push(Entered {
+                date: Date { y, m, d },
+                payee: payee.to_owned(),
+                cat: cat.to_owned(),
+                amount: Money::new(Decimal::new(cents, 2), usd).unwrap(),
+            });
         }
+    }
+
+    /// The starting draft row (Home:Rent, 2026-10-01, -1,850.00), or a blank one.
+    fn reset_row(&mut self, blank: bool) {
+        self.row = if blank {
+            draft_row()
+        } else {
+            Row {
+                date: Some(Date {
+                    y: 2026,
+                    m: 10,
+                    d: 1,
+                }),
+                payee: "Maple Property Mgmt".to_owned(),
+                cat: self.cats.iter().position(|c| c.path == "Home:Rent"),
+                amount: Some(Money::new(Decimal::new(-1850, 0), self.code()).unwrap()),
+            }
+        };
+        self.cents.clear();
+        self.date_ed = TextEd::default();
+        self.money_ed = TextEd::default();
+        self.payee_ed = TextEd::default();
+        self.combo = Combo::default();
+        self.seg_error = None;
     }
 
     fn loc(&self) -> Loc {
@@ -1191,11 +1252,15 @@ impl Proto {
     }
 
     fn f(&self) -> &'static Fmt {
-        self.loc().fmt()
+        &self.fmts[self.t.locale]
     }
 
-    fn cur(&self) -> &'static Cur {
-        &CURS[self.t.currency]
+    fn code(&self) -> CurrencyCode {
+        code_of(self.t.currency)
+    }
+
+    fn dp(&self) -> u32 {
+        self.code().decimal_places()
     }
 
     /// Translate an English string: `de-DE` has a seed set, `en-XA` is the pseudo transform.
@@ -1214,8 +1279,24 @@ impl Proto {
         self.tr(s).replacen("{}", arg, 1)
     }
 
-    fn amt(&self, v: Option<i128>) -> String {
-        v.map_or_else(String::new, |v| fmt_amount(v, self.cur().dp, self.f()))
+    /// A bare amount, as a Register cell shows it.
+    fn amt(&self, v: Option<Money>) -> String {
+        v.map_or_else(String::new, |m| {
+            self.f()
+                .l10n
+                .format_amount(m.amount(), i18n_currency(m.currency()), AmountStyle::Bare)
+        })
+    }
+
+    /// Any decimal at all the places it has: for "rounded from" notes.
+    fn exact(&self, v: Decimal) -> String {
+        let v = v.round_dp(6).normalize();
+        let places = v.scale().max(self.dp());
+        self.f().l10n.format_amount(
+            v,
+            Currency::new(self.code().as_str(), places).unwrap(),
+            AmountStyle::Bare,
+        )
     }
 
     fn date_text(&self, d: Option<Date>) -> String {
@@ -1245,39 +1326,57 @@ impl Proto {
         self.date_ed.error = None;
         self.money_ed.error = None;
         self.seg_error = None;
-        self.combos.clear();
+        self.combo = Combo::default();
         self.h.screenshot(format!("variant-{}", to.key()));
     }
 
     fn set_toggle(&mut self, key: &str, value: Option<bool>, via: &str) {
-        match key {
-            "locale" | "currency" | "match" => {
-                let (len, slot) = match key {
-                    "locale" => (LOCS.len(), &mut self.t.locale),
-                    "currency" => (CURS.len(), &mut self.t.currency),
-                    _ => (MatchMode::ALL.len(), &mut self.t.match_mode),
-                };
-                *slot = (*slot + 1) % len;
-                if key == "currency" {
-                    // Committed amounts always carry exactly the currency's decimal places.
-                    let dp = CURS[self.t.currency].dp;
-                    self.row.amount = self.row.amount.map(|v| round_dp(v, dp));
-                    self.cents.clear();
-                }
+        if CYCLING.contains(&key) {
+            let (len, slot) = match key {
+                "locale" => (LOCS.len(), &mut self.t.locale),
+                "currency" => (CURRENCIES.len(), &mut self.t.currency),
+                "rounding" => (Rounding::ALL.len(), &mut self.t.rounding),
+                _ => (MatchMode::ALL.len(), &mut self.t.match_mode),
+            };
+            *slot = (*slot + 1) % len;
+            if key == "currency" {
+                // Stub: the account's currency changed, so the draft amount is relabelled
+                // (not converted) at the new currency's decimal places.
+                let code = self.code();
+                self.row.amount = self.row.amount.map(|m| {
+                    Money::rounded(m.amount(), code, RoundingPolicy::HalfAwayFromZero).unwrap()
+                });
+                self.cents.clear();
+                self.money_ed = TextEd::default();
             }
-            _ => {
-                let Some(slot) = self.t.flag(key) else {
-                    self.h.event("control_unknown", json!({ "toggle": key }));
-                    return;
-                };
-                *slot = value.unwrap_or(!*slot);
-            }
+        } else {
+            let Some(slot) = self.t.flag(key) else {
+                self.h.event("control_unknown", json!({ "toggle": key }));
+                return;
+            };
+            *slot = value.unwrap_or(!*slot);
         }
         let v = self.t.describe(key);
         self.h
             .event("toggle", json!({ "key": key, "value": v, "via": via }));
         self.h
             .screenshot(format!("toggle-{key}-{}", v.to_string().trim_matches('"')));
+    }
+
+    /// Step a cycling toggle until it shows `value`.
+    fn set_cycling(&mut self, key: &str, value: &str, cmd: &str) {
+        for _ in 0..4 {
+            if self
+                .t
+                .describe(key)
+                .as_str()
+                .is_some_and(|v| v.starts_with(value))
+            {
+                return;
+            }
+            self.set_toggle(key, None, "control");
+        }
+        self.h.event("control_unknown", json!({ "command": cmd }));
     }
 
     fn set_dock(&mut self, open: bool, via: &str) {
@@ -1300,28 +1399,21 @@ impl Proto {
             "toggle" => {
                 let (key, value) = rest
                     .split_once(' ')
-                    .map_or((rest, None), |(k, v)| (k, Some(v.trim() == "on")));
-                self.set_toggle(key, value, "control");
+                    .map_or((rest, None), |(k, v)| (k, Some(v.trim())));
+                if CYCLING.contains(&key) && value.is_some() {
+                    self.set_cycling(key, value.unwrap_or_default(), cmd);
+                } else {
+                    self.set_toggle(key, value.map(|v| v == "on"), "control");
+                }
             }
-            "locale" => match LOCS.iter().position(|l| l.tag() == rest) {
-                Some(i) => {
-                    self.t.locale = i;
-                    self.h.event(
-                        "toggle",
-                        json!({ "key": "locale", "value": rest, "via": "control" }),
-                    );
-                    self.h.screenshot(format!("toggle-locale-{rest}"));
-                }
+            "locale" => self.set_cycling("locale", rest, cmd),
+            "currency" => self.set_cycling("currency", rest, cmd),
+            "rounding" => self.set_cycling("rounding", rest, cmd),
+            "match" => self.set_cycling("match", rest, cmd),
+            "focus" => match Field::from_name(rest) {
+                Some(f) => self.pending_focus = Some(f),
                 None => self.h.event("control_unknown", json!({ "command": cmd })),
             },
-            "currency" => match CURS.iter().position(|c| c.code == rest) {
-                Some(i) => {
-                    self.t.currency = (i + CURS.len() - 1) % CURS.len();
-                    self.set_toggle("currency", None, "control");
-                }
-                None => self.h.event("control_unknown", json!({ "command": cmd })),
-            },
-            "focus" => self.pending_focus = Some(rest.to_owned()),
             "blur" => self.pending_blur = true,
             "set" => {
                 let (field, text) = rest.split_once(' ').unwrap_or((rest, ""));
@@ -1330,6 +1422,7 @@ impl Proto {
             "picker" => {
                 if rest == "open" {
                     self.pick = Some(self.row.date.unwrap_or(TODAY));
+                    self.pending_focus = Some(Field::Date);
                 } else {
                     self.pick = None;
                 }
@@ -1339,26 +1432,7 @@ impl Proto {
                 );
             }
             "reset" => {
-                self.row = if rest == "blank" {
-                    Row {
-                        date: None,
-                        payee: String::new(),
-                        cat: None,
-                        amount: None,
-                    }
-                } else {
-                    Row {
-                        date: Some(Date {
-                            y: 2026,
-                            m: 10,
-                            d: 1,
-                        }),
-                        payee: "Maple Property Mgmt".to_owned(),
-                        cat: self.cats.iter().position(|c| c.path == "Home:Rent"),
-                        amount: Some(-1_850 * MICRO),
-                    }
-                };
-                self.cents.clear();
+                self.reset_row(rest == "blank");
                 self.h.event("reset", json!({ "row": rest }));
             }
             "screenshot" => self
@@ -1368,6 +1442,7 @@ impl Proto {
             "reload" => {
                 self.cats = generate_cats();
                 self.entered.clear();
+                self.seed_rows();
                 self.h.event("reload", json!({ "seed": SEED }));
             }
             "quit" => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
@@ -1377,9 +1452,13 @@ impl Proto {
 
     /// Put `text` into a field as if typed, without committing it.
     fn control_set(&mut self, field: &str, text: &str) {
-        self.pending_focus = Some(field.to_owned());
-        match field {
-            "date" => {
+        let Some(f) = Field::from_name(field) else {
+            self.h.event("control_unknown", json!({ "set": field }));
+            return;
+        };
+        self.pending_focus = Some(f);
+        match f {
+            Field::Date => {
                 if self.variant == Variant::C {
                     let base = self.row.date.unwrap_or(TODAY);
                     if let Ok(Some(d)) = parse_date(text, self.f(), true, base) {
@@ -1391,7 +1470,7 @@ impl Proto {
                     self.date_ed.error = None;
                 }
             }
-            "amount" => {
+            Field::Amount => {
                 if self.variant == Variant::C {
                     self.cents = text.chars().filter(char::is_ascii_digit).collect();
                     self.neg = text.contains('-');
@@ -1401,26 +1480,84 @@ impl Proto {
                     self.money_ed.error = None;
                 }
             }
-            "payee" => self.row.payee = text.to_owned(),
-            "category" | "child" => {
-                let key = match (self.variant, field) {
-                    (Variant::A, _) => "cat_field",
-                    (Variant::B, _) => "cat_field",
-                    (Variant::C, "child") => "cat_child",
-                    (Variant::C, _) => "cat_parent",
-                };
-                let st = self.combos.entry(key).or_default();
+            Field::Payee => {
+                self.payee_ed.buf = text.to_owned();
+                self.payee_ed.dirty = true;
+            }
+            Field::Category => {
+                let st = &mut self.combo;
                 st.ed.buf = text.to_owned();
                 st.typed = text.to_owned();
                 st.ed.dirty = true;
                 st.ed.error = None;
                 st.open = true;
-                st.hl = None;
+                st.all = false;
+                st.hl = Some(0);
+                st.moved = false;
             }
-            _ => self.h.event("control_unknown", json!({ "set": field })),
         }
         self.h
             .event("control_set", json!({ "field": field, "text": text }));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Leaving a cell: the Register's keys
+
+    /// Requests focus for `field` when the control file or the last cell asked for it.
+    fn take_pending_focus(&mut self, ui: &Ui, field: Field) -> bool {
+        if self.pending_focus != Some(field) {
+            return false;
+        }
+        self.pending_focus = None;
+        ui.memory_mut(|m| m.request_focus(field.id()));
+        true
+    }
+
+    /// The key (or the control file's `blur`) that leaves the focused cell this frame.
+    /// Call before the cell's widget, after any popup has taken the keys it owns. Modified
+    /// keys are matched before their plain forms: `consume_key` ignores unnamed modifiers.
+    fn leave_key(&mut self, ui: &Ui, field: Field) -> Option<Leave> {
+        if !ui.memory(|m| m.has_focus(field.id())) {
+            return None;
+        }
+        if std::mem::take(&mut self.pending_blur) {
+            ui.memory_mut(|m| m.surrender_focus(field.id()));
+            return Some(Leave::Blur);
+        }
+        if let Some(back) = self.pending_tab.take() {
+            return Some(if back { Leave::BackTab } else { Leave::Tab });
+        }
+        ui.input_mut(|i| {
+            if i.consume_key(Modifiers::COMMAND, Key::Enter) {
+                Some(Leave::CtrlEnter)
+            } else if i.consume_key(Modifiers::NONE, Key::Enter) {
+                Some(Leave::Enter)
+            } else if i.consume_key(Modifiers::NONE, Key::Escape) {
+                Some(Leave::Esc)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// After a cell commits (`ok`) or fails to: move on, or stay with the error.
+    fn finish_leave(&mut self, ui: &Ui, field: Field, leave: Leave, ok: bool) {
+        self.h.event(
+            "cell_leave",
+            json!({ "field": field.name(), "via": leave.name(), "ok": ok }),
+        );
+        if !ok {
+            ui.memory_mut(|m| m.request_focus(field.id()));
+            return;
+        }
+        match leave {
+            Leave::Enter if field == Field::Amount => self.save_requested = true,
+            Leave::Enter | Leave::Tab => self.pending_focus = Some(field.step(1)),
+            Leave::BackTab => self.pending_focus = Some(field.step(-1)),
+            Leave::CtrlEnter => self.save_requested = true,
+            Leave::Esc => ui.memory_mut(|m| m.surrender_focus(field.id())),
+            Leave::Blur => {}
+        }
     }
 
     // -----------------------------------------------------------------------------------------
@@ -1437,12 +1574,10 @@ impl Proto {
         hint: &str,
         popup: Option<Rect>,
     ) -> BoxOut {
-        let focused = ui.memory(|m| m.has_focus(id));
-        let enter = focused && ui.input(|i| i.key_pressed(Key::Enter));
-        let esc = focused && ui.input(|i| i.key_pressed(Key::Escape));
         let mut te = egui::TextEdit::singleline(&mut ed.buf)
             .id(id)
             .desired_width(width)
+            .event_filter(CELL_KEYS)
             .hint_text(hint);
         if right {
             te = te.horizontal_align(Align::RIGHT);
@@ -1463,12 +1598,7 @@ impl Proto {
             lost = false;
         }
         resp.id = id;
-        BoxOut {
-            resp,
-            lost,
-            enter,
-            esc,
-        }
+        BoxOut { resp, lost }
     }
 
     /// The error or preview line under a field: inline (A, C) or a floating bubble (B).
@@ -1498,45 +1628,94 @@ impl Proto {
     }
 
     // -----------------------------------------------------------------------------------------
+    // Payee: a plain text cell, here only so Tab and Enter walk a real row
+
+    fn payee_field(&mut self, ui: &mut Ui) {
+        let field = Field::Payee;
+        let id = field.id();
+        self.take_pending_focus(ui, field);
+        let leave = self.leave_key(ui, field);
+        let mut ed = std::mem::take(&mut self.payee_ed);
+        let focused = ui.memory(|m| m.has_focus(id));
+        if !focused && !ed.dirty {
+            ed.buf = self.row.payee.clone();
+        }
+        let out = self.edit_box(ui, &mut ed, id, "payee field", 170.0, false, "", None);
+        let leave = leave.or(out.lost.then_some(Leave::Blur));
+        match leave {
+            Some(Leave::Esc) => {
+                ed.buf = self.row.payee.clone();
+                ed.dirty = false;
+                self.h.event("field_revert", json!({ "field": "payee" }));
+                self.finish_leave(ui, field, Leave::Esc, true);
+            }
+            Some(l) => {
+                self.row.payee = ed.buf.trim().to_owned();
+                ed.dirty = false;
+                self.finish_leave(ui, field, l, true);
+            }
+            None => {}
+        }
+        self.payee_ed = ed;
+    }
+
+    // -----------------------------------------------------------------------------------------
     // Money
 
     /// Returns the value and a note (e.g. that a calculator result was rounded).
-    fn parse_money(&self, raw: &str) -> Result<(Option<i128>, Option<String>), String> {
-        let (f, cur) = (self.f(), self.cur());
-        let bad = |e: PErr| match e {
-            PErr::Empty => unreachable!(),
-            PErr::Invalid => self
+    fn parse_money(&self, raw: &str) -> Result<(Option<Money>, Option<String>), String> {
+        let (f, code) = (self.f(), self.code());
+        let bad = |e: AmountParseError| match e {
+            AmountParseError::Empty => unreachable!(),
+            AmountParseError::Invalid => self
                 .tr("“{}” isn't an amount here. Decimal mark: “{}”, group separator: “{}”.")
                 .replacen("{}", raw.trim(), 1)
                 .replacen("{}", &f.dec.to_string(), 1)
                 .replacen("{}", &f.grp.to_string(), 1),
-            PErr::Decimals(dp) => self
+            AmountParseError::TooManyDecimalPlaces { decimal_places } => self
                 .tr("{} amounts have {} decimal places")
-                .replacen("{}", cur.code, 1)
-                .replacen("{}", &dp.to_string(), 1),
+                .replacen("{}", code.as_str(), 1)
+                .replacen("{}", &decimal_places.to_string(), 1),
+            AmountParseError::OutOfRange => self.tr("That amount is too large"),
         };
         if raw.trim().is_empty() {
             return Ok((None, None));
         }
         if self.t.calc && self.variant != Variant::C && looks_like_expression(raw) {
-            return match eval_expression(raw, f, cur) {
-                Ok(v) => {
-                    let r = round_dp(v, cur.dp);
-                    let note = (r != v).then(|| self.tr1("rounded from {}", &trim_micro(v, f)));
-                    Ok((Some(r), note))
+            let v = match eval_expression(raw, &f.l10n) {
+                Ok(v) => v,
+                Err(AmountParseError::Empty) => return Ok((None, None)),
+                Err(e) => return Err(bad(e)),
+            };
+            if let Ok(m) = Money::new(v, code) {
+                return Ok((Some(m), None));
+            }
+            let rounding = Rounding::ALL[self.t.rounding];
+            return match rounding.policy() {
+                None => Err(self
+                    .tr("= {}, but {} amounts have {} decimal places. Not rounded.")
+                    .replacen("{}", &self.exact(v), 1)
+                    .replacen("{}", code.as_str(), 1)
+                    .replacen("{}", &self.dp().to_string(), 1)),
+                Some(policy) => {
+                    let m = Money::rounded(v, code, policy)
+                        .map_err(|_| bad(AmountParseError::OutOfRange))?;
+                    let note = self
+                        .tr("rounded from {} ({})")
+                        .replacen("{}", &self.exact(v), 1)
+                        .replacen("{}", rounding.name(), 1);
+                    Ok((Some(m), Some(note)))
                 }
-                Err(PErr::Empty) => Ok((None, None)),
-                Err(e) => Err(bad(e)),
             };
         }
-        match parse_plain(raw, f, cur, cur.dp) {
-            Ok(v) => Ok((Some(v), None)),
-            Err(PErr::Empty) => Ok((None, None)),
+        match f.l10n.parse_amount(raw, self.dp()) {
+            Ok(v) => Ok((Some(Money::new(v, code).unwrap()), None)),
+            Err(AmountParseError::Empty) => Ok((None, None)),
             Err(e) => Err(bad(e)),
         }
     }
 
-    fn commit_money(&mut self, ed: &mut TextEd, id: Id, ui: &mut Ui) -> bool {
+    fn commit_money(&mut self, ed: &mut TextEd) -> bool {
         let raw = ed.buf.clone();
         match self.parse_money(&raw) {
             Ok((v, note)) => {
@@ -1548,6 +1727,9 @@ impl Proto {
                     "field_commit",
                     json!({ "field": "amount", "raw": raw, "outcome": "ok", "value": ed.buf, "note": note }),
                 );
+                if let Some(n) = note {
+                    self.status = n;
+                }
                 true
             }
             Err(msg) => {
@@ -1556,46 +1738,40 @@ impl Proto {
                     json!({ "field": "amount", "raw": raw, "outcome": "error", "message": msg }),
                 );
                 ed.error = Some(msg);
-                ui.memory_mut(|m| m.request_focus(id));
                 false
             }
         }
     }
 
     fn money_field(&mut self, ui: &mut Ui) {
-        let id = ui.make_persistent_id("amount_field");
-        if self.pending_focus.as_deref() == Some("amount") {
-            ui.memory_mut(|m| m.request_focus(id));
-            self.pending_focus = None;
-        }
-        if self.pending_blur && ui.memory(|m| m.has_focus(id)) {
-            ui.memory_mut(|m| m.surrender_focus(id));
-            self.pending_blur = false;
-        }
+        let field = Field::Amount;
+        let id = field.id();
+        self.take_pending_focus(ui, field);
         if self.variant == Variant::C {
             self.money_cents(ui, id);
             return;
         }
+        let leave = self.leave_key(ui, field);
         let focused = ui.memory(|m| m.has_focus(id));
         let mut ed = std::mem::take(&mut self.money_ed);
-        if !focused && ed.error.is_none() {
+        if !focused && ed.error.is_none() && !ed.dirty {
             ed.buf = self.amt(self.row.amount);
-            ed.dirty = false;
         }
         let out = self.edit_box(ui, &mut ed, id, "amount field", 150.0, true, "0", None);
-        let mut saved = false;
-        if out.lost {
-            if out.esc {
+        let leave = leave.or(out.lost.then_some(Leave::Blur));
+        match leave {
+            Some(Leave::Esc) => {
                 ed.buf = self.amt(self.row.amount);
                 ed.dirty = false;
                 ed.error = None;
                 self.h.event("field_revert", json!({ "field": "amount" }));
-                if !ed.dirty {
-                    self.emit("CancelRowEdit", "Esc in amount");
-                }
-            } else {
-                saved = self.commit_money(&mut ed, id, ui) && out.enter;
+                self.finish_leave(ui, field, Leave::Esc, true);
             }
+            Some(l) => {
+                let ok = self.commit_money(&mut ed);
+                self.finish_leave(ui, field, l, ok);
+            }
+            None => {}
         }
         let msg = if let Some(e) = ed.error.clone() {
             Some((e, true))
@@ -1603,9 +1779,12 @@ impl Proto {
             Some(match self.parse_money(&ed.buf) {
                 Ok((Some(v), note)) => {
                     let mut s = format!(
-                        "= {} {}",
-                        fmt_with_symbol(v, self.cur(), self.f()),
-                        self.cur().code
+                        "= {}",
+                        self.f().l10n.format_amount(
+                            v.amount(),
+                            i18n_currency(v.currency()),
+                            AmountStyle::Symbol
+                        )
                     );
                     if let Some(n) = note {
                         s.push_str(&format!(" ({n})"));
@@ -1622,23 +1801,23 @@ impl Proto {
             self.note(ui, &out.resp, "amount", &text, bad);
         }
         self.money_ed = ed;
-        self.save_requested |= saved;
     }
 
-    fn cents_value(&self) -> Option<i128> {
+    fn cents_value(&self) -> Option<Money> {
         if self.cents.is_empty() {
             return None;
         }
-        let minor: i128 = self.cents.parse().unwrap_or(0);
-        let v = minor * 10_i128.pow(6 - self.cur().dp);
-        Some(if self.neg { -v } else { v })
+        let minor: i64 = self.cents.parse().unwrap_or(0);
+        let minor = if self.neg { -minor } else { minor };
+        Money::new(Decimal::new(minor, self.dp()), self.code()).ok()
     }
 
     fn money_cents(&mut self, ui: &mut Ui, id: Id) {
+        let field = Field::Amount;
+        let leave = self.leave_key(ui, field);
         let focused = ui.memory(|m| m.has_focus(id));
         let width = 150.0;
-        let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::click());
-        resp.id = id;
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::click());
         let resp = ui.interact(rect, id, Sense::click());
         self.h.track(&resp, "amount field");
         if resp.clicked() {
@@ -1646,26 +1825,12 @@ impl Proto {
         }
         let focused_now = ui.memory(|m| m.has_focus(id));
         if focused_now && !focused {
-            let a = self.row.amount.unwrap_or(0);
-            self.neg = a < 0;
-            self.cents = self.row.amount.map_or_else(String::new, |v| {
-                (v.abs() / 10_i128.pow(6 - self.cur().dp)).to_string()
-            });
+            let a = self.row.amount;
+            self.neg = a.is_some_and(|m| m.is_negative());
+            self.cents = a.map_or_else(String::new, |m| m.amount().abs().mantissa().to_string());
         }
-        let mut esc = false;
-        let mut enter = false;
-        if focused_now {
-            ui.memory_mut(|m| {
-                m.set_focus_lock_filter(
-                    id,
-                    egui::EventFilter {
-                        tab: false,
-                        horizontal_arrows: false,
-                        vertical_arrows: false,
-                        escape: false,
-                    },
-                );
-            });
+        if focused_now && leave.is_none() {
+            ui.memory_mut(|m| m.set_focus_lock_filter(id, CELL_KEYS));
             let (mut cents, mut neg) = (std::mem::take(&mut self.cents), self.neg);
             ui.input_mut(|i| {
                 i.events.retain(|e| match e {
@@ -1673,14 +1838,10 @@ impl Proto {
                         for c in s.chars() {
                             match c {
                                 '0'..='9' if cents.len() < 12 => {
-                                    if !(cents.is_empty() && c == '0') {
-                                        cents.push(c);
-                                    } else {
+                                    cents.push(c);
+                                    cents = cents.trim_start_matches('0').to_owned();
+                                    if cents.is_empty() {
                                         cents.push('0');
-                                        cents = cents.trim_start_matches('0').to_owned();
-                                        if cents.is_empty() {
-                                            cents.push('0');
-                                        }
                                     }
                                 }
                                 '-' | '−' => neg = true,
@@ -1708,8 +1869,6 @@ impl Proto {
                     }
                     _ => true,
                 });
-                esc = i.key_pressed(Key::Escape);
-                enter = i.key_pressed(Key::Enter);
             });
             self.cents = cents;
             self.neg = neg;
@@ -1725,19 +1884,22 @@ impl Proto {
             self.amt(shown)
         };
         self.paint_box(ui, rect, &text, focused_now, Align::RIGHT);
-        if focused_now && esc {
-            ui.memory_mut(|m| m.surrender_focus(id));
-            self.h.event("field_revert", json!({ "field": "amount" }));
-        } else if focused && !focused_now || (focused_now && enter) {
-            let v = self.cents_value();
-            self.row.amount = v;
-            self.h.event(
-                "field_commit",
-                json!({ "field": "amount", "raw": self.cents, "outcome": "ok", "value": self.amt(v) }),
-            );
-            if enter {
-                self.save_requested = true;
+        let leave = leave.or((focused && !focused_now).then_some(Leave::Blur));
+        match leave {
+            Some(Leave::Esc) => {
+                self.h.event("field_revert", json!({ "field": "amount" }));
+                self.finish_leave(ui, field, Leave::Esc, true);
             }
+            Some(l) => {
+                let v = self.cents_value();
+                self.row.amount = v;
+                self.h.event(
+                    "field_commit",
+                    json!({ "field": "amount", "raw": self.cents, "outcome": "ok", "value": self.amt(v) }),
+                );
+                self.finish_leave(ui, field, l, true);
+            }
+            None => {}
         }
     }
 
@@ -1775,19 +1937,25 @@ impl Proto {
     // -----------------------------------------------------------------------------------------
     // Date
 
-    fn date_hint(&self) -> String {
-        format!(
-            "{} = {}",
-            self.f().pattern,
-            fmt_date(
-                Date {
-                    y: 2026,
-                    m: 10,
-                    d: 5
-                },
-                self.f()
-            )
+    fn example_date(&self) -> String {
+        fmt_date(
+            Date {
+                y: 2026,
+                m: 10,
+                d: 5,
+            },
+            self.f(),
         )
+    }
+
+    fn date_hint(&self) -> String {
+        format!("{} = {}", self.f().pattern, self.example_date())
+    }
+
+    fn date_error(&self) -> String {
+        self.tr("Not a date. Expected {}, for example {}.")
+            .replacen("{}", self.f().pattern, 1)
+            .replacen("{}", &self.example_date(), 1)
     }
 
     fn apply_date_act(&self, act: DateAct, base: Date) -> Date {
@@ -1865,10 +2033,10 @@ impl Proto {
         self.set_segs(Some(d));
         self.pick = None;
         self.h
-            .event("date_pick", json!({ "date": fmt_date(d, &EN), "via": via }));
+            .event("date_pick", json!({ "date": d.iso(), "via": via }));
     }
 
-    fn commit_date(&mut self, ed: &mut TextEd, id: Id, ui: &mut Ui) -> bool {
+    fn commit_date(&mut self, ed: &mut TextEd) -> bool {
         let raw = ed.buf.clone();
         let base = self.row.date.unwrap_or(TODAY);
         match parse_date(&raw, self.f(), self.t.partial, base) {
@@ -1885,44 +2053,77 @@ impl Proto {
                 true
             }
             Err(()) => {
-                let msg = self
-                    .tr("Not a date. Expected {}, for example {}.")
-                    .replacen("{}", self.f().pattern, 1)
-                    .replacen(
-                        "{}",
-                        &fmt_date(
-                            Date {
-                                y: 2026,
-                                m: 10,
-                                d: 5,
-                            },
-                            self.f(),
-                        ),
-                        1,
-                    );
+                let msg = self.date_error();
                 self.h.event(
                     "field_commit",
                     json!({ "field": "date", "raw": raw, "outcome": "error", "message": msg }),
                 );
                 ed.error = Some(msg);
-                ui.memory_mut(|m| m.request_focus(id));
                 false
             }
         }
     }
 
-    fn date_field(&mut self, ui: &mut Ui) {
-        let id = ui.make_persistent_id("date_field");
-        if self.pending_focus.as_deref() == Some("date") {
-            ui.memory_mut(|m| m.request_focus(id));
-            self.pending_focus = None;
+    /// Keys the open calendar owns: arrows, PgUp/PgDn, Enter picks, Esc closes.
+    fn calendar_keys(&mut self, ui: &Ui) {
+        let Some(mut cur) = self.pick else { return };
+        let mut chosen = None;
+        let mut close = false;
+        ui.input_mut(|i| {
+            for (key, step) in [
+                (Key::ArrowLeft, -1),
+                (Key::ArrowRight, 1),
+                (Key::ArrowUp, -7),
+                (Key::ArrowDown, 7),
+            ] {
+                if i.consume_key(Modifiers::NONE, key) {
+                    cur = cur.add_days(step);
+                }
+            }
+            if i.consume_key(Modifiers::NONE, Key::PageUp) {
+                cur = cur.add_months(-1);
+            }
+            if i.consume_key(Modifiers::NONE, Key::PageDown) {
+                cur = cur.add_months(1);
+            }
+            if i.consume_key(Modifiers::NONE, Key::Enter) {
+                chosen = Some(cur);
+            }
+            if i.consume_key(Modifiers::NONE, Key::Escape) {
+                close = true;
+            }
+        });
+        if let Some(d) = chosen {
+            self.choose_date(d, "key");
+        } else if close {
+            self.pick = None;
+            self.h
+                .event("date_popup", json!({ "open": false, "via": "esc" }));
+        } else {
+            self.pick = Some(cur);
         }
-        if self.pending_blur && ui.memory(|m| m.has_focus(id)) {
-            ui.memory_mut(|m| m.surrender_focus(id));
-            self.pending_blur = false;
+    }
+
+    fn date_field(&mut self, ui: &mut Ui) {
+        let field = Field::Date;
+        let id = field.id();
+        self.take_pending_focus(ui, field);
+        let focused = ui.memory(|m| m.has_focus(id));
+        // The open calendar takes its keys first, then Alt+Down (before plain Down), then
+        // the shortcuts, then the keys that leave the cell.
+        if focused && self.pick.is_some() {
+            self.calendar_keys(ui);
+        }
+        if focused
+            && self.t.picker
+            && self.pick.is_none()
+            && ui.input_mut(|i| i.consume_key(Modifiers::ALT, Key::ArrowDown))
+        {
+            self.pick = Some(self.row.date.unwrap_or(TODAY));
+            self.h
+                .event("date_popup", json!({ "open": true, "via": "alt+down" }));
         }
         let mut field_rect = Rect::NOTHING;
-        let mut saved = false;
         let mut field_resp = None;
         ui.horizontal(|ui| {
             if self.variant == Variant::C {
@@ -1930,17 +2131,12 @@ impl Proto {
                 field_rect = r.rect;
                 field_resp = Some(r);
             } else {
-                let focused = ui.memory(|m| m.has_focus(id));
                 let mut ed = std::mem::take(&mut self.date_ed);
-                if !focused && ed.error.is_none() {
+                if !focused && ed.error.is_none() && !ed.dirty {
                     ed.buf = self.date_text(self.row.date);
-                    ed.dirty = false;
                 }
                 if focused && self.t.shortcuts {
-                    let base = self
-                        .row
-                        .date
-                        .unwrap_or(TODAY);
+                    let base = self.row.date.unwrap_or(TODAY);
                     let base = parse_date(&ed.buf, self.f(), self.t.partial, base)
                         .ok()
                         .flatten()
@@ -1956,61 +2152,57 @@ impl Proto {
                         ed.sel_all = true;
                         self.h.event(
                             "date_shortcut",
-                            json!({ "key": key, "from": fmt_date(base, &EN), "to": fmt_date(nd, &EN) }),
+                            json!({ "key": key, "from": base.iso(), "to": nd.iso() }),
                         );
                     }
                 }
+                let leave = self.leave_key(ui, field);
                 let hint = self.date_hint();
-                let out = self.edit_box(
-                    ui,
-                    &mut ed,
-                    id,
-                    "date field",
-                    120.0,
-                    false,
-                    &hint,
-                    self.pick_rect,
-                );
-                if out.lost {
-                    if out.esc {
+                let popup = union(self.pick_rect, self.cal_btn);
+                let out = self.edit_box(ui, &mut ed, id, "date field", 110.0, false, &hint, popup);
+                let leave = leave.or(out.lost.then_some(Leave::Blur));
+                match leave {
+                    Some(Leave::Esc) => {
                         ed.buf = self.date_text(self.row.date);
                         ed.dirty = false;
                         ed.error = None;
-                        self.pick = None;
                         self.h.event("field_revert", json!({ "field": "date" }));
-                    } else {
-                        saved = self.commit_date(&mut ed, id, ui) && out.enter;
+                        self.finish_leave(ui, field, Leave::Esc, true);
                     }
+                    Some(l) => {
+                        self.pick = None;
+                        let ok = self.commit_date(&mut ed);
+                        self.finish_leave(ui, field, l, ok);
+                    }
+                    None => {}
                 }
                 field_rect = out.resp.rect;
                 field_resp = Some(out.resp);
                 self.date_ed = ed;
             }
-            if self.t.picker {
-                let b = ui.small_button(self.tr("Cal"));
+            // The calendar button shows only while the cell is edited (#17).
+            let editing =
+                ui.memory(|m| m.has_focus(id)) || self.pick.is_some() || over(ui, self.cal_btn);
+            if self.t.picker && editing {
+                let b = ui.small_button("📅").on_hover_text("Calendar (Alt+Down)");
                 self.h.track(&b, "date picker button");
-                if b.clicked() {
+                if pressed(ui, &b) {
                     self.pick = if self.pick.is_some() {
                         None
                     } else {
                         Some(self.row.date.unwrap_or(TODAY))
                     };
-                    self.h
-                        .event("date_popup", json!({ "open": self.pick.is_some(), "via": "click" }));
+                    ui.memory_mut(|m| m.request_focus(id));
+                    self.h.event(
+                        "date_popup",
+                        json!({ "open": self.pick.is_some(), "via": "click" }),
+                    );
                 }
+                self.cal_btn = Some(b.rect);
+            } else {
+                self.cal_btn = None;
             }
         });
-        // Alt+Down opens the picker from the field.
-        let focused = ui.memory(|m| m.has_focus(id));
-        if focused
-            && self.t.picker
-            && self.pick.is_none()
-            && ui.input_mut(|i| i.consume_key(Modifiers::ALT, Key::ArrowDown))
-        {
-            self.pick = Some(self.row.date.unwrap_or(TODAY));
-            self.h
-                .event("date_popup", json!({ "open": true, "via": "alt+down" }));
-        }
         if self.pick.is_some() && self.t.picker {
             self.calendar(ui, field_rect, id);
         } else {
@@ -2018,6 +2210,7 @@ impl Proto {
             self.pick_rect = None;
         }
         // Message line.
+        let focused = ui.memory(|m| m.has_focus(id));
         let (err, live) = if self.variant == Variant::C {
             (self.seg_error.clone(), None)
         } else {
@@ -2038,11 +2231,11 @@ impl Proto {
                 self.note(ui, &resp, "date", &text, false);
             }
         }
-        self.save_requested |= saved;
     }
 
     /// Variant C: day, month and year as separate segments.
     fn date_segments(&mut self, ui: &mut Ui, id: Id) -> egui::Response {
+        let field = Field::Date;
         let f = self.f();
         let order = self.seg_order();
         let placeholders = if matches!(self.loc(), Loc::EnUs) {
@@ -2094,22 +2287,9 @@ impl Proto {
             self.set_segs(self.row.date);
             self.seg = 0;
         }
-        let mut esc = false;
-        let mut enter = false;
+        let mut leave = None;
         if focused {
-            ui.memory_mut(|m| {
-                m.set_focus_lock_filter(
-                    id,
-                    egui::EventFilter {
-                        tab: false,
-                        horizontal_arrows: true,
-                        vertical_arrows: true,
-                        escape: false,
-                    },
-                );
-            });
-            esc = ui.input(|i| i.key_pressed(Key::Escape));
-            enter = ui.input(|i| i.key_pressed(Key::Enter));
+            ui.memory_mut(|m| m.set_focus_lock_filter(id, CELL_KEYS));
             if self.t.shortcuts && self.seg_buf.is_empty() {
                 let base = self.row.date.unwrap_or(TODAY);
                 if let Some((act, key)) = self.date_shortcuts(ui, true, false) {
@@ -2118,10 +2298,11 @@ impl Proto {
                     self.set_segs(Some(nd));
                     self.h.event(
                         "date_shortcut",
-                        json!({ "key": key, "from": fmt_date(base, &EN), "to": fmt_date(nd, &EN) }),
+                        json!({ "key": key, "from": base.iso(), "to": nd.iso() }),
                     );
                 }
             }
+            leave = self.leave_key(ui, field);
             // Digits, separators, arrows, backspace.
             let mut digits = String::new();
             let mut sep = false;
@@ -2191,7 +2372,7 @@ impl Proto {
                     _ => (1900, 2200),
                 };
                 let span = i64::from(hi - lo + 1);
-                let n = (i64::from(cur - lo) + delta).rem_euclid(span) as u32 + lo;
+                let n = (i64::from(cur.max(lo) - lo) + delta).rem_euclid(span) as u32 + lo;
                 self.segs[k] = Some(if self.segs[k].is_none() { today } else { n });
                 self.seg_buf.clear();
                 let seg_name = ["day", "month", "year"][k];
@@ -2254,85 +2435,44 @@ impl Proto {
                         self.row.date = Some(date);
                     }
                 }
-                None => {
-                    self.seg_error = Some(
-                        self.tr("Not a date. Expected {}, for example {}.")
-                            .replacen("{}", f.pattern, 1)
-                            .replacen(
-                                "{}",
-                                &fmt_date(
-                                    Date {
-                                        y: 2026,
-                                        m: 10,
-                                        d: 5,
-                                    },
-                                    f,
-                                ),
-                                1,
-                            ),
-                    );
-                }
+                None => self.seg_error = Some(self.date_error()),
             }
         }
-        if focused && esc {
-            self.set_segs(self.row.date);
-            ui.memory_mut(|m| m.surrender_focus(id));
-            self.h.event("field_revert", json!({ "field": "date" }));
-        } else if (was_focused && !focused) || (focused && enter) {
-            let err = self.seg_error.clone();
-            if let Some(msg) = err {
-                self.h.event(
-                    "field_commit",
-                    json!({ "field": "date", "raw": format!("{:?}", self.segs), "outcome": "error", "message": msg }),
-                );
-                ui.memory_mut(|m| m.request_focus(id));
-            } else {
-                if self.segs.iter().all(Option::is_none) {
-                    self.row.date = None;
-                }
-                self.h.event(
-                    "field_commit",
-                    json!({ "field": "date", "raw": format!("{:?}", self.segs), "outcome": "ok", "value": self.date_text(self.row.date) }),
-                );
-                if enter {
-                    self.save_requested = true;
+        let leave = leave.or((was_focused && !focused).then_some(Leave::Blur));
+        match leave {
+            Some(Leave::Esc) => {
+                self.set_segs(self.row.date);
+                self.h.event("field_revert", json!({ "field": "date" }));
+                self.finish_leave(ui, field, Leave::Esc, true);
+            }
+            Some(l) => {
+                let err = self.seg_error.clone();
+                if let Some(msg) = err {
+                    self.h.event(
+                        "field_commit",
+                        json!({ "field": "date", "raw": format!("{:?}", self.segs), "outcome": "error", "message": msg }),
+                    );
+                    self.finish_leave(ui, field, l, false);
+                } else {
+                    if self.segs.iter().all(Option::is_none) {
+                        self.row.date = None;
+                    }
+                    self.h.event(
+                        "field_commit",
+                        json!({ "field": "date", "raw": format!("{:?}", self.segs), "outcome": "ok", "value": self.date_text(self.row.date) }),
+                    );
+                    self.finish_leave(ui, field, l, true);
                 }
             }
+            None => {}
         }
         resp
     }
 
     fn calendar(&mut self, ui: &mut Ui, field_rect: Rect, id: Id) {
         let f = self.f();
-        let Some(cursor) = self.pick else { return };
-        // Keys go to the calendar while it is open.
+        let Some(mut cur) = self.pick else { return };
         let mut chosen = None;
-        let mut close = false;
-        let mut cur = cursor;
-        ui.input_mut(|i| {
-            for (key, step) in [
-                (Key::ArrowLeft, -1),
-                (Key::ArrowRight, 1),
-                (Key::ArrowUp, -7),
-                (Key::ArrowDown, 7),
-            ] {
-                if i.consume_key(Modifiers::NONE, key) {
-                    cur = cur.add_days(step);
-                }
-            }
-            if i.consume_key(Modifiers::NONE, Key::PageUp) {
-                cur = cur.add_months(-1);
-            }
-            if i.consume_key(Modifiers::NONE, Key::PageDown) {
-                cur = cur.add_months(1);
-            }
-            if i.consume_key(Modifiers::NONE, Key::Enter) {
-                chosen = Some((cur, "key"));
-            }
-            if i.consume_key(Modifiers::NONE, Key::Escape) {
-                close = true;
-            }
-        });
         let first = Date { d: 1, ..cur };
         let lead = if f.sunday_first {
             (first.weekday() + 1) % 7
@@ -2350,17 +2490,20 @@ impl Proto {
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        if ui.small_button("<").clicked() {
+                        let b = ui.small_button("⏴");
+                        if pressed(ui, &b) {
                             nav = -1;
                         }
                         ui.label(
                             RichText::new(format!("{} {}", f.months[cur.m as usize - 1], cur.y))
                                 .strong(),
                         );
-                        if ui.small_button(">").clicked() {
+                        let b = ui.small_button("⏵");
+                        if pressed(ui, &b) {
                             nav = 1;
                         }
-                        if ui.small_button(&today_label).clicked() {
+                        let b = ui.small_button(&today_label);
+                        if pressed(ui, &b) {
                             go_today = true;
                         }
                     });
@@ -2395,7 +2538,7 @@ impl Proto {
                                         egui::Stroke::NONE
                                     });
                                 let r = ui.add_sized([30.0, 22.0], btn);
-                                if r.clicked() {
+                                if pressed(ui, &r) {
                                     chosen = Some((d, "click"));
                                 }
                             }
@@ -2404,47 +2547,34 @@ impl Proto {
                 });
             });
         self.pick_rect = Some(area.response.rect);
+        self.h.region(area.response.rect, "calendar");
         if nav != 0 {
             cur = cur.add_months(nav);
         }
         if go_today {
             chosen = Some((TODAY, "today"));
         }
-        // Click outside the calendar and the field closes it.
-        let pressed = ui.input(|i| i.pointer.primary_pressed());
-        if pressed
+        // A press outside the calendar, the field and its button closes it.
+        let outside = ui.input(|i| i.pointer.primary_pressed())
             && !over(ui, self.pick_rect)
-            && !over(ui, Some(field_rect.expand2(Vec2::new(60.0, 0.0))))
-        {
-            close = true;
+            && !over(ui, self.cal_btn)
+            && !over(ui, Some(field_rect));
+        if let Some((d, via)) = chosen {
+            self.choose_date(d, via);
+            ui.memory_mut(|m| m.request_focus(id));
+        } else if outside {
+            self.pick = None;
             self.h.event(
                 "date_popup",
                 json!({ "open": false, "via": "click-outside" }),
             );
-        }
-        if let Some((d, via)) = chosen {
-            self.choose_date(d, via);
-            ui.memory_mut(|m| m.request_focus(id));
-        } else if close {
-            self.pick = None;
         } else {
             self.pick = Some(cur);
         }
     }
 
     // -----------------------------------------------------------------------------------------
-    // Category
-
-    fn items_all(&self) -> Vec<Item> {
-        self.cats
-            .iter()
-            .enumerate()
-            .map(|(i, c)| Item {
-                cat: i,
-                label: c.path.clone(),
-            })
-            .collect()
-    }
+    // Category: the combobox list #17 settled, in every variant
 
     fn rank_key(&self, cat: usize) -> (i64, String) {
         let c = &self.cats[cat];
@@ -2458,14 +2588,16 @@ impl Proto {
         }
     }
 
-    fn ranked(&self, items: &[Item], q: &str) -> Vec<Matched> {
+    /// Matching categories, best first: (category index, matched character indices).
+    fn ranked(&self, q: &str) -> Vec<Matched> {
         let mode = MatchMode::ALL[self.t.match_mode];
-        let mut out: Vec<(u32, (i64, String), Matched)> = items
+        let mut out: Vec<(u32, (i64, String), Matched)> = self
+            .cats
             .iter()
             .enumerate()
-            .filter_map(|(i, it)| {
-                let (score, idx) = match_label(mode, q, &it.label)?;
-                Some((score, self.rank_key(it.cat), (i, idx)))
+            .filter_map(|(i, c)| {
+                let (score, idx) = match_label(mode, q, &c.path)?;
+                Some((score, self.rank_key(i), (i, idx)))
             })
             .collect();
         out.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
@@ -2515,21 +2647,14 @@ impl Proto {
         job
     }
 
-    /// Decide what leaving the field means.
-    fn resolve(
-        &self,
-        st: &Combo,
-        list: &[Matched],
-        items: &[Item],
-        offer_create: bool,
-    ) -> Option<Outcome> {
-        let intent = st.ed.dirty || st.moved;
-        if !intent {
+    /// What leaving the cell means: the highlighted row, else an exact match for the typed text.
+    fn resolve(&self, st: &Combo, list: &[Matched], offer_create: bool) -> Option<Outcome> {
+        if !(st.ed.dirty || st.moved) {
             return None;
         }
-        if let Some(h) = st.hl {
+        if let Some(h) = st.hl.filter(|_| st.open) {
             if h < list.len() {
-                return Some(Outcome::Pick(items[list[h].0].cat));
+                return Some(Outcome::Pick(list[h].0));
             }
             if offer_create {
                 return Some(Outcome::Create(st.ed.buf.trim().to_owned()));
@@ -2539,8 +2664,12 @@ impl Proto {
         if text.is_empty() {
             return Some(Outcome::Clear);
         }
-        if let Some(it) = items.iter().find(|it| it.label.eq_ignore_ascii_case(text)) {
-            return Some(Outcome::Pick(it.cat));
+        if let Some(i) = self
+            .cats
+            .iter()
+            .position(|c| c.path.eq_ignore_ascii_case(text))
+        {
+            return Some(Outcome::Pick(i));
         }
         Some(if offer_create {
             Outcome::Create(text.to_owned())
@@ -2549,246 +2678,258 @@ impl Proto {
         })
     }
 
-    /// Type-to-filter combo: used by B (all categories) and twice by C (parent, child).
-    /// `inline` is variant A: the first path-prefix match is completed in the field.
-    fn combo(
-        &mut self,
-        ui: &mut Ui,
-        key: &'static str,
-        name: &str,
-        items: &[Item],
-        current: String,
-        width: f32,
-        offer_create: bool,
-        inline: bool,
-    ) -> Option<Outcome> {
-        let id = ui.make_persistent_id(key);
-        let mut st = self.combos.remove(key).unwrap_or_default();
-        let mut result = None;
+    /// B offers `Create "x"…` when the typed text names no category.
+    fn create_row(&self, st: &Combo, offer_create: bool) -> bool {
+        offer_create
+            && st.ed.dirty
+            && !st.all
+            && !st.ed.buf.trim().is_empty()
+            && !self
+                .cats
+                .iter()
+                .any(|c| c.path.eq_ignore_ascii_case(st.ed.buf.trim()))
+    }
+
+    fn query(st: &Combo) -> String {
+        if st.all || !st.ed.dirty {
+            String::new()
+        } else {
+            st.typed.clone()
+        }
+    }
+
+    fn cat_field(&mut self, ui: &mut Ui) {
+        let field = Field::Category;
+        let id = field.id();
+        let offer_create = self.variant == Variant::B;
+        self.take_pending_focus(ui, field);
+        let mut st = std::mem::take(&mut self.combo);
         let focused = ui.memory(|m| m.has_focus(id));
-        let want_focus = self.pending_focus.as_deref().is_some_and(|f| {
-            f == "category" && matches!(key, "cat_field" | "cat_parent")
-                || (f == "child" && key == "cat_child")
-        });
-        if want_focus {
-            ui.memory_mut(|m| m.request_focus(id));
-            self.pending_focus = None;
-        }
-        if self.pending_blur && focused {
-            ui.memory_mut(|m| m.surrender_focus(id));
-            self.pending_blur = false;
-        }
         if !focused && st.ed.error.is_none() && !st.ed.dirty {
-            st.ed.buf = current;
+            st.ed.buf = self.cat_text();
             st.typed = st.ed.buf.clone();
             st.open = false;
+            st.all = false;
             st.hl = None;
             st.moved = false;
         }
-        let query = if st.ed.dirty {
-            st.typed.clone()
-        } else {
-            String::new()
-        };
-        let mut list = self.ranked(items, &query);
-        let create_row = offer_create
-            && st.ed.dirty
-            && !st.ed.buf.trim().is_empty()
-            && !items
-                .iter()
-                .any(|it| it.label.eq_ignore_ascii_case(st.ed.buf.trim()));
-        let rows = list.len() + usize::from(create_row);
-        // Keys that steer the list; consumed before the text box sees them.
-        let mut picked_by_key = None;
+        let list = self.ranked(&Self::query(&st));
+        let rows = list.len() + usize::from(self.create_row(&st, offer_create));
+        // The list's keys first, Alt+Down before plain Down; then the keys that leave the cell.
+        let mut result = None;
+        let mut leave = None;
         if focused {
+            let mut picked = None;
+            let mut list_event = None;
             ui.input_mut(|i| {
-                if i.consume_key(Modifiers::NONE, Key::ArrowDown) {
+                if i.consume_key(Modifiers::ALT, Key::ArrowDown) {
+                    st.open = true;
+                    st.all = true;
+                    st.hl = None;
+                    st.moved = false;
+                    list_event = Some("alt+down");
+                } else if i.consume_key(Modifiers::NONE, Key::ArrowDown) {
                     if st.open && rows > 0 {
                         st.hl = Some(st.hl.map_or(0, |h| (h + 1).min(rows - 1)));
                         st.moved = true;
                     } else {
                         st.open = true;
+                        list_event = Some("down");
                     }
                 }
-                if i.consume_key(Modifiers::NONE, Key::ArrowUp) && st.open && rows > 0 {
-                    st.hl = Some(st.hl.map_or(0, |h| h.saturating_sub(1)));
+                if i.consume_key(Modifiers::NONE, Key::ArrowUp) && st.open {
+                    // Up past the top clears the highlight, so Enter keeps the typed text.
+                    st.hl = match st.hl {
+                        Some(0) | None => None,
+                        Some(h) => Some(h - 1),
+                    };
                     st.moved = true;
                 }
-                if st.open
-                    && st.hl.is_some()
-                    && (st.ed.dirty || st.moved)
-                    && i.consume_key(Modifiers::NONE, Key::Enter)
-                {
-                    picked_by_key = st.hl;
+                if st.open && st.hl.is_some() && i.consume_key(Modifiers::NONE, Key::Enter) {
+                    picked = st.hl;
                 }
                 if st.open && i.consume_key(Modifiers::NONE, Key::Escape) {
                     st.open = false;
+                    st.all = false;
+                    list_event = Some("esc-close");
                 }
             });
-        }
-        let out = self.edit_box(ui, &mut st.ed, id, name, width, false, "", st.popup);
-        if out.resp.gained_focus() {
-            st.open = !inline;
-            st.hl = None;
-            st.moved = false;
-        }
-        if out.resp.changed() {
-            st.open = true;
-            st.moved = false;
-            let now = st.ed.buf.clone();
-            let grew = now.chars().count() > st.typed.chars().count();
-            st.typed = now.clone();
-            st.hl = (self.t.preselect || inline)
-                .then_some(0)
-                .filter(|_| !inline);
-            if inline && grew && !now.is_empty() {
-                // Quick-fill: complete with the best path that starts with what was typed.
-                let lower = now.to_lowercase();
-                let mut cands: Vec<&Item> = items
-                    .iter()
-                    .filter(|it| it.label.to_lowercase().starts_with(&lower))
-                    .collect();
-                cands.sort_by_key(|it| self.rank_key(it.cat));
-                if let Some(best) = cands.first() {
-                    let typed_len = now.chars().count();
-                    let full: String = best.label.chars().skip(typed_len).collect();
-                    st.ed.buf = format!("{now}{full}");
-                    select_range(ui.ctx(), id, typed_len, st.ed.buf.chars().count());
-                    st.open = false;
-                    self.h
-                        .event("quick_fill", json!({ "typed": now, "offered": best.label }));
-                } else {
-                    st.open = true;
-                }
+            if let Some(via) = list_event {
+                self.h.event(
+                    "category_list",
+                    json!({ "open": st.open, "all": st.all, "via": via }),
+                );
             }
-            ui.ctx().request_repaint();
-        }
-        let query = if st.ed.dirty {
-            st.typed.clone()
-        } else {
-            String::new()
-        };
-        list = self.ranked(items, &query);
-        // The list.
-        if focused || out.resp.has_focus() {
-            let show = st.open && (rows > 0 || !query.is_empty());
-            if show {
-                let rect = out.resp.rect;
-                let hl = st.hl;
-                let mut clicked = None;
-                let shown: Vec<(usize, Vec<usize>)> = list.iter().take(10).cloned().collect();
-                let more = list.len().saturating_sub(10);
-                let area = egui::Area::new(Id::new((key, "list")))
-                    .order(egui::Order::Foreground)
-                    .fixed_pos(rect.left_bottom() + Vec2::new(0.0, 2.0))
-                    .show(ui.ctx(), |ui| {
-                        egui::Frame::popup(ui.style()).show(ui, |ui| {
-                            ui.set_min_width(rect.width().max(260.0));
-                            if shown.is_empty() && !create_row {
-                                ui.label(RichText::new(self.tr("No match")).weak());
-                            }
-                            for (k, (i, idx)) in shown.iter().enumerate() {
-                                let it = &items[*i];
-                                let job = self.highlighted(ui, &it.label, idx);
-                                let r = ui.selectable_label(hl == Some(k), job);
-                                if self.t.rank {
-                                    r.clone().on_hover_text(format!(
-                                        "used {} times",
-                                        self.cats[it.cat].uses
-                                    ));
-                                }
-                                if r.clicked() {
-                                    clicked = Some(Outcome::Pick(it.cat));
-                                }
-                            }
-                            if more > 0 {
-                                ui.label(RichText::new(format!("… {more} more")).small().weak());
-                            }
-                            if create_row {
-                                let r = ui.selectable_label(
-                                    hl == Some(list.len()),
-                                    format!("{} “{}”…", self.tr("Create"), st.ed.buf.trim()),
-                                );
-                                if r.clicked() {
-                                    clicked = Some(Outcome::Create(st.ed.buf.trim().to_owned()));
-                                }
-                            }
-                        });
-                    });
-                st.popup = Some(area.response.rect);
-                if let Some(o) = clicked {
-                    result = Some(o);
-                    st.open = false;
-                }
+            if let Some(h) = picked {
+                result = Some(if h < list.len() {
+                    Outcome::Pick(list[h].0)
+                } else {
+                    Outcome::Create(st.ed.buf.trim().to_owned())
+                });
+                leave = Some(Leave::Enter);
             } else {
-                st.popup = None;
+                leave = self.leave_key(ui, field);
+            }
+        }
+        let mut field_resp = None;
+        let mut lost = false;
+        ui.horizontal(|ui| {
+            let popup = union(st.popup, st.btn);
+            let out = self.edit_box(
+                ui,
+                &mut st.ed,
+                id,
+                "category field",
+                250.0,
+                false,
+                "",
+                popup,
+            );
+            if out.resp.gained_focus() {
+                // B opens the list on focus; A and C open it when typing starts.
+                st.open = offer_create;
+                st.all = false;
+                st.hl = None;
+                st.moved = false;
+            }
+            if out.resp.changed() {
+                st.open = true;
+                st.all = false;
+                st.moved = false;
+                st.typed = st.ed.buf.clone();
+                // The top match starts highlighted, and Enter takes it.
+                st.hl = Some(0);
+                ui.ctx().request_repaint();
+            }
+            // B's ⏷ shows only while the cell is edited (#17).
+            let editing = ui.memory(|m| m.has_focus(id)) || over(ui, st.btn) || over(ui, st.popup);
+            if offer_create && editing {
+                let b = ui
+                    .small_button("⏷")
+                    .on_hover_text("Every category (Alt+Down)");
+                self.h.track(&b, "category list button");
+                if pressed(ui, &b) {
+                    let show_all = !(st.open && st.all);
+                    st.open = show_all;
+                    st.all = show_all;
+                    st.hl = None;
+                    ui.memory_mut(|m| m.request_focus(id));
+                    self.h.event(
+                        "category_list",
+                        json!({ "open": st.open, "all": st.all, "via": "button" }),
+                    );
+                }
+                st.btn = Some(b.rect);
+            } else {
+                st.btn = None;
+            }
+            lost = out.lost;
+            field_resp = Some(out.resp);
+        });
+        let resp = field_resp.unwrap();
+        let list = self.ranked(&Self::query(&st));
+        let create = self.create_row(&st, offer_create);
+        if let Some(h) = st.hl {
+            let rows = list.len() + usize::from(create);
+            st.hl = (rows > 0).then(|| h.min(rows - 1));
+        }
+        // The list.
+        if ui.memory(|m| m.has_focus(id)) && st.open {
+            let rect = resp.rect;
+            let hl = st.hl;
+            let moved = st.moved;
+            let mut clicked = None;
+            let query = Self::query(&st);
+            let typed = st.ed.buf.trim().to_owned();
+            let area = egui::Area::new(Id::new("category_list"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(rect.left_bottom() + Vec2::new(0.0, 2.0))
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_min_width(rect.width().max(280.0));
+                        egui::ScrollArea::vertical()
+                            .max_height(260.0)
+                            .show(ui, |ui| {
+                                if list.is_empty() && !create {
+                                    ui.label(RichText::new(self.tr("No match")).weak());
+                                }
+                                for (k, (cat, idx)) in list.iter().enumerate() {
+                                    let label = &self.cats[*cat].path;
+                                    let job = self.highlighted(ui, label, idx);
+                                    let mut r = ui.selectable_label(hl == Some(k), job);
+                                    if self.t.rank {
+                                        r = r.on_hover_text(format!(
+                                            "used {} times",
+                                            self.cats[*cat].uses
+                                        ));
+                                    }
+                                    if moved && hl == Some(k) {
+                                        r.scroll_to_me(None);
+                                    }
+                                    if pressed(ui, &r) {
+                                        clicked = Some(Outcome::Pick(*cat));
+                                    }
+                                }
+                                if create {
+                                    let r = ui.selectable_label(
+                                        hl == Some(list.len()),
+                                        format!("{} “{typed}”…", self.tr("Create")),
+                                    );
+                                    if pressed(ui, &r) {
+                                        clicked = Some(Outcome::Create(typed.clone()));
+                                    }
+                                }
+                            });
+                    });
+                });
+            st.popup = Some(area.response.rect);
+            self.h.region(area.response.rect, "category list");
+            if query.is_empty() && st.all {
+                self.h.region(area.response.rect, "every category");
+            }
+            if let Some(o) = clicked {
+                result = Some(o);
+                leave = None;
+                st.open = false;
+                st.all = false;
             }
         } else {
             st.popup = None;
         }
-        if let Some(h) = picked_by_key {
-            result = if h < list.len() {
-                Some(Outcome::Pick(items[list[h].0].cat))
-            } else {
-                Some(Outcome::Create(st.ed.buf.trim().to_owned()))
-            };
-            st.open = false;
+        if leave.is_none() && result.is_none() && lost {
+            leave = Some(Leave::Blur);
         }
-        let mut saved = false;
-        if result.is_none() && out.lost {
-            if out.esc {
+        match leave {
+            Some(Leave::Esc) => {
+                st.ed.buf = self.cat_text();
                 st.ed.dirty = false;
                 st.ed.error = None;
                 st.moved = false;
                 st.open = false;
-                self.h.event("field_revert", json!({ "field": key }));
-            } else {
-                result = self.resolve(&st, &list, items, offer_create);
+                self.h.event("field_revert", json!({ "field": "category" }));
+                self.finish_leave(ui, field, Leave::Esc, true);
+            }
+            Some(l) => {
+                let outcome = result
+                    .take()
+                    .or_else(|| self.resolve(&st, &list, offer_create));
                 st.open = false;
-                saved = out.enter;
-                if result.is_none() {
-                    st.ed.dirty = false;
-                    st.moved = false;
+                st.all = false;
+                let ok = outcome.is_none_or(|o| self.apply_cat_outcome(&mut st, o));
+                self.finish_leave(ui, field, l, ok);
+            }
+            None => {
+                if let Some(o) = result {
+                    // A click in the list commits the cell and leaves the focus in it.
+                    self.apply_cat_outcome(&mut st, o);
+                    ui.memory_mut(|m| m.request_focus(id));
                 }
             }
         }
-        // Errors are applied by the caller through `set_error`; keep the state otherwise.
-        if let Some(e) = &st.ed.error {
-            let e = e.clone();
-            self.note(ui, &out.resp, key, &e, true);
-        } else if self.t.preview && false {
-            // Preview applies to money and dates only.
+        if let Some(e) = st.ed.error.clone() {
+            self.note(ui, &resp, "category", &e, true);
         }
-        self.combos.insert(key, st);
-        if let Some(r) = &result {
-            // Reset editing state; the caller sets the committed value.
-            if let Some(st) = self.combos.get_mut(key) {
-                st.ed.dirty = false;
-                st.moved = false;
-                st.hl = None;
-            }
-            let desc = match r {
-                Outcome::Pick(c) => json!({ "outcome": "pick", "category": self.cats[*c].path }),
-                Outcome::Create(t) => json!({ "outcome": "create", "text": t }),
-                Outcome::Unknown(t) => json!({ "outcome": "unknown", "text": t }),
-                Outcome::Clear => json!({ "outcome": "clear" }),
-            };
-            self.h
-                .event("field_commit", json!({ "field": key, "result": desc }));
-        }
-        if saved {
-            self.save_requested = true;
-        }
-        result
-    }
-
-    fn set_combo_error(&mut self, key: &'static str, msg: String, ui: &Ui) {
-        let id = ui.make_persistent_id(key);
-        if let Some(st) = self.combos.get_mut(key) {
-            st.ed.error = Some(msg);
-            st.ed.dirty = true;
-        }
-        ui.memory_mut(|m| m.request_focus(id));
+        self.combo = st;
     }
 
     fn touch_cat(&mut self, c: usize) {
@@ -2797,17 +2938,32 @@ impl Proto {
         self.cats[c].last_used = self.use_clock;
     }
 
-    fn apply_cat_outcome(&mut self, key: &'static str, out: Outcome, ui: &Ui) {
+    /// Applies what leaving the cell meant. False keeps the cell open with an error.
+    fn apply_cat_outcome(&mut self, st: &mut Combo, out: Outcome) -> bool {
+        let desc = match &out {
+            Outcome::Pick(c) => json!({ "outcome": "pick", "category": self.cats[*c].path }),
+            Outcome::Create(t) => json!({ "outcome": "create", "text": t }),
+            Outcome::Unknown(t) => json!({ "outcome": "unknown", "text": t }),
+            Outcome::Clear => json!({ "outcome": "clear" }),
+        };
+        self.h.event(
+            "field_commit",
+            json!({ "field": "category", "result": desc }),
+        );
+        st.moved = false;
+        st.hl = None;
         match out {
             Outcome::Pick(c) => {
                 self.row.cat = Some(c);
-                if let Some(st) = self.combos.get_mut(key) {
-                    st.ed.error = None;
-                    st.ed.dirty = false;
-                }
+                st.ed.buf = self.cats[c].path.clone();
+                st.ed.error = None;
+                st.ed.dirty = false;
+                true
             }
             Outcome::Clear => {
                 self.row.cat = None;
+                st.ed.dirty = false;
+                true
             }
             Outcome::Create(name) => {
                 // Real app: opens the New Category Dialog prefilled with the name.
@@ -2815,125 +2971,19 @@ impl Proto {
                     &format!("OpenDialog(NewCategory {{ name: {name:?} }})"),
                     "category combo",
                 );
+                st.ed.dirty = false;
+                true
             }
             Outcome::Unknown(text) => {
-                let msg = self.tr1("No category “{}”. Pick one from the list.", &text);
-                self.set_combo_error(key, msg, ui);
-            }
-        }
-    }
-
-    fn cat_field(&mut self, ui: &mut Ui) {
-        match self.variant {
-            Variant::A | Variant::B => {
-                let items = self.items_all();
-                let current = self.cat_text();
-                let inline = self.variant == Variant::A;
-                let create = self.variant == Variant::B;
-                if let Some(out) = self.combo(
-                    ui,
-                    "cat_field",
-                    "category field",
-                    &items,
-                    current,
-                    300.0,
-                    create,
-                    inline,
-                ) {
-                    self.apply_cat_outcome("cat_field", out, ui);
-                }
-            }
-            Variant::C => {
-                let parents: Vec<Item> = self
-                    .cats
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, c)| c.parent.is_none())
-                    .map(|(i, c)| Item {
-                        cat: i,
-                        label: c.name.clone(),
-                    })
-                    .collect();
-                let cur_parent = self.row.cat.map(|c| self.cats[c].parent.unwrap_or(c));
-                let cur_child = self
-                    .row
-                    .cat
-                    .filter(|c| self.cats[*c].parent.is_some())
-                    .map(|c| self.cats[c].name.clone())
-                    .unwrap_or_default();
-                let parent_text =
-                    cur_parent.map_or_else(String::new, |p| self.cats[p].name.clone());
-                let mut parent_changed = None;
-                let mut child_out = None;
-                ui.horizontal_top(|ui| {
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(self.tr("Parent")).small().weak());
-                        if let Some(out) = self.combo(
-                            ui,
-                            "cat_parent",
-                            "category parent field",
-                            &parents,
-                            parent_text,
-                            150.0,
-                            false,
-                            false,
-                        ) {
-                            parent_changed = Some(out);
-                        }
-                    });
-                    let kids: Vec<Item> = self
-                        .cats
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, c)| c.parent.is_some() && c.parent == cur_parent)
-                        .map(|(i, c)| Item {
-                            cat: i,
-                            label: c.name.clone(),
-                        })
-                        .collect();
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(self.tr("Subcategory")).small().weak());
-                        if let Some(out) = self.combo(
-                            ui,
-                            "cat_child",
-                            "category child field",
-                            &kids,
-                            cur_child,
-                            170.0,
-                            false,
-                            false,
-                        ) {
-                            child_out = Some(out);
-                        }
-                    });
-                });
-                if let Some(out) = parent_changed {
-                    match out {
-                        Outcome::Pick(p) => {
-                            self.row.cat = Some(p);
-                            if let Some(st) = self.combos.get_mut("cat_parent") {
-                                st.ed.error = None;
-                            }
-                            // Moving on: the subcategory is the next thing to choose.
-                            self.pending_focus = Some("child".to_owned());
-                        }
-                        other => self.apply_cat_outcome("cat_parent", other, ui),
-                    }
-                }
-                if let Some(out) = child_out {
-                    match out {
-                        Outcome::Clear => {
-                            self.row.cat = cur_parent;
-                        }
-                        other => self.apply_cat_outcome("cat_child", other, ui),
-                    }
-                }
+                st.ed.error = Some(self.tr1("No category “{}”. Pick one from the list.", &text));
+                st.ed.dirty = true;
+                false
             }
         }
     }
 
     // -----------------------------------------------------------------------------------------
-    // The row
+    // The Register: entered rows, then the draft row
 
     fn save_row(&mut self) {
         let (Some(date), Some(amount)) = (self.row.date, self.row.amount) else {
@@ -2948,126 +2998,98 @@ impl Proto {
         self.emit(
             &format!(
                 "AddTransaction {{ date: {}, payee: {:?}, category: {:?}, amount: {} {} }}",
-                fmt_date(date, &EN),
+                date.iso(),
                 self.row.payee,
                 cat_path,
-                fmt_amount(amount, self.cur().dp, &EN),
-                self.cur().code
+                amount.amount(),
+                amount.currency()
             ),
-            "Enter",
+            "draft row",
         );
         if let Some(c) = self.row.cat {
             self.touch_cat(c);
         }
-        self.entered.insert(
-            0,
-            Entered {
-                date,
-                payee: self.row.payee.clone(),
-                cat: cat_path,
-                amount,
-                cur: self.t.currency,
-            },
-        );
-        self.entered.truncate(14);
-        self.row = Row {
-            date: Some(date),
-            payee: String::new(),
-            cat: None,
-            amount: None,
-        };
-        self.cents.clear();
-        self.pending_focus = Some("date".to_owned());
+        self.entered.push(Entered {
+            date,
+            payee: self.row.payee.clone(),
+            cat: cat_path,
+            amount,
+        });
+        // A fresh draft row keeps the date, as a register does for runs of entries.
+        self.reset_row(true);
+        self.row.date = Some(date);
+        self.pending_focus = Some(Field::Date);
     }
 
     fn main_panel(&mut self, ui: &mut Ui) {
         CentralPanel::default().show(ui, |ui| {
-            ui.heading(self.tr("Edit row"));
+            ui.heading("Register");
             ui.label(
                 RichText::new(format!(
-                    "{} · {} · {} {}",
+                    "{} · {} · {} ({} dp)",
                     self.loc().tag(),
                     self.variant.label(),
-                    self.cur().code,
-                    self.cur().dp
+                    self.code(),
+                    self.dp()
                 ))
                 .small()
                 .weak(),
             );
             ui.add_space(8.0);
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.horizontal_top(|ui| {
-                    ui.vertical(|ui| {
-                        ui.set_min_width(190.0);
-                        ui.label(self.tr("Date"));
-                        self.date_field(ui);
-                    });
-                    ui.vertical(|ui| {
-                        ui.set_min_width(190.0);
-                        ui.label(self.tr("Payee"));
-                        let id = ui.make_persistent_id("payee_field");
-                        if self.pending_focus.as_deref() == Some("payee") {
-                            ui.memory_mut(|m| m.request_focus(id));
-                            self.pending_focus = None;
-                        }
-                        let r = ui.add(
-                            egui::TextEdit::singleline(&mut self.row.payee)
-                                .id(id)
-                                .desired_width(170.0),
-                        );
-                        self.h.track(&r, "payee field");
-                    });
-                    ui.vertical(|ui| {
-                        ui.set_min_width(if self.variant == Variant::C { 340.0 } else { 320.0 });
-                        ui.label(self.tr("Category"));
-                        self.cat_field(ui);
-                    });
-                    ui.vertical(|ui| {
-                        ui.label(self.tr("Amount"));
-                        self.money_field(ui);
-                    });
-                });
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    let r = ui.button(format!("{} (Enter)", self.tr("Save row")));
-                    self.h.track(&r, "save row button");
-                    if r.clicked() {
-                        self.save_requested = true;
+            let f = self.f();
+            let grid = egui::Grid::new("register")
+                .striped(self.theme.alternating_rows())
+                .min_row_height(self.theme.row_height())
+                .show(ui, |ui| {
+                    for h in ["Date", "Payee", "Category", "Amount"] {
+                        ui.label(RichText::new(self.tr(h)).strong());
                     }
-                    ui.label(
-                        RichText::new("Tab: next field · Enter: pick / commit, then save · Esc: revert, then cancel")
-                            .small()
-                            .weak(),
-                    );
+                    ui.end_row();
+                    let start = self.entered.len().saturating_sub(12);
+                    for e in &self.entered[start..] {
+                        ui.label(fmt_date(e.date, f));
+                        ui.label(&e.payee);
+                        ui.label(&e.cat);
+                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                            let text = f.l10n.format_amount(
+                                e.amount.amount(),
+                                i18n_currency(e.amount.currency()),
+                                AmountStyle::Bare,
+                            );
+                            ui.label(self.theme.amount(&e.amount, text));
+                        });
+                        ui.end_row();
+                    }
+                    // The draft row.
+                    ui.vertical(|ui| self.date_field(ui));
+                    ui.vertical(|ui| self.payee_field(ui));
+                    ui.vertical(|ui| self.cat_field(ui));
+                    ui.vertical(|ui| self.money_field(ui));
+                    ui.end_row();
                 });
-            });
+            self.h.region(grid.response.rect, "register");
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(
+                    "Enter: commit, move right (on Amount: add) · Tab / Shift+Tab: commit, next / previous · Esc: cancel the cell · Ctrl+Enter: add the row",
+                )
+                .small()
+                .weak(),
+            );
             if self.save_requested {
                 self.save_requested = false;
                 self.save_row();
             }
             ui.add_space(12.0);
-            ui.label(RichText::new(self.tr("Entered rows")).strong());
-            let f = self.f();
-            egui::Grid::new("entered").striped(true).show(ui, |ui| {
-                for h in ["Date", "Payee", "Category", "Amount"] {
-                    ui.label(RichText::new(self.tr(h)).small().weak());
-                }
-                ui.end_row();
-                for e in &self.entered {
-                    ui.label(fmt_date(e.date, f));
-                    ui.label(&e.payee);
-                    ui.label(&e.cat);
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(fmt_amount(e.amount, CURS[e.cur].dp, f));
-                    });
-                    ui.end_row();
-                }
-            });
-            ui.add_space(12.0);
-            ui.label(RichText::new("Commands the real app would emit").strong());
-            for line in &self.emitted {
-                ui.label(RichText::new(line).small().monospace());
-            }
+            let tail = ui
+                .vertical(|ui| {
+                    ui.label(RichText::new("Commands the real app would emit").strong());
+                    for line in &self.emitted {
+                        ui.label(RichText::new(line).small().monospace());
+                    }
+                })
+                .response;
+            self.h.region(tail.rect, "commands");
         });
     }
 
@@ -3085,7 +3107,7 @@ impl Proto {
                 .frame(frame)
                 .show(ui, |ui| {
                     let r = ui
-                        .small_button("<")
+                        .small_button("⏴")
                         .on_hover_text("Show prototype controls (F4)");
                     self.h.track(&r, "dock: expand");
                     if r.clicked() {
@@ -3095,7 +3117,7 @@ impl Proto {
             return;
         }
         Panel::right("prototype_dock")
-            .exact_size(300.0)
+            .exact_size(320.0)
             .resizable(false)
             .frame(frame)
             .show(ui, |ui| {
@@ -3103,7 +3125,7 @@ impl Proto {
                     ui,
                     |ui| ui.label(RichText::new("PROTOTYPE").strong()),
                     |ui| {
-                        let r = ui.small_button(">").on_hover_text("Collapse (F4)");
+                        let r = ui.small_button("⏵").on_hover_text("Collapse (F4)");
                         self.h.track(&r, "dock: collapse");
                         if r.clicked() {
                             self.set_dock(false, "click");
@@ -3123,12 +3145,9 @@ impl Proto {
                 ui.separator();
                 ui.label(RichText::new("Toggles").strong());
                 for (&(key, label, scope), (_, hint)) in TOGGLES.iter().zip(TOGGLE_KEYS) {
-                    if matches!(key, "locale" | "currency" | "match") {
-                        let value = match key {
-                            "locale" => self.loc().tag().to_owned(),
-                            "currency" => self.cur().code.to_owned(),
-                            _ => MatchMode::ALL[self.t.match_mode].name().to_owned(),
-                        };
+                    if CYCLING.contains(&key) {
+                        let value = self.t.describe(key);
+                        let value = value.as_str().unwrap_or_default();
                         let r = ui.button(format!("{hint}   {label}: {value}  [{scope}]"));
                         self.h.track(&r, format!("dock: toggle {key}"));
                         if r.clicked() {
@@ -3144,9 +3163,11 @@ impl Proto {
                     }
                 }
                 ui.separator();
+                self.h.dock_spotlight(ui);
+                ui.separator();
                 ui.label(
                     RichText::new(
-                        "A B C or Left/Right variant · 1–0 toggles (while no field has focus) · F2 note · F3 marker · F4 hide dock",
+                        "A B C or ⏴/⏵ variant · 1–0 toggles (while no field has focus) · F2 note · F3 marker · F4 hide dock · F5 spotlight",
                     )
                     .small()
                     .weak(),
@@ -3158,6 +3179,31 @@ impl Proto {
 }
 
 impl eframe::App for Proto {
+    /// The draft row owns Tab while one of its cells has focus; egui would otherwise move
+    /// focus to the next widget (a button, the dock) before the prototype sees the key.
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let Some(focused) = ctx.memory(|m| m.focused()) else {
+            return;
+        };
+        if !Field::ALL.iter().any(|f| f.id() == focused) {
+            return;
+        }
+        raw.events.retain(|e| match e {
+            Event::Key {
+                key: Key::Tab,
+                pressed,
+                modifiers,
+                ..
+            } => {
+                if *pressed {
+                    self.pending_tab = Some(modifiers.shift);
+                }
+                false
+            }
+            _ => true,
+        });
+    }
+
     fn on_exit(&mut self) {
         self.h.event("session_end", json!({}));
     }
@@ -3205,6 +3251,13 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "balanced_input_fields_prototype",
         options,
-        Box::new(move |_cc| Ok(Box::new(Proto::new(&args)))),
+        Box::new(move |cc| {
+            let proto = Proto::new(&args);
+            let style = proto.theme.style();
+            cc.egui_ctx.set_style_of(egui::Theme::Dark, style.clone());
+            cc.egui_ctx.set_style_of(egui::Theme::Light, style);
+            cc.egui_ctx.set_theme(egui::Theme::Light);
+            Ok(Box::new(proto))
+        }),
     )
 }
