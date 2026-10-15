@@ -1671,6 +1671,7 @@ fn show_dialogs(
             DlgStyle::OsWindow => {
                 let size = stack[i].size();
                 let mut b = ViewportBuilder::default()
+                    .with_app_id(APP_ID)
                     .with_title(&title)
                     .with_inner_size(size)
                     .with_resizable(false)
@@ -2068,6 +2069,7 @@ fn detached_viewport_ui(ui: &mut Ui, shared: &Shared, det: &Mutex<Detached>) {
 
 fn detached_builder(d: &Detached, opts: Opts) -> ViewportBuilder {
     let mut b = ViewportBuilder::default()
+        .with_app_id(APP_ID)
         .with_title(&d.title)
         .with_inner_size([700.0, 480.0])
         .with_min_inner_size([420.0, 280.0]);
@@ -3166,10 +3168,15 @@ impl Proto {
     }
 }
 
+/// One Wayland app id (X11 `WM_CLASS`) for every window, so the desktop treats them as one app
+/// in Alt+Tab and the taskbar instead of one app per window.
+const APP_ID: &str = "balanced_dialogs_detached_prototype";
+
 fn main() -> eframe::Result {
     let args = Args::from_env();
     let options = eframe::NativeOptions {
         viewport: ViewportBuilder::default()
+            .with_app_id(APP_ID)
             .with_title("Balanced — PROTOTYPE dialogs and detached windows")
             .with_inner_size([1280.0, 800.0]),
         ..Default::default()
