@@ -4,6 +4,8 @@ A **stack** is a chain of open PRs, each based on the branch below it, with the 
 
 Stack a PR whenever its branch builds on another open PR's branch, including when you rebase one PR onto another to resolve their conflicts.
 
+Offer a stack when you foresee two PRs colliding: merged one at a time, the second would conflict with the first. Check before opening a PR whose files another open PR also touches, and when the user asks about several open PRs: `git merge-tree --write-tree --name-only --no-messages origin/<branch-a> origin/<branch-b>` exits 1 and lists the conflicted files when they collide, 0 when they merge clean. Name the PRs and files in the offer; on a yes, rebase the upper branch onto the lower one and make the stack.
+
 ## Making a stack
 
 1. Rebase each branch onto the one below it, bottom first, so every layer holds the tip of the layer under it.

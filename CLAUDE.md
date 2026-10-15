@@ -84,7 +84,7 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 - Leave remote branches to GitHub, which deletes a PR's head branch when it merges; cleanup after a merge covers only local branches and worktrees.
 - Before pushing to an existing PR's branch, check the PR is still open (`gh pr view <n> --json state`); once it has merged, put follow-ups on a fresh branch from `origin/main` and open a new PR.
 - Whenever you push to a pull request, update its title and description to cover everything it now contains.
-- **Stack** a PR whose branch builds on another open PR's branch, with `gh stack`. See `docs/agents/stacked-prs.md`.
+- **Stack** a PR whose branch builds on another open PR's branch, with `gh stack`, and offer a stack when you foresee two PRs conflicting if merged one at a time. See `docs/agents/stacked-prs.md`.
 
 ### Merge conflicts
 
