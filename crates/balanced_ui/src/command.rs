@@ -25,12 +25,15 @@ pub(crate) enum AppCommand {
 pub(crate) enum StatusMessage {
     /// Balanced's name and version, in answer to Help → About.
     About,
+    /// The answer to a command whose feature isn't built yet.
+    NotAvailableYet,
 }
 
 impl StatusMessage {
     pub(crate) fn text(self, i18n: &Localizer) -> String {
         match self {
             Self::About => fl!(i18n, "status-about", version = env!("CARGO_PKG_VERSION")),
+            Self::NotAvailableYet => fl!(i18n, "status-not-available-yet"),
         }
     }
 }

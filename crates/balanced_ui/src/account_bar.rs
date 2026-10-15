@@ -11,8 +11,9 @@ use eframe::egui::{
     Shape, Stroke, TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 
-use crate::accounts_model::{AccountRow, AccountsModel, FormattedAmount, Section};
+use crate::accounts_model::{AccountRow, AccountsModel, Section};
 use crate::command::{AppCommand, CommandSender};
+use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
 use crate::route::Route;
 use crate::theme::Theme;
