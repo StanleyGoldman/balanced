@@ -25,7 +25,7 @@ Read the doc for the area you are changing:
 - [workspace](docs/practices/workspace.md): crates, manifests, dependencies, modules, visibility and API naming. Read it when adding a crate, a dependency or a public item.
 - [errors-and-logging](docs/practices/errors-and-logging.md): error types, panics and `tracing`. Read it when code can fail or logs.
 - [state](docs/practices/state.md): Commands, snapshots and per-window UI state. Read it when code changes domain or app state.
-- [egui](docs/practices/egui.md): panels, IDs, Dialogs, large lists, colours, accessibility and egui upgrades. Read it for any change to `balanced_ui`.
+- [egui](docs/practices/egui.md): panels, IDs, Dialogs, large lists, text entry and editable grids, colours, accessibility and egui upgrades. Read it for any change to `balanced_ui`.
 - [theme](docs/practices/theme.md): the look, its colours and sizes, density, and painting Register stripes and gridlines. Read it when a widget needs a colour or a size.
 - [i18n](docs/practices/i18n.md): Fluent messages, the `fl!` macro, translations, the two locales and the pseudo-locale. Read it when adding user-visible text, a number or date shown to the user, or a locale.
 - [money](docs/practices/money.md): `Money`, rounding, and formatting and parsing amounts. Read it when code holds, combines, shows or reads an amount.
