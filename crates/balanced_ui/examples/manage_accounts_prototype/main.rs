@@ -1806,6 +1806,8 @@ struct Mcx<'a> {
     accounts: &'a [Account],
     o: Opts,
     row_h: f32,
+    /// The tallest the Dialog's list may be, so the Dialog fits inside its window.
+    list_h: f32,
 }
 
 impl Mcx<'_> {
@@ -2054,7 +2056,7 @@ fn variant_a(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
     });
     ui.separator();
     let mut drop = None;
-    rows_scroll(ui, |ui| {
+    rows_scroll(ui, cx, |ui| {
         let mut in_section = false;
         for k in 0..m.layout.len() {
             let sel = m.sel == Some(k);
@@ -2155,8 +2157,8 @@ fn variant_a(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
     }
 }
 
-fn rows_scroll(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
-    let h = 430.0;
+fn rows_scroll(ui: &mut Ui, cx: &Mcx<'_>, add: impl FnOnce(&mut Ui)) {
+    let h = cx.list_h;
     egui::ScrollArea::vertical()
         .id_salt("manage_rows")
         .max_height(h)
@@ -2285,7 +2287,7 @@ fn section_combo(ui: &mut Ui, m: &Manage, k: usize, w: f32, out: &mut Out) {
 /// Variant B: tree on the left, details of the selected item on the right.
 fn variant_b(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
     // A fixed height: the resizable window would otherwise grow to fit the whole tree.
-    let h = 430.0;
+    let h = cx.list_h;
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(320.0);
@@ -2389,7 +2391,7 @@ fn variant_c(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
     });
     ui.separator();
     if m.layout_page {
-        rows_scroll(ui, |ui| tree(ui, cx, m, out, true));
+        rows_scroll(ui, cx, |ui| tree(ui, cx, m, out, true));
         return;
     }
     let h = cx.row_h;
@@ -2408,7 +2410,7 @@ fn variant_c(ui: &mut Ui, cx: &Mcx<'_>, m: &mut Manage, out: &mut Out) {
         }
     });
     ui.separator();
-    rows_scroll(ui, |ui| {
+    rows_scroll(ui, cx, |ui| {
         let order: Vec<(usize, usize)> = m
             .layout
             .iter()
@@ -2481,6 +2483,8 @@ impl Proto {
             accounts: &self.accounts,
             o: self.o,
             row_h: self.theme.row_height(),
+            // The window minus the Dialog's title, description, tabs and footer, and a margin.
+            list_h: (ctx.content_rect().height() - 300.0).clamp(160.0, 430.0),
         };
         let mut out = Out::default();
 
@@ -2510,7 +2514,10 @@ impl Proto {
             .collapsible(false)
             .resizable(true)
             .default_size(vec2(820.0, 560.0))
-            .min_size(vec2(640.0, 380.0))
+            .min_size(vec2(640.0, 300.0))
+            // A Dialog never outgrows the window it opens in.
+            .max_size(ctx.content_rect().size() - vec2(48.0, 48.0))
+            .constrain(true)
             .pivot(Align2::CENTER_CENTER)
             .default_pos(screen.center())
             .show(ctx, |ui| {
