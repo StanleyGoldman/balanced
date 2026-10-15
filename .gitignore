@@ -9,3 +9,9 @@ mutants.out*/
 # insta writes these when a snapshot test fails; accept or reject them, never commit them.
 *.pending-snap
 *.snap.new
+
+# egui_kittest writes these beside an image snapshot that fails or is updated; review
+# them, never commit them.
+*.new.png
+*.diff.png
+*.old.png

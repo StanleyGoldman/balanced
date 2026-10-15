@@ -12,7 +12,8 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 - `cargo xtask ci` runs the following, stopping at the first failure:
   - `fmt`
   - `clippy`, with `-D warnings`
-  - `test`
+  - `test`, which skips the image snapshots
+  - `snapshots`: the image snapshots, on Linux only (see [testing](testing.md#image-snapshots))
   - `locales`: reports how many messages each translation lacks, without failing (see [i18n](i18n.md#translations))
   - `deny`, which is `cargo deny check`
   - `typos`
@@ -22,7 +23,7 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 - Warnings are allowed while you iterate. `cargo xtask clippy` denies them.
 - A new check is written as a new `xtask` task and added to `ci`, never as CI-provider config.
 
-Two checks are still to come: the Linux lavapipe image-snapshot run, and a periodic full mutants run. Each arrives when there is code for it to check.
+One check is still to come: a periodic full mutants run. It arrives when there is code for it to check.
 
 ## Config files
 

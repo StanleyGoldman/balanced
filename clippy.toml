@@ -18,6 +18,17 @@ disallowed-methods = [
   { path = "egui::Color32::from_gray", reason = "use a theme colour" },
   { path = "egui::Color32::from_hex", reason = "use a theme colour" },
 
+  # Every image snapshot goes through `balanced_ui::testing::check_snapshot`, which holds
+  # the project thresholds.
+  { path = "egui_kittest::Harness::snapshot", reason = "use `balanced_ui::testing::check_snapshot`" },
+  { path = "egui_kittest::Harness::snapshot_options", reason = "use `balanced_ui::testing::check_snapshot`" },
+  { path = "egui_kittest::Harness::try_snapshot", reason = "use `balanced_ui::testing::check_snapshot`" },
+  { path = "egui_kittest::Harness::try_snapshot_options", reason = "use `balanced_ui::testing::check_snapshot`" },
+  { path = "egui_kittest::image_snapshot", reason = "use `balanced_ui::testing::check_snapshot`" },
+  { path = "egui_kittest::image_snapshot_options", reason = "use `balanced_ui::testing::check_snapshot`" },
+  { path = "egui_kittest::try_image_snapshot", reason = "use `balanced_ui::testing::check_snapshot`" },
+  { path = "egui_kittest::try_image_snapshot_options", reason = "use `balanced_ui::testing::check_snapshot`" },
+
   { path = "egui_extras::TableBody::row", reason = "lays out every row each frame; use `rows` or `heterogeneous_rows`" },
 
   # No floats near money: a float can't hold most decimal fractions exactly. The

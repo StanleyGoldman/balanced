@@ -11,6 +11,8 @@ mod main_window;
 mod register;
 mod register_model;
 mod route;
+#[cfg(feature = "test-support")]
+pub mod testing;
 mod theme;
 mod user_action;
 
