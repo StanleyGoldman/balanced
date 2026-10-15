@@ -3,7 +3,7 @@
 
 use icu_calendar::{Date, Iso};
 
-use crate::{CategoryId, Money, MoneyError};
+use crate::{CategoryId, DomainError, Money, MoneyError, TransactionEdit};
 
 /// Identifies a transaction for as long as it exists. Ids are never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -99,6 +99,25 @@ impl Transaction {
     /// The whole amount: the sum of the lines, for a split transaction.
     pub fn amount(&self) -> Money {
         self.amount
+    }
+
+    /// The transaction with `edit` made. Fails when the edit gives the opening balance
+    /// a payee.
+    pub(crate) fn edited(&self, edit: TransactionEdit) -> Result<Self, DomainError> {
+        let mut edited = self.clone();
+        match edit {
+            TransactionEdit::Number(number) => edited.number = number,
+            TransactionEdit::Payee(payee) => {
+                if self.allocation == Allocation::OpeningBalance {
+                    return Err(DomainError::OpeningBalancePayee {
+                        transaction: self.id,
+                    });
+                }
+                edited.payee = payee;
+            }
+            TransactionEdit::Memo(memo) => edited.memo = memo,
+        }
+        Ok(edited)
     }
 }
 

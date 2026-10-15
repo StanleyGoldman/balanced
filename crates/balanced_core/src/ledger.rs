@@ -6,7 +6,8 @@ use crate::account::NewAccount;
 use crate::category::NewCategory;
 use crate::transaction::TransactionId;
 use crate::{
-    Account, AccountId, Category, CategoryId, CurrencyCode, Money, MoneyError, Transaction,
+    Account, AccountId, Category, CategoryId, CurrencyCode, DomainCommand, DomainError, Money,
+    MoneyError, Transaction, TransactionEdit,
 };
 
 /// Counts the changes applied to a [`Ledger`]. A window's view model rebuilds when
@@ -17,6 +18,10 @@ pub struct Generation(u64);
 impl Generation {
     /// The generation of a ledger no change has been applied to.
     pub const FIRST: Self = Self(0);
+
+    fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
 }
 
 /// A transaction in its account's register, with the account's balance after it.
@@ -207,6 +212,49 @@ impl Ledger {
     pub fn snapshot(&self) -> Arc<LedgerView> {
         Arc::clone(&self.view)
     }
+
+    /// Applies `command`, publishing a new snapshot with the next generation, or
+    /// rejects it and leaves the ledger as it was.
+    pub fn apply(&mut self, command: DomainCommand) -> Result<(), DomainError> {
+        match command {
+            DomainCommand::EditTransaction { transaction, edit } => {
+                self.edit_transaction(transaction, edit)
+            }
+        }
+    }
+
+    fn edit_transaction(
+        &mut self,
+        id: TransactionId,
+        edit: TransactionEdit,
+    ) -> Result<(), DomainError> {
+        let (account, entry) = self
+            .view
+            .accounts
+            .iter()
+            .enumerate()
+            .find_map(|(account, summary)| {
+                let entry = summary
+                    .register
+                    .iter()
+                    .position(|entry| entry.transaction.id() == id)?;
+                Some((account, entry))
+            })
+            .ok_or(DomainError::UnknownTransaction { transaction: id })?;
+        // Both indices were just found in this same view.
+        let summary = &self.view.accounts[account];
+        if summary.account.is_closed() {
+            return Err(DomainError::AccountClosed {
+                account: summary.account.id(),
+            });
+        }
+        let edited = summary.register[entry].transaction.edited(edit)?;
+        // Windows still holding the old snapshot keep it; the ledger moves to a copy.
+        let view = Arc::make_mut(&mut self.view);
+        view.accounts[account].register[entry].transaction = edited;
+        view.generation = view.generation.next();
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -217,7 +265,7 @@ mod tests {
 
     use super::*;
     use crate::transaction::{NewTransaction, SplitLine};
-    use crate::{AccountKind, Allocation};
+    use crate::{AccountKind, Allocation, TransactionEdit};
 
     fn usd_code() -> CurrencyCode {
         CurrencyCode::new("USD").unwrap()
@@ -577,5 +625,202 @@ mod tests {
             [],
         )
         .ok();
+    }
+
+    /// A ledger with one open account, Everyday, holding its opening balance and one
+    /// payment to Fresh Market numbered 1041 with a memo.
+    fn everyday() -> Ledger {
+        let groceries = CategoryId::new(0);
+        Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(100.00))).with_transactions([
+                    NewTransaction::new(date(5), "Fresh Market", groceries, usd(dec!(-30.25)))
+                        .number("1041")
+                        .memo("Weekly shop"),
+                ]),
+            ],
+        )
+        .unwrap()
+    }
+
+    /// The id of the `index`th transaction in the first account's register.
+    fn transaction_id(ledger: &Ledger, index: usize) -> TransactionId {
+        ledger.snapshot().accounts()[0].register()[index]
+            .transaction()
+            .id()
+    }
+
+    fn edit(transaction: TransactionId, edit: TransactionEdit) -> DomainCommand {
+        DomainCommand::EditTransaction { transaction, edit }
+    }
+
+    #[test]
+    fn editing_a_payee_shows_in_the_next_snapshot() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+
+        ledger
+            .apply(edit(
+                fresh_market,
+                TransactionEdit::Payee("Corner Shop".into()),
+            ))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        let transaction = view.accounts()[0].register()[1].transaction();
+        assert_eq!(transaction.payee(), "Corner Shop");
+        assert_ne!(view.generation(), Generation::FIRST);
+    }
+
+    #[test]
+    fn editing_a_number_and_a_memo_shows_in_the_next_snapshot() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+
+        ledger
+            .apply(edit(
+                fresh_market,
+                TransactionEdit::Number(Some("1042".into())),
+            ))
+            .unwrap();
+        ledger
+            .apply(edit(
+                fresh_market,
+                TransactionEdit::Memo("Party food".into()),
+            ))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        let transaction = view.accounts()[0].register()[1].transaction();
+        assert_eq!(
+            (transaction.number(), transaction.memo()),
+            (Some("1042"), "Party food")
+        );
+    }
+
+    #[test]
+    fn a_number_can_be_cleared() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Number(None)))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        assert_eq!(
+            view.accounts()[0].register()[1].transaction().number(),
+            None
+        );
+    }
+
+    #[test]
+    fn each_applied_command_moves_to_a_new_generation() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Memo("A".into())))
+            .unwrap();
+        let first = ledger.snapshot().generation();
+
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Memo("B".into())))
+            .unwrap();
+
+        assert!(ledger.snapshot().generation() > first);
+    }
+
+    #[test]
+    fn an_earlier_snapshot_is_unchanged_by_an_edit() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+        let fresh_market = transaction_id(&ledger, 1);
+
+        ledger
+            .apply(edit(
+                fresh_market,
+                TransactionEdit::Payee("Corner Shop".into()),
+            ))
+            .unwrap();
+
+        let transaction = before.accounts()[0].register()[1].transaction();
+        assert_eq!(transaction.payee(), "Fresh Market");
+        assert_eq!(before.generation(), Generation::FIRST);
+    }
+
+    #[test]
+    fn editing_a_closed_accounts_transaction_is_rejected() {
+        let groceries = CategoryId::new(0);
+        let mut ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [account("Old", AccountKind::Checking, usd(dec!(10.00)))
+                .with_transactions([NewTransaction::new(
+                    date(5),
+                    "Fresh Market",
+                    groceries,
+                    usd(dec!(-10.00)),
+                )])
+                .closed()],
+        )
+        .unwrap();
+        let before = ledger.snapshot();
+        let old = before.accounts()[0].account().id();
+        let fresh_market = transaction_id(&ledger, 1);
+
+        let result = ledger.apply(edit(fresh_market, TransactionEdit::Memo("Late".into())));
+
+        assert_eq!(result, Err(DomainError::AccountClosed { account: old }));
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn editing_an_unknown_transaction_is_rejected() {
+        let mut ledger = everyday();
+        let unknown = TransactionId::new(99);
+
+        let result = ledger.apply(edit(unknown, TransactionEdit::Memo("Lost".into())));
+
+        assert_eq!(
+            result,
+            Err(DomainError::UnknownTransaction {
+                transaction: unknown
+            })
+        );
+    }
+
+    #[test]
+    fn the_opening_balance_takes_no_payee() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+        let opening = transaction_id(&ledger, 0);
+
+        let result = ledger.apply(edit(opening, TransactionEdit::Payee("Bank".into())));
+
+        assert_eq!(
+            result,
+            Err(DomainError::OpeningBalancePayee {
+                transaction: opening
+            })
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn the_opening_balance_takes_a_memo() {
+        let mut ledger = everyday();
+        let opening = transaction_id(&ledger, 0);
+
+        ledger
+            .apply(edit(opening, TransactionEdit::Memo("Moved banks".into())))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        assert_eq!(
+            view.accounts()[0].register()[0].transaction().memo(),
+            "Moved banks"
+        );
     }
 }
