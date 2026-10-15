@@ -14,7 +14,7 @@ use eframe::egui::{
     Response, ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode,
     WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
-use egui_extras::{Column, TableBuilder};
+use egui_extras::{Column, TableBody, TableBuilder};
 
 use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::i18n::fl;
@@ -319,7 +319,6 @@ impl Register {
     }
 
     /// Draws the Register of `summary`, an account in `view`, filling the space left in
-    /// Draws the Register of `summary`, an account in `view`, filling the space left in
     /// `ui`. Only the rows in view are laid out.
     pub(crate) fn show(
         &mut self,
@@ -400,49 +399,51 @@ impl Register {
                             });
                         }
                     })
-                    .body(|mut body| {
-                        let body_viewport = body.ui_mut().clip_rect();
-                        let rows = model.rows();
-                        let body_frame = BodyFrame {
+                    .body(|body| {
+                        let frame = BodyFrame {
                             i18n,
                             theme,
                             commands,
-                            rows,
+                            rows: model.rows(),
                             register_id,
-                            viewport: body_viewport,
+                            viewport: Rect::NOTHING,
                         };
-                        let mut in_view: Option<(usize, usize)> = None;
-                        body.rows(row_height, rows.len(), |mut table_row| {
-                            let index = table_row.index();
-                            // `rows` lays out indices below `rows.len()` only.
-                            let row = &rows[index];
-                            let selected = self.cursor.is_some_and(|cursor| cursor.row == row.id());
-                            table_row.set_selected(selected);
-                            for (column_index, column) in
-                                RegisterColumn::ALL.into_iter().enumerate()
-                            {
-                                table_row.col(|ui| {
-                                    if column_index == 0 && fully_in(body_viewport, ui.max_rect()) {
-                                        in_view =
-                                            Some(in_view.map_or((index, index), |(first, _)| {
-                                                (first, index)
-                                            }));
-                                    }
-                                    self.body_cell(ui, &body_frame, row, column_index, column);
-                                });
-                            }
-                        });
-                        self.rows_in_view = in_view.map(|(first, last)| RowsInView {
-                            first,
-                            last,
-                            height: body_viewport.height(),
-                            pitch,
-                        });
+                        self.body(body, frame, row_height, pitch);
                     });
             });
         self.model = Some(model);
     }
 
+    /// Lays out the rows in view of the Register's body, and notes which of them are
+    /// fully in view for keyboard scrolling. `frame`'s viewport is filled in here.
+    fn body(&mut self, mut body: TableBody<'_>, frame: BodyFrame<'_>, row_height: f32, pitch: f32) {
+        let viewport = body.ui_mut().clip_rect();
+        let frame = BodyFrame { viewport, ..frame };
+        let rows = frame.rows;
+        let mut in_view: Option<(usize, usize)> = None;
+        body.rows(row_height, rows.len(), |mut table_row| {
+            let index = table_row.index();
+            // `rows` lays out indices below `rows.len()` only.
+            let row = &rows[index];
+            table_row.set_selected(self.cursor.is_some_and(|cursor| cursor.row == row.id()));
+            for (column_index, column) in RegisterColumn::ALL.into_iter().enumerate() {
+                table_row.col(|ui| {
+                    if column_index == 0 && fully_in(viewport, ui.max_rect()) {
+                        in_view = Some(in_view.map_or((index, index), |(first, _)| (first, index)));
+                    }
+                    self.body_cell(ui, &frame, row, column_index, column);
+                });
+            }
+        });
+        self.rows_in_view = in_view.map(|(first, last)| RowsInView {
+            first,
+            last,
+            height: viewport.height(),
+            pitch,
+        });
+    }
+
+    /// Draws one body cell, `column` (the `column_index`th) of `row`: its text, or its
     /// editor while it is edited, and its gridlines.
     fn body_cell(
         &mut self,
