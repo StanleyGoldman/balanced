@@ -22,6 +22,7 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 - Find nodes by role and label (`get_by_role_and_label`), never by screen position.
 - Labels in tests use the pinned test locale, `en-US`.
 - Double-clicks need `with_step_dt(0.01)`. With the default 0.25 s step, the second click arrives too late.
+- `Harness::output()` holds only the last frame's output, and `run()` keeps stepping until repaints stop. Output that lasts one frame, such as a `ViewportCommand` sent from `App::logic`, is gone by the time `run()` returns. Step to that frame instead: after a `click()`, one `step()` plays the click, and the next runs the `logic()` that applies the Command it sent.
 - `Harness::run()` panics if the UI keeps asking for repaints. A UI that animates or shows a clock needs mocked time in its tests. When the injectable clock lands, `clippy.toml` will ban `SystemTime::now` and `Instant::now` outside it.
 - When the project snapshot helper (`balanced_ui::testing`) lands, add a `clippy.toml` ban on the raw kittest snapshot methods so that every snapshot uses the project thresholds.
 
