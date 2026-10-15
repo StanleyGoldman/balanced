@@ -132,6 +132,8 @@ pub struct Harness {
     shot_in_flight: Option<String>,
     shot_seq: u32,
     note: Option<String>,
+    /// The note box's answer this frame: `Some(true)` on Enter, `Some(false)` on Esc.
+    note_answer: Option<bool>,
     marker_seq: u32,
     dt_ms: f32,
     perf_since: Instant,
@@ -177,6 +179,7 @@ impl Harness {
             shot_in_flight: None,
             shot_seq: 0,
             note: None,
+            note_answer: None,
             marker_seq: 0,
             dt_ms: 0.0,
             perf_since: now,
@@ -383,6 +386,23 @@ impl Harness {
         let events = ctx.input(|i| i.events.clone());
         for event in events {
             self.on_input(event);
+        }
+        if self.note.is_some() {
+            // Take the note box's Enter and Esc before the app reads input, so they don't also
+            // press a Dialog's default button or close it.
+            let (enter, esc) = ctx.input_mut(|i| {
+                (
+                    i.consume_key(egui::Modifiers::NONE, Key::Enter),
+                    i.consume_key(egui::Modifiers::NONE, Key::Escape),
+                )
+            });
+            self.note_answer = if enter {
+                Some(true)
+            } else if esc {
+                Some(false)
+            } else {
+                None
+            };
         }
         self.sample_perf();
 
@@ -711,7 +731,7 @@ impl Harness {
         let Some(mut text) = self.note.take() else {
             return;
         };
-        let mut done = None;
+        let done = self.note_answer.take();
         egui::Area::new(Id::new("harness_note"))
             .anchor(Align2::CENTER_TOP, [0.0, 60.0])
             .order(egui::Order::Tooltip)
@@ -722,11 +742,6 @@ impl Harness {
                         let field =
                             ui.add(egui::TextEdit::singleline(&mut text).desired_width(420.0));
                         field.request_focus();
-                        if ui.input(|i| i.key_pressed(Key::Enter)) {
-                            done = Some(true);
-                        } else if ui.input(|i| i.key_pressed(Key::Escape)) {
-                            done = Some(false);
-                        }
                     });
                 });
             });
@@ -738,5 +753,54 @@ impl Harness {
             Some(false) => {}
             None => self.note = Some(text),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn press(key: Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// Run one frame with `events`, and report whether the app saw Enter after `begin_frame`.
+    fn frame(ctx: &Context, harness: &mut Harness, events: Vec<egui::Event>) -> bool {
+        let input = egui::RawInput {
+            events,
+            ..egui::RawInput::default()
+        };
+        let mut app_saw_enter = false;
+        let mut output = ctx.run_ui(input, |ui| {
+            harness.begin_frame(ui.ctx());
+            app_saw_enter = ui.input(|i| i.key_pressed(Key::Enter));
+            harness.end_frame(ui.ctx());
+        });
+        // No renderer takes the font texture here.
+        output.textures_delta.clear();
+        app_saw_enter
+    }
+
+    #[test]
+    fn enter_that_saves_a_note_stays_out_of_the_app() {
+        let ctx = Context::default();
+        let mut harness = Harness::new(&Args::default());
+        frame(&ctx, &mut harness, vec![press(Key::F2)]);
+        assert!(harness.note.is_some());
+        assert!(!frame(&ctx, &mut harness, vec![press(Key::Enter)]));
+        assert!(harness.note.is_none());
+    }
+
+    #[test]
+    fn enter_reaches_the_app_without_a_note() {
+        let ctx = Context::default();
+        let mut harness = Harness::new(&Args::default());
+        assert!(frame(&ctx, &mut harness, vec![press(Key::Enter)]));
     }
 }
