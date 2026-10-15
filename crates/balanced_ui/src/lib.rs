@@ -10,6 +10,7 @@ mod keymap;
 mod main_window;
 mod register;
 mod register_model;
+mod register_tabs;
 mod route;
 mod theme;
 mod user_action;

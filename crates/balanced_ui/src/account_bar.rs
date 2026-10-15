@@ -15,7 +15,7 @@ use crate::accounts_model::{AccountRow, AccountsModel, Section};
 use crate::command::{AppCommand, CommandSender};
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
-use crate::route::Route;
+use crate::route::{OpenIn, Route};
 use crate::theme::Theme;
 
 /// Which Account bar sections are folded. None of it outlives the run yet: every run
@@ -36,7 +36,8 @@ impl Default for AccountBar {
 
 impl AccountBar {
     /// Draws the Account bar from `model`, highlighting `selected`. Clicking an
-    /// account opens it; clicking a heading folds or unfolds its section.
+    /// account opens it in the current Register, and right-clicking it offers its
+    /// commands. Clicking a heading folds or unfolds its section.
     pub(crate) fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -90,9 +91,13 @@ impl AccountBar {
                 let balance = model
                     .balance(row.id())
                     .expect("the model formats a balance for every account it lists");
-                if account_row(ui, theme, row, balance, selected == Some(row.id())).clicked() {
-                    commands.send(AppCommand::Navigate(Route::Account(row.id())));
+                let response = account_row(ui, theme, row, balance, selected == Some(row.id()));
+                if response.clicked() {
+                    // TODO(#100): open in a new Register tab when the "Open an account
+                    // in" Preference says so.
+                    open(commands, row.id(), OpenIn::CurrentRegister);
                 }
+                response.context_menu(|ui| account_menu(ui, i18n, commands, row.id()));
             }
         }
     }
@@ -104,6 +109,24 @@ impl AccountBar {
                 ui.label(net_worth.styled(theme));
             });
         });
+    }
+}
+
+/// Opens `account`'s Register where `open_in` says.
+fn open(commands: &CommandSender, account: AccountId, open_in: OpenIn) {
+    commands.send(AppCommand::Navigate(Route::Account { account, open_in }));
+}
+
+/// An account's right-click menu.
+fn account_menu(ui: &mut egui::Ui, i18n: &Localizer, commands: &CommandSender, account: AccountId) {
+    if ui.button(fl!(i18n, "account-bar-open-register")).clicked() {
+        open(commands, account, OpenIn::CurrentRegister);
+    }
+    if ui
+        .button(fl!(i18n, "account-bar-open-in-new-tab"))
+        .clicked()
+    {
+        open(commands, account, OpenIn::NewTab);
     }
 }
 

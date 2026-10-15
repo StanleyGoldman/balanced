@@ -1,6 +1,6 @@
 //! The Main window: Menu bar, tab row, Account bar, Main view and Status bar.
 
-use balanced_core::{AccountId, AccountSummary, LedgerView};
+use balanced_core::{AccountSummary, LedgerView};
 use balanced_i18n::Localizer;
 use eframe::egui::{self, Button, CentralPanel, Label, MenuBar, Panel, RichText, Sides};
 
@@ -9,7 +9,7 @@ use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
-use crate::register::Register;
+use crate::register_tabs::RegisterTabs;
 use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
@@ -18,14 +18,12 @@ use crate::user_action::UserAction;
 #[derive(Debug, Default)]
 pub(crate) struct MainWindow {
     tab: TopLevelTab,
-    /// The account open under the Accounts tab.
-    account: Option<AccountId>,
     status: Option<StatusMessage>,
     account_bar: AccountBar,
     /// The accounts of the last snapshot shown, rebuilt when it is out of date.
     accounts: Option<AccountsModel>,
-    /// The open account's Register.
-    register: Register,
+    /// The Registers open under the Accounts tab.
+    registers: RegisterTabs,
 }
 
 impl MainWindow {
@@ -33,11 +31,38 @@ impl MainWindow {
     pub(crate) fn navigate(&mut self, route: Route) {
         match route {
             Route::Tab(tab) => self.tab = tab,
-            Route::Account(id) => {
+            Route::Account { account, open_in } => {
                 self.tab = TopLevelTab::Accounts;
-                self.account = Some(id);
+                self.registers.open(account, open_in);
             }
         }
+    }
+
+    /// Closes the current Register tab, if the Accounts tab shows one.
+    pub(crate) fn close_register_tab(&mut self) {
+        if self.shows_registers() {
+            self.registers.close_current();
+        }
+    }
+
+    /// Moves to the next Register tab, if the Accounts tab shows the Register tabs.
+    pub(crate) fn next_register_tab(&mut self) {
+        if self.shows_registers() {
+            self.registers.next();
+        }
+    }
+
+    /// Moves to the previous Register tab, if the Accounts tab shows the Register tabs.
+    pub(crate) fn previous_register_tab(&mut self) {
+        if self.shows_registers() {
+            self.registers.previous();
+        }
+    }
+
+    /// Whether the Main view shows the Register tabs: the Accounts tab is active and
+    /// a tab is open.
+    fn shows_registers(&self) -> bool {
+        self.tab == TopLevelTab::Accounts && !self.registers.tabs().is_empty()
     }
 
     /// Shows `message` in the Status bar.
@@ -64,7 +89,7 @@ impl MainWindow {
         };
         Panel::top("menu_bar")
             .frame(theme.chrome_frame())
-            .show(ui, |ui| Self::menu_bar(ui, i18n, commands));
+            .show(ui, |ui| self.menu_bar(ui, i18n, commands));
         Panel::bottom("status_bar")
             .frame(theme.chrome_frame())
             .show(ui, |ui| {
@@ -75,11 +100,22 @@ impl MainWindow {
         Panel::top("tab_row")
             .frame(theme.chrome_frame())
             .show(ui, |ui| self.tab_row(ui, i18n, commands));
-        self.account_bar
-            .show(ui, i18n, theme, commands, &accounts, self.account);
+        self.account_bar.show(
+            ui,
+            i18n,
+            theme,
+            commands,
+            &accounts,
+            self.registers.current_account(),
+        );
         CentralPanel::default().show(ui, |ui| {
             let open_account = match self.tab {
-                TopLevelTab::Accounts => self.account.and_then(|id| view.account(id)),
+                TopLevelTab::Accounts => {
+                    self.registers.show_strip(ui, i18n, view);
+                    self.registers
+                        .current_account()
+                        .and_then(|id| view.account(id))
+                }
                 TopLevelTab::Home
                 | TopLevelTab::Bills
                 | TopLevelTab::Spending
@@ -90,7 +126,9 @@ impl MainWindow {
             match open_account {
                 Some(summary) => {
                     Self::context_header(ui, i18n, theme, commands, summary, &accounts);
-                    self.register.show(ui, i18n, theme, summary, view);
+                    if let Some(register) = self.registers.current_register_mut() {
+                        register.show(ui, i18n, theme, summary, view);
+                    }
                 }
                 None => {
                     ui.label(self.tab.placeholder(i18n));
@@ -135,28 +173,57 @@ impl MainWindow {
         );
     }
 
-    fn menu_bar(ui: &mut egui::Ui, i18n: &Localizer, commands: &CommandSender) {
+    fn menu_bar(&self, ui: &mut egui::Ui, i18n: &Localizer, commands: &CommandSender) {
+        let shows_registers = self.shows_registers();
+        let several_registers = shows_registers && self.registers.tabs().len() > 1;
         MenuBar::new().ui(ui, |ui| {
             ui.menu_button(fl!(i18n, "menu-file"), |ui| {
-                Self::menu_item(ui, i18n, commands, UserAction::Quit);
+                Self::menu_item(
+                    ui,
+                    i18n,
+                    commands,
+                    UserAction::CloseRegisterTab,
+                    shows_registers,
+                );
+                ui.separator();
+                Self::menu_item(ui, i18n, commands, UserAction::Quit, true);
+            });
+            ui.menu_button(fl!(i18n, "menu-view"), |ui| {
+                Self::menu_item(
+                    ui,
+                    i18n,
+                    commands,
+                    UserAction::NextRegisterTab,
+                    several_registers,
+                );
+                Self::menu_item(
+                    ui,
+                    i18n,
+                    commands,
+                    UserAction::PreviousRegisterTab,
+                    several_registers,
+                );
             });
             ui.menu_button(fl!(i18n, "menu-help"), |ui| {
-                Self::menu_item(ui, i18n, commands, UserAction::About);
+                Self::menu_item(ui, i18n, commands, UserAction::About, true);
             });
         });
     }
 
+    /// The menu item for `action`, with its Shortcut text. A disabled item is shown
+    /// but can't be chosen.
     fn menu_item(
         ui: &mut egui::Ui,
         i18n: &Localizer,
         commands: &CommandSender,
         action: UserAction,
+        enabled: bool,
     ) {
         let mut button = egui::Button::new(action.label(i18n));
         if let Some(chord) = keymap::chord(action) {
             button = button.shortcut_text(keymap::shortcut_text(chord, i18n, ui.ctx().os()));
         }
-        if ui.add(button).clicked() {
+        if ui.add_enabled(enabled, button).clicked() {
             commands.send(action.command());
         }
     }

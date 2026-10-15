@@ -14,6 +14,12 @@ use crate::route::Route;
 pub(crate) enum AppCommand {
     /// Show `Route` in the Main view.
     Navigate(Route),
+    /// Close the current Register tab.
+    CloseRegisterTab,
+    /// Make the Register tab right of the current one current, wrapping to the first.
+    NextRegisterTab,
+    /// Make the Register tab left of the current one current, wrapping to the last.
+    PreviousRegisterTab,
     /// Show a message in the Status bar until the next one replaces it.
     ShowStatus(StatusMessage),
     /// Close the Main window, which ends the app.

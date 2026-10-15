@@ -56,7 +56,17 @@ impl Binding {
 
 /// Every default chord. An action with several chords lists the one its menu item
 /// shows first.
-pub(crate) const KEYMAP: &[Binding] = &[Binding::new(Modifiers::COMMAND, Key::Q, UserAction::Quit)];
+pub(crate) const KEYMAP: &[Binding] = &[
+    Binding::new(Modifiers::COMMAND, Key::W, UserAction::CloseRegisterTab),
+    Binding::new(Modifiers::COMMAND, Key::F4, UserAction::CloseRegisterTab),
+    Binding::new(Modifiers::COMMAND, Key::Tab, UserAction::NextRegisterTab),
+    Binding::new(
+        Modifiers::COMMAND.plus(Modifiers::SHIFT),
+        Key::Tab,
+        UserAction::PreviousRegisterTab,
+    ),
+    Binding::new(Modifiers::COMMAND, Key::Q, UserAction::Quit),
+];
 
 /// The chord `action`'s menu item shows: its first chord in [`KEYMAP`].
 pub(crate) fn chord(action: UserAction) -> Option<KeyboardShortcut> {

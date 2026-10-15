@@ -46,6 +46,9 @@ impl App {
     fn apply(&mut self, ctx: &egui::Context, command: AppCommand) {
         match command {
             AppCommand::Navigate(route) => self.main_window.navigate(route),
+            AppCommand::CloseRegisterTab => self.main_window.close_register_tab(),
+            AppCommand::NextRegisterTab => self.main_window.next_register_tab(),
+            AppCommand::PreviousRegisterTab => self.main_window.previous_register_tab(),
             AppCommand::ShowStatus(message) => self.main_window.show_status(message),
             AppCommand::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }
