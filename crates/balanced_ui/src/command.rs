@@ -76,6 +76,7 @@ impl StatusMessage {
                 DomainError::UnknownTransaction { .. } => {
                     fl!(i18n, "status-unknown-transaction")
                 }
+                DomainError::BlankAccountName => fl!(i18n, "status-blank-account-name"),
                 DomainError::OpeningBalancePayee { .. } => {
                     fl!(i18n, "status-opening-balance-payee")
                 }

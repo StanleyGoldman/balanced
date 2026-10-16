@@ -2,6 +2,7 @@
 
 mod account_bar;
 mod accounts_model;
+mod amount_field;
 mod app;
 mod clock;
 mod combobox;

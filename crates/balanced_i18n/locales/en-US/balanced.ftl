@@ -157,6 +157,7 @@ status-no-such-category = No category has that name. Pick one from the list, or 
 status-account-closed = This account is closed, so its transactions can't be changed.
 # A change to a transaction that no longer exists, such as one just deleted.
 status-unknown-transaction = That transaction no longer exists.
+status-blank-account-name = Enter a name for the account.
 status-opening-balance-payee = The opening balance has no payee.
 # A change to an account that no longer exists, such as one just deleted.
 status-unknown-account = That account no longer exists.
