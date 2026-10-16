@@ -78,6 +78,7 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 
 ### Implementation
 
+- Start an `/implement` run by checking that everything the ticket reuses (a field, a clock, a Dialog) is already built. When one is still an open ticket that isn't among its blockers, ask the user whether to add it as a blocker or build an interim stand-in.
 - Load the `tdd` skill before writing the first test or line of code of an `/implement` run; the skill names `/tdd` only in passing, so it won't load unless you call it.
 - Run each slice red before green. A test that has only failed to compile, or was written after its code, has never been red: break the code it covers, watch the test fail, then restore the code.
 - Restore broken code by editing it back, so its mtime moves forward. A file moved back from a backup copy keeps the copy's older mtime, so cargo skips the rebuild and the rerun still tests the broken build.
