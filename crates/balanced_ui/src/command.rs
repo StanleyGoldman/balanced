@@ -23,6 +23,9 @@ pub(crate) enum AppCommand {
     NextRegisterTab,
     /// Make the Register tab left of the current one current, wrapping to the last.
     PreviousRegisterTab,
+    /// Move keyboard focus from the Account bar to the Main view, or from anywhere
+    /// else to the Account bar.
+    SwitchPane,
     /// Open a Dialog over the Main window.
     OpenDialog(DialogKind),
     /// Show a message in the Status bar until the next one replaces it.

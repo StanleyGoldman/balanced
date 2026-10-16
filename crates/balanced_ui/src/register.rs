@@ -450,6 +450,18 @@ impl Register {
         }
     }
 
+    /// Saves the cell being edited, if any, and closes its editor, as a Shortcut does
+    /// before it acts.
+    pub(crate) fn commit_edit(&mut self, ctx: &egui::Context, commands: &CommandSender) {
+        let Some(edit) = self.edit.take() else {
+            return;
+        };
+        if let Some(model) = &self.model {
+            commit(&edit, model.rows(), commands);
+        }
+        ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+    }
+
     /// Queues a Tab press, with `modifiers` held, for the next frame.
     pub(crate) fn press_tab(&mut self, modifiers: Modifiers) {
         self.tabs.push(modifiers);

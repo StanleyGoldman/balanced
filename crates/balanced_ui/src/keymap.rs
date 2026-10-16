@@ -52,6 +52,13 @@ impl Binding {
         let types = key == Key::Space || key.name().chars().count() == 1;
         types && !self.chord.modifiers.alt && !self.holds_command()
     }
+
+    /// Whether a focused text field keeps the chord for itself: Ctrl with Z or Y (undo
+    /// and redo, Shift or not), or with C, X, V or A (copy, cut, paste, select all).
+    fn edits_text(self) -> bool {
+        const KEYS: [Key; 6] = [Key::Z, Key::Y, Key::C, Key::X, Key::V, Key::A];
+        self.holds_command() && !self.chord.modifiers.alt && KEYS.contains(&self.chord.logical_key)
+    }
 }
 
 /// Every default chord. An action with several chords lists the one its menu item
@@ -68,6 +75,8 @@ pub(crate) const KEYMAP: &[Binding] = &[
     Binding::new(Modifiers::COMMAND, Key::N, UserAction::NewTransaction),
     Binding::new(Modifiers::COMMAND, Key::D, UserAction::DeleteTransaction),
     Binding::new(Modifiers::COMMAND, Key::Q, UserAction::Quit),
+    Binding::new(Modifiers::NONE, Key::F6, UserAction::SwitchPane),
+    Binding::new(Modifiers::SHIFT, Key::F6, UserAction::SwitchPane),
 ];
 
 /// The chord `action`'s menu item shows: its first chord in [`KEYMAP`].
@@ -108,14 +117,17 @@ pub(crate) fn shortcut_text(
 ///
 /// egui matches a chord even when Shift or Alt is held beyond it, so chords with
 /// more modifiers are tried first: Ctrl+Shift+Z matches before Ctrl+Z can. A chord
-/// that types a character acts only while no text field has focus, so the field
-/// gets the letter.
+/// that types a character acts only while no widget has focus, so a focused field
+/// gets the letter. A focused text field also keeps its editing chords, such as
+/// Ctrl+Z and Ctrl+C.
 pub(crate) fn dispatch(ctx: &egui::Context, bindings: &[Binding]) -> Vec<UserAction> {
     let typing = ctx.egui_wants_keyboard_input();
+    let editing = ctx.text_edit_focused();
     let mut bindings: Vec<Binding> = bindings
         .iter()
         .copied()
         .filter(|binding| !(typing && binding.types_text()))
+        .filter(|binding| !(editing && binding.edits_text()))
         .collect();
     bindings.sort_by_key(|binding| std::cmp::Reverse(binding.modifier_count()));
     ctx.input_mut(|input| {
@@ -246,6 +258,33 @@ mod tests {
         let actions = dispatched(&BARE_T, focus_a_field, Modifiers::NONE, Key::T);
 
         assert_eq!(actions, []);
+    }
+
+    #[test]
+    fn dispatch_leaves_the_editing_chords_to_a_focused_text_field() {
+        let mut text = String::new();
+        let mut focus_a_field = |ui: &mut egui::Ui| {
+            ui.text_edit_singleline(&mut text).request_focus();
+        };
+        let chords = [
+            (Modifiers::COMMAND, Key::Z),
+            (Modifiers::COMMAND | Modifiers::SHIFT, Key::Z),
+            (Modifiers::COMMAND, Key::Y),
+            (Modifiers::COMMAND, Key::C),
+            (Modifiers::COMMAND, Key::X),
+            (Modifiers::COMMAND, Key::V),
+            (Modifiers::COMMAND, Key::A),
+        ];
+
+        let dispatched: Vec<Vec<UserAction>> = chords
+            .into_iter()
+            .map(|(modifiers, key)| {
+                let bindings = [Binding::new(modifiers, key, UserAction::Quit)];
+                dispatched(&bindings, &mut focus_a_field, modifiers, key)
+            })
+            .collect();
+
+        assert_eq!(dispatched, vec![Vec::<UserAction>::new(); chords.len()]);
     }
 
     #[test]

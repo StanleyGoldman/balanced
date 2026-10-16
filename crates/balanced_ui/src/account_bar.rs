@@ -7,9 +7,9 @@ use std::sync::Arc;
 use balanced_core::AccountId;
 use balanced_i18n::Localizer;
 use eframe::egui::{
-    self, CentralPanel, Color32, Frame, Galley, Id, Panel, PanelState, Rect, Response, RichText,
-    ScrollArea, Sense, Shape, Stroke, TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType,
-    pos2, vec2,
+    self, CentralPanel, Color32, Event, Frame, Galley, Id, Panel, PanelState, Rect, Response,
+    RichText, ScrollArea, Sense, Shape, Stroke, StrokeKind, TextStyle, TextWrapMode, WidgetInfo,
+    WidgetText, WidgetType, pos2, vec2,
 };
 
 use crate::accounts_model::{AccountRow, AccountsModel, Section};
@@ -34,6 +34,10 @@ pub(crate) struct AccountBar {
     width: f32,
     fold: AccountBarFold,
     folded: HashSet<Section>,
+    /// Whether the next frame gives the Account bar keyboard focus.
+    focus_requested: bool,
+    /// Whether one of the Account bar's widgets held keyboard focus in the last frame.
+    has_focus: bool,
 }
 
 impl AccountBar {
@@ -48,7 +52,21 @@ impl AccountBar {
             width: layout.account_bar_width(),
             fold: layout.account_bar_fold(),
             folded: layout.folded_sections(),
+            focus_requested: false,
+            has_focus: false,
         }
+    }
+
+    /// Gives the Account bar keyboard focus when it is next drawn: the selected
+    /// account's row, or else the first account's, or else the first heading. Folded to
+    /// a rail, the button that opens it takes focus.
+    pub(crate) fn request_focus(&mut self) {
+        self.focus_requested = true;
+    }
+
+    /// Whether one of the Account bar's widgets held keyboard focus in the last frame.
+    pub(crate) fn has_focus(&self) -> bool {
+        self.has_focus
     }
 
     /// The Account bar's width while open, which it keeps while folded to a rail.
@@ -89,13 +107,27 @@ impl AccountBar {
             .size_range(Self::MIN_WIDTH..=Self::MAX_WIDTH);
         let mut open = self.fold == AccountBarFold::Open;
         let mut fold_clicked = false;
+        let mut focus = Focus::default();
+        let frame = BarFrame {
+            i18n,
+            theme,
+            commands,
+            model,
+            selected,
+        };
         Panel::show_switched(ui, &mut open, rail, bar, |ui, expanded| {
             fold_clicked = if expanded {
-                self.open_bar(ui, i18n, theme, commands, model, selected)
+                self.open_bar(ui, &frame, &mut focus)
             } else {
-                Self::rail(ui, i18n)
+                Self::rail(ui, i18n, &mut focus)
             };
         });
+        if std::mem::take(&mut self.focus_requested)
+            && let Some((_, id)) = focus.target
+        {
+            ui.ctx().memory_mut(|memory| memory.request_focus(id));
+        }
+        self.has_focus = focus.held;
         if fold_clicked {
             open = !open;
         }
@@ -112,21 +144,18 @@ impl AccountBar {
 
     /// The open Account bar: the fold button, the sections and the Net Worth footer.
     /// Returns whether the fold button was clicked.
-    fn open_bar(
-        &mut self,
-        ui: &mut egui::Ui,
-        i18n: &Localizer,
-        theme: &Theme,
-        commands: &CommandSender,
-        model: &AccountsModel,
-        selected: Option<AccountId>,
-    ) -> bool {
+    fn open_bar(&mut self, ui: &mut egui::Ui, frame: &BarFrame<'_>, focus: &mut Focus) -> bool {
+        let BarFrame {
+            i18n, theme, model, ..
+        } = *frame;
         let fold = Panel::top("account_bar_header")
             .frame(Frame::NONE)
             .show_separator_line(false)
             .show(ui, |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    rail_button(ui, fl!(i18n, "account-bar-fold"), Direction::Left).clicked()
+                    let button = rail_button(ui, fl!(i18n, "account-bar-fold"), Direction::Left);
+                    focus.note(&button, Candidate::Last);
+                    button.clicked()
                 })
                 .inner
             })
@@ -136,7 +165,7 @@ impl AccountBar {
             .show(ui, |ui| Self::net_worth(ui, i18n, theme, model.net_worth()));
         CentralPanel::default().frame(Frame::NONE).show(ui, |ui| {
             ScrollArea::vertical().show(ui, |ui| {
-                self.sections(ui, i18n, theme, commands, model, selected);
+                self.sections(ui, frame, focus);
             });
         });
         fold
@@ -144,22 +173,24 @@ impl AccountBar {
 
     /// The rail the Account bar folds to: only the button that opens it again.
     /// Returns whether that button was clicked.
-    fn rail(ui: &mut egui::Ui, i18n: &Localizer) -> bool {
+    fn rail(ui: &mut egui::Ui, i18n: &Localizer, focus: &mut Focus) -> bool {
         ui.vertical_centered(|ui| {
-            rail_button(ui, fl!(i18n, "account-bar-unfold"), Direction::Right).clicked()
+            let button = rail_button(ui, fl!(i18n, "account-bar-unfold"), Direction::Right);
+            focus.note(&button, Candidate::Last);
+            button.clicked()
         })
         .inner
     }
 
-    fn sections(
-        &mut self,
-        ui: &mut egui::Ui,
-        i18n: &Localizer,
-        theme: &Theme,
-        commands: &CommandSender,
-        model: &AccountsModel,
-        selected: Option<AccountId>,
-    ) {
+    fn sections(&mut self, ui: &mut egui::Ui, frame: &BarFrame<'_>, focus: &mut Focus) {
+        let BarFrame {
+            i18n,
+            theme,
+            commands,
+            model,
+            selected,
+        } = *frame;
+        let mut jump = LetterJump::default();
         for section_rows in model.sections() {
             let section = section_rows.section();
             let fold = if self.folded.contains(&section) {
@@ -167,7 +198,10 @@ impl AccountBar {
             } else {
                 Fold::Open
             };
-            if heading(ui, section, section.label(i18n), fold).clicked() {
+            let heading = heading(ui, section, section.label(i18n), fold);
+            focus.note(&heading, Candidate::Heading);
+            jump.note_heading(&heading);
+            if heading.clicked() {
                 match fold {
                     Fold::Open => self.folded.insert(section),
                     Fold::Folded => self.folded.remove(&section),
@@ -181,7 +215,18 @@ impl AccountBar {
                 let balance = model
                     .balance(row.id())
                     .expect("the model formats a balance for every account it lists");
-                let response = account_row(ui, theme, row, balance, selected == Some(row.id()));
+                let is_selected = selected == Some(row.id());
+                let response = account_row(ui, theme, row, balance, is_selected);
+                let candidate = if is_selected {
+                    Candidate::Selected
+                } else {
+                    Candidate::Account
+                };
+                focus.note(&response, candidate);
+                jump.note_account(&response, row.name());
+                if response.gained_focus() {
+                    response.scroll_to_me(None);
+                }
                 if response.clicked() {
                     // TODO(#100): open in a new Register tab when the "Open an account
                     // in" Preference says so.
@@ -190,6 +235,7 @@ impl AccountBar {
                 response.context_menu(|ui| account_menu(ui, i18n, commands, row.id()));
             }
         }
+        jump.act(ui.ctx());
     }
 
     fn net_worth(ui: &mut egui::Ui, i18n: &Localizer, theme: &Theme, net_worth: &FormattedAmount) {
@@ -199,6 +245,108 @@ impl AccountBar {
                 ui.label(net_worth.styled(theme));
             });
         });
+    }
+}
+
+/// What every part of the Account bar is drawn with in one frame.
+#[derive(Clone, Copy)]
+struct BarFrame<'a> {
+    i18n: &'a Localizer,
+    theme: &'a Theme,
+    commands: &'a CommandSender,
+    model: &'a AccountsModel,
+    /// The account the Main view shows, highlighted.
+    selected: Option<AccountId>,
+}
+
+/// How strongly a widget is wanted as the Account bar's focus target, weakest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Candidate {
+    /// A rail button, taken only when nothing else is shown.
+    Last,
+    Heading,
+    Account,
+    Selected,
+}
+
+/// What one frame of the Account bar learnt about keyboard focus: whether one of its
+/// widgets holds it, and which widget takes it when the Account bar is given focus.
+#[derive(Debug, Default)]
+struct Focus {
+    held: bool,
+    /// The widget that takes focus, and how strongly it was wanted.
+    target: Option<(Candidate, Id)>,
+}
+
+impl Focus {
+    /// Notes a widget drawn in the Account bar. Of equally wanted widgets, the first
+    /// drawn becomes the target.
+    fn note(&mut self, response: &Response, candidate: Candidate) {
+        self.held |= response.has_focus();
+        if self
+            .target
+            .is_none_or(|(strongest, _)| candidate > strongest)
+        {
+            self.target = Some((candidate, response.id));
+        }
+    }
+}
+
+/// The accounts shown in one frame of the Account bar, in order, and where its focus
+/// sits among them, so that typing a letter can jump to the next account starting
+/// with it.
+#[derive(Debug, Default)]
+struct LetterJump<'a> {
+    accounts: Vec<(Id, &'a str)>,
+    /// The index in `accounts` the search for the next account starts from, while the
+    /// Account bar's focus is on an account or a heading.
+    start: Option<usize>,
+}
+
+impl<'a> LetterJump<'a> {
+    fn note_heading(&mut self, response: &Response) {
+        if response.has_focus() {
+            self.start = Some(self.accounts.len());
+        }
+    }
+
+    fn note_account(&mut self, response: &Response, name: &'a str) {
+        if response.has_focus() {
+            self.start = Some(self.accounts.len() + 1);
+        }
+        self.accounts.push((response.id, name));
+    }
+
+    /// Moves focus to the next account whose name starts with the text typed this
+    /// frame, ignoring case and wrapping to the first account, while the focus is in the
+    /// Account bar. The typed text is consumed.
+    fn act(self, ctx: &egui::Context) {
+        let Some(start) = self.start else {
+            return;
+        };
+        let typed = ctx.input_mut(|input| {
+            let mut typed = String::new();
+            input.events.retain(|event| {
+                let Event::Text(text) = event else {
+                    return true;
+                };
+                typed.push_str(text);
+                false
+            });
+            typed.to_lowercase()
+        });
+        if typed.is_empty() {
+            return;
+        }
+        let (before, after) = self.accounts.split_at(start.min(self.accounts.len()));
+        let next = after
+            .iter()
+            .chain(before)
+            .find(|(_, name)| name.to_lowercase().starts_with(&typed));
+        if let Some(&(id, _)) = next {
+            ctx.memory_mut(|memory| memory.request_focus(id));
+            ctx.request_repaint();
+        }
     }
 }
 
@@ -276,6 +424,14 @@ fn full_width_target(ui: &mut egui::Ui, id_salt: impl egui::AsIdSalt, height: f3
     ui.interact(rect, id, Sense::click())
 }
 
+/// Outlines the widget of `response` with `stroke` while it has keyboard focus.
+fn focus_outline(ui: &egui::Ui, response: &Response, stroke: Stroke) {
+    if response.has_focus() {
+        ui.painter()
+            .rect_stroke(response.rect, 0.0, stroke, StrokeKind::Inside);
+    }
+}
+
 /// Paints `galley` at `left`, centred vertically in `row`.
 fn paint_centred(ui: &egui::Ui, galley: Arc<Galley>, left: f32, row: Rect, color: Color32) {
     let top = row.center().y - galley.size().y / 2.0;
@@ -300,6 +456,7 @@ fn heading(ui: &mut egui::Ui, section: Section, label: String, fold: Fold) -> Re
         if response.hovered() {
             ui.painter().rect_filled(rect, 0.0, visuals.weak_bg_fill);
         }
+        focus_outline(ui, &response, visuals.bg_stroke);
         let icon_size = ui.spacing().icon_width / 2.0;
         let icon = Rect::from_center_size(
             pos2(rect.left() + ui.spacing().icon_width / 2.0, rect.center().y),
@@ -361,6 +518,7 @@ fn account_row(
     if selected || response.hovered() || response.is_pointer_button_down_on() {
         ui.painter().rect_filled(rect, 0.0, visuals.weak_bg_fill);
     }
+    focus_outline(ui, &response, visuals.bg_stroke);
     let text_color = visuals.text_color();
     let balance_galley = WidgetText::from(balance.styled(theme)).into_galley(
         ui,
