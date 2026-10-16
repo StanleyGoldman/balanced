@@ -168,11 +168,7 @@ impl MainWindow {
     /// to take it, a rejection goes to the Status bar.
     pub(crate) fn form_applied(&mut self, ctx: &egui::Context, result: Result<(), DomainError>) {
         match (result, &mut self.new_account) {
-            (Ok(()), Some(_)) => {
-                if let Some(dialog) = self.new_account.take() {
-                    self.focus_return = Some(dialog.close(ctx));
-                }
-            }
+            (Ok(()), Some(_)) => self.close_dialog(ctx, |window| &mut window.new_account),
             (Ok(()), None) => {}
             (Err(error), Some(dialog)) => dialog.form.refused(error),
             (Err(error), None) => self.show_status(StatusMessage::Rejected(error)),
@@ -220,6 +216,17 @@ impl MainWindow {
                 // TODO(#95): open the New Category Dialog, prefilled with the name.
                 tracing::debug!("the New Category Dialog was asked for");
             }
+        }
+    }
+
+    /// Closes the Dialog `slot` holds, if it is open, and keeps where focus goes back to.
+    fn close_dialog<F>(
+        &mut self,
+        ctx: &egui::Context,
+        slot: impl FnOnce(&mut Self) -> &mut Option<OpenDialog<F>>,
+    ) {
+        if let Some(dialog) = slot(self).take() {
+            self.focus_return = Some(dialog.close(ctx));
         }
     }
 
@@ -348,11 +355,7 @@ impl MainWindow {
         };
         match new_account::show(ctx, i18n, theme, commands, dialog, today) {
             WizardOutcome::Open => {}
-            WizardOutcome::Cancelled => {
-                if let Some(dialog) = self.new_account.take() {
-                    self.focus_return = Some(dialog.close(ctx));
-                }
-            }
+            WizardOutcome::Cancelled => self.close_dialog(ctx, |window| &mut window.new_account),
         }
     }
 
@@ -408,9 +411,7 @@ impl MainWindow {
             DialogOutcome::Cancelled => {}
             DialogOutcome::Back => unreachable!("the delete confirm has no Back button"),
         }
-        if let Some(dialog) = self.delete_transaction.take() {
-            self.focus_return = Some(dialog.close(ctx));
-        }
+        self.close_dialog(ctx, |window| &mut window.delete_transaction);
     }
 
     /// The open account's name and balance above its Register, with + Transaction. A

@@ -135,7 +135,6 @@ dialog-new-account-kind-asset = Asset
 # Debt, such as a mortgage or a loan.
 dialog-new-account-kind-liability = Liability
 dialog-new-account-name = Name
-dialog-new-account-name-blank = Enter a name for the account.
 dialog-new-account-balance = Opening balance
 # The date of the opening balance.
 dialog-new-account-date = As of

@@ -96,6 +96,10 @@ fn the_wizard_walks_from_type_to_a_new_account_last_in_its_sub_group() {
     type_into(&mut harness, "Opening balance", "1,234.56");
     press(&mut harness, Key::Enter);
     assert!(shows(&harness, "Step 4 of 4: Review"));
+    assert!(shows(
+        &harness,
+        "Opening balance: $1,234.56 as of 10/14/2026"
+    ));
 
     press(&mut harness, Key::Enter);
 

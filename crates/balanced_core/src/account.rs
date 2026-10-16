@@ -62,6 +62,11 @@ impl AccountId {
     pub(crate) fn new(id: u32) -> Self {
         Self(id)
     }
+
+    /// The id after this one.
+    pub(crate) fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
 }
 
 /// An account: its name, its kind, its currency, and whether it is hidden or closed.

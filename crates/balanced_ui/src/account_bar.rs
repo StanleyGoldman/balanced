@@ -161,10 +161,9 @@ impl AccountBar {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let button = rail_button(ui, fl!(i18n, "account-bar-fold"), Direction::Left);
                     focus.note(&button, Candidate::Fallback);
-                    if ui
-                        .small_button(fl!(i18n, "account-bar-new-account"))
-                        .clicked()
-                    {
+                    let new_account = ui.small_button(fl!(i18n, "account-bar-new-account"));
+                    focus.note(&new_account, Candidate::Fallback);
+                    if new_account.clicked() {
                         commands.send(UserAction::NewAccount.command());
                     }
                     button.clicked()

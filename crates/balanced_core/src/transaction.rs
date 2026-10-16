@@ -14,9 +14,9 @@ impl TransactionId {
         Self(id)
     }
 
-    /// The id's number.
-    pub(crate) fn raw(self) -> u32 {
-        self.0
+    /// The id after this one.
+    pub(crate) fn next(self) -> Self {
+        Self(self.0 + 1)
     }
 }
 

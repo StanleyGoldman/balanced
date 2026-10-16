@@ -238,9 +238,9 @@ pub struct Ledger {
     /// The inverses of the undone changes Redo can make again, the latest undone last.
     redo_stack: Vec<DomainCommand>,
     /// The id the next created account takes. Ids are never reused.
-    next_account: u32,
+    next_account: AccountId,
     /// The id the next posted transaction takes. Ids are never reused.
-    next_transaction: u32,
+    next_transaction: TransactionId,
 }
 
 impl Ledger {
@@ -271,9 +271,9 @@ impl Ledger {
         let mut transaction_ids = (0..).map(TransactionId::new);
         let mut summaries: Vec<AccountSummary> = Vec::new();
         let mut net_worth = Money::zero(currency);
-        let mut next_account = 0;
+        let mut next_account = AccountId::new(0);
         for (id, new) in (0..).zip(accounts) {
-            next_account = id + 1;
+            next_account = AccountId::new(id).next();
             let kind = new.kind();
             let (account, transactions) = new.into_account(AccountId::new(id));
             let mut posted = Vec::new();
@@ -307,7 +307,7 @@ impl Ledger {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             next_account,
-            next_transaction: transaction_ids.next().expect("the ids never run out").raw(),
+            next_transaction: transaction_ids.next().expect("the ids never run out"),
         })
     }
 
@@ -402,19 +402,19 @@ impl Ledger {
             return Err(DomainError::BlankAccountName);
         }
         let currency = self.view.net_worth.currency();
-        let id = AccountId::new(self.next_account);
+        let id = self.next_account;
         let (account, transactions) =
             NewAccount::new(name, kind, opened, opening_balance).into_account(id);
         let mut next_transaction = self.next_transaction;
         let mut posted = Vec::with_capacity(transactions.len());
         for new in transactions {
-            posted.push(new.into_transaction(TransactionId::new(next_transaction), currency)?);
-            next_transaction += 1;
+            posted.push(new.into_transaction(next_transaction, currency)?);
+            next_transaction = next_transaction.next();
         }
         let summary = AccountSummary::new(account, posted, currency)?;
         let place = self.view.sub_group(kind).len();
         self.insert_account(summary, place)?;
-        self.next_account += 1;
+        self.next_account = id.next();
         self.next_transaction = next_transaction;
         Ok(DomainCommand::DeleteAccount { account: id })
     }
@@ -426,6 +426,7 @@ impl Ledger {
             .iter()
             .position(|summary| summary.account.id() == id)
             .ok_or(DomainError::UnknownAccount { account: id })?;
+        // `position` found `index` in this same list of accounts.
         let place = index
             - self
                 .view

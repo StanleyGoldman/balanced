@@ -59,6 +59,24 @@ impl Step {
     }
 }
 
+/// The opening balance as the Review step shows it and Finish creates it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OpeningBalance {
+    amount: Money,
+    date: Date<Iso>,
+}
+
+/// Where the create Command is, once Finish has sent it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Submission {
+    /// Finish hasn't sent it, or the user went back since.
+    NotSent,
+    /// Finish sent it, and the wizard waits for it to be applied.
+    Sent,
+    /// The ledger refused it, for the reason the Review step shows.
+    Refused(DomainError),
+}
+
 /// The wizard's form: what each step holds so far, and where it is.
 #[derive(Debug, Clone)]
 pub(crate) struct NewAccountForm {
@@ -79,14 +97,11 @@ pub(crate) struct NewAccountForm {
     date: DateEdit,
     /// The day the wizard opened, the date field's saved date.
     opened_on: Date<Iso>,
-    /// The opening balance and its date, read when the Opening balance step is left.
-    read: Option<(Money, Date<Iso>)>,
+    /// The opening balance, read when the Opening balance step is left.
+    reviewed: Option<OpeningBalance>,
     /// Whether the step's field takes keyboard focus on the next frame.
     focus_field: bool,
-    /// Whether Finish has sent the create Command, which the wizard waits on.
-    submitted: bool,
-    /// Why the ledger refused the create Command.
-    rejected: Option<DomainError>,
+    submission: Submission,
 }
 
 impl NewAccountForm {
@@ -104,18 +119,16 @@ impl NewAccountForm {
             currency,
             date: DateEdit::new(today),
             opened_on: today,
-            read: None,
+            reviewed: None,
             focus_field: false,
-            submitted: false,
-            rejected: None,
+            submission: Submission::NotSent,
         }
     }
 
     /// Notes that the ledger refused the create Command with `error`, which the
     /// Review step shows. Finish can send it again.
     pub(crate) fn refused(&mut self, error: DomainError) {
-        self.submitted = false;
-        self.rejected = Some(error);
+        self.submission = Submission::Refused(error);
     }
 
     /// Moves on from the current step if its input is valid, or keeps it with the
@@ -139,8 +152,8 @@ impl NewAccountForm {
                     date_field::Commit::Rejected => None,
                 };
                 match (balance, date) {
-                    (Ok(balance), Some(date)) => {
-                        self.read = Some((balance, date));
+                    (Ok(amount), Some(date)) => {
+                        self.reviewed = Some(OpeningBalance { amount, date });
                         self.go_to(Step::Review);
                     }
                     (Err(error), _) => {
@@ -151,19 +164,18 @@ impl NewAccountForm {
                 }
             }
             Step::Review => {
-                if self.submitted {
+                if self.submission == Submission::Sent {
                     return;
                 }
-                let Some((opening_balance, opened)) = self.read else {
+                let Some(OpeningBalance { amount, date }) = self.reviewed else {
                     return;
                 };
-                self.submitted = true;
-                self.rejected = None;
+                self.submission = Submission::Sent;
                 commands.send(AppCommand::SubmitForm(DomainCommand::CreateAccount {
                     name: self.name.trim().to_owned(),
                     kind: self.kind,
-                    opened,
-                    opening_balance,
+                    opened: date,
+                    opening_balance: amount,
                 }));
             }
         }
@@ -183,10 +195,19 @@ impl NewAccountForm {
     fn go_to(&mut self, step: Step) {
         self.step = step;
         self.focus_field = step.has_field();
-        self.rejected = None;
+        self.submission = Submission::NotSent;
     }
 
     fn body(&mut self, ui: &mut egui::Ui, i18n: &Localizer, theme: &Theme, today: Date<Iso>) {
+        // Every step takes the height of the tallest, the Type step's heading and list
+        // of kinds, so the buttons stay put from step to step.
+        let rows = 1 + AccountKind::ALL.len();
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a handful of rows is exact in f32"
+        )]
+        let height = rows as f32 * (ui.spacing().interact_size.y + ui.spacing().item_spacing.y);
+        ui.set_min_height(height);
         ui.add(Label::new(RichText::new(self.step.heading(i18n)).strong()));
         ui.add_space(ui.spacing().item_spacing.y);
         match self.step {
@@ -219,7 +240,8 @@ impl NewAccountForm {
             self.blank_name = false;
         }
         if self.blank_name {
-            error(ui, fl!(i18n, "dialog-new-account-name-blank"));
+            let blank = StatusMessage::Rejected(DomainError::BlankAccountName);
+            refusal(ui, blank.text(i18n));
         }
     }
 
@@ -250,7 +272,7 @@ impl NewAccountForm {
             self.balance_error = None;
         }
         if let Some(reason) = self.balance_error {
-            error(
+            refusal(
                 ui,
                 amount_field::error_text(i18n, reason, &self.reader, self.currency),
             );
@@ -258,20 +280,21 @@ impl NewAccountForm {
         {
             ui.label(preview.text(i18n));
         }
-        ui.label(fl!(i18n, "dialog-new-account-date"));
+        let label = ui.label(fl!(i18n, "dialog-new-account-date"));
         let (rect, _) = ui.allocate_exact_size(
             vec2(ui.available_width(), theme.row_height()),
             Sense::hover(),
         );
         self.date
-            .show(ui, i18n, theme, today, Id::new("new_account_date"), rect);
+            .show(ui, i18n, theme, today, Id::new("new_account_date"), rect)
+            .labelled_by(label.id);
     }
 
     fn review_step(&self, ui: &mut egui::Ui, i18n: &Localizer) {
-        let Some((balance, date)) = self.read else {
+        let Some(OpeningBalance { amount, date }) = self.reviewed else {
             return;
         };
-        let balance = FormattedAmount::new(i18n, balance, AmountStyle::Symbol);
+        let balance = FormattedAmount::new(i18n, amount, AmountStyle::Symbol);
         ui.label(fl!(
             i18n,
             "dialog-new-account-review-type",
@@ -288,8 +311,8 @@ impl NewAccountForm {
             amount = balance.text(),
             date = i18n.format_date(date)
         ));
-        if let Some(rejected) = &self.rejected {
-            error(ui, StatusMessage::Rejected(rejected.clone()).text(i18n));
+        if let Submission::Refused(error) = &self.submission {
+            refusal(ui, StatusMessage::Rejected(error.clone()).text(i18n));
         }
     }
 }
@@ -358,8 +381,8 @@ fn kind_label(i18n: &Localizer, kind: AccountKind) -> String {
     }
 }
 
-/// Shows why the step's input was refused, below its field.
-fn error(ui: &mut egui::Ui, text: String) {
+/// Shows why the step's input, or Finish, was refused, below what was refused.
+fn refusal(ui: &mut egui::Ui, text: String) {
     let colour = ui.visuals().error_fg_color;
     ui.label(RichText::new(text).color(colour));
 }
