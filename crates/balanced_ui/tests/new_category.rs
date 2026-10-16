@@ -4,6 +4,7 @@
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
+use balanced_ui::testing::unfold_account_bar;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::App as _;
 use eframe::egui::accesskit::Role;
@@ -14,7 +15,7 @@ use icu_calendar::Date;
 
 /// The App on stub data, in the test locale, in a window of `size`.
 fn app(size: Vec2) -> Harness<'static, App> {
-    Harness::builder().with_size(size).build_eframe(|cc| {
+    let mut harness = Harness::builder().with_size(size).build_eframe(|cc| {
         App::new(
             cc,
             Localizer::for_tests(),
@@ -22,7 +23,9 @@ fn app(size: Vec2) -> Harness<'static, App> {
             Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
             PreferencesFile::for_tests(),
         )
-    })
+    });
+    unfold_account_bar(&mut harness);
+    harness
 }
 
 /// Plays `event` in one frame, first passing it through the App's `raw_input_hook`

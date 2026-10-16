@@ -3,6 +3,7 @@
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
+use balanced_ui::testing::unfold_account_bar;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::App as _;
 use eframe::egui::accesskit::Role;
@@ -16,7 +17,7 @@ use icu_locale::{langid, locale};
 /// every Register column.
 fn app_in(i18n: Localizer) -> Harness<'static, App> {
     let today = Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date");
-    Harness::builder()
+    let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(move |cc| {
             App::new(
@@ -26,7 +27,9 @@ fn app_in(i18n: Localizer) -> Harness<'static, App> {
                 Clock::fixed(today),
                 PreferencesFile::for_tests(),
             )
-        })
+        });
+    unfold_account_bar(&mut harness);
+    harness
 }
 
 /// The App in the test locale, `en-US`.

@@ -106,6 +106,8 @@ pub(crate) struct AccountsModel {
     source: Source,
     sections: Vec<SectionRows>,
     balances: HashMap<AccountId, FormattedAmount>,
+    /// Each section's total, for the sections whose sum doesn't overflow.
+    totals: HashMap<Section, FormattedAmount>,
     net_worth: FormattedAmount,
 }
 
@@ -169,6 +171,25 @@ impl AccountsModel {
                     (summary.account().id(), balance)
                 })
                 .collect(),
+            totals: Section::ALL
+                .into_iter()
+                .filter_map(|section| {
+                    let total = match section {
+                        Section::Group(group) => view.group_total(group),
+                        Section::Closed => view.closed_total(),
+                    };
+                    match total {
+                        Ok(total) => Some((
+                            section,
+                            FormattedAmount::new(i18n, total, AmountStyle::Symbol),
+                        )),
+                        Err(error) => {
+                            tracing::warn!(?error, ?section, "a section's total can't be summed");
+                            None
+                        }
+                    }
+                })
+                .collect(),
             net_worth: FormattedAmount::new(i18n, view.net_worth(), AmountStyle::Symbol),
         }
     }
@@ -193,6 +214,12 @@ impl AccountsModel {
     /// The balance of account `id`, or `None` when the snapshot lacks it.
     pub(crate) fn balance(&self, id: AccountId) -> Option<&FormattedAmount> {
         self.balances.get(&id)
+    }
+
+    /// The sum of the balances of `section`'s accounts, hidden accounts included, or
+    /// `None` when the sum overflows.
+    pub(crate) fn total(&self, section: Section) -> Option<&FormattedAmount> {
+        self.totals.get(&section)
     }
 
     /// Net Worth: every balance summed, hidden and closed accounts included.

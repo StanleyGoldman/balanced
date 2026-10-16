@@ -17,7 +17,8 @@ use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
 use crate::layout::Layout;
-use crate::route::{OpenIn, Route};
+use crate::preferences::{NetWorthPlacement, Preferences};
+use crate::route::{OpenIn, Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::triangle_button::{Direction, triangle_button};
 use crate::user_action::UserAction;
@@ -40,6 +41,19 @@ pub(crate) struct AccountBar {
     focus_requested: bool,
     /// Whether one of the Account bar's widgets held keyboard focus in the last frame.
     has_focus: bool,
+    /// Where the Main view was in the last frame, as auto-fold reads it.
+    visit: Visit,
+}
+
+/// Where the Main view is, as auto-fold reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Visit {
+    /// On the Accounts tab.
+    OnAccounts,
+    /// Off the Accounts tab, where auto-fold shows the rail.
+    Away,
+    /// Off the Accounts tab, with the rail auto-fold showed unfolded by the user.
+    AwayUnfolded,
 }
 
 impl AccountBar {
@@ -56,6 +70,8 @@ impl AccountBar {
             folded: layout.folded_sections(),
             focus_requested: false,
             has_focus: false,
+            // Every run starts on Home.
+            visit: Visit::Away,
         }
     }
 
@@ -85,19 +101,35 @@ impl AccountBar {
         &self.folded
     }
 
-    /// Draws the Account bar from `model`, highlighting `selected`, or the rail it
-    /// folds to. Clicking an account opens it in the current Register, and
-    /// right-clicking it offers its commands. Clicking a heading folds or unfolds its
-    /// section. Dragging the Account bar's edge resizes it.
-    pub(crate) fn show(
-        &mut self,
-        ui: &mut egui::Ui,
-        i18n: &Localizer,
-        theme: &Theme,
-        commands: &CommandSender,
-        model: &AccountsModel,
-        selected: Option<AccountId>,
-    ) {
+    /// Draws the Account bar from `frame`'s model, highlighting its selected account,
+    /// or the rail it folds to, as its Preferences say. Clicking an account opens it
+    /// where the Preferences say, and right-clicking it offers its commands. Clicking a
+    /// heading folds or unfolds its section. Dragging the Account bar's edge resizes it.
+    ///
+    /// With auto-fold on, the Account bar shows its rail while the Main view's `tab` is
+    /// not Accounts, without changing its own fold, which the layout saves. Clicking the
+    /// rail's button opens the Account bar until `tab` next changes, and saves it open.
+    pub(crate) fn show(&mut self, ui: &mut egui::Ui, frame: &BarFrame<'_>, tab: TopLevelTab) {
+        let BarFrame {
+            i18n,
+            theme,
+            preferences,
+            ..
+        } = *frame;
+        self.visit = match (tab, self.visit) {
+            (TopLevelTab::Accounts, _) => Visit::OnAccounts,
+            (
+                TopLevelTab::Home
+                | TopLevelTab::Bills
+                | TopLevelTab::Spending
+                | TopLevelTab::Planning
+                | TopLevelTab::Investing
+                | TopLevelTab::PropertyDebt,
+                Visit::OnAccounts,
+            ) => Visit::Away,
+            (_, visit) => visit,
+        };
+        let auto_folded = preferences.auto_fold && self.visit == Visit::Away;
         let id = Id::new("account_bar");
         let rail = Panel::left("account_bar_rail")
             .frame(theme.chrome_frame())
@@ -107,19 +139,12 @@ impl AccountBar {
             .frame(theme.chrome_frame())
             .default_size(self.width)
             .size_range(Self::MIN_WIDTH..=Self::MAX_WIDTH);
-        let mut open = self.fold == AccountBarFold::Open;
+        let mut open = self.fold == AccountBarFold::Open && !auto_folded;
         let mut fold_clicked = false;
         let mut focus = Focus::default();
-        let frame = BarFrame {
-            i18n,
-            theme,
-            commands,
-            model,
-            selected,
-        };
         Panel::show_switched(ui, &mut open, rail, bar, |ui, expanded| {
             fold_clicked = if expanded {
-                self.open_bar(ui, &frame, &mut focus)
+                self.open_bar(ui, frame, &mut focus)
             } else {
                 Self::rail(ui, i18n, &mut focus)
             };
@@ -133,12 +158,18 @@ impl AccountBar {
         self.has_focus = focus.held;
         if fold_clicked {
             open = !open;
+            if auto_folded {
+                self.visit = Visit::AwayUnfolded;
+            }
         }
-        self.fold = if open {
-            AccountBarFold::Open
-        } else {
-            AccountBarFold::Rail
-        };
+        // The rail auto-fold shows leaves the user's own fold as it was.
+        if !auto_folded || fold_clicked {
+            self.fold = if open {
+                AccountBarFold::Open
+            } else {
+                AccountBarFold::Rail
+            };
+        }
         // The panel keeps its width before a drag until the drag ends.
         if let Some(state) = PanelState::load(ui.ctx(), id) {
             self.width = state.size().x;
@@ -153,6 +184,7 @@ impl AccountBar {
             theme,
             commands,
             model,
+            preferences,
             ..
         } = *frame;
         let fold = Panel::top("account_bar_header")
@@ -173,9 +205,14 @@ impl AccountBar {
                 .inner
             })
             .inner;
-        Panel::bottom("net_worth")
-            .frame(theme.footer_frame())
-            .show(ui, |ui| Self::net_worth(ui, i18n, theme, model.net_worth()));
+        match preferences.net_worth_placement {
+            NetWorthPlacement::AccountBar => {
+                Panel::bottom("net_worth")
+                    .frame(theme.footer_frame())
+                    .show(ui, |ui| Self::net_worth(ui, i18n, theme, model.net_worth()));
+            }
+            NetWorthPlacement::StatusBar => {}
+        }
         CentralPanel::default().frame(Frame::NONE).show(ui, |ui| {
             ScrollArea::vertical().show(ui, |ui| {
                 self.sections(ui, frame, focus);
@@ -202,6 +239,7 @@ impl AccountBar {
             commands,
             model,
             selected,
+            preferences,
         } = *frame;
         let mut jump = LetterJump::default();
         for section_rows in model.sections() {
@@ -211,7 +249,8 @@ impl AccountBar {
             } else {
                 Fold::Open
             };
-            let heading = heading(ui, section, section.label(i18n), fold);
+            let total = model.total(section).filter(|_| preferences.group_totals);
+            let heading = heading(ui, theme, section, section.label(i18n), total, fold);
             focus.note(&heading, Candidate::Heading);
             jump.note_heading(&heading);
             if heading.clicked() {
@@ -241,9 +280,7 @@ impl AccountBar {
                     response.scroll_to_me(None);
                 }
                 if response.clicked() {
-                    // TODO(#100): open in a new Register tab when the "Open an account
-                    // in" Preference says so.
-                    open(commands, row.id(), OpenIn::CurrentRegister);
+                    open(commands, row.id(), preferences.open_account_in);
                 }
                 response.context_menu(|ui| account_menu(ui, i18n, commands, row.id()));
             }
@@ -251,7 +288,14 @@ impl AccountBar {
         jump.act(ui.ctx());
     }
 
-    fn net_worth(ui: &mut egui::Ui, i18n: &Localizer, theme: &Theme, net_worth: &FormattedAmount) {
+    /// Net Worth's name, and its amount at the right edge of `ui`, as the Account bar's
+    /// footer or the Status bar shows it.
+    pub(crate) fn net_worth(
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        theme: &Theme,
+        net_worth: &FormattedAmount,
+    ) {
         ui.horizontal(|ui| {
             ui.label(fl!(i18n, "account-bar-net-worth"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -263,13 +307,15 @@ impl AccountBar {
 
 /// What every part of the Account bar is drawn with in one frame.
 #[derive(Clone, Copy)]
-struct BarFrame<'a> {
-    i18n: &'a Localizer,
-    theme: &'a Theme,
-    commands: &'a CommandSender,
-    model: &'a AccountsModel,
+pub(crate) struct BarFrame<'a> {
+    pub(crate) i18n: &'a Localizer,
+    pub(crate) theme: &'a Theme,
+    pub(crate) commands: &'a CommandSender,
+    pub(crate) model: &'a AccountsModel,
     /// The account the Main view shows, highlighted.
-    selected: Option<AccountId>,
+    pub(crate) selected: Option<AccountId>,
+    /// The Preferences shown: the open Preferences Dialog's draft, or else those in use.
+    pub(crate) preferences: &'a Preferences,
 }
 
 /// How strongly a widget is wanted as the Account bar's focus target, weakest first.
@@ -447,8 +493,16 @@ fn paint_centred(ui: &egui::Ui, galley: Arc<Galley>, left: f32, row: Rect, color
 }
 
 /// A section heading: a fold triangle and the section's name, the full width of the
-/// Account bar.
-fn heading(ui: &mut egui::Ui, section: Section, label: String, fold: Fold) -> Response {
+/// Account bar, with the section's `total` at its right when there is one. AccessKit
+/// reads the total as the heading's value.
+fn heading(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    section: Section,
+    label: String,
+    total: Option<&FormattedAmount>,
+    fold: Fold,
+) -> Response {
     let response = full_width_target(
         ui,
         ("account_bar_heading", section),
@@ -458,6 +512,10 @@ fn heading(ui: &mut egui::Ui, section: Section, label: String, fold: Fold) -> Re
     let open = fold == Fold::Open;
     response
         .widget_info(|| WidgetInfo::selected(WidgetType::CollapsingHeader, enabled, open, &label));
+    if let Some(total) = total {
+        ui.ctx()
+            .accesskit_node_builder(response.id, |node| node.set_value(total.text()));
+    }
     let rect = response.rect;
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact(&response);
@@ -473,10 +531,23 @@ fn heading(ui: &mut egui::Ui, section: Section, label: String, fold: Fold) -> Re
         ui.painter()
             .add(fold_triangle(icon, fold, visuals.text_color()));
         let text_left = rect.left() + icon_column(ui);
+        let gap = ui.spacing().item_spacing.x;
+        let mut text_right = rect.right();
+        if let Some(total) = total {
+            let total_galley = WidgetText::from(total.styled(theme).strong()).into_galley(
+                ui,
+                Some(TextWrapMode::Extend),
+                f32::INFINITY,
+                TextStyle::Body,
+            );
+            let total_left = rect.right() - gap - total_galley.size().x;
+            paint_centred(ui, total_galley, total_left, rect, visuals.text_color());
+            text_right = total_left - gap;
+        }
         let galley = WidgetText::from(RichText::new(label).strong()).into_galley(
             ui,
             Some(TextWrapMode::Truncate),
-            rect.right() - text_left,
+            (text_right - text_left).max(0.0),
             TextStyle::Body,
         );
         paint_centred(ui, galley, text_left, rect, visuals.text_color());

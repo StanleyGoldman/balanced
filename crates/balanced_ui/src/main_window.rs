@@ -2,10 +2,11 @@
 
 use balanced_core::{AccountSummary, DomainCommand, DomainError, LedgerView, TransactionId};
 use balanced_i18n::Localizer;
+use eframe::egui::accesskit::Role;
 use eframe::egui::{self, Button, CentralPanel, Id, Label, MenuBar, Panel, RichText, Sides};
 use icu_calendar::{Date, Iso};
 
-use crate::account_bar::AccountBar;
+use crate::account_bar::{AccountBar, BarFrame};
 use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
@@ -16,10 +17,9 @@ use crate::manage_accounts::{self, ManageAccountsForm, ManageAccountsOutcome};
 use crate::menu_nav::{DrawnMenus, MenuNav};
 use crate::new_account::{self, NewAccountForm, WizardOutcome};
 use crate::new_category::NewCategoryForm;
-use crate::preferences::Preferences;
+use crate::preferences::{NetWorthPlacement, Preferences};
 use crate::preferences_dialog::PreferencesForm;
 use crate::register::ColumnWidths;
-use crate::register_columns::RegisterColumns;
 use crate::register_model::RegisterRow;
 use crate::register_tabs::RegisterTabs;
 use crate::route::{Route, TopLevelTab};
@@ -52,6 +52,18 @@ pub(crate) struct MainWindow {
     /// Where focus goes now that a Dialog has closed, until a frame restores it.
     focus_return: Option<FocusReturn>,
     menu_nav: MenuNav,
+}
+
+/// What the Main window is drawn with in one frame.
+#[derive(Clone, Copy)]
+pub(crate) struct WindowFrame<'a> {
+    pub(crate) i18n: &'a Localizer,
+    pub(crate) theme: &'a Theme,
+    /// The Preferences shown: the open Preferences Dialog's draft, or else those in use.
+    pub(crate) preferences: &'a Preferences,
+    pub(crate) commands: &'a CommandSender,
+    pub(crate) view: &'a LedgerView,
+    pub(crate) today: Date<Iso>,
 }
 
 /// The delete transaction confirm's form: which transaction it deletes. Its question
@@ -329,22 +341,17 @@ impl MainWindow {
         }
     }
 
-    /// Draws the Main window's panels from `view`, outer ones first and the Main view
-    /// last, with every Register showing `register_columns`.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the Register columns are a Preference, which the App owns and lends here beside the look, the snapshot and today's date"
-    )]
-    pub(crate) fn show(
-        &mut self,
-        ui: &mut egui::Ui,
-        i18n: &Localizer,
-        theme: &Theme,
-        commands: &CommandSender,
-        view: &LedgerView,
-        register_columns: &RegisterColumns,
-        today: Date<Iso>,
-    ) {
+    /// Draws the Main window's panels from `frame`, outer ones first and the Main view
+    /// last.
+    pub(crate) fn show(&mut self, ui: &mut egui::Ui, frame: &WindowFrame<'_>) {
+        let WindowFrame {
+            i18n,
+            theme,
+            preferences,
+            commands,
+            view,
+            today,
+        } = *frame;
         self.focus_return = self
             .focus_return
             .take()
@@ -379,21 +386,35 @@ impl MainWindow {
         Panel::bottom("status_bar")
             .frame(theme.chrome_frame())
             .show(ui, |ui| {
+                ui.ctx()
+                    .accesskit_node_builder(ui.unique_id(), |node| node.set_role(Role::Status));
                 // An empty label keeps the Status bar one line tall.
                 let text = self.status.as_ref().map(|message| message.text(i18n));
-                ui.label(text.unwrap_or_default());
+                match preferences.net_worth_placement {
+                    NetWorthPlacement::AccountBar => {
+                        ui.label(text.unwrap_or_default());
+                    }
+                    NetWorthPlacement::StatusBar => {
+                        Sides::new().shrink_left().truncate().show(
+                            ui,
+                            |ui| ui.label(text.unwrap_or_default()),
+                            |ui| AccountBar::net_worth(ui, i18n, theme, accounts.net_worth()),
+                        );
+                    }
+                }
             });
         Panel::top("tab_row")
             .frame(theme.chrome_frame())
             .show(ui, |ui| self.tab_row(ui, i18n, commands));
-        self.account_bar.show(
-            ui,
+        let bar_frame = BarFrame {
             i18n,
             theme,
             commands,
-            &accounts,
-            self.registers.current_account(),
-        );
+            model: &accounts,
+            selected: self.registers.current_account(),
+            preferences,
+        };
+        self.account_bar.show(ui, &bar_frame, self.tab);
         CentralPanel::default().show(ui, |ui| {
             if self.tab == TopLevelTab::Accounts {
                 self.registers.show_strip(ui, i18n, view);
@@ -410,7 +431,7 @@ impl MainWindow {
                             summary,
                             view,
                             &mut self.column_widths,
-                            register_columns,
+                            &preferences.register_columns,
                             today,
                         );
                     }

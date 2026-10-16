@@ -2,6 +2,7 @@
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
+use balanced_ui::testing::unfold_account_bar;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::{Event, Key, Modifiers, ViewportCommand, ViewportId};
@@ -11,7 +12,7 @@ use icu_calendar::Date;
 
 /// The App on stub data, in the test locale.
 fn app() -> Harness<'static, App> {
-    Harness::new_eframe(|cc| {
+    let mut harness = Harness::new_eframe(|cc| {
         App::new(
             cc,
             Localizer::for_tests(),
@@ -19,7 +20,9 @@ fn app() -> Harness<'static, App> {
             Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
             PreferencesFile::for_tests(),
         )
-    })
+    });
+    unfold_account_bar(&mut harness);
+    harness
 }
 
 /// Queues one key press with `modifiers` held, as a single event. `step()` plays

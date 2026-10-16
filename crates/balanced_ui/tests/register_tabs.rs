@@ -2,6 +2,7 @@
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
+use balanced_ui::testing::unfold_account_bar;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::{Event, Key, Modifiers, vec2};
@@ -11,7 +12,7 @@ use icu_calendar::Date;
 
 /// The App on stub data, in the test locale, wide enough to show every Register column.
 fn app() -> Harness<'static, App> {
-    Harness::builder()
+    let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
             App::new(
@@ -21,7 +22,9 @@ fn app() -> Harness<'static, App> {
                 Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
                 PreferencesFile::for_tests(),
             )
-        })
+        });
+    unfold_account_bar(&mut harness);
+    harness
 }
 
 /// Opens the account named `name` in a new Register tab, from its right-click menu in

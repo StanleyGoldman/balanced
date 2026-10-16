@@ -164,6 +164,27 @@ dialog-preferences-font-face-liberation-sans = Liberation Sans
 dialog-preferences-dense-rows = Dense rows
 dialog-preferences-monospace-money = Line up amounts in a fixed-width font
 dialog-preferences-coloured-negatives = Show negative amounts in red
+dialog-preferences-group-register = { -register }
+dialog-preferences-alternating-rows = Alternating rows
+# The rules drawn between the Register's cells.
+dialog-preferences-gridlines = Gridlines
+dialog-preferences-gridlines-off = Off
+dialog-preferences-gridlines-horizontal = Horizontal
+dialog-preferences-gridlines-vertical = Vertical
+dialog-preferences-gridlines-both = Both
+dialog-preferences-group-account-bar = { -account-bar }
+# Each group heading in the Account bar shows the sum of its accounts' balances.
+dialog-preferences-group-totals = Show group totals
+dialog-preferences-net-worth = Show Net Worth
+dialog-preferences-net-worth-account-bar = In the { -account-bar }'s footer
+dialog-preferences-net-worth-status-bar = In the Status bar
+# The Account bar folds to a narrow rail while another tab than Accounts is shown.
+dialog-preferences-auto-fold = Fold the { -account-bar } when leaving Accounts
+dialog-preferences-group-accounts = Accounts
+# Where clicking an account in the Account bar opens its Register.
+dialog-preferences-open-account-in = Open an account in
+dialog-preferences-open-account-in-current = The current { -register }
+dialog-preferences-open-account-in-new-tab = A new { -register } tab
 
 # Manage Accounts: a table of every account, with what can be changed about each.
 dialog-manage-accounts-title = Manage Accounts

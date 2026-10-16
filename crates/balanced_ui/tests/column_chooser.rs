@@ -5,6 +5,7 @@ use std::path::Path;
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
+use balanced_ui::testing::unfold_account_bar;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::egui::accesskit::{Role, SortDirection};
 use eframe::egui::vec2;
@@ -28,7 +29,7 @@ fn app_in(config_dir: &Path) -> Harness<'static, App> {
                 file,
             )
         });
-    harness.run();
+    unfold_account_bar(&mut harness);
     harness
 }
 
@@ -104,6 +105,12 @@ fn unticking_memo_hides_it_and_saves_it_as_hidden() {
          dense_rows = false\n\
          monospace_money = false\n\
          coloured_negatives = true\n\
+         alternating_rows = true\n\
+         gridlines = \"off\"\n\
+         group_totals = false\n\
+         net_worth_placement = \"account_bar\"\n\
+         auto_fold = true\n\
+         open_account_in = \"current_register\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
          hidden_register_columns = [\"memo\"]\n"
     );
@@ -132,6 +139,12 @@ fn moving_payee_up_puts_it_before_num_and_saves_the_order() {
          dense_rows = false\n\
          monospace_money = false\n\
          coloured_negatives = true\n\
+         alternating_rows = true\n\
+         gridlines = \"off\"\n\
+         group_totals = false\n\
+         net_worth_placement = \"account_bar\"\n\
+         auto_fold = true\n\
+         open_account_in = \"current_register\"\n\
          register_columns = [\"date\", \"payee\", \"num\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
          hidden_register_columns = []\n"
     );

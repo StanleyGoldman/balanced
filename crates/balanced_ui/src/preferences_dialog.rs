@@ -2,10 +2,12 @@
 //! time. The App shows the draft while the Dialog is open.
 
 use balanced_i18n::Localizer;
+use eframe::egui::accesskit::Role;
 use eframe::egui::{self, ComboBox};
 
 use crate::i18n::fl;
-use crate::preferences::{FontFace, Preferences, Scheme};
+use crate::preferences::{FontFace, Gridlines, NetWorthPlacement, Preferences, Scheme};
+use crate::route::OpenIn;
 
 /// What the Preferences Dialog holds while it is open.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,14 +20,25 @@ pub(crate) struct PreferencesForm {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Group {
     Display,
+    Register,
+    AccountBar,
+    Accounts,
 }
 
 impl Group {
-    const ALL: [Self; 1] = [Self::Display];
+    const ALL: [Self; 4] = [
+        Self::Display,
+        Self::Register,
+        Self::AccountBar,
+        Self::Accounts,
+    ];
 
     fn label(self, i18n: &Localizer) -> String {
         match self {
             Self::Display => fl!(i18n, "dialog-preferences-group-display"),
+            Self::Register => fl!(i18n, "dialog-preferences-group-register"),
+            Self::AccountBar => fl!(i18n, "dialog-preferences-group-account-bar"),
+            Self::Accounts => fl!(i18n, "dialog-preferences-group-accounts"),
         }
     }
 }
@@ -44,16 +57,22 @@ impl PreferencesForm {
         &self.draft
     }
 
-    /// Draws the group list, and beside it the Preferences of the chosen group.
+    /// Draws the group list, which AccessKit reads as a tab list, and beside it the
+    /// Preferences of the chosen group.
     pub(crate) fn show(&mut self, ui: &mut egui::Ui, i18n: &Localizer) {
         let before = self.draft.clone();
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
+                ui.ctx()
+                    .accesskit_node_builder(ui.unique_id(), |node| node.set_role(Role::TabList));
                 for group in Group::ALL {
-                    if ui
-                        .selectable_label(self.group == group, group.label(i18n))
-                        .clicked()
-                    {
+                    let chosen = self.group == group;
+                    let response = ui.selectable_label(chosen, group.label(i18n));
+                    ui.ctx().accesskit_node_builder(response.id, |node| {
+                        node.set_role(Role::Tab);
+                        node.set_selected(chosen);
+                    });
+                    if response.clicked() {
                         self.group = group;
                     }
                 }
@@ -61,6 +80,9 @@ impl PreferencesForm {
             ui.separator();
             ui.vertical(|ui| match self.group {
                 Group::Display => self.display(ui, i18n),
+                Group::Register => self.register(ui, i18n),
+                Group::AccountBar => self.account_bar(ui, i18n),
+                Group::Accounts => self.accounts(ui, i18n),
             });
         });
         if self.draft != before {
@@ -104,6 +126,75 @@ impl PreferencesForm {
             &mut draft.coloured_negatives,
             fl!(i18n, "dialog-preferences-coloured-negatives"),
         );
+    }
+
+    /// The Register group: how every Register's rows read.
+    fn register(&mut self, ui: &mut egui::Ui, i18n: &Localizer) {
+        let draft = &mut self.draft;
+        ui.checkbox(
+            &mut draft.alternating_rows,
+            fl!(i18n, "dialog-preferences-alternating-rows"),
+        );
+        ui.label(fl!(i18n, "dialog-preferences-gridlines"));
+        ui.horizontal(|ui| {
+            for gridlines in Gridlines::ALL {
+                ui.radio_value(
+                    &mut draft.gridlines,
+                    gridlines,
+                    gridlines_label(gridlines, i18n),
+                );
+            }
+        });
+    }
+
+    /// The Account bar group: what the Account bar shows, and when it folds.
+    fn account_bar(&mut self, ui: &mut egui::Ui, i18n: &Localizer) {
+        let draft = &mut self.draft;
+        ui.checkbox(
+            &mut draft.group_totals,
+            fl!(i18n, "dialog-preferences-group-totals"),
+        );
+        ui.label(fl!(i18n, "dialog-preferences-net-worth"));
+        ui.radio_value(
+            &mut draft.net_worth_placement,
+            NetWorthPlacement::AccountBar,
+            fl!(i18n, "dialog-preferences-net-worth-account-bar"),
+        );
+        ui.radio_value(
+            &mut draft.net_worth_placement,
+            NetWorthPlacement::StatusBar,
+            fl!(i18n, "dialog-preferences-net-worth-status-bar"),
+        );
+        ui.checkbox(
+            &mut draft.auto_fold,
+            fl!(i18n, "dialog-preferences-auto-fold"),
+        );
+    }
+
+    /// The Accounts group: where an account's Register opens.
+    fn accounts(&mut self, ui: &mut egui::Ui, i18n: &Localizer) {
+        let draft = &mut self.draft;
+        ui.label(fl!(i18n, "dialog-preferences-open-account-in"));
+        ui.radio_value(
+            &mut draft.open_account_in,
+            OpenIn::CurrentRegister,
+            fl!(i18n, "dialog-preferences-open-account-in-current"),
+        );
+        ui.radio_value(
+            &mut draft.open_account_in,
+            OpenIn::NewTab,
+            fl!(i18n, "dialog-preferences-open-account-in-new-tab"),
+        );
+    }
+}
+
+/// The name of `gridlines`, as the Register group shows it.
+fn gridlines_label(gridlines: Gridlines, i18n: &Localizer) -> String {
+    match gridlines {
+        Gridlines::Off => fl!(i18n, "dialog-preferences-gridlines-off"),
+        Gridlines::Horizontal => fl!(i18n, "dialog-preferences-gridlines-horizontal"),
+        Gridlines::Vertical => fl!(i18n, "dialog-preferences-gridlines-vertical"),
+        Gridlines::Both => fl!(i18n, "dialog-preferences-gridlines-both"),
     }
 }
 

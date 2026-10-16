@@ -11,7 +11,7 @@ use crate::clock::Clock;
 use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::i18n::fl;
 use crate::layout::Layout;
-use crate::main_window::MainWindow;
+use crate::main_window::{MainWindow, WindowFrame};
 use crate::preferences::{Preferences, PreferencesFile};
 use crate::register_tabs::RegisterTabs;
 use crate::theme::{Theme, ThemeSettings};
@@ -232,18 +232,25 @@ impl eframe::App for App {
         false
     }
 
+    /// Draws the Main window with the open Preferences Dialog's draft, or else the
+    /// Preferences in use.
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let view = self.ledger.snapshot();
         let today = self.clock.today();
-        self.main_window.show(
-            ui,
-            &self.i18n,
-            &self.theme,
-            &self.commands,
-            &view,
-            &self.preferences.register_columns,
+        let preferences = self
+            .main_window
+            .preferences_draft()
+            .unwrap_or(&self.preferences)
+            .clone();
+        let frame = WindowFrame {
+            i18n: &self.i18n,
+            theme: &self.theme,
+            preferences: &preferences,
+            commands: &self.commands,
+            view: &view,
             today,
-        );
+        };
+        self.main_window.show(ui, &frame);
     }
 }
 
@@ -285,6 +292,12 @@ mod tests {
             )
         });
         let mut storage = MemoryStorage::default();
+        // Off the Accounts tab, auto-fold shows the Account bar as a rail.
+        harness.run();
+        harness
+            .get_by_role_and_label(Role::Button, "Accounts")
+            .click();
+        harness.run();
 
         harness
             .get_by_role_and_label(Role::Button, "Banking")
