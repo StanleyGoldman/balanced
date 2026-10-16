@@ -178,7 +178,7 @@ dialog-preferences-auto-fold = Fold the { -account-bar } when leaving Accounts
 dialog-preferences-group-accounts = Accounts
 # Where clicking an account in the Account bar opens its Register.
 dialog-preferences-open-account-in = Open an account in
-dialog-preferences-open-account-in-current = The current register
+dialog-preferences-open-account-in-current = The current { -register }
 dialog-preferences-open-account-in-new-tab = A new { -register } tab
 
 # Manage Accounts: a table of every account, with what can be changed about each.

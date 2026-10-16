@@ -358,6 +358,18 @@ fn net_worth_moves_to_the_status_bar() {
     assert_eq!(net_worth_in_status_bar_and_anywhere(&harness), (1, 1));
 }
 
+#[test]
+fn net_worth_previews_in_the_status_bar() {
+    let dir = config_dir();
+    let mut harness = app_on_accounts(dir.path());
+    open_preferences(&mut harness);
+    show_group(&mut harness, "Account bar");
+
+    click(&mut harness, Role::RadioButton, "In the Status bar");
+
+    assert_eq!(net_worth_in_status_bar_and_anywhere(&harness), (1, 1));
+}
+
 /// Whether the Account bar is folded to its rail.
 fn is_rail(harness: &Harness<'static, App>) -> bool {
     harness
@@ -412,6 +424,22 @@ fn with_auto_fold_off_the_account_bar_stays_open_off_the_accounts_tab() {
     click(&mut harness, Role::Button, "OK");
 
     click(&mut harness, Role::Button, "Home");
+
+    assert!(!is_rail(&harness));
+}
+
+#[test]
+fn turning_auto_fold_off_previews_the_open_account_bar() {
+    let dir = config_dir();
+    let mut harness = app_in(dir.path());
+    open_preferences(&mut harness);
+    show_group(&mut harness, "Account bar");
+
+    click(
+        &mut harness,
+        Role::CheckBox,
+        "Fold the Account bar when leaving Accounts",
+    );
 
     assert!(!is_rail(&harness));
 }

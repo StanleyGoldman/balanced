@@ -11,7 +11,7 @@ use crate::clock::Clock;
 use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::i18n::fl;
 use crate::layout::Layout;
-use crate::main_window::MainWindow;
+use crate::main_window::{MainWindow, WindowFrame};
 use crate::preferences::{Preferences, PreferencesFile};
 use crate::register_tabs::RegisterTabs;
 use crate::theme::{Theme, ThemeSettings};
@@ -233,15 +233,15 @@ impl eframe::App for App {
             .preferences_draft()
             .unwrap_or(&self.preferences)
             .clone();
-        self.main_window.show(
-            ui,
-            &self.i18n,
-            &self.theme,
-            &preferences,
-            &self.commands,
-            &view,
+        let frame = WindowFrame {
+            i18n: &self.i18n,
+            theme: &self.theme,
+            preferences: &preferences,
+            commands: &self.commands,
+            view: &view,
             today,
-        );
+        };
+        self.main_window.show(ui, &frame);
     }
 }
 

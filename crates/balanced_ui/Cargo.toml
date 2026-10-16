@@ -24,8 +24,9 @@ tempfile = { workspace = true, optional = true }
 egui_kittest = { workspace = true, optional = true, features = ["snapshot", "wgpu"] }
 
 [features]
-# `balanced_ui::testing`, for the image snapshot tests: the App on the lavapipe renderer,
-# and the snapshot check with the project thresholds. `PreferencesFile::for_tests`, a
+# `balanced_ui::testing`, for UI tests: unfolding the Account bar's rail, and for the
+# image snapshot tests the App on the lavapipe renderer and the snapshot check with the
+# project thresholds. `PreferencesFile::for_tests`, a
 # preferences file in a temporary directory.
 test-support = ["dep:egui-wgpu", "dep:egui_kittest", "dep:tempfile", "balanced_i18n/test-support"]
 

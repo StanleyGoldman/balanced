@@ -6,7 +6,7 @@ use eframe::egui::accesskit::Role;
 use eframe::egui::{self, Button, CentralPanel, Id, Label, MenuBar, Panel, RichText, Sides};
 use icu_calendar::{Date, Iso};
 
-use crate::account_bar::{self, AccountBar};
+use crate::account_bar::{AccountBar, BarFrame};
 use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
@@ -52,6 +52,18 @@ pub(crate) struct MainWindow {
     /// Where focus goes now that a Dialog has closed, until a frame restores it.
     focus_return: Option<FocusReturn>,
     menu_nav: MenuNav,
+}
+
+/// What the Main window is drawn with in one frame.
+#[derive(Clone, Copy)]
+pub(crate) struct WindowFrame<'a> {
+    pub(crate) i18n: &'a Localizer,
+    pub(crate) theme: &'a Theme,
+    /// The Preferences shown: the open Preferences Dialog's draft, or else those in use.
+    pub(crate) preferences: &'a Preferences,
+    pub(crate) commands: &'a CommandSender,
+    pub(crate) view: &'a LedgerView,
+    pub(crate) today: Date<Iso>,
 }
 
 /// The delete transaction confirm's form: which transaction it deletes. Its question
@@ -329,22 +341,17 @@ impl MainWindow {
         }
     }
 
-    /// Draws the Main window's panels from `view`, as `preferences` say, outer ones
-    /// first and the Main view last.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "each argument is a separate input the App draws the Main window from"
-    )]
-    pub(crate) fn show(
-        &mut self,
-        ui: &mut egui::Ui,
-        i18n: &Localizer,
-        theme: &Theme,
-        preferences: &Preferences,
-        commands: &CommandSender,
-        view: &LedgerView,
-        today: Date<Iso>,
-    ) {
+    /// Draws the Main window's panels from `frame`, outer ones first and the Main view
+    /// last.
+    pub(crate) fn show(&mut self, ui: &mut egui::Ui, frame: &WindowFrame<'_>) {
+        let WindowFrame {
+            i18n,
+            theme,
+            preferences,
+            commands,
+            view,
+            today,
+        } = *frame;
         self.focus_return = self
             .focus_return
             .take()
@@ -391,7 +398,7 @@ impl MainWindow {
                         Sides::new().shrink_left().truncate().show(
                             ui,
                             |ui| ui.label(text.unwrap_or_default()),
-                            |ui| account_bar::net_worth(ui, i18n, theme, accounts.net_worth()),
+                            |ui| AccountBar::net_worth(ui, i18n, theme, accounts.net_worth()),
                         );
                     }
                 }
@@ -399,16 +406,15 @@ impl MainWindow {
         Panel::top("tab_row")
             .frame(theme.chrome_frame())
             .show(ui, |ui| self.tab_row(ui, i18n, commands));
-        self.account_bar.show(
-            ui,
+        let bar_frame = BarFrame {
             i18n,
             theme,
             commands,
-            &accounts,
-            self.registers.current_account(),
+            model: &accounts,
+            selected: self.registers.current_account(),
             preferences,
-            self.tab == TopLevelTab::Accounts,
-        );
+        };
+        self.account_bar.show(ui, &bar_frame, self.tab);
         CentralPanel::default().show(ui, |ui| {
             if self.tab == TopLevelTab::Accounts {
                 self.registers.show_strip(ui, i18n, view);

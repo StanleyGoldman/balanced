@@ -18,7 +18,7 @@ use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
 use crate::layout::Layout;
 use crate::preferences::{NetWorthPlacement, Preferences};
-use crate::route::{OpenIn, Route};
+use crate::route::{OpenIn, Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::triangle_button::{Direction, triangle_button};
 use crate::user_action::UserAction;
@@ -101,33 +101,33 @@ impl AccountBar {
         &self.folded
     }
 
-    /// Draws the Account bar from `model`, highlighting `selected`, or the rail it
-    /// folds to, as `preferences` say. Clicking an account opens it where the
-    /// Preferences say, and right-clicking it offers its commands. Clicking a heading
-    /// folds or unfolds its section. Dragging the Account bar's edge resizes it.
+    /// Draws the Account bar from `frame`'s model, highlighting its selected account,
+    /// or the rail it folds to, as its Preferences say. Clicking an account opens it
+    /// where the Preferences say, and right-clicking it offers its commands. Clicking a
+    /// heading folds or unfolds its section. Dragging the Account bar's edge resizes it.
     ///
-    /// With auto-fold on, the Account bar shows its rail while the Main view is off
-    /// the Accounts tab (`on_accounts` is false), until the user unfolds it. Its own
-    /// fold, which the layout saves, stays as the user left it.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "each argument is a separate input the Main window draws the Account bar from"
-    )]
-    pub(crate) fn show(
-        &mut self,
-        ui: &mut egui::Ui,
-        i18n: &Localizer,
-        theme: &Theme,
-        commands: &CommandSender,
-        model: &AccountsModel,
-        selected: Option<AccountId>,
-        preferences: &Preferences,
-        on_accounts: bool,
-    ) {
-        self.visit = match (on_accounts, self.visit) {
-            (true, _) => Visit::OnAccounts,
-            (false, Visit::OnAccounts) => Visit::Away,
-            (false, visit) => visit,
+    /// With auto-fold on, the Account bar shows its rail while the Main view's `tab` is
+    /// not Accounts, without changing its own fold, which the layout saves. Clicking the
+    /// rail's button opens the Account bar until `tab` next changes, and saves it open.
+    pub(crate) fn show(&mut self, ui: &mut egui::Ui, frame: &BarFrame<'_>, tab: TopLevelTab) {
+        let BarFrame {
+            i18n,
+            theme,
+            preferences,
+            ..
+        } = *frame;
+        self.visit = match (tab, self.visit) {
+            (TopLevelTab::Accounts, _) => Visit::OnAccounts,
+            (
+                TopLevelTab::Home
+                | TopLevelTab::Bills
+                | TopLevelTab::Spending
+                | TopLevelTab::Planning
+                | TopLevelTab::Investing
+                | TopLevelTab::PropertyDebt,
+                Visit::OnAccounts,
+            ) => Visit::Away,
+            (_, visit) => visit,
         };
         let auto_folded = preferences.auto_fold && self.visit == Visit::Away;
         let id = Id::new("account_bar");
@@ -142,17 +142,9 @@ impl AccountBar {
         let mut open = self.fold == AccountBarFold::Open && !auto_folded;
         let mut fold_clicked = false;
         let mut focus = Focus::default();
-        let frame = BarFrame {
-            i18n,
-            theme,
-            commands,
-            model,
-            selected,
-            preferences,
-        };
         Panel::show_switched(ui, &mut open, rail, bar, |ui, expanded| {
             fold_clicked = if expanded {
-                self.open_bar(ui, &frame, &mut focus)
+                self.open_bar(ui, frame, &mut focus)
             } else {
                 Self::rail(ui, i18n, &mut focus)
             };
@@ -217,7 +209,7 @@ impl AccountBar {
             NetWorthPlacement::AccountBar => {
                 Panel::bottom("net_worth")
                     .frame(theme.footer_frame())
-                    .show(ui, |ui| net_worth(ui, i18n, theme, model.net_worth()));
+                    .show(ui, |ui| Self::net_worth(ui, i18n, theme, model.net_worth()));
             }
             NetWorthPlacement::StatusBar => {}
         }
@@ -295,34 +287,35 @@ impl AccountBar {
         }
         jump.act(ui.ctx());
     }
-}
 
-/// Net Worth's name, and its amount at the right edge of `ui`, as the Account bar's
-/// footer or the Status bar shows it.
-pub(crate) fn net_worth(
-    ui: &mut egui::Ui,
-    i18n: &Localizer,
-    theme: &Theme,
-    net_worth: &FormattedAmount,
-) {
-    ui.horizontal(|ui| {
-        ui.label(fl!(i18n, "account-bar-net-worth"));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(net_worth.styled(theme));
+    /// Net Worth's name, and its amount at the right edge of `ui`, as the Account bar's
+    /// footer or the Status bar shows it.
+    pub(crate) fn net_worth(
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        theme: &Theme,
+        net_worth: &FormattedAmount,
+    ) {
+        ui.horizontal(|ui| {
+            ui.label(fl!(i18n, "account-bar-net-worth"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(net_worth.styled(theme));
+            });
         });
-    });
+    }
 }
 
 /// What every part of the Account bar is drawn with in one frame.
 #[derive(Clone, Copy)]
-struct BarFrame<'a> {
-    i18n: &'a Localizer,
-    theme: &'a Theme,
-    commands: &'a CommandSender,
-    model: &'a AccountsModel,
+pub(crate) struct BarFrame<'a> {
+    pub(crate) i18n: &'a Localizer,
+    pub(crate) theme: &'a Theme,
+    pub(crate) commands: &'a CommandSender,
+    pub(crate) model: &'a AccountsModel,
     /// The account the Main view shows, highlighted.
-    selected: Option<AccountId>,
-    preferences: &'a Preferences,
+    pub(crate) selected: Option<AccountId>,
+    /// The Preferences shown: the open Preferences Dialog's draft, or else those in use.
+    pub(crate) preferences: &'a Preferences,
 }
 
 /// How strongly a widget is wanted as the Account bar's focus target, weakest first.

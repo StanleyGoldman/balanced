@@ -4,6 +4,7 @@
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
+use balanced_ui::testing::unfold_account_bar;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::App as _;
 use eframe::egui::accesskit::Role;
@@ -23,12 +24,7 @@ fn app(size: Vec2) -> Harness<'static, App> {
             PreferencesFile::for_tests(),
         )
     });
-    // Auto-fold shows the Account bar as a rail on Home, where every run starts.
-    harness.run();
-    harness
-        .get_by_role_and_label(Role::Button, "Unfold the Account bar")
-        .click();
-    harness.run();
+    unfold_account_bar(&mut harness);
     harness
 }
 

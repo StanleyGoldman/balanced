@@ -286,5 +286,6 @@ fn auto_fold_leaves_the_saved_fold_as_it_was() {
 
     let second = app(&storage);
 
-    second.get_by_role_and_label(Role::Button, "Everyday Checking");
+    let rail = second.query_by_role_and_label(Role::Button, "Unfold the Account bar");
+    assert!(rail.is_none());
 }

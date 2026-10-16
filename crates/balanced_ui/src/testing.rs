@@ -1,11 +1,14 @@
-//! Image snapshot support for tests: the App drawn by the lavapipe software rasterizer,
-//! and the snapshot check with the project thresholds (see `docs/practices/testing.md`).
+//! Support for tests: unfolding the Account bar a run starts with as a rail, the App
+//! drawn by the lavapipe software rasterizer, and the snapshot check with the project
+//! thresholds (see `docs/practices/testing.md`).
 
 use std::sync::Arc;
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
+use eframe::egui::accesskit::Role;
 use eframe::egui::{self, vec2};
+use egui_kittest::kittest::Queryable as _;
 use egui_kittest::{Harness, SnapshotOptions};
 use egui_wgpu::{WgpuSetup, WgpuSetupCreateNew, wgpu};
 
@@ -13,6 +16,20 @@ use icu_calendar::Date;
 
 use crate::preferences::{Preferences, Scheme};
 use crate::{App, Clock, PreferencesFile};
+
+/// Unfolds the Account bar, which auto-fold shows as a rail on Home, where every run
+/// starts, the way a user does: by clicking the rail's button.
+///
+/// # Panics
+///
+/// If the Account bar isn't folded to its rail.
+pub fn unfold_account_bar(harness: &mut Harness<'_, App>) {
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Unfold the Account bar")
+        .click();
+    harness.run();
+}
 
 /// How much one pixel may differ before it counts as failing: kittest's weighted squared
 /// YIQ distance.

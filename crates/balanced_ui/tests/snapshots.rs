@@ -4,7 +4,7 @@
 #![cfg(target_os = "linux")]
 
 use balanced_ui::App;
-use balanced_ui::testing::{app, check_snapshot};
+use balanced_ui::testing::{app, check_snapshot, unfold_account_bar};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{Event, Theme};
 use egui_kittest::Harness;
@@ -20,13 +20,6 @@ fn click(harness: &mut Harness<'static, App>, role: Role, label: &str) {
 fn pointer_gone(harness: &mut Harness<'static, App>) {
     harness.event(Event::PointerGone);
     harness.run();
-}
-
-/// Unfolds the Account bar, which auto-fold shows as a rail on Home, where every run
-/// starts.
-fn unfold_account_bar(harness: &mut Harness<'static, App>) {
-    harness.run();
-    click(harness, Role::Button, "Unfold the Account bar");
 }
 
 /// Opens the account named `name` from the Account bar.
