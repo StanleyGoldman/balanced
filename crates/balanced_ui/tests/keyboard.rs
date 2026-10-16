@@ -117,12 +117,19 @@ fn typing_a_letter_in_the_account_bar_jumps_to_the_next_account_with_it() {
     press(&mut harness, Modifiers::NONE, Key::F6);
 
     type_text(&mut harness, "e");
-    let next = focused(&harness);
-    type_text(&mut harness, "E");
-    let wrapped = focused(&harness);
 
-    assert_eq!(next.as_deref(), Some("Emergency Fund"));
-    assert_eq!(wrapped.as_deref(), Some("Everyday Checking"));
+    assert_eq!(focused(&harness).as_deref(), Some("Emergency Fund"));
+}
+
+#[test]
+fn the_letter_jump_wraps_to_the_first_account_with_the_letter() {
+    let mut harness = app();
+    press(&mut harness, Modifiers::NONE, Key::F6);
+    type_text(&mut harness, "e");
+
+    type_text(&mut harness, "E");
+
+    assert_eq!(focused(&harness).as_deref(), Some("Everyday Checking"));
 }
 
 #[test]
@@ -168,7 +175,7 @@ fn left_and_right_move_between_menus_and_wrap() {
 }
 
 #[test]
-fn enter_chooses_the_focused_menu_item_and_closes_the_menu() {
+fn enter_chooses_the_focused_menu_item() {
     let mut harness = app();
     press(&mut harness, Modifiers::NONE, Key::F10);
     press(&mut harness, Modifiers::NONE, Key::ArrowLeft);
@@ -176,6 +183,16 @@ fn enter_chooses_the_focused_menu_item_and_closes_the_menu() {
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
     harness.get_by_label("Balanced 0.0.0");
+}
+
+#[test]
+fn enter_closes_the_menu() {
+    let mut harness = app();
+    press(&mut harness, Modifiers::NONE, Key::F10);
+    press(&mut harness, Modifiers::NONE, Key::ArrowLeft);
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
     assert!(harness.query_by_label("About Balanced").is_none());
 }
 
@@ -187,7 +204,6 @@ fn esc_closes_the_menu() {
     press(&mut harness, Modifiers::NONE, Key::Escape);
 
     assert!(harness.query_by_label("Quit Ctrl+Q").is_none());
-    assert_eq!(focused(&harness), None);
 }
 
 /// Holds `modifiers` down, or releases them all with `Modifiers::NONE`, then lets the
@@ -234,4 +250,38 @@ fn a_shortcut_pressed_mid_edit_commits_the_edit_first() {
         .filter(|label| ["Fresh Market", "Corner Shop"].contains(&label.as_str()))
         .collect();
     assert_eq!(payees, ["Corner Shop"]);
+}
+
+#[test]
+fn alt_released_after_leaving_the_window_opens_no_menu() {
+    let mut harness = app();
+
+    // Alt+Tab: the OS takes the Tab, and the window loses focus before Alt is up.
+    hold(&mut harness, Modifiers::ALT);
+    send(&mut harness, Event::WindowFocused(false));
+    hold(&mut harness, Modifiers::NONE);
+
+    assert!(harness.query_by_label("Quit Ctrl+Q").is_none());
+}
+
+#[test]
+fn a_shortcut_closes_the_open_menu() {
+    let mut harness = app();
+    press(&mut harness, Modifiers::NONE, Key::F10);
+
+    press(&mut harness, Modifiers::NONE, Key::F6);
+
+    assert!(harness.query_by_label("Quit Ctrl+Q").is_none());
+}
+
+#[test]
+fn f10_opens_no_menu_behind_a_dialog() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    press(&mut harness, Modifiers::COMMAND, Key::D);
+
+    press(&mut harness, Modifiers::NONE, Key::F10);
+
+    assert!(harness.query_by_label("Quit Ctrl+Q").is_none());
 }

@@ -1,7 +1,7 @@
 //! Keyboard navigation of the Menu bar. egui's menus have none, so it is built on top
-//! of them. F10 or a lone Alt opens the first menu and puts focus on its first enabled item. While a
-//! menu is open, ← and → open the menu beside it, and ↑ and ↓ move focus through its
-//! enabled items, all wrapping around.
+//! of them. F10 or a lone Alt opens the first menu and puts focus on its first enabled
+//! item. While a menu is open, ← and → open the menu beside it, and ↑ and ↓ move focus
+//! through its enabled items, all wrapping around.
 
 use eframe::egui::{self, Id, Key, Modifiers, Popup, Response};
 
@@ -25,12 +25,12 @@ pub(crate) struct MenuNav {
 
 /// One frame of the Menu bar's drawing: its menus and the open menu's enabled items.
 #[derive(Debug, Default)]
-pub(crate) struct MenuFrame {
+pub(crate) struct DrawnMenus {
     menus: Vec<Id>,
     items: Vec<Id>,
 }
 
-impl MenuFrame {
+impl DrawnMenus {
     /// Notes a menu's button, left to right.
     pub(crate) fn note_menu(&mut self, button: &Response) {
         self.menus.push(Popup::default_response_id(button));
@@ -103,7 +103,8 @@ impl MenuNav {
     }
 
     /// Follows Alt through `event`, and returns whether the event released an Alt that
-    /// was pressed and released with nothing between: no key, click or other modifier.
+    /// was pressed and released with nothing between: no key, click, other modifier or
+    /// loss of window focus (as Alt+Tab causes, whose Tab the OS takes).
     fn alt_released_alone(&mut self, event: &egui::Event) -> bool {
         let mut released = false;
         if let egui::Event::ModifiersChanged(modifiers) = *event {
@@ -114,10 +115,18 @@ impl MenuNav {
             event,
             egui::Event::Key { pressed: true, .. }
                 | egui::Event::PointerButton { pressed: true, .. }
+                | egui::Event::WindowFocused(false)
         ) {
             self.lone_alt = false;
         }
         released
+    }
+
+    /// Closes the open menu, if one is.
+    pub(crate) fn close(&self, ctx: &egui::Context) {
+        if let Some(menu) = self.open_menu(ctx) {
+            Popup::close_id(ctx, self.menus[menu]);
+        }
     }
 
     /// Opens the menu at `index`, closing any other, with focus on its first item.
@@ -146,16 +155,16 @@ impl MenuNav {
         ctx.memory_mut(|memory| memory.request_focus(id));
     }
 
-    /// Takes in what `frame` drew of the Menu bar, after it is drawn.
-    pub(crate) fn drawn(&mut self, ctx: &egui::Context, frame: MenuFrame) {
+    /// Takes in the menus and items `drawn` in this frame, after the Menu bar is drawn.
+    pub(crate) fn drawn(&mut self, ctx: &egui::Context, drawn: DrawnMenus) {
         if self.focus_first
-            && let Some(&first) = frame.items.first()
+            && let Some(&first) = drawn.items.first()
         {
             ctx.memory_mut(|memory| memory.request_focus(first));
             self.focus_first = false;
         }
-        self.menus = frame.menus;
-        self.items = frame.items;
+        self.menus = drawn.menus;
+        self.items = drawn.items;
     }
 }
 

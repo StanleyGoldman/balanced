@@ -11,7 +11,7 @@ use crate::dialog::{DialogOutcome, FocusReturn, LightDialog, OpenDialog};
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
 use crate::layout::Layout;
-use crate::menu_nav::{MenuFrame, MenuNav};
+use crate::menu_nav::{DrawnMenus, MenuNav};
 use crate::register::ColumnWidths;
 use crate::register_tabs::RegisterTabs;
 use crate::route::{Route, TopLevelTab};
@@ -220,12 +220,14 @@ impl MainWindow {
         if !self.dialog_open() {
             self.menu_nav.keys(ui.ctx());
             let actions = keymap::dispatch(ui.ctx(), KEYMAP);
-            // A Shortcut pressed mid-edit saves the edit before it acts.
+            // A Shortcut closes the open menu, and one pressed mid-edit saves the edit
+            // before it acts.
             // TODO(#90): a refused commit stops the Shortcut and shows the error bubble.
-            if !actions.is_empty()
-                && let Some(register) = self.registers.current_register_mut()
-            {
-                register.commit_edit(ui.ctx(), commands);
+            if !actions.is_empty() {
+                self.menu_nav.close(ui.ctx());
+                if let Some(register) = self.registers.current_register_mut() {
+                    register.commit_edit(ui.ctx(), commands);
+                }
             }
             for action in actions {
                 commands.send(action.command());
@@ -238,8 +240,8 @@ impl MainWindow {
         Panel::top("menu_bar")
             .frame(theme.chrome_frame())
             .show(ui, |ui| {
-                let frame = self.menu_bar(ui, i18n, commands);
-                self.menu_nav.drawn(ui.ctx(), frame);
+                let drawn = self.menu_bar(ui, i18n, commands);
+                self.menu_nav.drawn(ui.ctx(), drawn);
             });
         Panel::bottom("status_bar")
             .frame(theme.chrome_frame())
@@ -379,34 +381,39 @@ impl MainWindow {
     }
 
     /// Draws the Menu bar, and returns what it drew for the keyboard navigation.
-    fn menu_bar(&self, ui: &mut egui::Ui, i18n: &Localizer, commands: &CommandSender) -> MenuFrame {
-        let mut frame = MenuFrame::default();
+    fn menu_bar(
+        &self,
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        commands: &CommandSender,
+    ) -> DrawnMenus {
+        let mut drawn = DrawnMenus::default();
         MenuBar::new().ui(ui, |ui| {
             let file = ui.menu_button(fl!(i18n, "menu-file"), |ui| {
-                self.menu_item(ui, i18n, commands, &mut frame, UserAction::CloseRegisterTab);
+                self.menu_item(ui, i18n, commands, &mut drawn, UserAction::CloseRegisterTab);
                 ui.separator();
-                self.menu_item(ui, i18n, commands, &mut frame, UserAction::Quit);
+                self.menu_item(ui, i18n, commands, &mut drawn, UserAction::Quit);
             });
-            frame.note_menu(&file.response);
+            drawn.note_menu(&file.response);
             let view = ui.menu_button(fl!(i18n, "menu-view"), |ui| {
-                self.menu_item(ui, i18n, commands, &mut frame, UserAction::NextRegisterTab);
+                self.menu_item(ui, i18n, commands, &mut drawn, UserAction::NextRegisterTab);
                 self.menu_item(
                     ui,
                     i18n,
                     commands,
-                    &mut frame,
+                    &mut drawn,
                     UserAction::PreviousRegisterTab,
                 );
                 ui.separator();
-                self.menu_item(ui, i18n, commands, &mut frame, UserAction::SwitchPane);
+                self.menu_item(ui, i18n, commands, &mut drawn, UserAction::SwitchPane);
             });
-            frame.note_menu(&view.response);
+            drawn.note_menu(&view.response);
             let help = ui.menu_button(fl!(i18n, "menu-help"), |ui| {
-                self.menu_item(ui, i18n, commands, &mut frame, UserAction::About);
+                self.menu_item(ui, i18n, commands, &mut drawn, UserAction::About);
             });
-            frame.note_menu(&help.response);
+            drawn.note_menu(&help.response);
         });
-        frame
+        drawn
     }
 
     /// The menu item for `action`, with its Shortcut text, disabled while the action
@@ -416,7 +423,7 @@ impl MainWindow {
         ui: &mut egui::Ui,
         i18n: &Localizer,
         commands: &CommandSender,
-        frame: &mut MenuFrame,
+        drawn: &mut DrawnMenus,
         action: UserAction,
     ) {
         let mut button = egui::Button::new(action.label(i18n));
@@ -424,7 +431,7 @@ impl MainWindow {
             button = button.shortcut_text(keymap::shortcut_text(chord, i18n, ui.ctx().os()));
         }
         let item = ui.add_enabled(self.can_act(action), button);
-        frame.note_item(&item);
+        drawn.note_item(&item);
         if item.clicked() {
             commands.send(action.command());
             // egui closes a menu on a pointer click only, not on Enter.

@@ -123,9 +123,10 @@ impl AccountBar {
             };
         });
         if std::mem::take(&mut self.focus_requested)
-            && let Some((_, id)) = focus.target
+            && let Some(target) = focus.target
         {
-            ui.ctx().memory_mut(|memory| memory.request_focus(id));
+            ui.ctx()
+                .memory_mut(|memory| memory.request_focus(target.id));
         }
         self.has_focus = focus.held;
         if fold_clicked {
@@ -154,7 +155,7 @@ impl AccountBar {
             .show(ui, |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let button = rail_button(ui, fl!(i18n, "account-bar-fold"), Direction::Left);
-                    focus.note(&button, Candidate::Last);
+                    focus.note(&button, Candidate::Fallback);
                     button.clicked()
                 })
                 .inner
@@ -176,7 +177,7 @@ impl AccountBar {
     fn rail(ui: &mut egui::Ui, i18n: &Localizer, focus: &mut Focus) -> bool {
         ui.vertical_centered(|ui| {
             let button = rail_button(ui, fl!(i18n, "account-bar-unfold"), Direction::Right);
-            focus.note(&button, Candidate::Last);
+            focus.note(&button, Candidate::Fallback);
             button.clicked()
         })
         .inner
@@ -263,7 +264,7 @@ struct BarFrame<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Candidate {
     /// A rail button, taken only when nothing else is shown.
-    Last,
+    Fallback,
     Heading,
     Account,
     Selected,
@@ -275,7 +276,15 @@ enum Candidate {
 struct Focus {
     held: bool,
     /// The widget that takes focus, and how strongly it was wanted.
-    target: Option<(Candidate, Id)>,
+    target: Option<FocusTarget>,
+}
+
+/// The widget that takes focus when the Account bar is given it.
+#[derive(Debug, Clone, Copy)]
+struct FocusTarget {
+    id: Id,
+    /// How strongly the widget was wanted.
+    strength: Candidate,
 }
 
 impl Focus {
@@ -283,11 +292,11 @@ impl Focus {
     /// drawn becomes the target.
     fn note(&mut self, response: &Response, candidate: Candidate) {
         self.held |= response.has_focus();
-        if self
-            .target
-            .is_none_or(|(strongest, _)| candidate > strongest)
-        {
-            self.target = Some((candidate, response.id));
+        if self.target.is_none_or(|target| candidate > target.strength) {
+            self.target = Some(FocusTarget {
+                id: response.id,
+                strength: candidate,
+            });
         }
     }
 }
@@ -297,7 +306,7 @@ impl Focus {
 /// with it.
 #[derive(Debug, Default)]
 struct LetterJump<'a> {
-    accounts: Vec<(Id, &'a str)>,
+    accounts: Vec<JumpTarget<'a>>,
     /// The index in `accounts` the search for the next account starts from, while the
     /// Account bar's focus is on an account or a heading.
     start: Option<usize>,
@@ -314,7 +323,10 @@ impl<'a> LetterJump<'a> {
         if response.has_focus() {
             self.start = Some(self.accounts.len() + 1);
         }
-        self.accounts.push((response.id, name));
+        self.accounts.push(JumpTarget {
+            id: response.id,
+            name,
+        });
     }
 
     /// Moves focus to the next account whose name starts with the text typed this
@@ -342,12 +354,19 @@ impl<'a> LetterJump<'a> {
         let next = after
             .iter()
             .chain(before)
-            .find(|(_, name)| name.to_lowercase().starts_with(&typed));
-        if let Some(&(id, _)) = next {
-            ctx.memory_mut(|memory| memory.request_focus(id));
+            .find(|account| account.name.to_lowercase().starts_with(&typed));
+        if let Some(account) = next {
+            ctx.memory_mut(|memory| memory.request_focus(account.id));
             ctx.request_repaint();
         }
     }
+}
+
+/// An account row the letter jump can move focus to.
+#[derive(Debug, Clone, Copy)]
+struct JumpTarget<'a> {
+    id: Id,
+    name: &'a str,
 }
 
 /// Opens `account`'s Register where `open_in` says.
