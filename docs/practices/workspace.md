@@ -28,7 +28,7 @@
   ```
 
 - `Cargo.lock` is committed, and the `xtask` checks build with `--locked`.
-- Adding a dependency can move crates it never touches to newer versions in `Cargo.lock`, and the `multiple-versions` ban in `deny.toml` then fails on a split the new crate didn't need. Read `git diff Cargo.lock` after adding one, and edit any unrelated version change back by hand; `cargo metadata --locked` confirms the lockfile still resolves.
+- Adding a dependency can move crates it never touches to newer versions in `Cargo.lock`, and the `multiple-versions` ban in `deny.toml` then fails on a split the new crate didn't need. Read the whole `git diff Cargo.lock` after adding one, the dependency lists of existing packages too: where several locked versions satisfy a requirement, cargo can re-point an existing package to the newest (`tempfile` from `"getrandom 0.3.4"` to `"getrandom 0.4.3"`), which no `name` or `version` line shows. Edit any unrelated change back by hand; `cargo metadata --locked` confirms the lockfile still resolves.
 
 ## Modules
 

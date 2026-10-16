@@ -15,6 +15,7 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 - Keep fixtures small and tests fast. Mutation testing runs the suite once for every mutant.
 - Test behaviour that could plausibly break, and skip trivial wiring.
 - Tests run against a real in-memory `Ledger`, not mocks.
+- `unwrap()` passes clippy only inside a `#[test]` function. A helper function in a test file writes `expect("why this can't fail")`.
 
 ## UI tests
 
