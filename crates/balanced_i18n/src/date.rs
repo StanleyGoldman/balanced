@@ -56,17 +56,15 @@ impl DateSegments {
             return Self::iso();
         };
         let order = [a, b, c];
-        let Some(day) = runs
+        // The probe's day and month are one digit, so two digits mean padding.
+        let zero_padded = runs
             .iter()
             .zip(order)
-            .find_map(|(run, segment)| (segment == DateSegment::Day).then_some(run))
-        else {
-            return Self::iso();
-        };
+            .any(|(run, segment)| segment != DateSegment::Year && run.text.len() == 2);
         Self {
             order,
             separator: formatted_probe[first.end..second.start].to_owned(),
-            zero_padded: day.text.len() == 2,
+            zero_padded,
         }
     }
 
@@ -139,17 +137,14 @@ pub(crate) fn parse_date(segments: &DateSegments, text: &str) -> Result<Date<Iso
     if let [run] = runs[..]
         && run.text.len() >= DIGITS_ONLY_LENGTH
     {
-        if run.text.len() > DIGITS_ONLY_LENGTH {
-            return Err(DateParseError::Invalid);
-        }
+        // More than eight digits leave the day too long, which `calendar_date` refuses.
         let digits = run.text;
         return calendar_date(&digits[..4], &digits[4..6], &digits[6..]);
     }
     let [first, second, third] = runs[..] else {
-        return Err(if runs.len() < 3 {
-            DateParseError::Incomplete
-        } else {
-            DateParseError::Invalid
+        return Err(match runs.len() {
+            0..=2 => DateParseError::Incomplete,
+            _ => DateParseError::Invalid,
         });
     };
     let mut day = None;
