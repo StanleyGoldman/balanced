@@ -82,6 +82,7 @@ register-column-category = Kategorie
 register-column-memo = Notiz
 register-column-amount = Betrag
 register-column-balance = Saldo
+register-new-transaction = + Buchung
 register-transaction-count =
     { $count ->
         [one] { $count } Buchung
