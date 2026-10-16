@@ -431,6 +431,10 @@ impl Register {
 
     /// Draws the Register of `summary`, an account in `view`, filling the space left in
     /// `ui`. Only the rows in view are laid out.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the column widths are shared by every Register, so the Main window owns them and lends them here beside the account and its snapshot"
+    )]
     pub(crate) fn show(
         &mut self,
         ui: &mut egui::Ui,
