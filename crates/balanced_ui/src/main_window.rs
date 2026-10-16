@@ -431,6 +431,7 @@ impl MainWindow {
                             summary,
                             view,
                             &mut self.column_widths,
+                            &preferences.register_columns,
                             today,
                         );
                     }

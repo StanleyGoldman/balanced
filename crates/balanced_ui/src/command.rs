@@ -8,6 +8,7 @@ use eframe::egui;
 
 use crate::i18n::fl;
 use crate::preferences::Preferences;
+use crate::register_columns::RegisterColumns;
 use crate::route::Route;
 
 /// An app-level action. UI code sends one instead of changing app or domain state
@@ -49,6 +50,9 @@ pub(crate) enum AppCommand {
     /// Replace the Preferences with these, show them and write them to the
     /// preferences file. Preferences are not undoable.
     SetPreferences(Preferences),
+    /// Replace the Preferences' Register columns with these, show them in every
+    /// Register and write them to the preferences file.
+    SetRegisterColumns(RegisterColumns),
     /// Show a message in the Status bar until the next one replaces it.
     ShowStatus(StatusMessage),
     /// Close the Main window, which ends the app.

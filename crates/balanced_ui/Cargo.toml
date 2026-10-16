@@ -44,6 +44,10 @@ required-features = ["test-support"]
 
 # Every App test stops the clock on one day with `Clock::fixed`.
 [[test]]
+name = "column_chooser"
+required-features = ["test-support"]
+
+[[test]]
 name = "date_field"
 required-features = ["test-support"]
 

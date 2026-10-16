@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::register_columns::RegisterColumns;
 use crate::route::OpenIn;
 
 /// Light or dark colours.
@@ -109,6 +110,9 @@ pub(crate) struct Preferences {
     pub(crate) auto_fold: bool,
     /// Where clicking an account in the Account bar opens its Register.
     pub(crate) open_account_in: OpenIn,
+    /// The columns every Register shows, and their order.
+    #[serde(flatten)]
+    pub(crate) register_columns: RegisterColumns,
 }
 
 impl Default for Preferences {
@@ -125,6 +129,7 @@ impl Default for Preferences {
             net_worth_placement: NetWorthPlacement::default(),
             auto_fold: true,
             open_account_in: OpenIn::CurrentRegister,
+            register_columns: RegisterColumns::default(),
         }
     }
 }
@@ -257,6 +262,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::register_columns::RegisterColumn;
 
     /// A preferences file in a new, empty directory, which lasts as long as the
     /// returned `TempDir`.
@@ -269,6 +275,9 @@ mod tests {
     #[test]
     fn saved_preferences_load_back() {
         let (_dir, file) = file();
+        let mut register_columns = RegisterColumns::default();
+        register_columns.move_up(RegisterColumn::Payee);
+        register_columns.set_shown(RegisterColumn::Memo, false);
         let preferences = Preferences {
             scheme: Scheme::Dark,
             font_face: FontFace::NotoSans,
@@ -281,6 +290,7 @@ mod tests {
             net_worth_placement: NetWorthPlacement::StatusBar,
             auto_fold: false,
             open_account_in: OpenIn::NewTab,
+            register_columns,
         };
 
         file.save(&preferences).unwrap();
@@ -363,6 +373,33 @@ mod tests {
     }
 
     #[test]
+    fn unknown_column_ids_are_dropped_and_missing_columns_appended() {
+        let (dir, file) = file();
+        std::fs::write(
+            dir.path().join("preferences.toml"),
+            "version = 1\n\
+             register_columns = [\"payee\", \"tags\", \"actions\", \"date\", \"payee\"]\n\
+             hidden_register_columns = [\"memo\", \"tags\", \"amount\"]\n",
+        )
+        .unwrap();
+
+        let loaded = file.load().unwrap();
+
+        assert_eq!(
+            loaded.register_columns.shown(),
+            [
+                RegisterColumn::Payee,
+                RegisterColumn::Date,
+                RegisterColumn::Number,
+                RegisterColumn::Category,
+                RegisterColumn::Amount,
+                RegisterColumn::Balance,
+                RegisterColumn::Actions,
+            ]
+        );
+    }
+
+    #[test]
     fn no_file_loads_the_defaults() {
         let (_dir, file) = file();
 
@@ -419,7 +456,9 @@ mod tests {
              group_totals = false\n\
              net_worth_placement = \"account_bar\"\n\
              auto_fold = true\n\
-             open_account_in = \"current_register\"\n"
+             open_account_in = \"current_register\"\n\
+             register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+             hidden_register_columns = []\n"
         );
     }
 

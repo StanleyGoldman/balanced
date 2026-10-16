@@ -105,6 +105,11 @@ register-column-amount = Amount
 register-column-balance = Balance
 # The handle on a column heading's right edge that resizes the column.
 register-resize-column = Resize { $column }
+# The ⚙ button at the right end of the Register header, which opens the column chooser.
+register-column-chooser = Choose columns
+# The column chooser's buttons that move a column one place up or down its list.
+register-column-move-up = Move { $column } up
+register-column-move-down = Move { $column } down
 # The Category cell of a transaction divided between several categories.
 register-split = [Split]
 # The Payee cell of an account's first transaction, its starting balance.

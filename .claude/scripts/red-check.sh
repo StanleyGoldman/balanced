@@ -13,11 +13,14 @@
 # moves the mtime forward, so cargo rebuilds it on the next run.
 #
 # Output: one JSON line on stdout:
-#   {"status": "red"|"green"|"error", "failed": [test names], "restored": bool,
-#    "next": string?}
+#   {"status": "red"|"green"|"error", "failed": [test names], "panics": [string],
+#    "restored": bool, "next": string?}
 #   red:   the test command failed with at least one `test … FAILED` name, all listed
-#          in "failed". Read their panics before trusting the red: a setup failure
-#          proves nothing.
+#          in "failed". "panics" holds one entry per failed test, in the order cargo
+#          prints them: the `panicked at <file:line:col>` line plus the message after
+#          it (`left:`/`right:`, "No nodes found", …), at most 6 lines joined by "\n".
+#          Read each before trusting the red: a setup failure proves nothing.
+#          Only a red result carries "panics".
 #   green: the tests pass against the broken code; they miss this break.
 #   error: bad arguments, or <old> not found exactly once (the file is untouched);
 #          or the test command failed with no `test … FAILED` line, usually a break
@@ -70,8 +73,21 @@ if [[ $code -ne 0 && $failed == "[]" ]]; then
   exit 2
 fi
 if [[ $code -ne 0 ]]; then
-  jq -nc --argjson failed "$failed" --argjson restored "$restored" \
-    '{status: "red", failed: $failed, restored: $restored}'
+  # One entry per failed test: the first panic in its `---- <name> stdout ----`
+  # section, at most 6 lines, ending at a blank line, cargo's `note:` hint or the next
+  # section. Entries are separated by the record separator \036 for jq to split on.
+  panics=$(awk '
+    function close_entry() { if (n > 0) printf "\036"; take = 0; n = 0 }
+    /^---- .* stdout ----$/ { close_entry(); take = 1; next }
+    take && n == 0 { if (/panicked at/) { printf "%s", $0; n = 1 }; next }
+    take {
+      if ($0 == "" || /^note: / || n >= 6) { close_entry(); next }
+      printf "\n%s", $0; n++
+    }
+    END { close_entry() }
+  ' "$log" | jq -Rsc 'split("\u001e") | map(select(length > 0))')
+  jq -nc --argjson failed "$failed" --argjson panics "$panics" --argjson restored "$restored" \
+    '{status: "red", failed: $failed, panics: $panics, restored: $restored}'
   exit 0
 fi
 jq -nc --argjson restored "$restored" '{status: "green", failed: [], restored: $restored,

@@ -85,7 +85,9 @@ fn dark_then_ok_applies_the_dark_theme_and_writes_the_file() {
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          auto_fold = true\n\
-         open_account_in = \"current_register\"\n"
+         open_account_in = \"current_register\"\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+         hidden_register_columns = []\n"
     );
 }
 
@@ -177,7 +179,9 @@ fn the_other_display_preferences_apply_and_are_saved_on_ok() {
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          auto_fold = true\n\
-         open_account_in = \"current_register\"\n"
+         open_account_in = \"current_register\"\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+         hidden_register_columns = []\n"
     );
 }
 
@@ -241,7 +245,9 @@ fn the_register_preferences_are_saved_on_ok() {
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          auto_fold = true\n\
-         open_account_in = \"current_register\"\n"
+         open_account_in = \"current_register\"\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+         hidden_register_columns = []\n"
     );
 }
 
@@ -276,7 +282,9 @@ fn the_account_bar_and_accounts_preferences_are_saved_on_ok() {
          group_totals = true\n\
          net_worth_placement = \"status_bar\"\n\
          auto_fold = false\n\
-         open_account_in = \"new_tab\"\n"
+         open_account_in = \"new_tab\"\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+         hidden_register_columns = []\n"
     );
 }
 
