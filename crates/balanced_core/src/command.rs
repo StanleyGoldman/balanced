@@ -27,7 +27,7 @@ impl Applied {
     }
 
     /// The Command that puts the ledger back as it was before the change.
-    pub fn inverse(&self) -> &DomainCommand {
+    pub(crate) fn inverse(&self) -> &DomainCommand {
         &self.inverse
     }
 

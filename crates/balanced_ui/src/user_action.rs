@@ -32,6 +32,19 @@ impl UserAction {
         }
     }
 
+    /// Whether a focused text field does the action itself, on its own text: Undo and
+    /// Redo undo and redo the typing there.
+    pub(crate) fn text_field_does_it(self) -> bool {
+        match self {
+            Self::Undo | Self::Redo => true,
+            Self::CloseRegisterTab
+            | Self::NextRegisterTab
+            | Self::PreviousRegisterTab
+            | Self::Quit
+            | Self::About => false,
+        }
+    }
+
     /// The Command that carries the action out.
     pub(crate) fn command(self) -> AppCommand {
         match self {

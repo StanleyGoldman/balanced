@@ -144,9 +144,9 @@ impl LedgerView {
 pub struct Ledger {
     view: Arc<LedgerView>,
     /// The inverses of the changes Undo can reverse, the latest last.
-    undo: Vec<DomainCommand>,
+    undo_stack: Vec<DomainCommand>,
     /// The inverses of the undone changes Redo can make again, the latest undone last.
-    redo: Vec<DomainCommand>,
+    redo_stack: Vec<DomainCommand>,
 }
 
 impl Ledger {
@@ -223,8 +223,8 @@ impl Ledger {
                 can_undo: false,
                 can_redo: false,
             }),
-            undo: Vec::new(),
-            redo: Vec::new(),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         })
     }
 
@@ -237,62 +237,50 @@ impl Ledger {
     /// rejects it and leaves the ledger as it was. An applied change can be undone,
     /// and nothing undone before it can be redone any more.
     pub fn apply(&mut self, command: DomainCommand) -> Result<Applied, DomainError> {
-        let applied = self.change(command)?;
-        self.undo.push(applied.inverse().clone());
-        self.redo.clear();
+        let applied = self.apply_unrecorded(command)?;
+        self.undo_stack.push(applied.inverse().clone());
+        self.redo_stack.clear();
         self.publish_history();
         Ok(applied)
     }
 
     /// Reverses the latest change not yet undone, publishing a new snapshot. Does
-    /// nothing when there is no change to undo. Fails, leaving the ledger as it was,
-    /// when the ledger refuses the reversal.
+    /// nothing when there is no change to undo. Fails, leaving the ledger and the
+    /// change to undo as they were, when the ledger refuses the reversal.
     pub fn undo(&mut self) -> Result<(), DomainError> {
-        let Some(inverse) = self.undo.pop() else {
+        let Some(inverse) = self.undo_stack.last().cloned() else {
             return Ok(());
         };
-        match self.change(inverse.clone()) {
-            Ok(applied) => {
-                self.redo.push(applied.into_inverse());
-                self.publish_history();
-                Ok(())
-            }
-            Err(error) => {
-                self.undo.push(inverse);
-                Err(error)
-            }
-        }
+        let applied = self.apply_unrecorded(inverse)?;
+        self.undo_stack.pop();
+        self.redo_stack.push(applied.into_inverse());
+        self.publish_history();
+        Ok(())
     }
 
     /// Makes the latest undone change again, publishing a new snapshot. Does nothing
-    /// when there is no undone change to redo. Fails, leaving the ledger as it was,
-    /// when the ledger refuses the change.
+    /// when there is no undone change to redo. Fails, leaving the ledger and the
+    /// change to redo as they were, when the ledger refuses the change.
     pub fn redo(&mut self) -> Result<(), DomainError> {
-        let Some(command) = self.redo.pop() else {
+        let Some(command) = self.redo_stack.last().cloned() else {
             return Ok(());
         };
-        match self.change(command.clone()) {
-            Ok(applied) => {
-                self.undo.push(applied.into_inverse());
-                self.publish_history();
-                Ok(())
-            }
-            Err(error) => {
-                self.redo.push(command);
-                Err(error)
-            }
-        }
+        let applied = self.apply_unrecorded(command)?;
+        self.redo_stack.pop();
+        self.undo_stack.push(applied.into_inverse());
+        self.publish_history();
+        Ok(())
     }
 
     /// Tells the current snapshot whether Undo and Redo can act.
     fn publish_history(&mut self) {
         let view = Arc::make_mut(&mut self.view);
-        view.can_undo = !self.undo.is_empty();
-        view.can_redo = !self.redo.is_empty();
+        view.can_undo = !self.undo_stack.is_empty();
+        view.can_redo = !self.redo_stack.is_empty();
     }
 
     /// Applies `command` without recording it for Undo.
-    fn change(&mut self, command: DomainCommand) -> Result<Applied, DomainError> {
+    fn apply_unrecorded(&mut self, command: DomainCommand) -> Result<Applied, DomainError> {
         match command {
             DomainCommand::EditTransaction { transaction, edit } => {
                 self.edit_transaction(transaction, edit)
@@ -1014,6 +1002,17 @@ mod tests {
 
         ledger.redo().unwrap();
         assert_eq!(can_undo_and_redo(&ledger), (true, false));
+    }
+
+    #[test]
+    fn undo_and_redo_with_nothing_to_do_leave_the_ledger_as_it_was() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+
+        ledger.undo().unwrap();
+        ledger.redo().unwrap();
+
+        assert_eq!(ledger.snapshot(), before);
     }
 
     #[test]

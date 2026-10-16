@@ -52,19 +52,6 @@ impl Binding {
         let types = key == Key::Space || key.name().chars().count() == 1;
         types && !self.chord.modifiers.alt && !self.holds_command()
     }
-
-    /// Whether a focused text field acts on the chord itself: there, Undo and Redo
-    /// undo and redo the typing.
-    fn edits_text(self) -> bool {
-        match self.action {
-            UserAction::Undo | UserAction::Redo => true,
-            UserAction::CloseRegisterTab
-            | UserAction::NextRegisterTab
-            | UserAction::PreviousRegisterTab
-            | UserAction::Quit
-            | UserAction::About => false,
-        }
-    }
 }
 
 /// Every default chord. An action with several chords lists the one its menu item
@@ -126,14 +113,17 @@ pub(crate) fn shortcut_text(
 ///
 /// egui matches a chord even when Shift or Alt is held beyond it, so chords with
 /// more modifiers are tried first: Ctrl+Shift+Z matches before Ctrl+Z can. A chord
-/// that types a character, or that a text field acts on itself, acts only while no
-/// text field has focus, so the field gets the key.
+/// that types a character acts only while no widget takes the keyboard, so a focused
+/// text field gets the letter. An action a text field does itself, such as Undo, acts
+/// only while no text field has focus.
 pub(crate) fn dispatch(ctx: &egui::Context, bindings: &[Binding]) -> Vec<UserAction> {
     let typing = ctx.egui_wants_keyboard_input();
+    let editing_text = ctx.text_edit_focused();
     let mut bindings: Vec<Binding> = bindings
         .iter()
         .copied()
-        .filter(|binding| !(typing && (binding.types_text() || binding.edits_text())))
+        .filter(|binding| !(typing && binding.types_text()))
+        .filter(|binding| !(editing_text && binding.action.text_field_does_it()))
         .collect();
     bindings.sort_by_key(|binding| std::cmp::Reverse(binding.modifier_count()));
     ctx.input_mut(|input| {
@@ -264,6 +254,31 @@ mod tests {
         let actions = dispatched(&BARE_T, focus_a_field, Modifiers::NONE, Key::T);
 
         assert_eq!(actions, []);
+    }
+
+    const CTRL_Z_UNDO: [Binding; 1] = [Binding::new(Modifiers::COMMAND, Key::Z, UserAction::Undo)];
+
+    #[test]
+    fn dispatch_leaves_undo_to_a_focused_text_field() {
+        let mut text = String::new();
+        let focus_a_field = |ui: &mut egui::Ui| {
+            ui.text_edit_singleline(&mut text).request_focus();
+        };
+
+        let actions = dispatched(&CTRL_Z_UNDO, focus_a_field, Modifiers::COMMAND, Key::Z);
+
+        assert_eq!(actions, []);
+    }
+
+    #[test]
+    fn dispatch_undoes_while_a_button_has_focus() {
+        let focus_a_button = |ui: &mut egui::Ui| {
+            ui.button("Help").request_focus();
+        };
+
+        let actions = dispatched(&CTRL_Z_UNDO, focus_a_button, Modifiers::COMMAND, Key::Z);
+
+        assert_eq!(actions, [UserAction::Undo]);
     }
 
     #[test]

@@ -701,28 +701,41 @@ fn the_register_leaves_ctrl_tab_to_the_rest_of_the_app() {
     assert_eq!(input.events, [ctrl_tab]);
 }
 
+/// Renames Fresh Market to Corner Shop through its Payee cell.
+fn rename_fresh_market(harness: &mut Harness<'static, App>) {
+    click_cell(harness, "Fresh Market");
+    type_text(harness, "Corner Shop");
+    press(harness, Modifiers::NONE, Key::Enter);
+}
+
 #[test]
-fn ctrl_z_undoes_a_cell_edit_and_ctrl_y_redoes_it() {
+fn ctrl_z_undoes_a_cell_edit() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "Fresh Market");
-    type_text(&mut harness, "Corner Shop");
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    rename_fresh_market(&mut harness);
 
     press(&mut harness, Modifiers::COMMAND, Key::Z);
+
     harness.get_by_role_and_label(Role::Cell, "Fresh Market");
+}
+
+#[test]
+fn ctrl_y_redoes_an_undone_cell_edit() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    rename_fresh_market(&mut harness);
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
 
     press(&mut harness, Modifiers::COMMAND, Key::Y);
+
     harness.get_by_role_and_label(Role::Cell, "Corner Shop");
 }
 
 #[test]
-fn ctrl_shift_z_redoes_too() {
+fn ctrl_shift_z_redoes_an_undone_cell_edit() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "Fresh Market");
-    type_text(&mut harness, "Corner Shop");
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    rename_fresh_market(&mut harness);
     press(&mut harness, Modifiers::COMMAND, Key::Z);
 
     press(&mut harness, Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
@@ -734,9 +747,7 @@ fn ctrl_shift_z_redoes_too() {
 fn ctrl_z_during_a_cell_edit_undoes_typing_not_the_ledger() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "Fresh Market");
-    type_text(&mut harness, "Corner Shop");
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    rename_fresh_market(&mut harness);
     click_cell(&mut harness, "Corner Shop");
     press(&mut harness, Modifiers::NONE, Key::Enter);
     type_text(&mut harness, " Downtown");
@@ -771,9 +782,7 @@ fn the_edit_menu_enables_undo_and_redo_only_when_they_can_act() {
     open(&mut harness, "Everyday Checking");
     assert_eq!(undo_redo_disabled(&mut harness), (true, true));
 
-    click_cell(&mut harness, "Fresh Market");
-    type_text(&mut harness, "Corner Shop");
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    rename_fresh_market(&mut harness);
     assert_eq!(undo_redo_disabled(&mut harness), (false, true));
 
     harness.get_by_role_and_label(Role::Button, "Edit").click();
