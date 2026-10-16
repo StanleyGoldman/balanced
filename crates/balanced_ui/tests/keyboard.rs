@@ -146,7 +146,18 @@ fn f10_opens_the_first_menu_on_its_first_enabled_item() {
 
     press(&mut harness, Modifiers::NONE, Key::F10);
 
-    // Close Register Tab, above Quit, is disabled while no Register is open.
+    assert_eq!(focused(&harness).as_deref(), Some("New Account…"));
+}
+
+#[test]
+fn down_skips_a_disabled_menu_item() {
+    let mut harness = app();
+    press(&mut harness, Modifiers::NONE, Key::F10);
+
+    press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+
+    // Close Register Tab, between New Account and Quit, is disabled while no Register
+    // is open.
     assert_eq!(focused(&harness).as_deref(), Some("Quit Ctrl+Q"));
 }
 
@@ -164,7 +175,11 @@ fn up_and_down_move_within_a_menu_and_wrap() {
 
     assert_eq!(
         seen,
-        ["Quit Ctrl+Q", "Close Register Tab Ctrl+W", "Quit Ctrl+Q"]
+        [
+            "Close Register Tab Ctrl+W",
+            "Quit Ctrl+Q",
+            "Close Register Tab Ctrl+W"
+        ]
     );
 }
 
@@ -180,7 +195,7 @@ fn left_and_right_move_between_menus_and_wrap() {
     }
 
     // Left from File wraps to Help, and Right from Help wraps back to File.
-    assert_eq!(seen, ["About Balanced", "Quit Ctrl+Q"]);
+    assert_eq!(seen, ["About Balanced", "New Account…"]);
 }
 
 #[test]
@@ -229,7 +244,7 @@ fn a_lone_alt_opens_the_first_menu() {
     hold(&mut harness, Modifiers::ALT);
     hold(&mut harness, Modifiers::NONE);
 
-    assert_eq!(focused(&harness).as_deref(), Some("Quit Ctrl+Q"));
+    assert_eq!(focused(&harness).as_deref(), Some("New Account…"));
 }
 
 #[test]

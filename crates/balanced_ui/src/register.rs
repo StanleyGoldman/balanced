@@ -7,7 +7,7 @@ use balanced_core::{
     Account, AccountId, AccountSummary, CurrencyCode, DomainCommand, DomainError, LedgerView,
     Money, TransactionEdit, TransactionId,
 };
-use balanced_i18n::{AmountParseError, AmountReader, AmountStyle, Calculation, Localizer};
+use balanced_i18n::{AmountParseError, AmountReader, Localizer};
 use eframe::egui::accesskit::{self, Role};
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
@@ -19,6 +19,7 @@ use eframe::egui::{
 use egui_extras::{Column, TableBody, TableBuilder};
 use icu_calendar::{Date, Iso};
 
+use crate::amount_field::{self, Preview};
 use crate::combobox::{FieldChoices, ListRow};
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::date_field::{self, DateEdit};
@@ -416,16 +417,6 @@ struct CellEdit {
     /// The result of the arithmetic typed so far, for the bubble below the cell, or
     /// `None` while the text is no arithmetic that can be read.
     preview: Option<Preview>,
-}
-
-/// The result of typed arithmetic, as the bubble below the cell shows it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Preview {
-    /// The result, formatted with its currency's symbol.
-    amount: String,
-    /// Whether the result was rounded to the currency's decimal places, which the
-    /// bubble marks with `~`.
-    rounded: bool,
 }
 
 /// The field a cell edit saves its text in.
@@ -1271,13 +1262,7 @@ impl Register {
                 &opened
             }
         };
-        ctx.input_mut(|input| {
-            for event in &mut input.events {
-                if let Event::Text(text) | Event::Paste(text) = event {
-                    text.retain(|c| reader.accepts(c));
-                }
-            }
-        });
+        amount_field::refuse_characters(ctx, reader);
     }
 
     /// Moves the cell cursor from `cursor` by `step`. Returns `None`, leaving the
@@ -1768,18 +1753,10 @@ fn bubble(ui: &egui::Ui, i18n: &Localizer, edit: &CellEdit, cell: Rect) {
     };
     let (text, colour) = match (edit.error, &edit.preview) {
         (Some(error), _) => (
-            amount_error(i18n, error, reader, *currency),
+            amount_field::error_text(i18n, error, reader, *currency),
             ui.visuals().error_fg_color,
         ),
-        (None, Some(Preview { amount, rounded })) => {
-            let amount = amount.clone();
-            let text = if *rounded {
-                fl!(i18n, "field-amount-preview-rounded", amount = amount)
-            } else {
-                fl!(i18n, "field-amount-preview", amount = amount)
-            };
-            (text, ui.visuals().text_color())
-        }
+        (None, Some(preview)) => (preview.text(i18n), ui.visuals().text_color()),
         (None, None) => return,
     };
     Area::new(edit.editor_id().with("bubble"))
@@ -1800,45 +1777,7 @@ fn preview(i18n: &Localizer, edit: &CellEdit) -> Option<Preview> {
     let EditField::Amount { reader, currency } = &edit.field else {
         return None;
     };
-    let calculation = reader
-        .read(edit.text.trim())
-        .ok()
-        .filter(Calculation::is_arithmetic)?;
-    let amount = i18n.format_amount(
-        calculation.amount(),
-        i18n_currency(*currency),
-        AmountStyle::Symbol,
-    );
-    Some(Preview {
-        amount,
-        rounded: calculation.rounded(),
-    })
-}
-
-/// Why typed text is not an amount in `currency`, in words naming what is expected.
-fn amount_error(
-    i18n: &Localizer,
-    error: AmountParseError,
-    reader: &AmountReader,
-    currency: CurrencyCode,
-) -> String {
-    match error {
-        AmountParseError::Empty => fl!(i18n, "field-amount-empty"),
-        AmountParseError::Invalid => fl!(
-            i18n,
-            "field-amount-invalid",
-            decimal = reader.decimal_mark(),
-            group = reader.group_separator()
-        ),
-        AmountParseError::TooManyDecimalPlaces { decimal_places } => fl!(
-            i18n,
-            "field-amount-too-many-decimal-places",
-            currency = currency.as_str(),
-            places = decimal_places
-        ),
-        AmountParseError::OutOfRange => fl!(i18n, "field-amount-out-of-range"),
-        AmountParseError::DivisionByZero => fl!(i18n, "field-amount-division-by-zero"),
-    }
+    Preview::of(i18n, reader, *currency, &edit.text)
 }
 
 /// The scroll offset that puts row `index` in the middle of a Register filling `ui`,

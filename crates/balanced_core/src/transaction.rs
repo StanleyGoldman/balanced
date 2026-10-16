@@ -13,6 +13,11 @@ impl TransactionId {
     pub(crate) fn new(id: u32) -> Self {
         Self(id)
     }
+
+    /// The id after this one.
+    pub(crate) fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
 }
 
 /// One line of a split transaction: part of its amount, in one category.

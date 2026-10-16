@@ -20,6 +20,8 @@ pub(crate) enum UserAction {
     NewTransaction,
     /// Delete the Register's selected transaction, once confirmed.
     DeleteTransaction,
+    /// Open the New Account wizard.
+    NewAccount,
     Quit,
     About,
 }
@@ -36,6 +38,7 @@ impl UserAction {
             Self::SwitchPane => fl!(i18n, "menu-view-switch-pane"),
             Self::NewTransaction => fl!(i18n, "menu-new-transaction"),
             Self::DeleteTransaction => fl!(i18n, "menu-delete-transaction"),
+            Self::NewAccount => fl!(i18n, "menu-file-new-account"),
             Self::Quit => fl!(i18n, "menu-file-quit"),
             Self::About => fl!(i18n, "menu-help-about"),
         }
@@ -52,6 +55,7 @@ impl UserAction {
             | Self::NextRegisterTab
             | Self::PreviousRegisterTab
             | Self::SwitchPane
+            | Self::NewAccount
             | Self::Quit
             | Self::About => false,
         }
@@ -69,6 +73,7 @@ impl UserAction {
             // TODO(#93): go to the draft row.
             Self::NewTransaction => AppCommand::ShowStatus(StatusMessage::NotAvailableYet),
             Self::DeleteTransaction => AppCommand::OpenDialog(DialogKind::DeleteTransaction),
+            Self::NewAccount => AppCommand::OpenDialog(DialogKind::NewAccount),
             Self::Quit => AppCommand::Quit,
             Self::About => AppCommand::ShowStatus(StatusMessage::About),
         }

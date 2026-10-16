@@ -15,6 +15,9 @@ use crate::route::Route;
 pub(crate) enum AppCommand {
     /// Apply a change to the ledger. A rejected change shows in the Status bar.
     Domain(DomainCommand),
+    /// Apply the change the open Dialog's form asks for. The Dialog closes once it is
+    /// applied, and shows a rejected change inline, staying open.
+    SubmitForm(DomainCommand),
     /// Reverse the latest ledger change not yet undone. A refused reversal shows in
     /// the Status bar.
     Undo,
@@ -48,6 +51,8 @@ pub(crate) enum DialogKind {
     /// The confirm for deleting the Register's selected transaction. Nothing opens
     /// while no transaction is selected, or while its account is closed.
     DeleteTransaction,
+    /// The New Account wizard, on its first step.
+    NewAccount,
     /// Create a category, starting from the name typed in a Category cell.
     NewCategory { name: String },
 }
@@ -76,6 +81,7 @@ impl StatusMessage {
                 DomainError::UnknownTransaction { .. } => {
                     fl!(i18n, "status-unknown-transaction")
                 }
+                DomainError::BlankAccountName => fl!(i18n, "status-blank-account-name"),
                 DomainError::OpeningBalancePayee { .. } => {
                     fl!(i18n, "status-opening-balance-payee")
                 }

@@ -3,16 +3,33 @@
 
 use icu_calendar::{Date, Iso};
 
-use crate::{AccountId, CategoryId, Money, MoneyError, Transaction, TransactionId};
+use crate::{
+    Account, AccountId, AccountKind, CategoryId, Money, MoneyError, Transaction, TransactionId,
+};
 
 /// A change to the ledger. `Ledger::apply` applies it, or rejects it with a
 /// [`DomainError`] and leaves the ledger as it was.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[expect(
-    clippy::enum_variant_names,
-    reason = "every Command so far acts on a transaction; account and category ones come next"
-)]
 pub enum DomainCommand {
+    /// Open an account named `name`, of `kind`, in the ledger's currency, holding
+    /// `opening_balance` on `opened`. It lands last in its sub-group.
+    CreateAccount {
+        name: String,
+        kind: AccountKind,
+        opened: Date<Iso>,
+        opening_balance: Money,
+    },
+    /// Delete an account with every transaction in it: the inverse of
+    /// [`DomainCommand::CreateAccount`].
+    DeleteAccount { account: AccountId },
+    /// Put a deleted account back, with its id and its transactions' ids, at `place`
+    /// among the accounts of its sub-group: the inverse of
+    /// [`DomainCommand::DeleteAccount`].
+    RestoreAccount {
+        account: Account,
+        transactions: Vec<Transaction>,
+        place: usize,
+    },
     /// Change one field of an existing transaction.
     EditTransaction {
         transaction: TransactionId,
@@ -73,6 +90,9 @@ pub enum DomainError {
     /// No account has the id, perhaps because it was deleted.
     #[error("no such account: {account:?}")]
     UnknownAccount { account: AccountId },
+    /// The command named a new account with nothing but white space.
+    #[error("an account needs a name")]
+    BlankAccountName,
     /// The command gave the opening balance a payee. The opening balance has none.
     #[error("the opening balance has no payee: {transaction:?}")]
     OpeningBalancePayee { transaction: TransactionId },
