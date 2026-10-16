@@ -100,3 +100,4 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 ### Merge conflicts
 
 - Invoke `/mattpocock-skills:resolving-merge-conflicts` the moment a merge or rebase reports a conflict, before opening any conflicted file.
+- Some sessions lack that skill (cloud sessions, for one). There, read each side's `git diff <merge-base> <side>` for the conflicted files before editing a hunk, then run `cargo xtask ci`: a test that merged cleanly can still assert the old shape, such as a full `preferences.toml` text or a harness step the other side added.
