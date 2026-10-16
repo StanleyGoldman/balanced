@@ -256,7 +256,7 @@ impl NumberSymbols {
             ]
             .iter()
             .any(|symbol| symbol.contains(c))
-            || matches!(c, '-' | '\u{2212}')
+            || matches!(c, '-' | MINUS_SIGN)
     }
 
     /// The group separator, if `rest` starts with one. A typed space stands in for
@@ -281,6 +281,10 @@ fn take_separator_run(runs: &mut Vec<(bool, String)>, index: usize) -> String {
         _ => String::new(),
     }
 }
+
+/// U+2212, the typographic minus sign, which users may type for `-`.
+pub(crate) const MINUS_SIGN: char = '\u{2212}';
+const MINUS_SIGN_STR: &str = "\u{2212}";
 
 /// Parses an amount typed in the locale `symbols` describe, for a currency with
 /// `decimal_places` decimal places. See [`crate::Localizer::parse_amount`].
@@ -447,7 +451,7 @@ fn groups_fit(symbols: &NumberSymbols, groups: &[String]) -> bool {
 
 /// Strips a minus sign from either end: the locale's own, or a typed `-` or `−`.
 fn strip_minus<'a>(symbols: &NumberSymbols, text: &'a str) -> (bool, &'a str) {
-    const TYPED: [&str; 2] = ["-", "\u{2212}"];
+    const TYPED: [&str; 2] = ["-", MINUS_SIGN_STR];
     let prefixes = std::iter::once(symbols.minus_prefix.as_str()).chain(TYPED);
     for prefix in prefixes.filter(|p| !p.is_empty()) {
         if let Some(rest) = text.strip_prefix(prefix) {

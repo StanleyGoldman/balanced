@@ -4,7 +4,9 @@
 use rust_decimal::{Decimal, RoundingStrategy};
 
 use crate::AmountParseError;
-use crate::money::{NumberSymbols, at_scale, parse_amount, parse_number, strip_affixes};
+use crate::money::{
+    MINUS_SIGN, NumberSymbols, at_scale, parse_amount, parse_number, strip_affixes,
+};
 
 /// Reads amounts typed in one formatting locale for one currency. It keeps that
 /// locale's marks after the [`crate::Localizer`]'s formatting locale changes, so
@@ -22,8 +24,16 @@ pub struct AmountReader {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Calculation {
     amount: Decimal,
-    rounded: bool,
-    arithmetic: bool,
+    source: Source,
+}
+
+/// What a [`Calculation`]'s amount came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Source {
+    /// A plain amount, which is never rounded.
+    Plain,
+    /// Arithmetic, whose result may have been rounded.
+    Arithmetic { rounded: bool },
 }
 
 impl Calculation {
@@ -35,12 +45,15 @@ impl Calculation {
     /// Whether arithmetic gave more decimal places than the currency has, so the
     /// amount was rounded half away from zero.
     pub fn rounded(&self) -> bool {
-        self.rounded
+        matches!(self.source, Source::Arithmetic { rounded: true })
     }
 
     /// Whether the text was arithmetic rather than a plain amount.
     pub fn is_arithmetic(&self) -> bool {
-        self.arithmetic
+        match self.source {
+            Source::Plain => false,
+            Source::Arithmetic { .. } => true,
+        }
     }
 }
 
@@ -93,8 +106,7 @@ impl AmountReader {
         else {
             return Ok(Calculation {
                 amount: parse_amount(&self.symbols, self.decimal_places, text)?,
-                rounded: false,
-                arithmetic: false,
+                source: Source::Plain,
             });
         };
         let mut values = operands
@@ -102,21 +114,27 @@ impl AmountReader {
             .map(|operand| parse_number(&self.symbols, operand));
         let first = values.next().expect("an expression has an operand")?;
         let mut sum = Decimal::ZERO;
-        let mut sum_operator = Operator::Add;
+        let mut sum_operator = Additive::Add;
         let mut term = first;
         for (operator, value) in operators.into_iter().zip(values) {
             let value = value?;
             match operator {
-                Operator::Multiply => term = term.checked_mul(value).ok_or(OUT_OF_RANGE)?,
+                Operator::Multiply => {
+                    term = term
+                        .checked_mul(value)
+                        .ok_or(AmountParseError::OutOfRange)?;
+                }
                 Operator::Divide => {
                     if value.is_zero() {
                         return Err(AmountParseError::DivisionByZero);
                     }
-                    term = term.checked_div(value).ok_or(OUT_OF_RANGE)?;
+                    term = term
+                        .checked_div(value)
+                        .ok_or(AmountParseError::OutOfRange)?;
                 }
-                Operator::Add | Operator::Subtract => {
+                Operator::Additive(additive) => {
                     sum = sum_operator.combine(sum, term)?;
-                    sum_operator = operator;
+                    sum_operator = additive;
                     term = value;
                 }
             }
@@ -125,49 +143,54 @@ impl AmountReader {
         let amount = exact
             .round_dp_with_strategy(self.decimal_places, RoundingStrategy::MidpointAwayFromZero);
         Ok(Calculation {
-            rounded: amount != exact,
-            arithmetic: true,
+            source: Source::Arithmetic {
+                rounded: amount != exact,
+            },
             amount: at_scale(amount, self.decimal_places)?,
         })
     }
 }
 
-const OUT_OF_RANGE: AmountParseError = AmountParseError::OutOfRange;
-
 /// An arithmetic operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Operator {
-    Add,
-    Subtract,
+    Additive(Additive),
     Multiply,
     Divide,
 }
 
+/// An operator that combines terms: it binds less tightly than `*` and `/`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Additive {
+    Add,
+    Subtract,
+}
+
 impl Operator {
+    const SUBTRACT: Self = Self::Additive(Additive::Subtract);
+
     /// The operator a typed character stands for.
     fn from_char(c: char) -> Option<Self> {
         match c {
-            '+' => Some(Self::Add),
-            '-' | MINUS_SIGN => Some(Self::Subtract),
+            '+' => Some(Self::Additive(Additive::Add)),
+            '-' | MINUS_SIGN => Some(Self::SUBTRACT),
             '*' => Some(Self::Multiply),
             '/' => Some(Self::Divide),
             _ => None,
         }
     }
+}
 
-    /// `left` combined with `right` by this operator, for the additive operators.
+impl Additive {
+    /// `left` combined with `right` by this operator.
     fn combine(self, left: Decimal, right: Decimal) -> Result<Decimal, AmountParseError> {
         match self {
             Self::Add => left.checked_add(right),
             Self::Subtract => left.checked_sub(right),
-            Self::Multiply | Self::Divide => unreachable!("only `+` and `-` combine terms"),
         }
-        .ok_or(OUT_OF_RANGE)
+        .ok_or(AmountParseError::OutOfRange)
     }
 }
-
-/// U+2212, the typographic minus sign.
-const MINUS_SIGN: char = '\u{2212}';
 
 /// Typed text split into operand texts and the operators between them.
 struct Expression<'a> {
@@ -191,7 +214,7 @@ impl<'a> Expression<'a> {
             // `start` and `i` are char boundaries, `start` never past `i`.
             let operand = &text[start..i];
             if strip_affixes(operand).is_empty() {
-                if operator == Operator::Subtract {
+                if operator == Operator::SUBTRACT {
                     continue;
                 }
                 return Err(AmountParseError::Invalid);
@@ -201,7 +224,7 @@ impl<'a> Expression<'a> {
             start = i + c.len_utf8();
         }
         let last = &text[start..];
-        let trailing_minus = operators == [Operator::Subtract] && strip_affixes(last).is_empty();
+        let trailing_minus = operators == [Operator::SUBTRACT] && strip_affixes(last).is_empty();
         if operators.is_empty() || trailing_minus {
             return Ok(None);
         }
@@ -355,9 +378,10 @@ mod tests {
 
     #[test]
     fn accepts_only_what_an_amount_or_arithmetic_is_written_with() {
+        let reader = usd();
         let typed = "12a,3b4.5$+-*/ €x\u{2212}";
 
-        let kept: String = typed.chars().filter(|&c| usd().accepts(c)).collect();
+        let kept: String = typed.chars().filter(|&c| reader.accepts(c)).collect();
 
         assert_eq!(kept, "12,34.5$+-*/ \u{2212}");
     }
@@ -393,5 +417,10 @@ mod tests {
             (plain.is_arithmetic(), arithmetic.is_arithmetic()),
             (false, true)
         );
+    }
+
+    #[test]
+    fn a_single_subtraction_is_arithmetic() {
+        assert_eq!(read(&usd(), "10-4"), Ok((dec!(6.00), false)));
     }
 }
