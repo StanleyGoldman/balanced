@@ -5,9 +5,11 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use balanced_core::{
-    AccountId, AccountSummary, Allocation, CategoryId, Generation, LedgerView, TransactionId,
+    AccountId, AccountSummary, Allocation, CategoryId, CurrencyCode, Generation, LedgerView,
+    TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
+use icu_calendar::{Date, Iso};
 use icu_locale::LanguageIdentifier;
 use icu_locale::Locale;
 
@@ -17,13 +19,23 @@ use crate::i18n::fl;
 /// Separates a category from the one it sits under: `Food & Dining:Groceries`.
 const CATEGORY_SEPARATOR: &str = ":";
 
+/// Where a row's amount went, as far as its Payee and Category cells care.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowKind {
+    OpeningBalance,
+    /// The whole amount, in one category.
+    Category(CategoryId),
+    Split,
+}
+
 /// One transaction's row in the Register, every cell formatted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisterRow {
     id: TransactionId,
     /// The row's place in date order, which breaks ties in every sort.
     place: usize,
-    opening_balance: bool,
+    kind: RowKind,
+    saved_date: Date<Iso>,
     date: String,
     number: String,
     payee: String,
@@ -41,7 +53,26 @@ impl RegisterRow {
     /// Whether this is the account's opening balance, whose Payee cell shows a
     /// caption rather than a payee.
     pub(crate) fn is_opening_balance(&self) -> bool {
-        self.opening_balance
+        self.kind == RowKind::OpeningBalance
+    }
+
+    /// The one category the whole amount is in, unless the row is the opening balance
+    /// or split.
+    pub(crate) fn category_id(&self) -> Option<CategoryId> {
+        match self.kind {
+            RowKind::Category(id) => Some(id),
+            RowKind::OpeningBalance | RowKind::Split => None,
+        }
+    }
+
+    /// Whether the amount is split between categories.
+    pub(crate) fn is_split(&self) -> bool {
+        self.kind == RowKind::Split
+    }
+
+    /// The transaction's date, which the Date cell shows formatted.
+    pub(crate) fn saved_date(&self) -> Date<Iso> {
+        self.saved_date
     }
 
     pub(crate) fn date(&self) -> &str {
@@ -65,6 +96,11 @@ impl RegisterRow {
 
     pub(crate) fn memo(&self) -> &str {
         &self.memo
+    }
+
+    /// The currency of the transaction's account.
+    pub(crate) fn currency(&self) -> CurrencyCode {
+        self.amount.money().currency()
     }
 
     /// The amount, as a bare number.
@@ -199,17 +235,28 @@ impl RegisterModel {
             .enumerate()
             .map(|(place, entry)| {
                 let transaction = entry.transaction();
-                let (payee, category) = match transaction.allocation() {
-                    Allocation::OpeningBalance => (opening_balance.clone(), String::new()),
-                    Allocation::Category(id) => {
-                        (transaction.payee().to_owned(), paths.path(*id).to_owned())
-                    }
-                    Allocation::Split(_) => (transaction.payee().to_owned(), split.clone()),
+                let (kind, payee, category) = match transaction.allocation() {
+                    Allocation::OpeningBalance => (
+                        RowKind::OpeningBalance,
+                        opening_balance.clone(),
+                        String::new(),
+                    ),
+                    Allocation::Category(id) => (
+                        RowKind::Category(*id),
+                        transaction.payee().to_owned(),
+                        paths.path(*id).to_owned(),
+                    ),
+                    Allocation::Split(_) => (
+                        RowKind::Split,
+                        transaction.payee().to_owned(),
+                        split.clone(),
+                    ),
                 };
                 RegisterRow {
                     id: transaction.id(),
                     place,
-                    opening_balance: *transaction.allocation() == Allocation::OpeningBalance,
+                    kind,
+                    saved_date: transaction.date(),
                     date: i18n.format_date(transaction.date()),
                     number: transaction.number().unwrap_or_default().to_owned(),
                     payee,
@@ -277,9 +324,13 @@ impl CategoryPaths<'_> {
     fn path(&mut self, id: CategoryId) -> &str {
         let view = self.view;
         self.paths.entry(id).or_insert_with(|| {
-            view.category_path(id)
-                .expect("a transaction's categories are in its snapshot")
-                .join(CATEGORY_SEPARATOR)
+            category_text(view, id).expect("a transaction's categories are in its snapshot")
         })
     }
+}
+
+/// The path from the top of the tree to category `id` of `view`, as the Register shows
+/// it: `Food & Dining:Groceries`. `None` once the category has been deleted.
+pub(crate) fn category_text(view: &LedgerView, id: CategoryId) -> Option<String> {
+    Some(view.category_path(id)?.join(CATEGORY_SEPARATOR))
 }

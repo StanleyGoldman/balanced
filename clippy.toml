@@ -29,6 +29,13 @@ disallowed-methods = [
   { path = "egui_kittest::try_image_snapshot", reason = "use `balanced_ui::testing::check_snapshot`" },
   { path = "egui_kittest::try_image_snapshot_options", reason = "use `balanced_ui::testing::check_snapshot`" },
 
+  # Today's date comes from `balanced_ui`'s `Clock`, which tests fix, so a kittest run is
+  # the same on any day.
+  { path = "std::time::SystemTime::now", reason = "read the time through `balanced_ui::Clock`" },
+  { path = "std::time::Instant::now", reason = "read the time through `balanced_ui::Clock`" },
+  { path = "jiff::Timestamp::now", reason = "read the time through `balanced_ui::Clock`", allow-invalid = true },
+  { path = "jiff::Zoned::now", reason = "read the time through `balanced_ui::Clock`", allow-invalid = true },
+
   { path = "egui_extras::TableBody::row", reason = "lays out every row each frame; use `rows` or `heterogeneous_rows`" },
 
   # No floats near money: a float can't hold most decimal fractions exactly. The

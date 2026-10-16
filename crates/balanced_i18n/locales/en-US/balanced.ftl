@@ -16,9 +16,12 @@ menu-file = File
 menu-file-close-register-tab = Close { -register } Tab
 menu-file-quit = Quit
 menu-edit = Edit
+menu-edit-undo = Undo
+menu-edit-redo = Redo
 menu-view = View
 menu-view-next-register-tab = Next { -register } Tab
 menu-view-previous-register-tab = Previous { -register } Tab
+menu-view-switch-pane = Switch Pane
 menu-tools = Tools
 menu-help = Help
 menu-help-about = About { -brand-name }
@@ -90,6 +93,10 @@ register-opening-balance = Opening Balance
 register-actions = Actions
 # The Actions menu item that asks to delete the row's transaction.
 register-actions-delete = Delete…
+# The ⏷ button beside the Category cell being edited, which lists every category.
+register-category-list = Show all categories
+# The row of the Category list that creates the category typed in the cell.
+register-create-category = Create "{ $name }"…
 register-new-transaction = + Transaction
 # Beside a closed account's name, above its Register.
 register-closed-read-only = Closed — read-only
@@ -106,10 +113,47 @@ dialog-cancel = Cancel
 dialog-delete-transaction-message = Delete this transaction? { $payee }, { $date }, { $amount }
 dialog-delete-transaction-delete = Delete
 
+## Amount field
+
+# Committing an Amount cell with nothing in it.
+field-amount-empty = Enter an amount.
+# Typed text that isn't an amount written the formatting locale's way. $decimal is
+# the decimal mark and $group the separator between thousands, such as "." and ",".
+field-amount-invalid = Write amounts with “{ $decimal }” as the decimal mark and “{ $group }” between thousands.
+# $currency is a currency code such as USD.
+field-amount-too-many-decimal-places =
+    { $places ->
+        [0] { $currency } amounts have no decimal places
+        [one] { $currency } amounts have 1 decimal place
+       *[other] { $currency } amounts have { $places } decimal places
+    }
+field-amount-out-of-range = That amount is too large.
+field-amount-division-by-zero = Can't divide by zero.
+# The result of arithmetic typed in an Amount cell, shown while typing.
+field-amount-preview = = { $amount }
+# The same, when the result was rounded to the currency's decimal places.
+field-amount-preview-rounded = ~ { $amount }
+
+## Date field
+
+# The letters standing for each part of a date in a date pattern, such as M/D/YYYY.
+# The day and month letters are doubled where the locale pads them (DD.MM.YYYY), and
+# the year letter is written four times.
+field-date-day-letter = D
+field-date-month-letter = M
+field-date-year-letter = Y
+# $pattern is the date pattern (M/D/YYYY); $example is today's date in that pattern.
+field-date-invalid = Not a date. Expected { $pattern }, for example { $example }.
+field-date-calendar = Calendar
+    .tooltip = Calendar (Alt+Down)
+field-date-previous-month = Previous month
+field-date-next-month = Next month
+
 ## Status bar
 
 status-about = { -brand-name } { $version }
 status-not-available-yet = Not available yet
+status-no-such-category = No category has that name. Pick one from the list, or create it.
 status-account-closed = This account is closed, so its transactions can't be changed.
 # A change to a transaction that no longer exists, such as one just deleted.
 status-unknown-transaction = That transaction no longer exists.
@@ -117,3 +161,7 @@ status-opening-balance-payee = The opening balance has no payee.
 # A change to an account that no longer exists, such as one just deleted.
 status-unknown-account = That account no longer exists.
 status-amount-too-large = That change would make a balance too large to hold.
+status-not-in-one-category = Only a transaction in one category can change its category.
+status-unknown-category = That category no longer exists.
+status-split-amount = A split transaction's amount is the sum of its lines.
+status-currency-mismatch = The amount is in another currency than the account.

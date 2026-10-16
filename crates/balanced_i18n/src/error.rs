@@ -41,4 +41,23 @@ pub enum AmountParseError {
     /// The amount is too large to hold.
     #[error("amount out of range")]
     OutOfRange,
+    /// Typed arithmetic divides by zero.
+    #[error("division by zero")]
+    DivisionByZero,
+}
+
+/// Why typed text is not a date. `balanced_ui` shows each as the format message.
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+pub enum DateParseError {
+    /// The text lacks a day, a month or a year: `5`, `3/5`. A missing part is never
+    /// filled in.
+    #[error("the date lacks a day, a month or a year")]
+    Incomplete,
+    /// The text is not a date written the formatting locale's way: a two-digit year,
+    /// a letter, a fourth part.
+    #[error("not a date")]
+    Invalid,
+    /// The day, month and year name no day on the calendar: `2/30/2026`.
+    #[error("no such day")]
+    NotOnCalendar(#[from] icu_calendar::RangeError),
 }

@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "the harness times prototype sessions, screenshots and frames by the wall clock; the clock ban is for the app, whose `Clock` lives in `balanced_ui`"
+)]
+
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::PathBuf;

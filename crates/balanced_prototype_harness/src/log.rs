@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_methods,
+    reason = "event lines carry wall-clock timestamps; the clock ban is for the app, whose `Clock` lives in `balanced_ui`"
+)]
+
 use std::io::Write;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
