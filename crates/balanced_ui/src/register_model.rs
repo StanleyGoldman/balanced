@@ -24,6 +24,10 @@ pub(crate) struct RegisterRow {
     /// The row's place in date order, which breaks ties in every sort.
     place: usize,
     opening_balance: bool,
+    /// The one category the whole amount is in, unless the row is the opening balance
+    /// or split.
+    category_id: Option<CategoryId>,
+    split: bool,
     date: String,
     number: String,
     payee: String,
@@ -42,6 +46,17 @@ impl RegisterRow {
     /// caption rather than a payee.
     pub(crate) fn is_opening_balance(&self) -> bool {
         self.opening_balance
+    }
+
+    /// The one category the whole amount is in, unless the row is the opening balance
+    /// or split.
+    pub(crate) fn category_id(&self) -> Option<CategoryId> {
+        self.category_id
+    }
+
+    /// Whether the amount is split between categories.
+    pub(crate) fn is_split(&self) -> bool {
+        self.split
     }
 
     pub(crate) fn date(&self) -> &str {
@@ -210,6 +225,11 @@ impl RegisterModel {
                     id: transaction.id(),
                     place,
                     opening_balance: *transaction.allocation() == Allocation::OpeningBalance,
+                    category_id: match transaction.allocation() {
+                        Allocation::Category(id) => Some(*id),
+                        Allocation::OpeningBalance | Allocation::Split(_) => None,
+                    },
+                    split: matches!(transaction.allocation(), Allocation::Split(_)),
                     date: i18n.format_date(transaction.date()),
                     number: transaction.number().unwrap_or_default().to_owned(),
                     payee,
@@ -277,9 +297,13 @@ impl CategoryPaths<'_> {
     fn path(&mut self, id: CategoryId) -> &str {
         let view = self.view;
         self.paths.entry(id).or_insert_with(|| {
-            view.category_path(id)
-                .expect("a transaction's categories are in its snapshot")
-                .join(CATEGORY_SEPARATOR)
+            category_text(view, id).expect("a transaction's categories are in its snapshot")
         })
     }
+}
+
+/// The path from the top of the tree to category `id` of `view`, as the Register shows
+/// it: `Food & Dining:Groceries`. `None` once the category has been deleted.
+pub(crate) fn category_text(view: &LedgerView, id: CategoryId) -> Option<String> {
+    Some(view.category_path(id)?.join(CATEGORY_SEPARATOR))
 }

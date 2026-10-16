@@ -78,6 +78,9 @@ impl App {
                 }
             }
             AppCommand::Navigate(route) => self.main_window.navigate(route),
+            AppCommand::OpenSplitView(_) => {
+                self.main_window.show_status(StatusMessage::NotAvailableYet);
+            }
             AppCommand::CloseRegisterTab => self
                 .main_window
                 .change_register_tabs(RegisterTabs::close_current),

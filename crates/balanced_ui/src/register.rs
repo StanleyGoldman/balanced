@@ -12,12 +12,13 @@ use eframe::egui::accesskit::{self, Role};
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
 use eframe::egui::{
-    self, Align, Button, CursorIcon, Event, EventFilter, Id, Key, Layout, Margin, Modifiers, Popup,
-    Rect, Response, ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle,
-    TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
+    self, Align, Area, Button, CursorIcon, Event, EventFilter, Frame, Id, Key, Layout, Margin, Modifiers,
+    Order, Popup, Rect, Response, ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit,
+    TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, TableBody, TableBuilder};
 
+use crate::combobox::{FieldChoices, ListRow};
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::i18n::fl;
 use crate::register_model::{RegisterModel, RegisterRow, RegisterSort, SortDirection, SortKey};
@@ -35,6 +36,12 @@ const RESIZE_HANDLE_WIDTH: f32 = 8.0;
 /// The radius of each dot of the Actions menu's ⋯, and the space between their centres.
 const ACTION_DOT_RADIUS: f32 = 1.5;
 const ACTION_DOT_SPACING: f32 = 4.5;
+
+/// The narrowest a combobox list gets, so its entries stay readable under a narrow cell.
+const LIST_MIN_WIDTH: f32 = 240.0;
+
+/// How many rows a combobox list shows before it scrolls.
+const LIST_MAX_ROWS: f32 = 10.0;
 
 /// The sort arrow beside the sorted column's heading: its width, its height, and the
 /// space between it and the heading.
@@ -157,14 +164,14 @@ impl RegisterColumn {
 
     /// The field the column's cell on `row` edits as text, or `None` when the cell
     /// can't be edited as text. The opening balance's Payee cell shows a caption, not a
-    /// payee.
+    /// payee, and only a row in one category edits its Category cell.
     fn text_field(self, row: &RegisterRow) -> Option<TextField> {
         match self {
             Self::Number => Some(TextField::Number),
             Self::Payee if !row.is_opening_balance() => Some(TextField::Payee),
+            Self::Category if row.category_id().is_some() => Some(TextField::Category),
             Self::Memo => Some(TextField::Memo),
             // TODO(#91): edit Date in the segmented date field.
-            // TODO(#92): edit Payee and Category in their comboboxes.
             // TODO(#90): edit Amount in the amount field.
             Self::Payee
             | Self::Date
@@ -296,11 +303,13 @@ struct Insets {
     right: f32,
 }
 
-/// A transaction field a Register cell edits as plain text.
+/// A transaction field a Register cell edits as text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TextField {
     Number,
     Payee,
+    /// The one category of a transaction, by its path.
+    Category,
     Memo,
 }
 
@@ -310,20 +319,54 @@ impl TextField {
         match self {
             Self::Number => row.number(),
             Self::Payee => row.payee(),
+            Self::Category => row.category(),
             Self::Memo => row.memo(),
         }
     }
 
-    /// The edit that saves `text`, already trimmed, in the field. An empty number
-    /// clears it.
-    fn edit(self, text: &str) -> TransactionEdit {
+    /// Whether the field offers a combobox list of entries as you type.
+    fn offers_list(self) -> bool {
         match self {
+            Self::Payee | Self::Category => true,
+            Self::Number | Self::Memo => false,
+        }
+    }
+
+    /// The edit that saves `text`, already trimmed, in the field of `row`, or `None`
+    /// when it changes nothing. An empty number clears it. A category is named by its
+    /// path, ignoring case, and fails when no category in `choices` has that name.
+    fn edit(
+        self,
+        row: &RegisterRow,
+        text: &str,
+        choices: &FieldChoices,
+    ) -> Result<Option<TransactionEdit>, NoSuchCategory> {
+        if text == self.saved(row) {
+            return Ok(None);
+        }
+        let edit = match self {
             Self::Number => TransactionEdit::Number((!text.is_empty()).then(|| text.to_owned())),
             Self::Payee => TransactionEdit::Payee(text.to_owned()),
             Self::Memo => TransactionEdit::Memo(text.to_owned()),
-        }
+            Self::Category => {
+                let category = *choices
+                    .categories()
+                    .named(text)
+                    .ok_or(NoSuchCategory)?
+                    .value();
+                if row.category_id() == Some(category) {
+                    return Ok(None);
+                }
+                TransactionEdit::Category(category)
+            }
+        };
+        Ok(Some(edit))
     }
 }
+
+/// Why a Category cell's text can't be saved: no category has that name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NoSuchCategory;
 
 /// One cell of the Register: a transaction's row and a column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -347,11 +390,14 @@ enum Move {
     PreviousEditable,
 }
 
-/// The cell being edited and its unsaved text.
+/// The cell being edited, the field it edits, its unsaved text, and its combobox list
+/// while that is open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CellEdit {
     cell: CellAddress,
+    field: TextField,
     text: String,
+    list: Option<ListState>,
 }
 
 impl CellEdit {
@@ -359,6 +405,62 @@ impl CellEdit {
     fn editor_id(&self) -> Id {
         Id::new(("register_editor", self.cell))
     }
+
+    /// Opens the field's list, if it offers one, with its top row highlighted: every
+    /// entry when `all`, else those matching the text.
+    fn open_list(&mut self, all: bool) {
+        if self.field.offers_list() {
+            self.list = Some(ListState {
+                all,
+                highlight: Some(0),
+            });
+        }
+    }
+
+    /// The rows of the list, from `choices`, or none while it is closed.
+    fn list_rows<'a>(&self, choices: &'a FieldChoices) -> Vec<ListRow<'a>> {
+        let Some(list) = self.list else {
+            return Vec::new();
+        };
+        let text = if list.all { "" } else { self.text.as_str() };
+        match self.field {
+            TextField::Payee => choices.payees().list(text, false),
+            TextField::Category => choices.categories().list(text, true),
+            TextField::Number | TextField::Memo => Vec::new(),
+        }
+    }
+
+    /// The highlighted row of the list, if it is open with one highlighted.
+    fn highlighted<'a>(&self, choices: &'a FieldChoices) -> Option<ListRow<'a>> {
+        let highlight = self.list?.highlight?;
+        self.list_rows(choices).into_iter().nth(highlight)
+    }
+
+    /// Moves the highlight one row down the list of `rows` rows, stopping at the last.
+    fn highlight_next(&mut self, rows: usize) {
+        if let Some(list) = &mut self.list {
+            let last = rows.saturating_sub(1);
+            list.highlight = Some(list.highlight.map_or(0, |row| (row + 1).min(last)));
+        }
+    }
+
+    /// Moves the highlight one row up the list. Up from the top row clears it, so
+    /// Enter keeps the typed text.
+    fn highlight_previous(&mut self) {
+        if let Some(list) = &mut self.list {
+            list.highlight = list.highlight.and_then(|row| row.checked_sub(1));
+        }
+    }
+}
+
+/// An open combobox list: which entries it lists, and its highlighted row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ListState {
+    /// Whether it lists every entry, as ⏷ and Alt+↓ open it, rather than those
+    /// matching the typed text.
+    all: bool,
+    /// The row Enter takes, or `None` to keep the typed text.
+    highlight: Option<usize>,
 }
 
 /// The rows fully in view in the last frame, which keyboard scrolling keeps the cell
@@ -404,6 +506,8 @@ pub(crate) struct Register {
     centre_pending: bool,
     cursor: Option<CellAddress>,
     edit: Option<CellEdit>,
+    /// What the Payee and Category comboboxes offer, rebuilt when it is out of date.
+    choices: Option<FieldChoices>,
     /// The modifiers held with each Tab press `App::raw_input_hook` took for the
     /// Register since the last frame.
     tabs: Vec<Modifiers>,
@@ -487,10 +591,15 @@ impl Register {
             Some(model) if model.is_current(account, view, self.sort, i18n) => model,
             _ => RegisterModel::new(summary, view, self.sort, i18n),
         };
+        let choices = match self.choices.take() {
+            Some(choices) if choices.is_current(view, i18n) => choices,
+            _ => FieldChoices::new(view, i18n),
+        };
         let keys = KeyContext {
             account,
             closed: summary.account().is_closed(),
             rows: model.rows(),
+            choices: &choices,
             commands,
         };
         let key_scroll_offset = self.handle_keys(ui.ctx(), &keys);
@@ -548,6 +657,7 @@ impl Register {
                             theme,
                             commands,
                             rows: model.rows(),
+                            choices: &choices,
                             register_id,
                             access: Access::of(summary.account()),
                             viewport: Rect::NOTHING,
@@ -556,6 +666,7 @@ impl Register {
                     });
             });
         self.model = Some(model);
+        self.choices = Some(choices);
     }
 
     /// Lays out the rows in view of the Register's body, and notes which of them are
@@ -601,10 +712,10 @@ impl Register {
             i18n,
             theme,
             commands,
-            rows,
             register_id,
             access,
             viewport,
+            ..
         } = *frame;
         let address = CellAddress {
             row: row.id(),
@@ -622,21 +733,65 @@ impl Register {
         let (response, action) = cell.show(ui, i18n, theme);
         if response.clicked() {
             self.place_cursor(row.id(), column);
+            if column == RegisterColumn::Category && row.is_split() {
+                commands.send(AppCommand::OpenSplitView(row.id()));
+            }
         }
         if let Some(action) = action {
             self.act(row.id(), action, commands);
         }
-        if let Some(edit) = self.edit.as_mut().filter(|edit| edit.cell == address)
-            && editor(ui, edit, heading_id(register_id, column)).lost_focus()
-        {
-            let edit = self.edit.take().expect("the edit was just shown");
-            commit(&edit, rows, commands);
+        if self.edit.as_ref().is_some_and(|edit| edit.cell == address) {
+            self.edit_cell(ui, frame, column);
         }
         let rules = theme.cell_rules(ui.max_rect(), column_index, ui.ctx().pixels_per_point());
         ui.ctx()
             .layer_painter(ui.layer_id())
             .with_clip_rect(theme.rule_clip(ui.clip_rect(), viewport))
             .extend(rules);
+    }
+
+    /// Draws the editor over the cell being edited, in `column`, with its ⏷ button and
+    /// its list when it has them, and acts on what they report: losing focus commits
+    /// the edit, and pressing a list row takes it.
+    fn edit_cell(&mut self, ui: &mut egui::Ui, frame: &BodyFrame<'_>, column: RegisterColumn) {
+        let Some(edit) = self.edit.as_mut() else {
+            return;
+        };
+        let cell = ui.max_rect();
+        let mut field = cell;
+        let list_button = (edit.field == TextField::Category).then(|| {
+            let button =
+                Rect::from_x_y_ranges(cell.right() - cell.height()..=cell.right(), cell.y_range());
+            field.max.x = button.left();
+            list_button(ui, frame.i18n, button, edit.editor_id())
+        });
+        let typed = edit.text.clone();
+        let response = editor(ui, edit, field, heading_id(frame.register_id, column));
+        if edit.text != typed {
+            edit.open_list(false);
+        }
+        if list_button.as_ref().is_some_and(Response::clicked) {
+            // The click took focus from the editor, which keeps the edit.
+            if edit.list.is_some_and(|list| list.all) {
+                edit.list = None;
+            } else {
+                edit.open_list(true);
+            }
+            ui.memory_mut(|memory| memory.request_focus(edit.editor_id()));
+        } else if response.lost_focus() {
+            let edit = self.edit.take().expect("the edit was just shown");
+            // A refused category leaves nothing to save; the Status bar says why.
+            let _refused = commit(&edit, frame.rows, frame.choices, frame.commands);
+            return;
+        }
+        let pressed = list(ui, frame, edit, cell);
+        if let Some(row) = pressed {
+            let mut edit = self.edit.take().expect("the edit was just shown");
+            ui.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+            if take_row(&mut edit, row, frame.commands) == Taken::Choice {
+                let _refused = commit(&edit, frame.rows, frame.choices, frame.commands);
+            }
+        }
     }
 
     /// Puts the cell cursor on a click in `column` of transaction `row`. A click in a
@@ -675,30 +830,7 @@ impl Register {
             }
         });
         if let Some(edit) = self.edit.take() {
-            let (escape, enter) = ctx.input_mut(|input| {
-                (
-                    input.consume_key(Modifiers::NONE, Key::Escape),
-                    input.consume_key(Modifiers::NONE, Key::Enter),
-                )
-            });
-            if escape {
-                ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
-                return None;
-            }
-            if enter || tab.is_some() {
-                commit(&edit, keys.rows, keys.commands);
-                ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
-                let step = if enter { Move::Next } else { tab? };
-                let moved = self.move_cursor(cursor, step, keys.rows)?;
-                // Tab opens the cell it moved to. With nowhere to move it opens nothing,
-                // since this frame's rows don't hold the text just committed yet.
-                if !enter {
-                    self.start_edit(ctx, keys, EditStart::Saved);
-                }
-                return moved.scroll_offset;
-            }
-            self.edit = Some(edit);
-            return None;
+            return self.handle_edit_keys(ctx, keys, edit, cursor, tab);
         }
         let pressed = ctx.input_mut(|input| {
             [
@@ -723,6 +855,13 @@ impl Register {
                 self.start_edit(ctx, keys, EditStart::Saved);
                 return None;
             }
+            if cursor.column == RegisterColumn::Category
+                && let Some(row) = keys.rows.iter().find(|row| row.id() == cursor.row)
+                && row.is_split()
+            {
+                keys.commands.send(AppCommand::OpenSplitView(row.id()));
+                return None;
+            }
             return self
                 .move_cursor(cursor, Move::Next, keys.rows)?
                 .scroll_offset;
@@ -737,6 +876,77 @@ impl Register {
             // The editor takes the typed text in this same frame.
             self.start_edit(ctx, keys, EditStart::Empty);
         }
+        None
+    }
+
+    /// Acts on this frame's keys for `edit`, the cell being edited under `cursor`,
+    /// with `tab` the move a Tab press asks for, and returns the scroll offset that
+    /// brings the cell cursor into view when it has left it. The edit stays open
+    /// unless a key ends it.
+    fn handle_edit_keys(
+        &mut self,
+        ctx: &egui::Context,
+        keys: &KeyContext<'_>,
+        mut edit: CellEdit,
+        cursor: CellAddress,
+        tab: Option<Move>,
+    ) -> Option<f32> {
+        let rows = edit.list_rows(keys.choices).len();
+        let list_open = rows > 0;
+        let offers_list = edit.field.offers_list();
+        let (alt_down, down, up, escape, enter) = ctx.input_mut(|input| {
+            // Alt+↓ first, since a bare ↓ also matches it.
+            let alt_down = offers_list && input.consume_key(Modifiers::ALT, Key::ArrowDown);
+            (
+                alt_down,
+                offers_list && input.consume_key(Modifiers::NONE, Key::ArrowDown),
+                offers_list && input.consume_key(Modifiers::NONE, Key::ArrowUp),
+                input.consume_key(Modifiers::NONE, Key::Escape),
+                input.consume_key(Modifiers::NONE, Key::Enter),
+            )
+        });
+        if alt_down {
+            edit.open_list(true);
+        } else if down && list_open {
+            edit.highlight_next(rows);
+        } else if down {
+            edit.open_list(false);
+        } else if up {
+            edit.highlight_previous();
+        }
+        if escape {
+            // The first Esc closes the list; the next cancels the edit.
+            if list_open {
+                edit.list = None;
+                self.edit = Some(edit);
+            } else {
+                ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+            }
+            return None;
+        }
+        if enter || tab.is_some() {
+            if let Some(row) = edit.highlighted(keys.choices)
+                && take_row(&mut edit, row, keys.commands) == Taken::Create
+            {
+                ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+                return None;
+            }
+            if commit(&edit, keys.rows, keys.choices, keys.commands) == Commit::Refused {
+                edit.list = None;
+                self.edit = Some(edit);
+                return None;
+            }
+            ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+            let step = if enter { Move::Next } else { tab? };
+            let moved = self.move_cursor(cursor, step, keys.rows)?;
+            // Tab opens the cell it moved to. With nowhere to move it opens nothing,
+            // since this frame's rows don't hold the text just committed yet.
+            if !enter {
+                self.start_edit(ctx, keys, EditStart::Saved);
+            }
+            return moved.scroll_offset;
+        }
+        self.edit = Some(edit);
         None
     }
 
@@ -819,7 +1029,12 @@ impl Register {
             EditStart::Saved => field.saved(row).to_owned(),
             EditStart::Empty => String::new(),
         };
-        let edit = CellEdit { cell: cursor, text };
+        let edit = CellEdit {
+            cell: cursor,
+            field,
+            text,
+            list: None,
+        };
         let id = edit.editor_id();
         // The text cursor starts at the end, wherever an earlier edit left it.
         let mut state = TextEditState::load(ctx, id).unwrap_or_default();
@@ -864,6 +1079,7 @@ struct BodyFrame<'a> {
     theme: &'a Theme,
     commands: &'a CommandSender,
     rows: &'a [RegisterRow],
+    choices: &'a FieldChoices,
     register_id: Id,
     access: Access,
     /// The visible part of the Register's body.
@@ -906,21 +1122,67 @@ struct KeyContext<'a> {
     account: AccountId,
     closed: bool,
     rows: &'a [RegisterRow],
+    choices: &'a FieldChoices,
     commands: &'a CommandSender,
+}
+
+/// Whether a commit went through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Commit {
+    /// The text was saved, or matched the saved text, or its row is gone.
+    Done,
+    /// The text names no category, so nothing was sent, and the Status bar says so.
+    Refused,
 }
 
 /// Saves `edit`'s text, trimmed, by sending one edit Command, unless it matches the
 /// saved text.
-fn commit(edit: &CellEdit, rows: &[RegisterRow], commands: &CommandSender) {
+fn commit(
+    edit: &CellEdit,
+    rows: &[RegisterRow],
+    choices: &FieldChoices,
+    commands: &CommandSender,
+) -> Commit {
     let Some((row, field)) = field_at(rows, edit.cell) else {
-        return;
+        return Commit::Done;
     };
-    let text = edit.text.trim();
-    if text != field.saved(row) {
-        commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
-            transaction: row.id(),
-            edit: field.edit(text),
-        }));
+    match field.edit(row, edit.text.trim(), choices) {
+        Ok(Some(change)) => {
+            commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
+                transaction: row.id(),
+                edit: change,
+            }));
+            Commit::Done
+        }
+        Ok(None) => Commit::Done,
+        Err(NoSuchCategory) => {
+            commands.send(AppCommand::ShowStatus(StatusMessage::NoSuchCategory));
+            Commit::Refused
+        }
+    }
+}
+
+/// What taking a list row did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Taken {
+    /// The row's text replaced the edit's, ready to commit.
+    Choice,
+    /// The New Category Dialog was asked for, prefilled with the typed name, and the
+    /// edit is over.
+    Create,
+}
+
+/// Takes `row` of `edit`'s list.
+fn take_row(edit: &mut CellEdit, row: ListRow<'_>, commands: &CommandSender) -> Taken {
+    match row {
+        ListRow::Choice(text) => {
+            text.clone_into(&mut edit.text);
+            Taken::Choice
+        }
+        ListRow::Create(name) => {
+            commands.send(AppCommand::OpenDialog(DialogKind::NewCategory { name }));
+            Taken::Create
+        }
     }
 }
 
@@ -929,10 +1191,10 @@ fn heading_id(register_id: Id, column: RegisterColumn) -> Id {
     register_id.with(("register_heading", column))
 }
 
-/// The `TextEdit` over the cell being edited. It keeps Esc, so the Register can cancel
-/// the edit before egui drops the field's focus.
-fn editor(ui: &mut egui::Ui, edit: &mut CellEdit, heading: Id) -> Response {
-    let rect = ui.max_rect();
+/// The `TextEdit` over the cell being edited, filling `rect`. It keeps Esc, so the
+/// Register can cancel the edit before egui drops the field's focus. A field with a
+/// list keeps ↑ and ↓ too, which would otherwise move focus out of it.
+fn editor(ui: &mut egui::Ui, edit: &mut CellEdit, rect: Rect, heading: Id) -> Response {
     let Insets { left, right } = edit.cell.column.insets();
     let inner = Rect::from_x_y_ranges(rect.left() + left..=rect.right() - right, rect.y_range());
     let id = edit.editor_id();
@@ -944,10 +1206,125 @@ fn editor(ui: &mut egui::Ui, edit: &mut CellEdit, heading: Id) -> Response {
             .desired_width(inner.width())
             .event_filter(EventFilter {
                 escape: true,
+                vertical_arrows: edit.field.offers_list(),
                 ..Default::default()
             }),
     )
     .labelled_by(heading)
+}
+
+/// The ⏷ button in `rect`, beside the Category cell being edited, which lists every
+/// category.
+fn list_button(ui: &egui::Ui, i18n: &Localizer, rect: Rect, editor: Id) -> Response {
+    let response = ui.interact(rect, editor.with("list_button"), Sense::click());
+    let label = fl!(i18n, "register-category-list");
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
+    let visuals = ui.style().interact(&response);
+    if response.hovered() || response.is_pointer_button_down_on() {
+        ui.painter().rect_filled(rect, 0.0, visuals.weak_bg_fill);
+    }
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "⏷",
+        TextStyle::Body.resolve(ui.style()),
+        visuals.text_color(),
+    );
+    response
+}
+
+/// Draws `edit`'s list, while it is open, in a popup below `cell`, and returns the row
+/// pressed this frame. A row is taken on the press, since the release would come after
+/// the press has moved focus off the editor.
+fn list<'a>(
+    ui: &egui::Ui,
+    frame: &BodyFrame<'a>,
+    edit: &CellEdit,
+    cell: Rect,
+) -> Option<ListRow<'a>> {
+    let rows = edit.list_rows(frame.choices);
+    if rows.is_empty() {
+        return None;
+    }
+    let highlight = edit.list.and_then(|list| list.highlight);
+    let row_height = frame.theme.row_height();
+    let width = cell.width().max(LIST_MIN_WIDTH);
+    let mut pressed = None;
+    Area::new(edit.editor_id().with("list"))
+        .order(Order::Foreground)
+        .fixed_pos(cell.left_bottom())
+        .show(ui.ctx(), |ui| {
+            Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_width(width);
+                ScrollArea::vertical()
+                    .max_height(row_height * LIST_MAX_ROWS)
+                    .show(ui, |ui| {
+                        for (index, row) in rows.into_iter().enumerate() {
+                            let highlighted = highlight == Some(index);
+                            if list_row(ui, frame.i18n, &row, highlighted, row_height) {
+                                pressed = Some(row);
+                            }
+                        }
+                    });
+            });
+        });
+    pressed
+}
+
+/// Draws one row of a combobox list, `row_height` high, and returns whether the
+/// pointer pressed it this frame.
+fn list_row(
+    ui: &mut egui::Ui,
+    i18n: &Localizer,
+    row: &ListRow<'_>,
+    highlighted: bool,
+    row_height: f32,
+) -> bool {
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click());
+    let label = match row {
+        ListRow::Choice(text) => (*text).to_owned(),
+        ListRow::Create(name) => fl!(i18n, "register-create-category", name = name.clone()),
+    };
+    response.widget_info(|| {
+        WidgetInfo::selected(
+            WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            highlighted,
+            &label,
+        )
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(Role::ListBoxOption);
+        node.set_selected(highlighted);
+    });
+    let visuals = ui.visuals();
+    let (fill, text_color) = if highlighted {
+        (
+            Some(visuals.selection.bg_fill),
+            visuals.selection.stroke.color,
+        )
+    } else if response.hovered() {
+        (
+            Some(visuals.widgets.hovered.weak_bg_fill),
+            visuals.text_color(),
+        )
+    } else {
+        (None, visuals.text_color())
+    };
+    if let Some(fill) = fill {
+        ui.painter().rect_filled(rect, 0.0, fill);
+    }
+    let galley = WidgetText::from(label).into_galley(
+        ui,
+        Some(TextWrapMode::Truncate),
+        rect.width(),
+        TextStyle::Body,
+    );
+    let top = rect.center().y - galley.size().y / 2.0;
+    ui.painter()
+        .galley(pos2(rect.left(), top), galley, text_color);
+    response.is_pointer_button_down_on()
 }
 
 /// The scroll offset that puts row `index` in the middle of a Register filling `ui`,
@@ -1369,6 +1746,23 @@ mod tests {
             [AppCommand::Domain(DomainCommand::EditTransaction {
                 transaction: rent,
                 edit: TransactionEdit::Number(None),
+            })]
+        );
+    }
+
+    #[test]
+    fn enter_on_the_create_row_asks_for_the_new_category_dialog_with_the_typed_name() {
+        let (mut harness, receiver) = register();
+        click_cell(&mut harness, "Auto & Transport:Fuel");
+        harness.event(Event::Text("Pets".to_owned()));
+        harness.run();
+
+        press(&mut harness, Key::Enter);
+
+        assert_eq!(
+            receiver.try_iter().collect::<Vec<_>>(),
+            [AppCommand::OpenDialog(DialogKind::NewCategory {
+                name: "Pets".to_owned()
             })]
         );
     }

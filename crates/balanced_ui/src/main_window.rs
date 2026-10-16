@@ -157,6 +157,10 @@ impl MainWindow {
                 };
                 self.delete_transaction = Some(OpenDialog::new(ctx, form));
             }
+            DialogKind::NewCategory { .. } => {
+                // TODO(#95): open the New Category Dialog, prefilled with the name.
+                tracing::debug!("the New Category Dialog was asked for");
+            }
         }
     }
 
