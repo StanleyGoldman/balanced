@@ -2254,7 +2254,7 @@ mod tests {
         let mut ids: Vec<TransactionId> = view
             .accounts()
             .iter()
-            .flat_map(|summary| summary.register())
+            .flat_map(AccountSummary::register)
             .map(|entry| entry.transaction().id())
             .collect();
         let count = ids.len();

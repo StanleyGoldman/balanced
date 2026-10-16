@@ -547,15 +547,10 @@ impl DateEdit {
         };
         // An empty field shows each segment's placeholder, as typing into it would.
         let untouched = Typed::empty();
-        let typed = match (&self.typed, self.date) {
-            (Some(typed), _) => Some(typed),
-            (None, Some(_)) => None,
-            (None, None) => Some(&untouched),
-        };
-        match (typed, self.date) {
+        match (&self.typed, self.date) {
             (None, Some(date)) => place(i18n.format_date(date), text_colour, true),
-            (None, None) => {}
-            (Some(typed), _) => {
+            (typed, _) => {
+                let typed = typed.as_ref().unwrap_or(&untouched);
                 let layout = i18n.date_segments();
                 let placeholders = placeholders(i18n);
                 for (slot, segment) in typed.segments.iter().enumerate() {

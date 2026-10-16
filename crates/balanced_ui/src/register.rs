@@ -4,8 +4,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use balanced_core::{
-    Account, AccountId, AccountSummary, CurrencyCode, DomainCommand, DomainError, LedgerView,
-    Money, TransactionEdit, TransactionId,
+    Account, AccountId, AccountSummary, CurrencyCode, DomainCommand, DomainError, Generation,
+    LedgerView, Money, TransactionEdit, TransactionId,
 };
 use balanced_i18n::{AmountParseError, AmountReader, Localizer};
 use eframe::egui::accesskit::{self, Role};
@@ -404,6 +404,13 @@ impl CellAddress {
     }
 }
 
+/// The draft row, formatted, and the draft it was formatted from.
+#[derive(Debug)]
+struct DraftRow {
+    draft: Draft,
+    row: RegisterRow,
+}
+
 /// The Register's rows: the transactions' in the order of the sort, then the draft
 /// row, which an account that can't change has none of.
 #[derive(Debug, Clone, Copy)]
@@ -719,9 +726,13 @@ pub(crate) struct Register {
     refused_leave: bool,
     /// What the draft row holds.
     draft: Draft,
-    /// The draft row as the last frame left it, for saving an edit before the next
-    /// frame draws the Register. `None` while the account can't change.
-    draft_row: Option<RegisterRow>,
+    /// The draft row, formatted, with the draft it shows. It is rebuilt when the draft
+    /// changes or the transactions' rows are rebuilt. `None` while the account can't
+    /// change.
+    draft_row: Option<DraftRow>,
+    /// The generation of the snapshot a post was sent against, until a later snapshot
+    /// shows whether the ledger applied it. A rejected post keeps the draft.
+    posted_at: Option<Generation>,
     /// The cell a refused draft row still needs, outlined with a bubble saying so
     /// until it is filled.
     missing: Option<Missing>,
@@ -776,10 +787,43 @@ impl Register {
             .and_then(|cursor| rows.position(cursor.row))
     }
 
-    /// Starts the Register over for another account, sorted by date with an empty
-    /// draft row and the cell cursor on it. A closed account has no draft row, so its
-    /// Register starts with no cursor.
-    fn start_over(&mut self, closed: bool) {
+    /// Catches up with what changed since the last frame: another account, `account`,
+    /// starts the Register over with the cell cursor on its draft row, unless it is
+    /// `closed`; and a post that `view` shows applied empties the draft row.
+    fn catch_up(&mut self, account: AccountId, closed: bool, view: &LedgerView) {
+        if self.model.as_ref().map(RegisterModel::account) != Some(account) {
+            self.start_over();
+            if !closed {
+                self.go_to_draft_row();
+            }
+        }
+        if let Some(sent_at) = self.posted_at.take()
+            && view.generation() != sent_at
+        {
+            self.draft = Draft::default();
+            self.missing = None;
+            self.go_to_draft_row();
+        }
+    }
+
+    /// Settles what this frame's keys and clicks changed: an edit that refused to let
+    /// the keyboard go keeps the cell cursor, a filled cell drops its outline, and
+    /// `draft_row`, taken for the frame, comes back up to date with the draft.
+    fn end_frame(&mut self, draft_row: Option<DraftRow>, draft_frame: DraftFrame<'_>) {
+        if std::mem::take(&mut self.refused_leave)
+            && let Some(edit) = &self.edit
+        {
+            self.cursor = Some(edit.cell());
+        }
+        let draft = &self.draft;
+        self.missing = self.missing.filter(|&missing| draft.lacks(missing));
+        self.draft_row = draft_row;
+        self.refresh_draft_row(draft_frame, false);
+    }
+
+    /// Starts the Register over for another account: sorted by date, with no cell
+    /// cursor and an empty draft row.
+    fn start_over(&mut self) {
         self.sort = RegisterSort::default();
         self.centre_pending = false;
         self.cursor = None;
@@ -787,8 +831,33 @@ impl Register {
         self.rows_in_view = None;
         self.draft = Draft::default();
         self.missing = None;
-        if !closed {
-            self.go_to_draft_row();
+        self.posted_at = None;
+    }
+
+    /// Formats the draft row again when the draft changed since it was formatted, or
+    /// when `rebuilt` says the transactions' rows were just formatted again. A closed
+    /// account has none.
+    fn refresh_draft_row(&mut self, frame: DraftFrame<'_>, rebuilt: bool) {
+        let DraftFrame {
+            closed,
+            currency,
+            view,
+            i18n,
+        } = frame;
+        if closed {
+            self.draft_row = None;
+            return;
+        }
+        let current = !rebuilt
+            && self
+                .draft_row
+                .as_ref()
+                .is_some_and(|draft_row| draft_row.draft == self.draft);
+        if !current {
+            self.draft_row = Some(DraftRow {
+                draft: self.draft.clone(),
+                row: RegisterRow::draft(&self.draft, currency, view, i18n),
+            });
         }
     }
 
@@ -824,7 +893,7 @@ impl Register {
         if let (Some(model), Some(choices)) = (&self.model, &self.choices) {
             let rows = Rows {
                 transactions: model.rows(),
-                draft: self.draft_row.as_ref(),
+                draft: self.draft_row.as_ref().map(|draft| &draft.row),
             };
             let draft = &mut self.draft;
             // A refused edit is dropped: the Shortcut acts on the saved value.
@@ -860,26 +929,32 @@ impl Register {
     ) {
         let account = summary.account().id();
         let closed = summary.account().is_closed();
-        if self.model.as_ref().map(RegisterModel::account) != Some(account) {
-            self.start_over(closed);
-        }
-        let model = match self.model.take() {
-            Some(model) if model.is_current(account, view, self.sort, i18n) => model,
-            _ => RegisterModel::new(summary, view, self.sort, i18n),
+        self.catch_up(account, closed, view);
+        let (model, rebuilt) = match self.model.take() {
+            Some(model) if model.is_current(account, view, self.sort, i18n) => (model, false),
+            _ => (RegisterModel::new(summary, view, self.sort, i18n), true),
         };
         let choices = match self.choices.take() {
             Some(choices) if choices.is_current(view, i18n) => choices,
             _ => FieldChoices::new(view, i18n),
         };
         let currency = summary.account().currency();
-        let draft_row = (!closed).then(|| RegisterRow::draft(&self.draft, currency, view, i18n));
+        let draft_frame = DraftFrame {
+            closed,
+            currency,
+            view,
+            i18n,
+        };
+        self.refresh_draft_row(draft_frame, rebuilt);
+        let draft_row = self.draft_row.take();
         let rows = Rows {
             transactions: model.rows(),
-            draft: draft_row.as_ref(),
+            draft: draft_row.as_ref().map(|draft| &draft.row),
         };
         let keys = KeyContext {
             i18n,
             account,
+            generation: view.generation(),
             closed,
             rows,
             choices: &choices,
@@ -945,14 +1020,7 @@ impl Register {
                         self.body(body, frame, row_height, pitch);
                     });
             });
-        if std::mem::take(&mut self.refused_leave)
-            && let Some(edit) = &self.edit
-        {
-            self.cursor = Some(edit.cell());
-        }
-        let draft = &self.draft;
-        self.missing = self.missing.filter(|&missing| draft.lacks(missing));
-        self.draft_row = (!closed).then(|| RegisterRow::draft(draft, currency, view, i18n));
+        self.end_frame(draft_row, draft_frame);
         self.model = Some(model);
         self.choices = Some(choices);
     }
@@ -1592,16 +1660,16 @@ impl Register {
         self.edit.is_none()
     }
 
-    /// Adds the draft row to the account, emptying it and putting the cell cursor on
-    /// its first cell. A row missing a cell the transaction needs is refused: the cursor
-    /// goes to the first such cell, outlined, with a bubble saying what is missing.
+    /// Adds the draft row to the account. Once the ledger applies it, the draft row
+    /// empties and the cell cursor goes to its first cell; a rejected post keeps the
+    /// draft, and the Status bar says why. A row missing a cell the transaction needs
+    /// is refused: the cursor goes to the first such cell, outlined, with a bubble
+    /// saying what is missing.
     fn post(&mut self, keys: &KeyContext<'_>) {
         match self.draft.posting(keys.account) {
             Ok(command) => {
                 keys.commands.send(AppCommand::Domain(command));
-                self.draft = Draft::default();
-                self.missing = None;
-                self.go_to_draft_row();
+                self.posted_at = Some(keys.generation);
             }
             Err(missing) => {
                 self.missing = Some(missing);
@@ -1690,10 +1758,22 @@ fn fully_in(viewport: Rect, rect: Rect) -> bool {
     view.contains(rect.top()) && view.contains(rect.bottom())
 }
 
+/// What the draft row is formatted with in one frame.
+#[derive(Clone, Copy)]
+struct DraftFrame<'a> {
+    /// Whether the account is closed, so has no draft row.
+    closed: bool,
+    currency: CurrencyCode,
+    view: &'a LedgerView,
+    i18n: &'a Localizer,
+}
+
 /// What the Register's keys act on.
 struct KeyContext<'a> {
     i18n: &'a Localizer,
     account: AccountId,
+    /// The generation of the snapshot the Register shows.
+    generation: Generation,
     closed: bool,
     rows: Rows<'a>,
     choices: &'a FieldChoices,
@@ -2511,5 +2591,39 @@ mod tests {
         press(&mut harness, Key::Enter);
 
         assert_eq!(receiver.try_iter().collect::<Vec<_>>(), []);
+    }
+
+    #[test]
+    fn a_post_the_ledger_never_applies_keeps_the_draft() {
+        let (mut harness, receiver) = register();
+        // The Register opens with the cell cursor on the draft row's Date cell.
+        for c in "10/15/2026".chars() {
+            harness.event(Event::Text(c.to_string()));
+            harness.run();
+        }
+        press(&mut harness, Key::Enter);
+        press(&mut harness, Key::ArrowRight);
+        harness.event(Event::Text("Corner Cafe".to_owned()));
+        harness.run();
+        press(&mut harness, Key::Enter);
+        harness.event(Event::Text("Food & Dining:Groceries".to_owned()));
+        harness.run();
+        press(&mut harness, Key::Enter);
+        press(&mut harness, Key::ArrowRight);
+        harness.event(Event::Text("-12".to_owned()));
+        harness.run();
+
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+        harness.run();
+
+        let posted = receiver.try_iter().any(|command| {
+            matches!(
+                command,
+                AppCommand::Domain(DomainCommand::PostTransaction { .. })
+            )
+        });
+        assert!(posted);
+        // The snapshot never changes, as when the ledger rejects the post.
+        harness.get_by_role_and_label(Role::Cell, "Corner Cafe");
     }
 }
