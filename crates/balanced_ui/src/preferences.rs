@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::route::OpenIn;
+
 /// Light or dark colours.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -54,9 +56,40 @@ impl From<FontFace> for &'static str {
     }
 }
 
+/// Which rules the Register draws between its cells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Gridlines {
+    #[default]
+    Off,
+    /// A rule between rows.
+    Horizontal,
+    /// A rule between columns.
+    Vertical,
+    Both,
+}
+
+impl Gridlines {
+    pub(crate) const ALL: [Self; 4] = [Self::Off, Self::Horizontal, Self::Vertical, Self::Both];
+}
+
+/// Where Net Worth is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum NetWorthPlacement {
+    /// In the Account bar's footer.
+    #[default]
+    AccountBar,
+    StatusBar,
+}
+
 /// The user's Preferences.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is one on/off Preference, a checkbox in the Dialog and a TOML boolean in the file"
+)]
 pub(crate) struct Preferences {
     pub(crate) scheme: Scheme,
     pub(crate) font_face: FontFace,
@@ -66,6 +99,16 @@ pub(crate) struct Preferences {
     pub(crate) monospace_money: bool,
     /// Negative amounts in the negative colour.
     pub(crate) coloured_negatives: bool,
+    /// Every other Register row filled with the stripe colour.
+    pub(crate) alternating_rows: bool,
+    pub(crate) gridlines: Gridlines,
+    /// Each Account bar heading shows its section's total.
+    pub(crate) group_totals: bool,
+    pub(crate) net_worth_placement: NetWorthPlacement,
+    /// The Account bar folds to a rail while the Main view is off the Accounts tab.
+    pub(crate) auto_fold: bool,
+    /// Where clicking an account in the Account bar opens its Register.
+    pub(crate) open_account_in: OpenIn,
 }
 
 impl Default for Preferences {
@@ -76,6 +119,12 @@ impl Default for Preferences {
             dense_rows: false,
             monospace_money: false,
             coloured_negatives: true,
+            alternating_rows: true,
+            gridlines: Gridlines::default(),
+            group_totals: false,
+            net_worth_placement: NetWorthPlacement::default(),
+            auto_fold: true,
+            open_account_in: OpenIn::CurrentRegister,
         }
     }
 }
@@ -226,6 +275,12 @@ mod tests {
             dense_rows: true,
             monospace_money: true,
             coloured_negatives: false,
+            alternating_rows: false,
+            gridlines: Gridlines::Both,
+            group_totals: true,
+            net_worth_placement: NetWorthPlacement::StatusBar,
+            auto_fold: false,
+            open_account_in: OpenIn::NewTab,
         };
 
         file.save(&preferences).unwrap();
@@ -265,6 +320,29 @@ mod tests {
 
         let expected = Preferences {
             dense_rows: true,
+            ..Preferences::default()
+        };
+        assert_eq!(loaded, expected);
+    }
+
+    #[test]
+    fn the_enumerated_preferences_read_their_ids() {
+        let (dir, file) = file();
+        std::fs::write(
+            dir.path().join("preferences.toml"),
+            "version = 1\n\
+             gridlines = \"vertical\"\n\
+             net_worth_placement = \"status_bar\"\n\
+             open_account_in = \"new_tab\"\n",
+        )
+        .unwrap();
+
+        let loaded = file.load().unwrap();
+
+        let expected = Preferences {
+            gridlines: Gridlines::Vertical,
+            net_worth_placement: NetWorthPlacement::StatusBar,
+            open_account_in: OpenIn::NewTab,
             ..Preferences::default()
         };
         assert_eq!(loaded, expected);
@@ -335,7 +413,13 @@ mod tests {
              font_face = \"liberation_sans\"\n\
              dense_rows = false\n\
              monospace_money = false\n\
-             coloured_negatives = true\n"
+             coloured_negatives = true\n\
+             alternating_rows = true\n\
+             gridlines = \"off\"\n\
+             group_totals = false\n\
+             net_worth_placement = \"account_bar\"\n\
+             auto_fold = true\n\
+             open_account_in = \"current_register\"\n"
         );
     }
 

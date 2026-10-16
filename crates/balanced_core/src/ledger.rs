@@ -8,9 +8,9 @@ use crate::account::NewAccount;
 use crate::category::NewCategory;
 use crate::transaction::{NewTransaction, TransactionId};
 use crate::{
-    Account, AccountId, AccountKind, AccountStatus, Applied, Category, CategoryId, CurrencyCode,
-    DomainCommand, DomainError, Money, MoneyError, MoveDirection, Transaction, TransactionEdit,
-    Visibility,
+    Account, AccountGroup, AccountId, AccountKind, AccountStatus, Applied, Category, CategoryId,
+    CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection, Transaction,
+    TransactionEdit, Visibility,
 };
 
 /// Counts the changes applied to a [`Ledger`]. A window's view model rebuilds when
@@ -207,6 +207,27 @@ impl LedgerView {
     /// The sum of every account's balance, hidden and closed accounts included.
     pub fn net_worth(&self) -> Money {
         self.net_worth
+    }
+
+    /// The sum of the balances of `group`'s open accounts, hidden accounts included.
+    /// Fails when the sum overflows.
+    pub fn group_total(&self, group: AccountGroup) -> Result<Money, MoneyError> {
+        self.total(|account| !account.is_closed() && account.kind().group() == group)
+    }
+
+    /// The sum of the balances of every closed account. Fails when the sum overflows.
+    pub fn closed_total(&self) -> Result<Money, MoneyError> {
+        self.total(Account::is_closed)
+    }
+
+    /// The sum of the balances of the accounts `include` picks.
+    fn total(&self, include: impl Fn(&Account) -> bool) -> Result<Money, MoneyError> {
+        self.accounts
+            .iter()
+            .filter(|summary| include(&summary.account))
+            .try_fold(Money::zero(self.net_worth.currency()), |total, summary| {
+                total.checked_add(summary.balance)
+            })
     }
 
     /// Whether there is a change Undo can reverse.
@@ -987,6 +1008,64 @@ mod tests {
         let view = ledger.snapshot();
 
         assert_eq!(view.net_worth(), usd(dec!(810.75)));
+    }
+
+    #[test]
+    fn a_group_total_sums_its_open_accounts_hidden_ones_included() {
+        let ledger = Ledger::with_accounts(
+            usd_code(),
+            [],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(1000.50))),
+                account("Holiday Fund", AccountKind::Savings, usd(dec!(200.25))).hidden(),
+                account("Old Checking", AccountKind::Checking, usd(dec!(10.00))).closed(),
+                account("Visa", AccountKind::CreditCard, usd(dec!(-400.00))),
+                account("Brokerage", AccountKind::Investment, usd(dec!(5000.00))),
+            ],
+        )
+        .unwrap();
+
+        let view = ledger.snapshot();
+
+        assert_eq!(
+            view.group_total(AccountGroup::Banking),
+            Ok(usd(dec!(800.75)))
+        );
+    }
+
+    #[test]
+    fn a_group_with_no_open_accounts_totals_zero() {
+        let ledger = Ledger::with_accounts(
+            usd_code(),
+            [],
+            [account("Old House", AccountKind::Asset, usd(dec!(10.00))).closed()],
+        )
+        .unwrap();
+
+        let view = ledger.snapshot();
+
+        assert_eq!(
+            view.group_total(AccountGroup::PropertyDebt),
+            Ok(usd(dec!(0)))
+        );
+    }
+
+    #[test]
+    fn the_closed_total_sums_the_closed_accounts_of_every_group() {
+        let ledger = Ledger::with_accounts(
+            usd_code(),
+            [],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(1000.50))),
+                account("Old Checking", AccountKind::Checking, usd(dec!(10.00))).closed(),
+                account("Old House", AccountKind::Asset, usd(dec!(2.50))).closed(),
+            ],
+        )
+        .unwrap();
+
+        let view = ledger.snapshot();
+
+        assert_eq!(view.closed_total(), Ok(usd(dec!(12.50))));
     }
 
     #[test]

@@ -15,8 +15,8 @@ use egui::{
     Shape, Stroke, TextStyle, Vec2, vec2,
 };
 
-pub(crate) use crate::preferences::Scheme;
 use crate::preferences::{FontFace, Preferences};
+pub(crate) use crate::preferences::{Gridlines, Scheme};
 
 /// How tightly rows and controls are packed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -24,39 +24,6 @@ pub(crate) enum Density {
     #[default]
     Normal,
     Dense,
-}
-
-/// Which rules the Register draws between its cells.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum Gridlines {
-    #[default]
-    Off,
-    /// A rule between rows.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the Register Preferences (#100) are the first to choose them"
-        )
-    )]
-    Horizontal,
-    /// A rule between columns.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the Register Preferences (#100) are the first to choose them"
-        )
-    )]
-    Vertical,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the Register Preferences (#100) are the first to choose them"
-        )
-    )]
-    Both,
 }
 
 /// The Preferences that shape the look, as the theme reads them.
@@ -91,9 +58,8 @@ impl From<&Preferences> for ThemeSettings {
             } else {
                 Density::Normal
             },
-            // TODO(#100): read the Register Preferences.
-            gridlines: Gridlines::default(),
-            alternating_rows: true,
+            gridlines: preferences.gridlines,
+            alternating_rows: preferences.alternating_rows,
             monospace_money: preferences.monospace_money,
             coloured_negatives: preferences.coloured_negatives,
         }
@@ -551,6 +517,9 @@ mod tests {
             dense_rows: true,
             monospace_money: true,
             coloured_negatives: false,
+            alternating_rows: false,
+            gridlines: Gridlines::Vertical,
+            ..Preferences::default()
         };
 
         let settings = ThemeSettings::from(&preferences);
@@ -559,8 +528,8 @@ mod tests {
             scheme: Scheme::Dark,
             font_face: FontFace::NotoSans,
             density: Density::Dense,
-            gridlines: Gridlines::Off,
-            alternating_rows: true,
+            gridlines: Gridlines::Vertical,
+            alternating_rows: false,
             monospace_money: true,
             coloured_negatives: false,
         };

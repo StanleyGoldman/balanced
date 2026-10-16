@@ -3,6 +3,7 @@
 
 use balanced_core::AccountId;
 use balanced_i18n::Localizer;
+use serde::{Deserialize, Serialize};
 
 use crate::i18n::fl;
 
@@ -15,8 +16,10 @@ pub(crate) enum Route {
     Account { account: AccountId, open_in: OpenIn },
 }
 
-/// Where an account's Register opens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Where an account's Register opens. The "Open an account in" Preference holds one,
+/// by its name in `snake_case`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum OpenIn {
     /// In place of the current Register tab's account, or in a first Register tab when
     /// none is open.

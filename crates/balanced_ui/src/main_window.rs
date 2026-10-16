@@ -2,10 +2,11 @@
 
 use balanced_core::{AccountSummary, DomainCommand, DomainError, LedgerView, TransactionId};
 use balanced_i18n::Localizer;
+use eframe::egui::accesskit::Role;
 use eframe::egui::{self, Button, CentralPanel, Id, Label, MenuBar, Panel, RichText, Sides};
 use icu_calendar::{Date, Iso};
 
-use crate::account_bar::AccountBar;
+use crate::account_bar::{self, AccountBar};
 use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
@@ -16,7 +17,7 @@ use crate::manage_accounts::{self, ManageAccountsForm, ManageAccountsOutcome};
 use crate::menu_nav::{DrawnMenus, MenuNav};
 use crate::new_account::{self, NewAccountForm, WizardOutcome};
 use crate::new_category::NewCategoryForm;
-use crate::preferences::Preferences;
+use crate::preferences::{NetWorthPlacement, Preferences};
 use crate::preferences_dialog::PreferencesForm;
 use crate::register::ColumnWidths;
 use crate::register_model::RegisterRow;
@@ -328,13 +329,18 @@ impl MainWindow {
         }
     }
 
-    /// Draws the Main window's panels from `view`, outer ones first and the Main view
-    /// last.
+    /// Draws the Main window's panels from `view`, as `preferences` say, outer ones
+    /// first and the Main view last.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each argument is a separate input the App draws the Main window from"
+    )]
     pub(crate) fn show(
         &mut self,
         ui: &mut egui::Ui,
         i18n: &Localizer,
         theme: &Theme,
+        preferences: &Preferences,
         commands: &CommandSender,
         view: &LedgerView,
         today: Date<Iso>,
@@ -373,9 +379,22 @@ impl MainWindow {
         Panel::bottom("status_bar")
             .frame(theme.chrome_frame())
             .show(ui, |ui| {
+                ui.ctx()
+                    .accesskit_node_builder(ui.unique_id(), |node| node.set_role(Role::Status));
                 // An empty label keeps the Status bar one line tall.
                 let text = self.status.as_ref().map(|message| message.text(i18n));
-                ui.label(text.unwrap_or_default());
+                match preferences.net_worth_placement {
+                    NetWorthPlacement::AccountBar => {
+                        ui.label(text.unwrap_or_default());
+                    }
+                    NetWorthPlacement::StatusBar => {
+                        Sides::new().shrink_left().truncate().show(
+                            ui,
+                            |ui| ui.label(text.unwrap_or_default()),
+                            |ui| account_bar::net_worth(ui, i18n, theme, accounts.net_worth()),
+                        );
+                    }
+                }
             });
         Panel::top("tab_row")
             .frame(theme.chrome_frame())
@@ -387,6 +406,8 @@ impl MainWindow {
             commands,
             &accounts,
             self.registers.current_account(),
+            preferences,
+            self.tab == TopLevelTab::Accounts,
         );
         CentralPanel::default().show(ui, |ui| {
             if self.tab == TopLevelTab::Accounts {

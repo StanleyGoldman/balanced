@@ -1,5 +1,6 @@
-//! Tools → Preferences: the Display group, its live preview, OK and Cancel, and the
-//! preferences file, driven through the AccessKit tree the way a user drives it.
+//! Tools → Preferences: each group's Preferences, their live preview, OK and Cancel,
+//! and the preferences file, driven through the AccessKit tree the way a user drives
+//! it.
 
 use std::path::Path;
 
@@ -78,7 +79,13 @@ fn dark_then_ok_applies_the_dark_theme_and_writes_the_file() {
          font_face = \"egui\"\n\
          dense_rows = false\n\
          monospace_money = false\n\
-         coloured_negatives = true\n"
+         coloured_negatives = true\n\
+         alternating_rows = true\n\
+         gridlines = \"off\"\n\
+         group_totals = false\n\
+         net_worth_placement = \"account_bar\"\n\
+         auto_fold = true\n\
+         open_account_in = \"current_register\"\n"
     );
 }
 
@@ -164,7 +171,13 @@ fn the_other_display_preferences_apply_and_are_saved_on_ok() {
          font_face = \"noto_sans\"\n\
          dense_rows = true\n\
          monospace_money = true\n\
-         coloured_negatives = false\n"
+         coloured_negatives = false\n\
+         alternating_rows = true\n\
+         gridlines = \"off\"\n\
+         group_totals = false\n\
+         net_worth_placement = \"account_bar\"\n\
+         auto_fold = true\n\
+         open_account_in = \"current_register\"\n"
     );
 }
 
@@ -197,4 +210,242 @@ fn labels(harness: &Harness<'static, App>) -> Vec<String> {
         .query_all_by_role(Role::Label)
         .filter_map(|label| label.accesskit_node().value())
         .collect()
+}
+
+/// Shows the Preferences of `group` in the open Preferences Dialog.
+fn show_group(harness: &mut Harness<'static, App>, group: &str) {
+    click(harness, Role::Tab, group);
+}
+
+#[test]
+fn the_register_preferences_are_saved_on_ok() {
+    let dir = config_dir();
+    let mut harness = app_in(dir.path());
+    open_preferences(&mut harness);
+    show_group(&mut harness, "Register");
+
+    click(&mut harness, Role::CheckBox, "Alternating rows");
+    click(&mut harness, Role::RadioButton, "Both");
+    click(&mut harness, Role::Button, "OK");
+
+    assert_eq!(
+        file_text(&dir),
+        "version = 1\n\
+         scheme = \"light\"\n\
+         font_face = \"egui\"\n\
+         dense_rows = false\n\
+         monospace_money = false\n\
+         coloured_negatives = true\n\
+         alternating_rows = false\n\
+         gridlines = \"both\"\n\
+         group_totals = false\n\
+         net_worth_placement = \"account_bar\"\n\
+         auto_fold = true\n\
+         open_account_in = \"current_register\"\n"
+    );
+}
+
+#[test]
+fn the_account_bar_and_accounts_preferences_are_saved_on_ok() {
+    let dir = config_dir();
+    let mut harness = app_in(dir.path());
+    open_preferences(&mut harness);
+    show_group(&mut harness, "Account bar");
+    click(&mut harness, Role::CheckBox, "Show group totals");
+    click(&mut harness, Role::RadioButton, "In the Status bar");
+    click(
+        &mut harness,
+        Role::CheckBox,
+        "Fold the Account bar when leaving Accounts",
+    );
+    show_group(&mut harness, "Accounts");
+
+    click(&mut harness, Role::RadioButton, "A new Register tab");
+    click(&mut harness, Role::Button, "OK");
+
+    assert_eq!(
+        file_text(&dir),
+        "version = 1\n\
+         scheme = \"light\"\n\
+         font_face = \"egui\"\n\
+         dense_rows = false\n\
+         monospace_money = false\n\
+         coloured_negatives = true\n\
+         alternating_rows = true\n\
+         gridlines = \"off\"\n\
+         group_totals = true\n\
+         net_worth_placement = \"status_bar\"\n\
+         auto_fold = false\n\
+         open_account_in = \"new_tab\"\n"
+    );
+}
+
+/// The App with the Account bar showing its accounts: on the Accounts tab.
+fn app_on_accounts(config_dir: &Path) -> Harness<'static, App> {
+    let mut harness = app_in(config_dir);
+    click(&mut harness, Role::Button, "Accounts");
+    harness
+}
+
+/// The total the Account bar heading `section` shows, if any.
+fn heading_total(harness: &Harness<'static, App>, section: &str) -> Option<String> {
+    harness
+        .get_by_role_and_label(Role::Button, section)
+        .accesskit_node()
+        .value()
+}
+
+#[test]
+fn group_totals_are_off_by_default() {
+    let dir = config_dir();
+
+    let harness = app_on_accounts(dir.path());
+
+    assert_eq!(heading_total(&harness, "Banking"), None);
+}
+
+#[test]
+fn group_totals_show_on_the_headings_while_previewed() {
+    let dir = config_dir();
+    let mut harness = app_on_accounts(dir.path());
+    open_preferences(&mut harness);
+    show_group(&mut harness, "Account bar");
+
+    click(&mut harness, Role::CheckBox, "Show group totals");
+
+    // Everyday Checking $5,647.46, Joint Checking $1,032.00, Household Checking
+    // $500.00, Emergency Fund $12,000.00, the hidden Holiday Fund $800.00 and Visa
+    // Rewards -$412.30. Closed Old Checking is left out.
+    assert_eq!(
+        heading_total(&harness, "Banking").as_deref(),
+        Some("$19,567.16")
+    );
+}
+
+/// How many times Net Worth's amount is shown inside the Status bar, and how many
+/// times anywhere.
+fn net_worth_in_status_bar_and_anywhere(harness: &Harness<'static, App>) -> (usize, usize) {
+    let amount = "$288,497.71";
+    let in_status_bar = harness
+        .get_by_role(Role::Status)
+        .query_all_by_role_and_label(Role::Label, amount)
+        .count();
+    let anywhere = harness
+        .query_all_by_role_and_label(Role::Label, amount)
+        .count();
+    (in_status_bar, anywhere)
+}
+
+#[test]
+fn net_worth_starts_in_the_account_bar_footer() {
+    let dir = config_dir();
+
+    let harness = app_on_accounts(dir.path());
+
+    assert_eq!(net_worth_in_status_bar_and_anywhere(&harness), (0, 1));
+}
+
+#[test]
+fn net_worth_moves_to_the_status_bar() {
+    let dir = config_dir();
+    let mut harness = app_on_accounts(dir.path());
+    open_preferences(&mut harness);
+    show_group(&mut harness, "Account bar");
+
+    click(&mut harness, Role::RadioButton, "In the Status bar");
+    click(&mut harness, Role::Button, "OK");
+
+    assert_eq!(net_worth_in_status_bar_and_anywhere(&harness), (1, 1));
+}
+
+/// Whether the Account bar is folded to its rail.
+fn is_rail(harness: &Harness<'static, App>) -> bool {
+    harness
+        .query_by_role_and_label(Role::Button, "Unfold the Account bar")
+        .is_some()
+}
+
+#[test]
+fn auto_fold_folds_the_account_bar_off_the_accounts_tab() {
+    let dir = config_dir();
+    let mut harness = app_on_accounts(dir.path());
+    assert!(!is_rail(&harness));
+
+    click(&mut harness, Role::Button, "Home");
+
+    assert!(is_rail(&harness));
+}
+
+#[test]
+fn auto_fold_unfolds_the_account_bar_back_on_the_accounts_tab() {
+    let dir = config_dir();
+    let mut harness = app_on_accounts(dir.path());
+    click(&mut harness, Role::Button, "Home");
+
+    click(&mut harness, Role::Button, "Accounts");
+
+    assert!(!is_rail(&harness));
+}
+
+#[test]
+fn the_account_bar_unfolded_off_the_accounts_tab_stays_open() {
+    let dir = config_dir();
+    let mut harness = app_on_accounts(dir.path());
+    click(&mut harness, Role::Button, "Home");
+
+    click(&mut harness, Role::Button, "Unfold the Account bar");
+
+    assert!(!is_rail(&harness));
+}
+
+#[test]
+fn with_auto_fold_off_the_account_bar_stays_open_off_the_accounts_tab() {
+    let dir = config_dir();
+    let mut harness = app_on_accounts(dir.path());
+    open_preferences(&mut harness);
+    show_group(&mut harness, "Account bar");
+    click(
+        &mut harness,
+        Role::CheckBox,
+        "Fold the Account bar when leaving Accounts",
+    );
+    click(&mut harness, Role::Button, "OK");
+
+    click(&mut harness, Role::Button, "Home");
+
+    assert!(!is_rail(&harness));
+}
+
+/// The labels of the open Register tabs, left to right.
+fn register_tabs(harness: &Harness<'static, App>) -> Vec<String> {
+    harness
+        .query_all_by_role(Role::Tab)
+        .filter_map(|tab| tab.accesskit_node().label())
+        .collect()
+}
+
+#[test]
+fn selecting_accounts_replaces_the_current_register_by_default() {
+    let dir = config_dir();
+    let mut harness = app_on_accounts(dir.path());
+    click(&mut harness, Role::Button, "Joint Checking");
+
+    click(&mut harness, Role::Button, "Brokerage");
+
+    assert_eq!(register_tabs(&harness), ["Brokerage"]);
+}
+
+#[test]
+fn selecting_an_account_opens_a_new_register_tab_when_the_preference_says_so() {
+    let dir = config_dir();
+    let mut harness = app_on_accounts(dir.path());
+    open_preferences(&mut harness);
+    show_group(&mut harness, "Accounts");
+    click(&mut harness, Role::RadioButton, "A new Register tab");
+    click(&mut harness, Role::Button, "OK");
+    click(&mut harness, Role::Button, "Joint Checking");
+
+    click(&mut harness, Role::Button, "Brokerage");
+
+    assert_eq!(register_tabs(&harness), ["Joint Checking", "Brokerage"]);
 }

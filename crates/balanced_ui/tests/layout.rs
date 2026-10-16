@@ -33,8 +33,20 @@ impl eframe::Storage for MemoryStorage {
 }
 
 /// The App on stub data, in the test locale, restored from `storage`, wide enough to
-/// show every Register column.
+/// show every Register column, on the Accounts tab. Off it, auto-fold would show the
+/// Account bar as a rail whatever its saved fold.
 fn app(storage: &MemoryStorage) -> Harness<'_, App> {
+    let mut harness = app_on_home(storage);
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Accounts")
+        .click();
+    harness.run();
+    harness
+}
+
+/// The App restored from `storage`, as a run starts: on Home.
+fn app_on_home(storage: &MemoryStorage) -> Harness<'_, App> {
     Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
@@ -80,7 +92,8 @@ fn a_restart_starts_on_home() {
     open(&mut first, "Everyday Checking");
     let storage = save(&mut first);
 
-    let second = app(&storage);
+    let mut second = app_on_home(&storage);
+    second.run();
 
     let home = second.get_by_role_and_label(Role::Button, "Home");
     assert_eq!(home.accesskit_node().toggled(), Some(Toggled::True));
@@ -261,4 +274,17 @@ fn a_resized_column_survives_a_restart() {
     open(&mut second, "Everyday Checking");
 
     assert_eq!(column_width(&second, "Memo"), before + 60.0);
+}
+
+#[test]
+fn auto_fold_leaves_the_saved_fold_as_it_was() {
+    let empty = MemoryStorage::default();
+    let mut first = app(&empty);
+    first.get_by_role_and_label(Role::Button, "Home").click();
+    first.run();
+    let storage = save(&mut first);
+
+    let second = app(&storage);
+
+    second.get_by_role_and_label(Role::Button, "Everyday Checking");
 }

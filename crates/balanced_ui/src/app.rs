@@ -223,11 +223,25 @@ impl eframe::App for App {
         false
     }
 
+    /// Draws the Main window with the open Preferences Dialog's draft, or else the
+    /// Preferences in use.
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let view = self.ledger.snapshot();
         let today = self.clock.today();
-        self.main_window
-            .show(ui, &self.i18n, &self.theme, &self.commands, &view, today);
+        let preferences = self
+            .main_window
+            .preferences_draft()
+            .unwrap_or(&self.preferences)
+            .clone();
+        self.main_window.show(
+            ui,
+            &self.i18n,
+            &self.theme,
+            &preferences,
+            &self.commands,
+            &view,
+            today,
+        );
     }
 }
 
@@ -269,6 +283,12 @@ mod tests {
             )
         });
         let mut storage = MemoryStorage::default();
+        // Off the Accounts tab, auto-fold shows the Account bar as a rail.
+        harness.run();
+        harness
+            .get_by_role_and_label(Role::Button, "Accounts")
+            .click();
+        harness.run();
 
         harness
             .get_by_role_and_label(Role::Button, "Banking")

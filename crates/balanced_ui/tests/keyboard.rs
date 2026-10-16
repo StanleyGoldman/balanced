@@ -13,7 +13,7 @@ use icu_calendar::Date;
 
 /// The App on stub data, in the test locale, wide enough to show every Register column.
 fn app() -> Harness<'static, App> {
-    Harness::builder()
+    let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
             App::new(
@@ -23,7 +23,14 @@ fn app() -> Harness<'static, App> {
                 Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
                 PreferencesFile::for_tests(),
             )
-        })
+        });
+    // Auto-fold shows the Account bar as a rail on Home, where every run starts.
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Unfold the Account bar")
+        .click();
+    harness.run();
+    harness
 }
 
 /// Plays `event` in one frame, first passing it through the App's `raw_input_hook`

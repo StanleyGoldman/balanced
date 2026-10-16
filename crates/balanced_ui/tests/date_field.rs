@@ -16,7 +16,7 @@ use icu_locale::{langid, locale};
 /// every Register column.
 fn app_in(i18n: Localizer) -> Harness<'static, App> {
     let today = Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date");
-    Harness::builder()
+    let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(move |cc| {
             App::new(
@@ -26,7 +26,14 @@ fn app_in(i18n: Localizer) -> Harness<'static, App> {
                 Clock::fixed(today),
                 PreferencesFile::for_tests(),
             )
-        })
+        });
+    // Auto-fold shows the Account bar as a rail on Home, where every run starts.
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Unfold the Account bar")
+        .click();
+    harness.run();
+    harness
 }
 
 /// The App in the test locale, `en-US`.

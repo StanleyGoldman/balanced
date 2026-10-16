@@ -14,7 +14,7 @@ use icu_calendar::Date;
 
 /// The App on stub data, in the test locale, in a window of `size`.
 fn app(size: Vec2) -> Harness<'static, App> {
-    Harness::builder().with_size(size).build_eframe(|cc| {
+    let mut harness = Harness::builder().with_size(size).build_eframe(|cc| {
         App::new(
             cc,
             Localizer::for_tests(),
@@ -22,7 +22,14 @@ fn app(size: Vec2) -> Harness<'static, App> {
             Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
             PreferencesFile::for_tests(),
         )
-    })
+    });
+    // Auto-fold shows the Account bar as a rail on Home, where every run starts.
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Unfold the Account bar")
+        .click();
+    harness.run();
+    harness
 }
 
 /// Plays `event` in one frame, first passing it through the App's `raw_input_hook`
