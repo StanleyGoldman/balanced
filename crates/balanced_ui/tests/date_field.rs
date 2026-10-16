@@ -269,8 +269,8 @@ fn shows(harness: &Harness<'static, App>, text: &str) -> bool {
     })
 }
 
-/// The format message in `en-US` on 14 October 2026.
-const FORMAT_MESSAGE: &str = "Not a date. Expected M/D/YYYY, for example 10/14/2026.";
+/// The format message in `en-US`.
+const FORMAT_MESSAGE: &str = "Not a date. Expected M/D/YYYY, for example 10/5/2026.";
 
 #[test]
 fn a_partial_or_impossible_date_is_refused_with_the_format_message() {
@@ -300,7 +300,7 @@ fn german_partial_dates_are_refused_with_the_german_pattern() {
 
     assert!(shows(
         &harness,
-        "Not a date. Expected DD.MM.YYYY, for example 14.10.2026."
+        "Not a date. Expected DD.MM.YYYY, for example 05.10.2026."
     ));
 }
 

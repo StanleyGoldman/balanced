@@ -172,6 +172,8 @@ mod tests {
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable as _;
 
+    use icu_calendar::Date;
+
     use super::*;
     use crate::accounts_model::Section;
     use crate::layout::MemoryStorage;
@@ -179,7 +181,12 @@ mod tests {
     #[test]
     fn folding_a_group_saves_it_in_the_layout() {
         let mut harness = Harness::new_eframe(|cc| {
-            App::new(cc, Localizer::for_tests(), Ledger::stub(), Clock::default())
+            App::new(
+                cc,
+                Localizer::for_tests(),
+                Ledger::stub(),
+                Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
+            )
         });
         let mut storage = MemoryStorage::default();
 

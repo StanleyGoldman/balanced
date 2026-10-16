@@ -11,7 +11,7 @@
 //! ↑/↓ a day, `m`/`h` the month's first and last day, `y`/`r` the year's, PgUp/PgDn a
 //! month. A 📅 button, or Alt+↓, opens a calendar whose days pick on pointer press.
 
-use balanced_i18n::{DateParseError, DateSegment, Localizer};
+use balanced_i18n::{DateParseError, DateSegment, DateSegments, Localizer};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{
     self, Align2, Area, Event, EventFilter, Frame, Id, Key, Label, Modifiers, Order, Rect,
@@ -23,9 +23,7 @@ use jiff::ToSpan as _;
 
 use crate::clock::{to_civil, to_iso};
 use crate::i18n::fl;
-
-/// The separators a typed date may use, besides spaces.
-const SEPARATORS: &str = "/.-";
+use crate::theme::Theme;
 
 /// How many digits a date typed with no separators has: `YYYYMMDD`.
 const DIGITS_ONLY_LENGTH: usize = 8;
@@ -41,9 +39,11 @@ const WEEKDAYS: [Weekday; 7] = [
     Weekday::Sunday,
 ];
 
-/// The space between the calendar's day buttons, and the width of each.
-const CALENDAR_SPACING: f32 = 2.0;
-const CALENDAR_DAY_WIDTH: f32 = 28.0;
+/// The index of the last segment.
+const LAST_SLOT: usize = 2;
+
+/// How many day columns the calendar's month and year title spans, between ◀ and ▶.
+const TITLE_DAYS: f32 = 5.0;
 
 /// The date field's state while its cell is edited.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +97,7 @@ impl Typed {
     fn filled(i18n: &Localizer, date: Date<Iso>) -> Self {
         Self {
             segments: segments_of(i18n, date),
-            slot: 2,
+            slot: LAST_SLOT,
             fresh: false,
             advanced: false,
             digits: None,
@@ -129,7 +129,7 @@ impl Typed {
             return;
         }
         segment.push(digit);
-        if is_full(kind, segment) && self.slot < 2 {
+        if is_full(kind, segment) && self.slot < LAST_SLOT {
             self.slot += 1;
             self.fresh = true;
             self.advanced = true;
@@ -142,7 +142,7 @@ impl Typed {
         if std::mem::take(&mut self.advanced) {
             return;
         }
-        if self.slot < 2 {
+        if self.slot < LAST_SLOT {
             self.move_to(self.slot + 1);
         }
     }
@@ -175,7 +175,7 @@ fn is_full(kind: DateSegment, digits: &str) -> bool {
     let largest_first_digit = match kind {
         DateSegment::Day => '3',
         DateSegment::Month => '1',
-        DateSegment::Year => '9',
+        DateSegment::Year => return digits.len() >= width(kind),
     };
     let mut chars = digits.chars();
     match (chars.next(), chars.next()) {
@@ -340,7 +340,7 @@ impl DateEdit {
                     pressed: true,
                     modifiers: Modifiers::NONE,
                     ..
-                } => self.press(*key, order, today),
+                } => self.press(*key, today),
                 Event::Text(text) | Event::Paste(text) => {
                     self.type_text(i18n, order, today, text);
                     true
@@ -355,7 +355,7 @@ impl DateEdit {
     }
 
     /// Acts on `key`, pressed with no modifiers. Returns whether the field took it.
-    fn press(&mut self, key: Key, order: [DateSegment; 3], today: Date<Iso>) -> bool {
+    fn press(&mut self, key: Key, today: Date<Iso>) -> bool {
         if let Some(shortcut) = Shortcut::key(key) {
             if self.typed.is_none() {
                 self.shortcut(shortcut, today);
@@ -372,7 +372,7 @@ impl DateEdit {
             }
             Key::ArrowRight => {
                 if let Some(typed) = &mut self.typed {
-                    typed.move_to((typed.slot + 1).min(order.len() - 1));
+                    typed.move_to((typed.slot + 1).min(LAST_SLOT));
                 }
                 true
             }
@@ -423,7 +423,7 @@ impl DateEdit {
                 {
                     self.typed = Some(Typed::filled(i18n, date));
                 }
-            } else if (c.is_whitespace() || SEPARATORS.contains(c))
+            } else if DateSegments::is_separator(c)
                 && let Some(typed) = &mut self.typed
             {
                 typed.type_separator();
@@ -454,6 +454,7 @@ impl DateEdit {
         &mut self,
         ui: &egui::Ui,
         i18n: &Localizer,
+        theme: &Theme,
         today: Date<Iso>,
         id: Id,
         rect: Rect,
@@ -495,6 +496,7 @@ impl DateEdit {
                 selected: self.value(i18n).ok(),
                 today,
                 below: rect,
+                day_size: theme.row_height(),
             };
             match shown.show(ui.ctx(), i18n) {
                 CalendarAction::None => {}
@@ -503,7 +505,7 @@ impl DateEdit {
             }
             self.holding_focus |= shown.pressed(ui.ctx());
         } else if self.rejected {
-            bubble(ui.ctx(), id, rect, &format_message(i18n, today));
+            bubble(ui.ctx(), id, rect, &format_message(i18n));
         }
         if self.holding_focus {
             ui.memory_mut(|memory| memory.request_focus(id));
@@ -549,7 +551,7 @@ impl DateEdit {
                     } else {
                         place(segment.clone(), text_colour, selected);
                     }
-                    if slot < 2 {
+                    if slot < LAST_SLOT {
                         place(
                             layout.separator().to_owned(),
                             visuals.weak_text_color(),
@@ -582,15 +584,16 @@ fn placeholders(i18n: &Localizer) -> [String; 3] {
     })
 }
 
-/// The message a refused date shows: the locale's date pattern, with today as an
-/// example.
-fn format_message(i18n: &Localizer, today: Date<Iso>) -> String {
+/// The message a refused date shows: the locale's date pattern, with 5 October 2026
+/// as an example.
+fn format_message(i18n: &Localizer) -> String {
     let pattern = placeholders(i18n).join(i18n.date_segments().separator());
+    let example = Date::try_new_iso(2026, 10, 5).expect("5 October 2026 is a date");
     fl!(
         i18n,
         "field-date-invalid",
         pattern = pattern,
-        example = i18n.format_date(today)
+        example = i18n.format_date(example)
     )
 }
 
@@ -650,6 +653,8 @@ struct Calendar {
     today: Date<Iso>,
     /// The cell the calendar opens under.
     below: Rect,
+    /// The width and height of each day, and of ◀ and ▶.
+    day_size: f32,
 }
 
 impl Calendar {
@@ -665,26 +670,28 @@ impl Calendar {
             .fixed_pos(self.below.left_bottom())
             .show(ctx, |ui| {
                 Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = vec2(CALENDAR_SPACING, CALENDAR_SPACING);
+                    let size = vec2(self.day_size, self.day_size);
                     ui.horizontal(|ui| {
                         let previous = month.checked_sub(1.month()).ok();
-                        if nav_button(ui, "◀", &fl!(i18n, "field-date-previous-month"))
+                        if nav_button(ui, size, "◀", &fl!(i18n, "field-date-previous-month"))
                             && let Some(previous) = previous
                         {
                             action = CalendarAction::Month(to_iso(previous));
                         }
+                        // The title spans the five day columns between ◀ and ▶.
+                        let gaps = (TITLE_DAYS - 1.0) * ui.spacing().item_spacing.x;
                         ui.add_sized(
-                            vec2(CALENDAR_DAY_WIDTH * 5.0, ui.spacing().interact_size.y),
+                            vec2(self.day_size * TITLE_DAYS + gaps, self.day_size),
                             Label::new(i18n.format_month_year(self.month)),
                         );
                         let next = month.checked_add(1.month()).ok();
-                        if nav_button(ui, "▶", &fl!(i18n, "field-date-next-month"))
+                        if nav_button(ui, size, "▶", &fl!(i18n, "field-date-next-month"))
                             && let Some(next) = next
                         {
                             action = CalendarAction::Month(to_iso(next));
                         }
                     });
-                    if let Some(picked) = self.grid(ui, i18n, month) {
+                    if let Some(picked) = self.grid(ui, i18n, month, size) {
                         action = CalendarAction::Pick(picked);
                     }
                 });
@@ -711,16 +718,16 @@ impl Calendar {
         ui: &mut egui::Ui,
         i18n: &Localizer,
         month: jiff::civil::Date,
+        size: egui::Vec2,
     ) -> Option<Date<Iso>> {
         let first_weekday = i18n.first_weekday();
         let start = WEEKDAYS
             .iter()
             .position(|&weekday| weekday == first_weekday)
-            .unwrap_or_default();
-        let week: Vec<Weekday> = (0..7)
-            .map(|offset| WEEKDAYS[(start + offset) % 7])
+            .expect("WEEKDAYS holds every weekday");
+        let week: Vec<Weekday> = (0..WEEKDAYS.len())
+            .map(|offset| WEEKDAYS[(start + offset) % WEEKDAYS.len()])
             .collect();
-        let size = vec2(CALENDAR_DAY_WIDTH, ui.spacing().interact_size.y);
         ui.horizontal(|ui| {
             for &weekday in &week {
                 let name = i18n.format_weekday(weekday);
@@ -737,26 +744,32 @@ impl Calendar {
                 );
             }
         });
-        let first = to_iso(month);
+        let days: Vec<Date<Iso>> = (0..month.days_in_month())
+            .map(|offset| {
+                let day = month
+                    .checked_add(i64::from(offset).days())
+                    .expect("every day of a month is a date");
+                to_iso(day)
+            })
+            .collect();
+        // The empty places before the first, under the weekdays before its own.
         let lead = week
             .iter()
-            .position(|&weekday| weekday == first.weekday())
-            .unwrap_or_default();
-        let days = usize::try_from(month.days_in_month()).unwrap_or_default();
+            .position(|&weekday| weekday == to_iso(month).weekday())
+            .expect("the week holds every weekday");
+        let mut places = std::iter::repeat_n(None, lead)
+            .chain(days.into_iter().map(Some))
+            .peekable();
         let mut picked = None;
-        for row in 0..(lead + days).div_ceil(7) {
+        while places.peek().is_some() {
             ui.horizontal(|ui| {
-                for column in 0..7 {
-                    let place = row * 7 + column;
-                    let Some(day) = place.checked_sub(lead).filter(|&day| day < days) else {
-                        ui.allocate_exact_size(size, Sense::hover());
-                        continue;
-                    };
-                    let date = month
-                        .checked_add(i64::try_from(day).unwrap_or_default().days())
-                        .map_or(first, to_iso);
-                    if self.day(ui, i18n, date, size) {
-                        picked = Some(date);
+                for place in places.by_ref().take(week.len()) {
+                    match place {
+                        Some(date) if self.day(ui, i18n, date, size) => picked = Some(date),
+                        Some(_) => {}
+                        None => {
+                            ui.allocate_exact_size(size, Sense::hover());
+                        }
                     }
                 }
             });
@@ -792,8 +805,7 @@ impl Calendar {
 }
 
 /// A ◀ or ▶ button that moves the calendar a month. It never takes focus.
-fn nav_button(ui: &mut egui::Ui, glyph: &str, label: &str) -> bool {
-    let size = vec2(CALENDAR_DAY_WIDTH, ui.spacing().interact_size.y);
+fn nav_button(ui: &mut egui::Ui, size: egui::Vec2, glyph: &str, label: &str) -> bool {
     let (rect, response) = ui.allocate_exact_size(size, Sense::CLICK);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, label));
     let visuals = ui.style().interact(&response);

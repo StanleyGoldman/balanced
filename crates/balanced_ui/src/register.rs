@@ -361,7 +361,8 @@ struct CellEdit {
 /// The unsaved value of the cell being edited, in the editor its field takes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Editor {
-    Text(String),
+    /// The text typed into a field edited as plain text.
+    Text(TextField, String),
     Date(DateEdit),
 }
 
@@ -374,7 +375,7 @@ impl CellEdit {
     /// Closes the editor's popup. Returns whether one was open.
     fn close_popup(&mut self) -> bool {
         match &mut self.editor {
-            Editor::Text(_) => false,
+            Editor::Text(..) => false,
             Editor::Date(date) => date.close_calendar(),
         }
     }
@@ -382,7 +383,7 @@ impl CellEdit {
     /// Whether the last commit was refused, so the edit stays open with its message.
     fn is_rejected(&self) -> bool {
         match &self.editor {
-            Editor::Text(_) => false,
+            Editor::Text(..) => false,
             Editor::Date(date) => date.is_rejected(),
         }
     }
@@ -659,13 +660,20 @@ impl Register {
             self.act(row.id(), action, commands);
         }
         if let Some(edit) = self.edit.as_mut().filter(|edit| edit.cell == address)
-            && editor(ui, i18n, today, edit, heading_id(register_id, column)).lost_focus()
+            && editor(
+                ui,
+                i18n,
+                theme,
+                today,
+                edit,
+                heading_id(register_id, column),
+            )
+            .lost_focus()
         {
             let mut edit = self.edit.take().expect("the edit was just shown");
             if commit(i18n, &mut edit, rows, commands) == Committed::Refused {
-                // The cell keeps its edit, and the keyboard, until the date is fixed or the
-                // edit cancelled.
-                ui.memory_mut(|memory| memory.request_focus(edit.editor_id()));
+                // The cell keeps its edit and the cell cursor, unfocused, until the date
+                // is fixed or the edit cancelled. Focus stays where the click put it.
                 self.cursor = Some(edit.cell);
                 self.edit = Some(edit);
             }
@@ -865,17 +873,20 @@ impl Register {
             // Typing goes to the date field, which starts the date over or acts on a
             // shortcut.
             Field::Date => Editor::Date(DateEdit::new(row.saved_date())),
-            Field::Text(field) => Editor::Text(match start {
-                EditStart::Saved => field.saved(row).to_owned(),
-                EditStart::Empty => String::new(),
-            }),
+            Field::Text(field) => Editor::Text(
+                field,
+                match start {
+                    EditStart::Saved => field.saved(row).to_owned(),
+                    EditStart::Empty => String::new(),
+                },
+            ),
         };
         let edit = CellEdit {
             cell: cursor,
             editor,
         };
         let id = edit.editor_id();
-        if let Editor::Text(text) = &edit.editor {
+        if let Editor::Text(_, text) = &edit.editor {
             // The text cursor starts at the end, wherever an earlier edit left it.
             let mut state = TextEditState::load(ctx, id).unwrap_or_default();
             state
@@ -984,21 +995,19 @@ fn commit(
     rows: &[RegisterRow],
     commands: &CommandSender,
 ) -> Committed {
-    let Some((row, field)) = field_at(rows, edit.cell) else {
+    let Some(row) = rows.iter().find(|row| row.id() == edit.cell.row) else {
         return Committed::Done;
     };
-    let change = match (field, &mut edit.editor) {
-        (Field::Text(field), Editor::Text(text)) => {
+    let change = match &mut edit.editor {
+        Editor::Text(field, text) => {
             let text = text.trim();
             (text != field.saved(row)).then(|| field.edit(text))
         }
-        (Field::Date, Editor::Date(date)) => match date.commit(i18n) {
+        Editor::Date(date) => match date.commit(i18n) {
             Commit::Unchanged => None,
             Commit::Changed(date) => Some(TransactionEdit::Date(date)),
             Commit::Rejected => return Committed::Refused,
         },
-        // The editor was opened for the field, so the two always match.
-        (Field::Text(_), Editor::Date(_)) | (Field::Date, Editor::Text(_)) => None,
     };
     if let Some(change) = change {
         commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
@@ -1019,6 +1028,7 @@ fn heading_id(register_id: Id, column: RegisterColumn) -> Id {
 fn editor(
     ui: &mut egui::Ui,
     i18n: &Localizer,
+    theme: &Theme,
     today: Date<Iso>,
     edit: &mut CellEdit,
     heading: Id,
@@ -1028,8 +1038,12 @@ fn editor(
     let inner = Rect::from_x_y_ranges(rect.left() + left..=rect.right() - right, rect.y_range());
     let id = edit.editor_id();
     let text = match &mut edit.editor {
-        Editor::Date(date) => return date.show(ui, i18n, today, id, inner).labelled_by(heading),
-        Editor::Text(text) => text,
+        Editor::Date(date) => {
+            return date
+                .show(ui, i18n, theme, today, id, inner)
+                .labelled_by(heading);
+        }
+        Editor::Text(_, text) => text,
     };
     ui.put(
         inner,

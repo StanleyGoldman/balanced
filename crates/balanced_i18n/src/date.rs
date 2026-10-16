@@ -33,6 +33,12 @@ impl DateSegments {
         &self.separator
     }
 
+    /// Whether `c` may separate the segments of a typed date: `/`, `.`, `-` or a space,
+    /// in any locale.
+    pub fn is_separator(c: char) -> bool {
+        c.is_whitespace() || SEPARATORS.contains(c)
+    }
+
     /// Whether a one-digit day or month is written with a leading zero.
     pub fn zero_padded(&self) -> bool {
         self.zero_padded
@@ -129,7 +135,7 @@ const SEPARATORS: &str = "/.-";
 pub(crate) fn parse_date(segments: &DateSegments, text: &str) -> Result<Date<Iso>, DateParseError> {
     if !text
         .chars()
-        .all(|c| c.is_ascii_digit() || c.is_whitespace() || SEPARATORS.contains(c))
+        .all(|c| c.is_ascii_digit() || DateSegments::is_separator(c))
     {
         return Err(DateParseError::Invalid);
     }
@@ -175,10 +181,10 @@ fn calendar_date(year: &str, month: &str, day: &str) -> Result<Date<Iso>, DatePa
     if year.len() != 4 || !(1..=2).contains(&month.len()) || !(1..=2).contains(&day.len()) {
         return Err(DateParseError::Invalid);
     }
-    let year = year.parse().map_err(|_| DateParseError::Invalid)?;
-    let month = month.parse().map_err(|_| DateParseError::Invalid)?;
-    let day = day.parse().map_err(|_| DateParseError::Invalid)?;
-    Date::try_new_iso(year, month, day).map_err(|_| DateParseError::Invalid)
+    let year = year.parse().expect("four ASCII digits are an i32");
+    let month = month.parse().expect("two ASCII digits are a u8");
+    let day = day.parse().expect("two ASCII digits are a u8");
+    Ok(Date::try_new_iso(year, month, day)?)
 }
 
 #[cfg(test)]
@@ -288,12 +294,19 @@ mod tests {
     }
 
     #[test]
-    fn a_date_the_calendar_lacks_or_the_locale_doesnt_write_is_invalid() {
+    fn a_date_the_calendar_lacks_or_the_locale_doesnt_write_is_refused() {
         let en_us = localizer(&locale!("en-US"));
 
+        for text in ["2/30/2026", "13/1/2026"] {
+            assert!(
+                matches!(
+                    en_us.parse_date(text),
+                    Err(DateParseError::NotOnCalendar(_))
+                ),
+                "{text:?}"
+            );
+        }
         for text in [
-            "2/30/2026",
-            "13/1/2026",
             "10/5/26",
             "10/5/20260",
             "010/5/2026",
@@ -337,7 +350,10 @@ mod tests {
         let en_us = localizer(&locale!("en-US"));
 
         assert_eq!(en_us.parse_date("0501"), Err(DateParseError::Incomplete));
-        assert_eq!(en_us.parse_date("10052026"), Err(DateParseError::Invalid));
+        assert!(matches!(
+            en_us.parse_date("10052026"),
+            Err(DateParseError::NotOnCalendar(_))
+        ));
         assert_eq!(en_us.parse_date("202610051"), Err(DateParseError::Invalid));
     }
 
@@ -360,5 +376,15 @@ mod tests {
             ),
             ("Mo".to_owned(), "Oktober 2026".to_owned())
         );
+    }
+
+    #[test]
+    fn slashes_dots_dashes_and_spaces_separate_segments() {
+        let separators: Vec<bool> = ['/', '.', '-', ' ', ',', 'x', '5']
+            .into_iter()
+            .map(DateSegments::is_separator)
+            .collect();
+
+        assert_eq!(separators, [true, true, true, true, false, false, false]);
     }
 }

@@ -10,6 +10,7 @@ use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::{Event, Modifiers, PointerButton, Pos2, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use icu_calendar::Date;
 
 /// eframe storage in memory.
 #[derive(Default)]
@@ -38,7 +39,12 @@ fn app(storage: &MemoryStorage) -> Harness<'_, App> {
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
             cc.storage = Some(storage);
-            App::new(cc, Localizer::for_tests(), Ledger::stub(), Clock::default())
+            App::new(
+                cc,
+                Localizer::for_tests(),
+                Ledger::stub(),
+                Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
+            )
         })
 }
 

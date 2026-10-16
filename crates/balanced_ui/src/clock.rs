@@ -16,13 +16,13 @@ enum Source {
     #[default]
     System,
     /// The same date on every read, for tests.
-    #[cfg(feature = "test-support")]
+    #[cfg(any(test, feature = "test-support"))]
     Fixed(Date<Iso>),
 }
 
 impl Clock {
     /// A clock stopped on `today`, so tests run the same on any day.
-    #[cfg(feature = "test-support")]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn fixed(today: Date<Iso>) -> Self {
         Self {
             source: Source::Fixed(today),
@@ -40,7 +40,7 @@ impl Clock {
                 let now = jiff::Zoned::now();
                 to_iso(now.date())
             }
-            #[cfg(feature = "test-support")]
+            #[cfg(any(test, feature = "test-support"))]
             Source::Fixed(today) => today,
         }
     }

@@ -7,12 +7,20 @@ use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::{Event, Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use icu_calendar::Date;
 
 /// The App on stub data, in the test locale, wide enough to show every Register column.
 fn app() -> Harness<'static, App> {
     Harness::builder()
         .with_size(vec2(1280.0, 720.0))
-        .build_eframe(|cc| App::new(cc, Localizer::for_tests(), Ledger::stub(), Clock::default()))
+        .build_eframe(|cc| {
+            App::new(
+                cc,
+                Localizer::for_tests(),
+                Ledger::stub(),
+                Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
+            )
+        })
 }
 
 /// Opens the account named `name` in a new Register tab, from its right-click menu in

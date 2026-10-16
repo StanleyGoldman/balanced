@@ -35,9 +35,29 @@ rust_decimal_macros.workspace = true
 name = "snapshots"
 required-features = ["test-support"]
 
-# `Clock::fixed` stops the clock on one day.
+# Every App test stops the clock on one day with `Clock::fixed`.
 [[test]]
 name = "date_field"
+required-features = ["test-support"]
+
+[[test]]
+name = "delete_transaction"
+required-features = ["test-support"]
+
+[[test]]
+name = "layout"
+required-features = ["test-support"]
+
+[[test]]
+name = "main_window"
+required-features = ["test-support"]
+
+[[test]]
+name = "register"
+required-features = ["test-support"]
+
+[[test]]
+name = "register_tabs"
 required-features = ["test-support"]
 
 [lints]
