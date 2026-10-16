@@ -13,6 +13,7 @@ main-window-title = { -brand-name }
 ## Menu bar
 
 menu-file = File
+menu-file-new-account = New Account…
 menu-file-close-register-tab = Close { -register } Tab
 menu-file-quit = Quit
 menu-edit = Edit
@@ -72,6 +73,8 @@ account-bar-unfold = Unfold the { -account-bar }
 # An account's right-click menu.
 account-bar-open-register = Open { -register }
 account-bar-open-in-new-tab = Open in New Tab
+# The button in the Account bar's header that opens the New Account wizard.
+account-bar-new-account = + Account
 
 ## Register
 
@@ -112,6 +115,35 @@ dialog-cancel = Cancel
 # Asks before deleting the transaction the payee, date and amount describe.
 dialog-delete-transaction-message = Delete this transaction? { $payee }, { $date }, { $amount }
 dialog-delete-transaction-delete = Delete
+
+# The New Account wizard. Each step's heading says how far through it is.
+dialog-new-account-step-type = Step 1 of 4: Type
+dialog-new-account-step-details = Step 2 of 4: Details
+dialog-new-account-step-opening-balance = Step 3 of 4: Opening balance
+dialog-new-account-step-review = Step 4 of 4: Review
+dialog-new-account-back = Back
+dialog-new-account-next = Next
+dialog-new-account-finish = Finish
+dialog-new-account-kind-checking = Checking
+dialog-new-account-kind-savings = Savings
+dialog-new-account-kind-credit-card = Credit Card
+dialog-new-account-kind-investment = Investment
+# Retirement savings, such as a 401(k) or an IRA.
+dialog-new-account-kind-retirement = Retirement
+# Property, such as a house or a car.
+dialog-new-account-kind-asset = Asset
+# Debt, such as a mortgage or a loan.
+dialog-new-account-kind-liability = Liability
+dialog-new-account-name = Name
+dialog-new-account-name-blank = Enter a name for the account.
+dialog-new-account-balance = Opening balance
+# The date of the opening balance.
+dialog-new-account-date = As of
+# The Review step, one line per choice. $kind is the account type.
+dialog-new-account-review-type = Type: { $kind }
+dialog-new-account-review-name = Name: { $name }
+# $amount is the opening balance, $date the day it is as of.
+dialog-new-account-review-balance = Opening balance: { $amount } as of { $date }
 
 ## Amount field
 

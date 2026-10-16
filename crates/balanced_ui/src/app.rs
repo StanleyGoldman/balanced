@@ -78,6 +78,10 @@ impl App {
                     self.main_window.show_status(StatusMessage::Rejected(error));
                 }
             }
+            AppCommand::SubmitForm(command) => {
+                let result = self.ledger.apply(command).map(drop);
+                self.main_window.form_applied(ctx, result);
+            }
             AppCommand::Undo => {
                 if let Err(error) = self.ledger.undo() {
                     self.main_window.show_status(StatusMessage::Rejected(error));
@@ -103,8 +107,13 @@ impl App {
                 .change_register_tabs(RegisterTabs::previous),
             AppCommand::SwitchPane => self.main_window.switch_pane(ctx),
             AppCommand::OpenDialog(kind) => {
-                self.main_window
-                    .open_dialog(ctx, &kind, &self.ledger.snapshot());
+                self.main_window.open_dialog(
+                    ctx,
+                    &self.i18n,
+                    &kind,
+                    &self.ledger.snapshot(),
+                    self.clock.today(),
+                );
             }
             AppCommand::ShowStatus(message) => self.main_window.show_status(message),
             AppCommand::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),

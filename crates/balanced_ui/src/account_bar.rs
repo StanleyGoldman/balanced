@@ -19,6 +19,7 @@ use crate::i18n::fl;
 use crate::layout::Layout;
 use crate::route::{OpenIn, Route};
 use crate::theme::Theme;
+use crate::user_action::UserAction;
 
 /// Whether the Account bar shows its accounts or is folded to a narrow rail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,11 +144,15 @@ impl AccountBar {
         }
     }
 
-    /// The open Account bar: the fold button, the sections and the Net Worth footer.
-    /// Returns whether the fold button was clicked.
+    /// The open Account bar: the fold and + Account buttons, the sections and the Net
+    /// Worth footer. Returns whether the fold button was clicked.
     fn open_bar(&mut self, ui: &mut egui::Ui, frame: &BarFrame<'_>, focus: &mut Focus) -> bool {
         let BarFrame {
-            i18n, theme, model, ..
+            i18n,
+            theme,
+            commands,
+            model,
+            ..
         } = *frame;
         let fold = Panel::top("account_bar_header")
             .frame(Frame::NONE)
@@ -156,6 +161,12 @@ impl AccountBar {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let button = rail_button(ui, fl!(i18n, "account-bar-fold"), Direction::Left);
                     focus.note(&button, Candidate::Fallback);
+                    if ui
+                        .small_button(fl!(i18n, "account-bar-new-account"))
+                        .clicked()
+                    {
+                        commands.send(UserAction::NewAccount.command());
+                    }
                     button.clicked()
                 })
                 .inner

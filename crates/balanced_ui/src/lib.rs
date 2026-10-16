@@ -15,6 +15,7 @@ mod keymap;
 mod layout;
 mod main_window;
 mod menu_nav;
+mod new_account;
 mod register;
 mod register_model;
 mod register_tabs;

@@ -1,6 +1,6 @@
 //! The Main window: Menu bar, tab row, Account bar, Main view and Status bar.
 
-use balanced_core::{AccountSummary, DomainCommand, LedgerView, TransactionId};
+use balanced_core::{AccountSummary, DomainCommand, DomainError, LedgerView, TransactionId};
 use balanced_i18n::Localizer;
 use eframe::egui::{self, Button, CentralPanel, Id, Label, MenuBar, Panel, RichText, Sides};
 use icu_calendar::{Date, Iso};
@@ -13,6 +13,7 @@ use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
 use crate::layout::Layout;
 use crate::menu_nav::{DrawnMenus, MenuNav};
+use crate::new_account::{self, NewAccountForm, WizardOutcome};
 use crate::register::ColumnWidths;
 use crate::register_tabs::RegisterTabs;
 use crate::route::{Route, TopLevelTab};
@@ -34,6 +35,8 @@ pub(crate) struct MainWindow {
     column_widths: ColumnWidths,
     /// The delete transaction confirm, while it is open.
     delete_transaction: Option<OpenDialog<DeleteTransactionForm>>,
+    /// The New Account wizard, while it is open.
+    new_account: Option<OpenDialog<NewAccountForm>>,
     /// Where focus goes now that a Dialog has closed, until a frame restores it.
     focus_return: Option<FocusReturn>,
     menu_nav: MenuNav,
@@ -57,6 +60,7 @@ impl MainWindow {
             registers: RegisterTabs::default(),
             column_widths: layout.column_widths(),
             delete_transaction: None,
+            new_account: None,
             focus_return: None,
             menu_nav: MenuNav::default(),
         }
@@ -109,7 +113,10 @@ impl MainWindow {
             UserAction::NextRegisterTab | UserAction::PreviousRegisterTab => {
                 self.shows_registers() && self.registers.len() > 1
             }
-            UserAction::SwitchPane | UserAction::Quit | UserAction::About => true,
+            UserAction::SwitchPane
+            | UserAction::NewAccount
+            | UserAction::Quit
+            | UserAction::About => true,
         }
     }
 
@@ -156,13 +163,31 @@ impl MainWindow {
         self.status = Some(message);
     }
 
+    /// Hands the open Dialog the outcome of the Command its form submitted: it closes
+    /// once the Command is applied, and shows a rejection inline. With no Dialog open
+    /// to take it, a rejection goes to the Status bar.
+    pub(crate) fn form_applied(&mut self, ctx: &egui::Context, result: Result<(), DomainError>) {
+        match (result, &mut self.new_account) {
+            (Ok(()), Some(_)) => {
+                if let Some(dialog) = self.new_account.take() {
+                    self.focus_return = Some(dialog.close(ctx));
+                }
+            }
+            (Ok(()), None) => {}
+            (Err(error), Some(dialog)) => dialog.form.refused(error),
+            (Err(error), None) => self.show_status(StatusMessage::Rejected(error)),
+        }
+    }
+
     /// Opens the Dialog `kind` over `view`, unless a Dialog is already open or there is
-    /// nothing for it to act on.
+    /// nothing for it to act on. A Dialog that dates anything starts on `today`.
     pub(crate) fn open_dialog(
         &mut self,
         ctx: &egui::Context,
+        i18n: &Localizer,
         kind: &DialogKind,
         view: &LedgerView,
+        today: Date<Iso>,
     ) {
         if self.dialog_open() {
             return;
@@ -187,6 +212,10 @@ impl MainWindow {
                 };
                 self.delete_transaction = Some(OpenDialog::new(ctx, form));
             }
+            DialogKind::NewAccount => {
+                let form = NewAccountForm::new(i18n, view.net_worth().currency(), today);
+                self.new_account = Some(OpenDialog::new(ctx, form));
+            }
             DialogKind::NewCategory { .. } => {
                 // TODO(#95): open the New Category Dialog, prefilled with the name.
                 tracing::debug!("the New Category Dialog was asked for");
@@ -196,7 +225,7 @@ impl MainWindow {
 
     /// Whether a Dialog is open over the Main window.
     fn dialog_open(&self) -> bool {
-        self.delete_transaction.is_some()
+        self.delete_transaction.is_some() || self.new_account.is_some()
     }
 
     /// The account the Main view shows, if it shows one.
@@ -302,6 +331,29 @@ impl MainWindow {
         });
         self.accounts = Some(accounts);
         self.delete_transaction_dialog(ui.ctx(), i18n, commands, view);
+        self.new_account_dialog(ui.ctx(), i18n, theme, commands, today);
+    }
+
+    /// The New Account wizard, while it is open.
+    fn new_account_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        theme: &Theme,
+        commands: &CommandSender,
+        today: Date<Iso>,
+    ) {
+        let Some(dialog) = &mut self.new_account else {
+            return;
+        };
+        match new_account::show(ctx, i18n, theme, commands, dialog, today) {
+            WizardOutcome::Open => {}
+            WizardOutcome::Cancelled => {
+                if let Some(dialog) = self.new_account.take() {
+                    self.focus_return = Some(dialog.close(ctx));
+                }
+            }
+        }
     }
 
     /// The delete transaction confirm, while it is open. Delete has first focus, so
@@ -354,6 +406,7 @@ impl MainWindow {
                 }));
             }
             DialogOutcome::Cancelled => {}
+            DialogOutcome::Back => unreachable!("the delete confirm has no Back button"),
         }
         if let Some(dialog) = self.delete_transaction.take() {
             self.focus_return = Some(dialog.close(ctx));
@@ -409,6 +462,8 @@ impl MainWindow {
         let mut drawn = DrawnMenus::default();
         MenuBar::new().ui(ui, |ui| {
             let file = ui.menu_button(fl!(i18n, "menu-file"), |ui| {
+                item(ui, &mut drawn, UserAction::NewAccount);
+                ui.separator();
                 item(ui, &mut drawn, UserAction::CloseRegisterTab);
                 ui.separator();
                 item(ui, &mut drawn, UserAction::Quit);

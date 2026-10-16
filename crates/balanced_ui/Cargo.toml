@@ -59,6 +59,10 @@ name = "main_window"
 required-features = ["test-support"]
 
 [[test]]
+name = "new_account"
+required-features = ["test-support"]
+
+[[test]]
 name = "register"
 required-features = ["test-support"]
 
