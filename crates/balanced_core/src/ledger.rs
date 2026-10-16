@@ -8,8 +8,9 @@ use crate::account::NewAccount;
 use crate::category::NewCategory;
 use crate::transaction::{NewTransaction, TransactionId};
 use crate::{
-    Account, AccountId, AccountKind, Applied, Category, CategoryId, CurrencyCode, DomainCommand,
-    DomainError, Money, MoneyError, MoveDirection, Transaction, TransactionEdit,
+    Account, AccountId, AccountKind, AccountStatus, Applied, Category, CategoryId, CurrencyCode,
+    DomainCommand, DomainError, Money, MoneyError, MoveDirection, Transaction, TransactionEdit,
+    Visibility,
 };
 
 /// Counts the changes applied to a [`Ledger`]. A window's view model rebuilds when
@@ -228,6 +229,15 @@ struct TransactionPosition {
     entry: usize,
 }
 
+/// What [`Ledger::restore`] puts back: the ledger less its Undo and Redo history.
+#[derive(Debug)]
+struct Checkpoint {
+    view: Arc<LedgerView>,
+    next_account: AccountId,
+    next_transaction: TransactionId,
+    next_category: CategoryId,
+}
+
 /// The financial data. It changes only by applying a `DomainCommand`, and windows
 /// read it through [`Ledger::snapshot`].
 #[derive(Debug)]
@@ -387,21 +397,9 @@ impl Ledger {
             DomainCommand::SetAccountVisibility {
                 account,
                 visibility,
-            } => {
-                let index = self.account_index(account)?;
-                let old = self.change_account(index, |changed| changed.set_visibility(visibility));
-                DomainCommand::SetAccountVisibility {
-                    account,
-                    visibility: old,
-                }
-            }
+            } => self.set_account_visibility(account, visibility)?,
             DomainCommand::SetAccountStatus { account, status } => {
-                let index = self.account_index(account)?;
-                let old = self.change_account(index, |changed| changed.set_status(status));
-                DomainCommand::SetAccountStatus {
-                    account,
-                    status: old,
-                }
+                self.set_account_status(account, status)?
             }
             DomainCommand::Compound(commands) => self.apply_compound(commands)?,
             DomainCommand::MoveAccount { account, direction } => {
@@ -437,21 +435,40 @@ impl Ledger {
         &mut self,
         commands: Vec<DomainCommand>,
     ) -> Result<DomainCommand, DomainError> {
-        let view = Arc::clone(&self.view);
-        let ids = (self.next_account, self.next_transaction, self.next_category);
+        let checkpoint = self.checkpoint();
         let mut inverses = Vec::with_capacity(commands.len());
         for command in commands {
             match self.apply_unrecorded(command) {
                 Ok(applied) => inverses.push(applied.into_inverse()),
                 Err(error) => {
-                    self.view = view;
-                    (self.next_account, self.next_transaction, self.next_category) = ids;
+                    self.restore(checkpoint);
                     return Err(error);
                 }
             }
         }
         inverses.reverse();
         Ok(DomainCommand::Compound(inverses))
+    }
+
+    /// The ledger as it is now, less its Undo and Redo history.
+    fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            view: Arc::clone(&self.view),
+            next_account: self.next_account,
+            next_transaction: self.next_transaction,
+            next_category: self.next_category,
+        }
+    }
+
+    /// Puts the ledger back as it was at `checkpoint`, keeping its Undo and Redo
+    /// history.
+    fn restore(&mut self, checkpoint: Checkpoint) {
+        Checkpoint {
+            view: self.view,
+            next_account: self.next_account,
+            next_transaction: self.next_transaction,
+            next_category: self.next_category,
+        } = checkpoint;
     }
 
     fn create_account(
@@ -569,6 +586,32 @@ impl Ledger {
         })
     }
 
+    fn set_account_visibility(
+        &mut self,
+        id: AccountId,
+        visibility: Visibility,
+    ) -> Result<DomainCommand, DomainError> {
+        let index = self.account_index(id)?;
+        let old = self.change_account(index, |account| account.set_visibility(visibility));
+        Ok(DomainCommand::SetAccountVisibility {
+            account: id,
+            visibility: old,
+        })
+    }
+
+    fn set_account_status(
+        &mut self,
+        id: AccountId,
+        status: AccountStatus,
+    ) -> Result<DomainCommand, DomainError> {
+        let index = self.account_index(id)?;
+        let old = self.change_account(index, |account| account.set_status(status));
+        Ok(DomainCommand::SetAccountStatus {
+            account: id,
+            status: old,
+        })
+    }
+
     fn move_account(
         &mut self,
         id: AccountId,
@@ -579,12 +622,10 @@ impl Ledger {
         let sub_group = self
             .view
             .sub_group(self.view.accounts[index].account.kind());
-        let neighbour = match direction {
-            MoveDirection::Up => index.checked_sub(1),
-            MoveDirection::Down => Some(index + 1),
-        }
-        .filter(|neighbour| sub_group.contains(neighbour))
-        .ok_or(DomainError::SubGroupEdge { account: id })?;
+        let neighbour = direction
+            .neighbour(index)
+            .filter(|neighbour| sub_group.contains(neighbour))
+            .ok_or(DomainError::SubGroupEdge { account: id })?;
         let view = Arc::make_mut(&mut self.view);
         view.accounts.swap(index, neighbour);
         view.generation = view.generation.next();
@@ -3018,5 +3059,24 @@ mod tests {
         ledger.undo().unwrap();
 
         assert_eq!(names(&ledger.snapshot())[0], "Alpha");
+    }
+
+    #[test]
+    fn undoing_a_compound_command_puts_a_deleted_account_back_in_its_place() {
+        let mut ledger = four_accounts();
+        let before = flags(&ledger);
+        let compound = DomainCommand::Compound(vec![
+            DomainCommand::DeleteAccount {
+                account: account_id(&ledger, "Alpha"),
+            },
+            move_account(&ledger, "Charlie", MoveDirection::Up),
+        ]);
+        ledger.apply(compound).unwrap();
+        let applied = names(&ledger.snapshot()).join(",");
+
+        ledger.undo().unwrap();
+
+        assert_eq!(applied, "Charlie,Bravo,Rainy Day");
+        assert_eq!(flags(&ledger), before);
     }
 }

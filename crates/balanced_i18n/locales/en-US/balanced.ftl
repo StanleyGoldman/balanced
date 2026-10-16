@@ -167,8 +167,8 @@ dialog-manage-accounts-delete = Delete…
 dialog-manage-accounts-move-up = Move { $name } up
 dialog-manage-accounts-move-down = Move { $name } down
 dialog-close-account-message = Close { $name }? Its { -register } becomes read-only. You can reopen it later.
-# Added to the close confirm when the account's balance isn't zero.
-dialog-close-account-balance = It still has a balance of { $amount }.
+# The close confirm for an account whose balance isn't zero.
+dialog-close-account-message-balance = Close { $name }? It still has a balance of { $amount }. Its { -register } becomes read-only. You can reopen it later.
 dialog-close-account-close = Close
 dialog-delete-account-message = Delete { $name } and every transaction in it?
 dialog-delete-account-delete = Delete

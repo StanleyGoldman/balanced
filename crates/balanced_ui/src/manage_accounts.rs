@@ -19,9 +19,6 @@ use crate::i18n::fl;
 use crate::theme::Theme;
 use crate::triangle_button::{Direction, triangle_button};
 
-/// The width of each Name field.
-const NAME_WIDTH: f32 = 200.0;
-
 /// What Manage Accounts holds while it is open: every account as the user has left
 /// it, in the order they will be in.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,8 +43,7 @@ struct Row {
     kind: AccountKind,
     /// The Name field's text.
     name: String,
-    /// The Hidden checkbox.
-    hidden: bool,
+    visibility: Visibility,
     status: AccountStatus,
 }
 
@@ -97,7 +93,7 @@ impl ManageAccountsForm {
                     id: account.id(),
                     kind: account.kind(),
                     name: account.name().to_owned(),
-                    hidden: account.visibility() == Visibility::Hidden,
+                    visibility: account.visibility(),
                     status: account.status(),
                 }
             })
@@ -154,15 +150,10 @@ impl ManageAccountsForm {
                     name: name.to_owned(),
                 });
             }
-            let visibility = if row.hidden {
-                Visibility::Hidden
-            } else {
-                Visibility::Shown
-            };
-            if visibility != account.visibility() {
+            if row.visibility != account.visibility() {
                 changes.push(DomainCommand::SetAccountVisibility {
                     account: row.id,
-                    visibility,
+                    visibility: row.visibility,
                 });
             }
             if row.status != account.status() {
@@ -216,6 +207,7 @@ impl ManageAccountsForm {
             ui.strong(fl!(i18n, "dialog-manage-accounts-status"));
             ui.end_row();
             for (index, row) in self.rows.iter_mut().enumerate() {
+                // `kinds` holds a kind for each row, and `above` is a row before this one.
                 let above = index.checked_sub(1).map(|above| kinds[above]);
                 if above.is_none_or(|above| above.group() != row.kind.group()) {
                     ui.strong(Section::Group(row.kind.group()).label(i18n));
@@ -248,10 +240,11 @@ impl ManageAccountsForm {
         match action {
             None => {}
             Some(TableAction::Move(index, direction)) => {
-                let neighbour = match direction {
-                    MoveDirection::Up => index - 1,
-                    MoveDirection::Down => index + 1,
-                };
+                // A row's arrow is enabled only when a row of its sub-group is that way.
+                let neighbour = direction
+                    .neighbour(index)
+                    .filter(|&neighbour| neighbour < self.rows.len())
+                    .expect("a row moves only towards a row of its sub-group");
                 self.rows.swap(index, neighbour);
             }
             Some(TableAction::Ask(confirm)) => {
@@ -302,7 +295,7 @@ impl Row {
         let mut action = None;
         let height = ui.spacing().interact_size.y;
         ui.add_sized(
-            vec2(NAME_WIDTH, height),
+            vec2(Theme::MANAGE_ACCOUNTS_NAME_WIDTH, height),
             TextEdit::singleline(&mut self.name).id(Id::new(("manage_accounts_name", self.id))),
         )
         .labelled_by(name_header);
@@ -322,16 +315,22 @@ impl Row {
             Some(balance) => ui.label(balance.styled(theme)),
             None => ui.label(""),
         };
-        let hidden = ui.add(Checkbox::without_text(&mut self.hidden));
+        let mut hidden = self.visibility == Visibility::Hidden;
+        let checkbox = ui.add(Checkbox::without_text(&mut hidden));
         name_for_screen_readers(
-            &hidden,
+            &checkbox,
             fl!(i18n, "dialog-manage-accounts-hide", name = name.clone()),
         );
+        self.visibility = if hidden {
+            Visibility::Hidden
+        } else {
+            Visibility::Shown
+        };
         match self.status {
             AccountStatus::Open => {
-                let close = ui.button(fl!(i18n, "dialog-manage-accounts-close"));
-                name_for_screen_readers(
-                    &close,
+                let close = labelled_button(
+                    ui,
+                    fl!(i18n, "dialog-manage-accounts-close"),
                     fl!(
                         i18n,
                         "dialog-manage-accounts-close",
@@ -344,9 +343,9 @@ impl Row {
                 }
             }
             AccountStatus::Closed => {
-                let reopen = ui.button(fl!(i18n, "dialog-manage-accounts-reopen"));
-                name_for_screen_readers(
-                    &reopen,
+                let reopen = labelled_button(
+                    ui,
+                    fl!(i18n, "dialog-manage-accounts-reopen"),
                     fl!(
                         i18n,
                         "dialog-manage-accounts-reopen",
@@ -359,9 +358,9 @@ impl Row {
                 }
             }
         }
-        let delete = ui.button(fl!(i18n, "dialog-manage-accounts-delete"));
-        name_for_screen_readers(
-            &delete,
+        let delete = labelled_button(
+            ui,
+            fl!(i18n, "dialog-manage-accounts-delete"),
             fl!(
                 i18n,
                 "dialog-manage-accounts-delete",
@@ -372,32 +371,58 @@ impl Row {
         if delete.clicked() {
             action = Some(RowAction::Ask(Confirm::Delete(self.id)));
         }
-        ui.horizontal(|ui| {
-            let up = ui
-                .add_enabled_ui(!edges.first, |ui| {
-                    let label = fl!(i18n, "dialog-manage-accounts-move-up", name = name.clone());
-                    triangle_button(ui, label, Direction::Up)
-                })
-                .inner;
-            if up.clicked() {
-                action = Some(RowAction::Move(MoveDirection::Up));
-            }
-            let down = ui
-                .add_enabled_ui(!edges.last, |ui| {
-                    let label = fl!(
-                        i18n,
-                        "dialog-manage-accounts-move-down",
-                        name = name.clone()
-                    );
-                    triangle_button(ui, label, Direction::Down)
-                })
-                .inner;
-            if down.clicked() {
-                action = Some(RowAction::Move(MoveDirection::Down));
-            }
-        });
+        if let Some(direction) = arrows(ui, i18n, &name, edges) {
+            action = Some(RowAction::Move(direction));
+        }
         action
     }
+}
+
+/// The ↑ and ↓ buttons of the row of the account named `name`, each disabled at its
+/// sub-group's edge. Returns the way the clicked one moves the row.
+fn arrows(
+    ui: &mut egui::Ui,
+    i18n: &Localizer,
+    name: &str,
+    edges: SubGroupEdges,
+) -> Option<MoveDirection> {
+    ui.horizontal(|ui| {
+        let up = ui
+            .add_enabled_ui(!edges.first, |ui| {
+                let label = fl!(
+                    i18n,
+                    "dialog-manage-accounts-move-up",
+                    name = name.to_owned()
+                );
+                triangle_button(ui, label, Direction::Up)
+            })
+            .inner;
+        let down = ui
+            .add_enabled_ui(!edges.last, |ui| {
+                let label = fl!(
+                    i18n,
+                    "dialog-manage-accounts-move-down",
+                    name = name.to_owned()
+                );
+                triangle_button(ui, label, Direction::Down)
+            })
+            .inner;
+        if up.clicked() {
+            Some(MoveDirection::Up)
+        } else if down.clicked() {
+            Some(MoveDirection::Down)
+        } else {
+            None
+        }
+    })
+    .inner
+}
+
+/// A button showing `text`, which screen readers name `label`.
+fn labelled_button(ui: &mut egui::Ui, text: String, label: String) -> Response {
+    let button = ui.button(text);
+    name_for_screen_readers(&button, label);
+    button
 }
 
 /// Gives `response`'s widget `label` as its name for screen readers, in place of the
@@ -469,18 +494,18 @@ fn show_confirm(
         .expect("a confirm asks about a row in the table");
     let (message, accept) = match confirm {
         Confirm::Close(_) => {
-            let mut message = fl!(i18n, "dialog-close-account-message", name = name);
             let balance = model
                 .balance(id)
                 .filter(|balance| !balance.money().amount().is_zero());
-            if let Some(balance) = balance {
-                message.push('\n');
-                message.push_str(&fl!(
+            let message = match balance {
+                None => fl!(i18n, "dialog-close-account-message", name = name),
+                Some(balance) => fl!(
                     i18n,
-                    "dialog-close-account-balance",
+                    "dialog-close-account-message-balance",
+                    name = name,
                     amount = balance.text().to_owned()
-                ));
-            }
+                ),
+            };
             (message, fl!(i18n, "dialog-close-account-close"))
         }
         Confirm::Delete(_) => (

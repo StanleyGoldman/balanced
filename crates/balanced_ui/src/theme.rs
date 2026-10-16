@@ -234,6 +234,9 @@ impl Theme {
     /// enough for a dozen accounts.
     pub(crate) const MANAGE_ACCOUNTS_SIZE: Vec2 = vec2(760.0, 560.0);
 
+    /// The width of each Name field in Manage Accounts.
+    pub(crate) const MANAGE_ACCOUNTS_NAME_WIDTH: f32 = 200.0;
+
     pub(crate) fn new(settings: ThemeSettings) -> Self {
         Self {
             settings,

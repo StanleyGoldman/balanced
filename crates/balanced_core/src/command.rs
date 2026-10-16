@@ -100,6 +100,14 @@ impl MoveDirection {
             Self::Down => Self::Up,
         }
     }
+
+    /// The index of the item this way of `index` in a list, or `None` above the first.
+    pub fn neighbour(self, index: usize) -> Option<usize> {
+        match self {
+            Self::Up => index.checked_sub(1),
+            Self::Down => index.checked_add(1),
+        }
+    }
 }
 
 /// The new value of one field of a transaction.

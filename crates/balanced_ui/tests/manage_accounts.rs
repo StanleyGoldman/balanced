@@ -127,8 +127,8 @@ fn closing_an_account_with_a_balance_warns_and_still_closes_it() {
     click(&mut harness, "Close Joint Checking…");
     let warned = shows(
         &harness,
-        "Close Joint Checking? Its Register becomes read-only. You can reopen it later.\n\
-         It still has a balance of $1,032.00.",
+        "Close Joint Checking? It still has a balance of $1,032.00. Its Register becomes \
+         read-only. You can reopen it later.",
     );
     click(&mut harness, "Close");
 
@@ -179,9 +179,29 @@ fn ok_applies_a_move_to_the_account_bar() {
     click(&mut harness, "Move Roth IRA up");
     click(&mut harness, "OK");
 
-    let buttons = buttons(&harness);
-    let place = |name: &str| buttons.iter().position(|label| label == name);
-    assert!(place("Roth IRA") < place("401(k)"), "{buttons:?}");
+    let retirement: Vec<String> = buttons(&harness)
+        .into_iter()
+        .filter(|label| label == "401(k)" || label == "Roth IRA")
+        .collect();
+    assert_eq!(retirement, ["Roth IRA", "401(k)"]);
+}
+
+#[test]
+fn ok_moves_a_closed_account_to_the_account_bars_closed_group() {
+    let mut harness = manage_accounts();
+
+    click(&mut harness, "Close Joint Checking…");
+    click(&mut harness, "Close");
+    click(&mut harness, "OK");
+    click(&mut harness, "Closed");
+
+    let closed: Vec<String> = buttons(&harness)
+        .into_iter()
+        .skip_while(|label| label != "Closed")
+        .skip(1)
+        .take(2)
+        .collect();
+    assert_eq!(closed, ["Joint Checking", "Old Checking"]);
 }
 
 #[test]
