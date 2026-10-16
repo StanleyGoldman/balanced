@@ -15,10 +15,14 @@
 # Output: one JSON line on stdout:
 #   {"status": "red"|"green"|"error", "failed": [test names], "restored": bool,
 #    "next": string?}
-#   red:   the test command failed; "failed" lists the `test … FAILED` names. Read
-#          their panics before trusting the red: a setup failure proves nothing.
+#   red:   the test command failed with at least one `test … FAILED` name, all listed
+#          in "failed". Read their panics before trusting the red: a setup failure
+#          proves nothing.
 #   green: the tests pass against the broken code; they miss this break.
-#   error: bad arguments, or <old> not found exactly once; the file is untouched.
+#   error: bad arguments, or <old> not found exactly once (the file is untouched);
+#          or the test command failed with no `test … FAILED` line, usually a break
+#          that doesn't compile (the file is restored; "restored" says so). No test
+#          ran red, so make a break that compiles.
 # Exit codes: 0 red, 1 green, 2 error.
 set -euo pipefail
 
@@ -60,6 +64,11 @@ restored=false
 cmp -s -- "$saved" "$file" && restored=true
 
 failed=$({ grep -oE '^test [^ ]+ \.\.\. FAILED' "$log" || true; } | awk '{print $2}' | jq -R . | jq -sc .)
+if [[ $code -ne 0 && $failed == "[]" ]]; then
+  jq -nc --argjson restored "$restored" '{status: "error", failed: [], restored: $restored,
+    next: "the break did not compile or no test failed: make a break that compiles, then run this again"}'
+  exit 2
+fi
 if [[ $code -ne 0 ]]; then
   jq -nc --argjson failed "$failed" --argjson restored "$restored" \
     '{status: "red", failed: $failed, restored: $restored}'

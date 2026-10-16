@@ -8,8 +8,9 @@ use crate::account::NewAccount;
 use crate::category::NewCategory;
 use crate::transaction::{NewTransaction, TransactionId};
 use crate::{
-    Account, AccountId, AccountKind, Applied, Category, CategoryId, CurrencyCode, DomainCommand,
-    DomainError, Money, MoneyError, Transaction, TransactionEdit,
+    Account, AccountId, AccountKind, AccountStatus, Applied, Category, CategoryId, CurrencyCode,
+    DomainCommand, DomainError, Money, MoneyError, MoveDirection, Transaction, TransactionEdit,
+    Visibility,
 };
 
 /// Counts the changes applied to a [`Ledger`]. A window's view model rebuilds when
@@ -228,6 +229,15 @@ struct TransactionPosition {
     entry: usize,
 }
 
+/// What [`Ledger::restore`] puts back: the ledger less its Undo and Redo history.
+#[derive(Debug)]
+struct Checkpoint {
+    view: Arc<LedgerView>,
+    next_account: AccountId,
+    next_transaction: TransactionId,
+    next_category: CategoryId,
+}
+
 /// The financial data. It changes only by applying a `DomainCommand`, and windows
 /// read it through [`Ledger::snapshot`].
 #[derive(Debug)]
@@ -383,6 +393,18 @@ impl Ledger {
                 transactions,
                 place,
             } => self.restore_account(account, transactions, place)?,
+            DomainCommand::RenameAccount { account, name } => self.rename_account(account, name)?,
+            DomainCommand::SetAccountVisibility {
+                account,
+                visibility,
+            } => self.set_account_visibility(account, visibility)?,
+            DomainCommand::SetAccountStatus { account, status } => {
+                self.set_account_status(account, status)?
+            }
+            DomainCommand::Compound(commands) => self.apply_compound(commands)?,
+            DomainCommand::MoveAccount { account, direction } => {
+                self.move_account(account, direction)?
+            }
             DomainCommand::PostTransaction {
                 account,
                 transaction,
@@ -404,6 +426,49 @@ impl Ledger {
             DomainCommand::RestoreCategory { category } => self.restore_category(category),
         };
         Ok(Applied { inverse })
+    }
+
+    /// Applies each of `commands` in order, returning the Command that undoes them all:
+    /// their inverses, latest first. When one is refused, puts the ledger back as it
+    /// was before the first.
+    fn apply_compound(
+        &mut self,
+        commands: Vec<DomainCommand>,
+    ) -> Result<DomainCommand, DomainError> {
+        let checkpoint = self.checkpoint();
+        let mut inverses = Vec::with_capacity(commands.len());
+        for command in commands {
+            match self.apply_unrecorded(command) {
+                Ok(applied) => inverses.push(applied.into_inverse()),
+                Err(error) => {
+                    self.restore(checkpoint);
+                    return Err(error);
+                }
+            }
+        }
+        inverses.reverse();
+        Ok(DomainCommand::Compound(inverses))
+    }
+
+    /// The ledger as it is now, less its Undo and Redo history.
+    fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            view: Arc::clone(&self.view),
+            next_account: self.next_account,
+            next_transaction: self.next_transaction,
+            next_category: self.next_category,
+        }
+    }
+
+    /// Puts the ledger back as it was at `checkpoint`, keeping its Undo and Redo
+    /// history.
+    fn restore(&mut self, checkpoint: Checkpoint) {
+        Checkpoint {
+            view: self.view,
+            next_account: self.next_account,
+            next_transaction: self.next_transaction,
+            next_category: self.next_category,
+        } = checkpoint;
     }
 
     fn create_account(
@@ -484,6 +549,90 @@ impl Ledger {
         let summary = AccountSummary::new(account, transactions, currency)?;
         self.insert_account(summary, place)?;
         Ok(DomainCommand::DeleteAccount { account: id })
+    }
+
+    /// The index in the view's accounts of account `id`.
+    fn account_index(&self, id: AccountId) -> Result<usize, DomainError> {
+        self.view
+            .accounts
+            .iter()
+            .position(|summary| summary.account.id() == id)
+            .ok_or(DomainError::UnknownAccount { account: id })
+    }
+
+    /// Changes the account at `index` with `change`, which leaves its balance as it
+    /// was, and moves to the next generation. Returns what `change` returned.
+    fn change_account<T>(&mut self, index: usize, change: impl FnOnce(&mut Account) -> T) -> T {
+        let view = Arc::make_mut(&mut self.view);
+        // Callers take `index` from a lookup in this same list of accounts.
+        let changed = change(&mut view.accounts[index].account);
+        view.generation = view.generation.next();
+        changed
+    }
+
+    fn rename_account(
+        &mut self,
+        id: AccountId,
+        name: String,
+    ) -> Result<DomainCommand, DomainError> {
+        if name.trim().is_empty() {
+            return Err(DomainError::BlankAccountName);
+        }
+        let index = self.account_index(id)?;
+        let old = self.change_account(index, |account| account.rename(name));
+        Ok(DomainCommand::RenameAccount {
+            account: id,
+            name: old,
+        })
+    }
+
+    fn set_account_visibility(
+        &mut self,
+        id: AccountId,
+        visibility: Visibility,
+    ) -> Result<DomainCommand, DomainError> {
+        let index = self.account_index(id)?;
+        let old = self.change_account(index, |account| account.set_visibility(visibility));
+        Ok(DomainCommand::SetAccountVisibility {
+            account: id,
+            visibility: old,
+        })
+    }
+
+    fn set_account_status(
+        &mut self,
+        id: AccountId,
+        status: AccountStatus,
+    ) -> Result<DomainCommand, DomainError> {
+        let index = self.account_index(id)?;
+        let old = self.change_account(index, |account| account.set_status(status));
+        Ok(DomainCommand::SetAccountStatus {
+            account: id,
+            status: old,
+        })
+    }
+
+    fn move_account(
+        &mut self,
+        id: AccountId,
+        direction: MoveDirection,
+    ) -> Result<DomainCommand, DomainError> {
+        let index = self.account_index(id)?;
+        // `account_index` found `index` in this same list of accounts.
+        let sub_group = self
+            .view
+            .sub_group(self.view.accounts[index].account.kind());
+        let neighbour = direction
+            .neighbour(index)
+            .filter(|neighbour| sub_group.contains(neighbour))
+            .ok_or(DomainError::SubGroupEdge { account: id })?;
+        let view = Arc::make_mut(&mut self.view);
+        view.accounts.swap(index, neighbour);
+        view.generation = view.generation.next();
+        Ok(DomainCommand::MoveAccount {
+            account: id,
+            direction: direction.opposite(),
+        })
     }
 
     /// Puts `summary` at `place` among the accounts of its sub-group, recounting Net
@@ -749,7 +898,9 @@ mod tests {
 
     use super::*;
     use crate::transaction::{NewTransaction, SplitLine};
-    use crate::{AccountKind, Allocation, TransactionEdit};
+    use crate::{
+        AccountKind, AccountStatus, Allocation, MoveDirection, TransactionEdit, Visibility,
+    };
 
     fn usd_code() -> CurrencyCode {
         CurrencyCode::new("USD").unwrap()
@@ -2584,5 +2735,348 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), count);
+    }
+
+    /// Three checking accounts, Alpha, Bravo and Charlie in that order, then a savings
+    /// account, Rainy Day.
+    fn four_accounts() -> Ledger {
+        Ledger::with_accounts(
+            usd_code(),
+            [],
+            [
+                account("Alpha", AccountKind::Checking, usd(dec!(10.00))),
+                account("Bravo", AccountKind::Checking, usd(dec!(20.00))),
+                account("Charlie", AccountKind::Checking, usd(dec!(30.00))),
+                account("Rainy Day", AccountKind::Savings, usd(dec!(40.00))),
+            ],
+        )
+        .unwrap()
+    }
+
+    /// The id of the account named `name`.
+    fn account_id(ledger: &Ledger, name: &str) -> AccountId {
+        ledger
+            .snapshot()
+            .accounts()
+            .iter()
+            .map(AccountSummary::account)
+            .find(|account| account.name() == name)
+            .map(Account::id)
+            .unwrap()
+    }
+
+    fn rename(ledger: &Ledger, from: &str, to: &str) -> DomainCommand {
+        DomainCommand::RenameAccount {
+            account: account_id(ledger, from),
+            name: to.to_owned(),
+        }
+    }
+
+    #[test]
+    fn renaming_an_account_shows_its_new_name_and_undo_puts_the_old_one_back() {
+        let mut ledger = four_accounts();
+
+        ledger.apply(rename(&ledger, "Bravo", "Joint")).unwrap();
+        let renamed = names(&ledger.snapshot()).join(",");
+        ledger.undo().unwrap();
+
+        assert_eq!(renamed, "Alpha,Joint,Charlie,Rainy Day");
+        assert_eq!(
+            names(&ledger.snapshot()),
+            ["Alpha", "Bravo", "Charlie", "Rainy Day"]
+        );
+    }
+
+    #[test]
+    fn renaming_an_account_to_a_blank_name_is_rejected_and_changes_nothing() {
+        let mut ledger = four_accounts();
+        let before = ledger.snapshot();
+
+        let result = ledger.apply(rename(&ledger, "Bravo", "  "));
+
+        assert_eq!(result, Err(DomainError::BlankAccountName));
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    /// Each account's name with whether it is hidden and whether it is closed.
+    fn flags(ledger: &Ledger) -> Vec<(String, bool, bool)> {
+        ledger
+            .snapshot()
+            .accounts()
+            .iter()
+            .map(|summary| {
+                let account = summary.account();
+                (
+                    account.name().to_owned(),
+                    account.is_hidden(),
+                    account.is_closed(),
+                )
+            })
+            .collect()
+    }
+
+    fn flag(name: &str, hidden: bool, closed: bool) -> (String, bool, bool) {
+        (name.to_owned(), hidden, closed)
+    }
+
+    #[test]
+    fn hiding_an_account_leaves_it_open_and_undo_shows_it_again() {
+        let mut ledger = four_accounts();
+        let before = flags(&ledger);
+
+        ledger
+            .apply(DomainCommand::SetAccountVisibility {
+                account: account_id(&ledger, "Bravo"),
+                visibility: Visibility::Hidden,
+            })
+            .unwrap();
+        let hidden = flags(&ledger);
+        ledger.undo().unwrap();
+
+        assert_eq!(hidden[1], flag("Bravo", true, false));
+        assert_eq!(flags(&ledger), before);
+    }
+
+    #[test]
+    fn closing_an_account_with_a_balance_leaves_it_shown_and_undo_reopens_it() {
+        let mut ledger = four_accounts();
+        let before = flags(&ledger);
+
+        ledger
+            .apply(DomainCommand::SetAccountStatus {
+                account: account_id(&ledger, "Bravo"),
+                status: AccountStatus::Closed,
+            })
+            .unwrap();
+        let closed = flags(&ledger);
+        ledger.undo().unwrap();
+
+        assert_eq!(closed[1], flag("Bravo", false, true));
+        assert_eq!(flags(&ledger), before);
+    }
+
+    #[test]
+    fn reopening_a_closed_account_lets_its_transactions_change_again() {
+        let mut ledger = four_accounts();
+        let bravo = account_id(&ledger, "Bravo");
+        let close = |status| DomainCommand::SetAccountStatus {
+            account: bravo,
+            status,
+        };
+        ledger.apply(close(AccountStatus::Closed)).unwrap();
+
+        ledger.apply(close(AccountStatus::Open)).unwrap();
+
+        assert_eq!(flags(&ledger)[1], flag("Bravo", false, false));
+        let opening = ledger.snapshot().account(bravo).unwrap().register()[0]
+            .transaction()
+            .id();
+        ledger
+            .apply(edit(opening, TransactionEdit::Memo("Reopened".to_owned())))
+            .unwrap();
+    }
+
+    #[test]
+    fn hiding_an_unknown_account_is_rejected() {
+        let mut ledger = four_accounts();
+        let bravo = account_id(&ledger, "Bravo");
+        ledger
+            .apply(DomainCommand::DeleteAccount { account: bravo })
+            .unwrap();
+
+        let result = ledger.apply(DomainCommand::SetAccountVisibility {
+            account: bravo,
+            visibility: Visibility::Hidden,
+        });
+
+        assert_eq!(result, Err(DomainError::UnknownAccount { account: bravo }));
+    }
+
+    fn move_account(ledger: &Ledger, name: &str, direction: MoveDirection) -> DomainCommand {
+        DomainCommand::MoveAccount {
+            account: account_id(ledger, name),
+            direction,
+        }
+    }
+
+    #[test]
+    fn moving_an_account_up_swaps_it_with_the_one_above_and_undo_swaps_them_back() {
+        let mut ledger = four_accounts();
+
+        ledger
+            .apply(move_account(&ledger, "Charlie", MoveDirection::Up))
+            .unwrap();
+        let moved = names(&ledger.snapshot()).join(",");
+        ledger.undo().unwrap();
+
+        assert_eq!(moved, "Alpha,Charlie,Bravo,Rainy Day");
+        assert_eq!(
+            names(&ledger.snapshot()),
+            ["Alpha", "Bravo", "Charlie", "Rainy Day"]
+        );
+    }
+
+    #[test]
+    fn moving_an_account_down_swaps_it_with_the_one_below() {
+        let mut ledger = four_accounts();
+
+        ledger
+            .apply(move_account(&ledger, "Alpha", MoveDirection::Down))
+            .unwrap();
+
+        assert_eq!(
+            names(&ledger.snapshot()),
+            ["Bravo", "Alpha", "Charlie", "Rainy Day"]
+        );
+    }
+
+    #[test]
+    fn the_first_account_of_a_sub_group_moves_no_higher() {
+        let mut ledger = four_accounts();
+        let before = ledger.snapshot();
+
+        let result = ledger.apply(move_account(&ledger, "Alpha", MoveDirection::Up));
+
+        assert_eq!(
+            result,
+            Err(DomainError::SubGroupEdge {
+                account: account_id(&ledger, "Alpha")
+            })
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn a_move_never_crosses_into_the_next_sub_group() {
+        let mut ledger = four_accounts();
+        let before = ledger.snapshot();
+
+        let down = ledger.apply(move_account(&ledger, "Charlie", MoveDirection::Down));
+        let up = ledger.apply(move_account(&ledger, "Rainy Day", MoveDirection::Up));
+
+        assert_eq!(
+            [down, up],
+            [
+                Err(DomainError::SubGroupEdge {
+                    account: account_id(&ledger, "Charlie")
+                }),
+                Err(DomainError::SubGroupEdge {
+                    account: account_id(&ledger, "Rainy Day")
+                }),
+            ]
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    /// Renames Alpha, hides Bravo, deletes Charlie, then closes Rainy Day and moves
+    /// Alpha below Bravo.
+    fn manage_accounts(ledger: &Ledger) -> DomainCommand {
+        DomainCommand::Compound(vec![
+            rename(ledger, "Alpha", "Everyday"),
+            DomainCommand::SetAccountVisibility {
+                account: account_id(ledger, "Bravo"),
+                visibility: Visibility::Hidden,
+            },
+            DomainCommand::DeleteAccount {
+                account: account_id(ledger, "Charlie"),
+            },
+            DomainCommand::SetAccountStatus {
+                account: account_id(ledger, "Rainy Day"),
+                status: AccountStatus::Closed,
+            },
+            move_account(ledger, "Alpha", MoveDirection::Down),
+        ])
+    }
+
+    #[test]
+    fn a_compound_command_makes_each_of_its_changes_in_order() {
+        let mut ledger = four_accounts();
+
+        ledger.apply(manage_accounts(&ledger)).unwrap();
+
+        assert_eq!(
+            flags(&ledger),
+            [
+                flag("Bravo", true, false),
+                flag("Everyday", false, false),
+                flag("Rainy Day", false, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn one_undo_reverts_a_whole_compound_command_and_one_redo_makes_it_again() {
+        let mut ledger = four_accounts();
+        let before = flags(&ledger);
+        ledger.apply(manage_accounts(&ledger)).unwrap();
+        let after = flags(&ledger);
+
+        ledger.undo().unwrap();
+        let undone = flags(&ledger);
+        let can_undo = ledger.snapshot().can_undo();
+        ledger.redo().unwrap();
+
+        assert_eq!(undone, before);
+        assert!(!can_undo);
+        assert_eq!(flags(&ledger), after);
+    }
+
+    #[test]
+    fn a_compound_command_with_a_rejected_change_changes_nothing() {
+        let mut ledger = four_accounts();
+        let before = ledger.snapshot();
+        let DomainCommand::Compound(mut changes) = manage_accounts(&ledger) else {
+            unreachable!("manage_accounts is a compound command");
+        };
+        changes.push(move_account(&ledger, "Rainy Day", MoveDirection::Up));
+
+        let result = ledger.apply(DomainCommand::Compound(changes));
+
+        assert_eq!(
+            result,
+            Err(DomainError::SubGroupEdge {
+                account: account_id(&ledger, "Rainy Day")
+            })
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn undoing_a_compound_command_reverts_its_changes_latest_first() {
+        let mut ledger = four_accounts();
+        let alpha = account_id(&ledger, "Alpha");
+        let rename = |name: &str| DomainCommand::RenameAccount {
+            account: alpha,
+            name: name.to_owned(),
+        };
+        ledger
+            .apply(DomainCommand::Compound(vec![
+                rename("First"),
+                rename("Second"),
+            ]))
+            .unwrap();
+
+        ledger.undo().unwrap();
+
+        assert_eq!(names(&ledger.snapshot())[0], "Alpha");
+    }
+
+    #[test]
+    fn undoing_a_compound_command_puts_a_deleted_account_back_in_its_place() {
+        let mut ledger = four_accounts();
+        let before = flags(&ledger);
+        let compound = DomainCommand::Compound(vec![
+            DomainCommand::DeleteAccount {
+                account: account_id(&ledger, "Alpha"),
+            },
+            move_account(&ledger, "Charlie", MoveDirection::Up),
+        ]);
+        ledger.apply(compound).unwrap();
+        let applied = names(&ledger.snapshot()).join(",");
+
+        ledger.undo().unwrap();
+
+        assert_eq!(applied, "Charlie,Bravo,Rainy Day");
+        assert_eq!(flags(&ledger), before);
     }
 }

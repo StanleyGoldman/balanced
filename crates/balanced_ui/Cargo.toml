@@ -67,15 +67,19 @@ name = "main_window"
 required-features = ["test-support"]
 
 [[test]]
+name = "manage_accounts"
+required-features = ["test-support"]
+
+[[test]]
+name = "new_account"
+required-features = ["test-support"]
+
+[[test]]
 name = "new_category"
 required-features = ["test-support"]
 
 [[test]]
 name = "preferences"
-required-features = ["test-support"]
-
-[[test]]
-name = "new_account"
 required-features = ["test-support"]
 
 [[test]]

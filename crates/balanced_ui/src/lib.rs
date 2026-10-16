@@ -15,6 +15,7 @@ mod i18n;
 mod keymap;
 mod layout;
 mod main_window;
+mod manage_accounts;
 mod menu_nav;
 mod new_account;
 mod new_category;
@@ -27,6 +28,7 @@ mod route;
 #[cfg(feature = "test-support")]
 pub mod testing;
 mod theme;
+mod triangle_button;
 mod user_action;
 
 pub use app::App;

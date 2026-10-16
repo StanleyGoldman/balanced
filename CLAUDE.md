@@ -74,12 +74,13 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 
 - The main checkout in the repo folder belongs to the user; keep its branch as the user left it.
 - Do branch work (practice and doc updates, fixes, PR branches) in a git worktree under `.claude/worktrees/<name>` (gitignored), never beside the repo folder. A subagent in its own worktree makes such a fix in the background.
-- In a worktree-isolated subagent, run each shell command as one plain call with literal paths. The isolation guard refuses any command it cannot prove keeps git inside the worktree, and backgrounding, loops, shell variables, and `sh <script>` all trip it, even for `curl` or `gh` downloads.
+- In a worktree-isolated subagent, run each shell command as one plain call with literal paths. The isolation guard refuses any command it cannot prove keeps git inside the worktree, and backgrounding, loops, shell variables, and `sh <script>` all trip it, even for `curl` or `gh` downloads. Inline text holding backticks or `$` trips it too, so write a PR or issue body to a scratchpad file and pass `--body-file <path>`, and a commit message with such characters via `git commit -F <path>`.
 
 ### Implementation
 
 - Assign the ticket to the user as an `/implement` run starts (`gh issue edit <n> --add-assignee @me`), so the tracker shows it is being worked.
-- Start an `/implement` run by checking that everything the ticket reuses (a field, a clock, a Dialog) is already built. When one is still an open ticket that isn't among its blockers, ask the user whether to add it as a blocker or build an interim stand-in.
+- Start an `/implement` run with `git fetch origin main` and branch the work from `origin/main`: a worktree can predate merged blockers, so their code looks missing.
+- Then check that everything the ticket reuses (a field, a clock, a Dialog) is already built. When one is still an open ticket that isn't among its blockers, ask the user whether to add it as a blocker or build an interim stand-in.
 - Load the `tdd` skill before writing the first test or line of code of an `/implement` run; the skill names `/tdd` only in passing, so it won't load unless you call it.
 - Run each slice red before green. A test that has only failed to compile, or was written after its code, has never been red: break the code it covers, watch the test fail, then restore the code. Do the break with `.claude/scripts/red-check.sh <file> <old> <new> <test command...>`, which restores the file byte for byte (contract in its header).
 - Restore broken code by editing it back, so its mtime moves forward. A file moved back from a backup copy keeps the copy's older mtime, so cargo skips the rebuild and the rerun still tests the broken build.

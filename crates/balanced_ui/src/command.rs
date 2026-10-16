@@ -63,6 +63,8 @@ pub(crate) enum DialogKind {
     DeleteTransaction,
     /// The New Account wizard, on its first step.
     NewAccount,
+    /// Manage Accounts, holding every account as the ledger has it.
+    ManageAccounts,
     /// Create a category, starting from the name typed in a Category cell.
     NewCategory { name: String },
     /// The Preferences Dialog, starting from the Preferences in use.
@@ -105,6 +107,7 @@ impl StatusMessage {
                     fl!(i18n, "status-unknown-transaction")
                 }
                 DomainError::BlankAccountName => fl!(i18n, "status-blank-account-name"),
+                DomainError::SubGroupEdge { .. } => fl!(i18n, "status-sub-group-edge"),
                 DomainError::OpeningBalancePayee { .. } => {
                     fl!(i18n, "status-opening-balance-payee")
                 }

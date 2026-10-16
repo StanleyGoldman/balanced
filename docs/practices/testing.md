@@ -19,6 +19,7 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 ## UI tests
 
 - Drive the UI the way a user does: `node.click()`, or `focus()` then `type_text()`. Don't write into internal state to set up a UI test. `TextEdit` ignores AccessKit value-setting in egui 0.36.
+- `node.click()` clicks the centre of the node's rect, even when the widget is scrolled out of view. In a heavy Dialog's scrolling body, that click lands on the dimming backdrop and cancels the Dialog, and the test fails later with "No nodes found". Scroll the widget into view first: `node.scroll_to_me()`, `harness.run()`, then `click()`.
 - Find nodes by role and label (`get_by_role_and_label`), never by screen position.
 - A `Label`'s text is its AccessKit value, and its label is empty, so `get_by_label` misses a message shown in a `Label` (a bubble, the Status bar). Find it by role and value: `query_all_by_role(Role::Label)` and `accesskit_node().value()`.
 - `accesskit_node()` returns an `accesskit_consumer` node, whose `supports_action` takes a filter as well. To ask whether a widget accepts a click, read the raw node: `node.accesskit_node().data().supports_action(Action::Click)`.

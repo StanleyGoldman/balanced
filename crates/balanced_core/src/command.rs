@@ -4,8 +4,8 @@
 use icu_calendar::{Date, Iso};
 
 use crate::{
-    Account, AccountId, AccountKind, Category, CategoryId, Money, MoneyError, NewTransaction,
-    Transaction, TransactionId,
+    Account, AccountId, AccountKind, AccountStatus, Category, CategoryId, Money, MoneyError,
+    NewTransaction, Transaction, TransactionId, Visibility,
 };
 
 /// A change to the ledger. `Ledger::apply` applies it, or rejects it with a
@@ -31,6 +31,28 @@ pub enum DomainCommand {
         transactions: Vec<Transaction>,
         place: usize,
     },
+    /// Give an account a new name, which may not be blank.
+    RenameAccount { account: AccountId, name: String },
+    /// Show an account in the Account bar, or hide it there.
+    SetAccountVisibility {
+        account: AccountId,
+        visibility: Visibility,
+    },
+    /// Close an account, which makes its history read-only, or open it again. An
+    /// account with a balance can be closed.
+    SetAccountStatus {
+        account: AccountId,
+        status: AccountStatus,
+    },
+    /// Swap an account with its neighbour above or below it in its sub-group. An
+    /// account never moves out of its sub-group.
+    MoveAccount {
+        account: AccountId,
+        direction: MoveDirection,
+    },
+    /// Make every change in the list, in order, as one change that undoes in one step.
+    /// When the ledger refuses any of them, it makes none.
+    Compound(Vec<Self>),
     /// Add a transaction to `account`, in date order after any already on its date.
     PostTransaction {
         account: AccountId,
@@ -60,6 +82,32 @@ pub enum DomainCommand {
     /// Put a deleted category back, with its id: the inverse of
     /// [`DomainCommand::DeleteCategory`].
     RestoreCategory { category: Category },
+}
+
+/// Which way [`DomainCommand::MoveAccount`] moves an account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MoveDirection {
+    Up,
+    Down,
+}
+
+impl MoveDirection {
+    /// The direction that undoes a move this way.
+    #[must_use]
+    pub fn opposite(self) -> Self {
+        match self {
+            Self::Up => Self::Down,
+            Self::Down => Self::Up,
+        }
+    }
+
+    /// The index of the item this way of `index` in a list, or `None` above the first.
+    pub fn neighbour(self, index: usize) -> Option<usize> {
+        match self {
+            Self::Up => index.checked_sub(1),
+            Self::Down => index.checked_add(1),
+        }
+    }
 }
 
 /// The new value of one field of a transaction.
@@ -107,6 +155,10 @@ pub enum DomainError {
     /// No account has the id, perhaps because it was deleted.
     #[error("no such account: {account:?}")]
     UnknownAccount { account: AccountId },
+    /// The account is already first or last in its sub-group, so it can't move that
+    /// way.
+    #[error("the account can't move out of its sub-group: {account:?}")]
+    SubGroupEdge { account: AccountId },
     /// The command named a new account with nothing but white space.
     #[error("an account needs a name")]
     BlankAccountName,

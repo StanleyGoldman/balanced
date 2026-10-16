@@ -73,7 +73,21 @@ impl FocusReturn {
     /// still on top, it asks for another frame and returns itself, to try again then.
     #[must_use = "focus that can't be restored yet is returned to try again next frame"]
     pub(crate) fn restore(self, ctx: &egui::Context) -> Option<Self> {
-        if ctx.memory(|memory| memory.top_modal_layer().is_some()) {
+        self.restore_under(ctx, None)
+    }
+
+    /// Restores focus to a widget in the heavy Dialog with id `heavy`, once a confirm
+    /// opened over it has closed. Call it before the heavy Dialog's body is drawn. While
+    /// another modal layer is on top of the heavy Dialog, it asks for another frame and
+    /// returns itself, to try again then.
+    #[must_use = "focus that can't be restored yet is returned to try again next frame"]
+    pub(crate) fn restore_in(self, ctx: &egui::Context, heavy: Id) -> Option<Self> {
+        self.restore_under(ctx, Some(heavy_backdrop(heavy)))
+    }
+
+    /// Restores focus once `layer`, or no layer, is the top modal layer.
+    fn restore_under(self, ctx: &egui::Context, layer: Option<LayerId>) -> Option<Self> {
+        if ctx.memory(egui::Memory::top_modal_layer) != layer {
             ctx.request_repaint();
             return Some(self);
         }
@@ -171,13 +185,16 @@ impl LightDialog {
 /// edges, over the dimmed Main window. Its body sits above a row with its default
 /// button and Cancel. It opens centred, and the default button has first focus
 /// unless the body gives it to a field.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct HeavyDialog {
     id: Id,
     title: String,
     accept: String,
     cancel: String,
     backdrop: Color32,
+    /// The size it opens at, when not [`Theme::HEAVY_DIALOG_WIDTH`] wide and as tall
+    /// as its body.
+    size: Option<Vec2>,
 }
 
 impl HeavyDialog {
@@ -196,6 +213,15 @@ impl HeavyDialog {
             accept,
             cancel,
             backdrop: theme.backdrop(),
+            size: None,
+        }
+    }
+
+    /// The same Dialog, opening at `size` where the window has room.
+    pub(crate) fn with_size(self, size: Vec2) -> Self {
+        Self {
+            size: Some(size),
+            ..self
         }
     }
 
@@ -214,6 +240,7 @@ impl HeavyDialog {
             accept,
             cancel,
             backdrop: tint,
+            size,
         } = self;
         let window = ctx.content_rect();
         let room = window.shrink(Theme::DIALOG_MARGIN);
@@ -221,7 +248,7 @@ impl HeavyDialog {
         dialog.shown = true;
         // Windows' order: above the Main window's panels, and below popups and light
         // Dialogs, so a list or confirm the Dialog opens draws over it.
-        let backdrop_layer = LayerId::new(Order::Middle, id.with("backdrop"));
+        let backdrop_layer = heavy_backdrop(id);
         let dialog_layer = LayerId::new(Order::Middle, id);
         // Widgets below the backdrop take no input or focus, as below an `egui::Modal`.
         let is_top = ctx.memory_mut(|memory| {
@@ -245,9 +272,12 @@ impl HeavyDialog {
             .collapsible(false)
             .resizable(true)
             .pivot(Align2::CENTER_CENTER)
-            .default_width(Theme::HEAVY_DIALOG_WIDTH.min(room.width()))
             .max_size(room.size())
             .constrain_to(room);
+        heavy = match size {
+            None => heavy.default_width(Theme::HEAVY_DIALOG_WIDTH.min(room.width())),
+            Some(size) => heavy.default_size(size.min(room.size())),
+        };
         if first_frame {
             heavy = heavy.current_pos(window.center());
         }
@@ -282,6 +312,12 @@ impl HeavyDialog {
             DialogOutcome::Open
         }
     }
+}
+
+/// The layer of the backdrop behind the heavy Dialog with id `heavy`, which is its
+/// modal layer.
+fn heavy_backdrop(heavy: Id) -> LayerId {
+    LayerId::new(Order::Middle, heavy.with("backdrop"))
 }
 
 /// Draws a Dialog's `body` in `ui`, scrolling when it is taller than `height` less a

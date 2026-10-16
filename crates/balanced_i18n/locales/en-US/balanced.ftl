@@ -24,6 +24,7 @@ menu-view-next-register-tab = Next { -register } Tab
 menu-view-previous-register-tab = Previous { -register } Tab
 menu-view-switch-pane = Switch Pane
 menu-tools = Tools
+menu-tools-manage-accounts = Manage Accounts…
 menu-tools-preferences = Preferences…
 menu-help = Help
 menu-help-about = About { -brand-name }
@@ -58,6 +59,19 @@ tab-property-debt-placeholder = Your assets, loans and other debts will appear h
 # The × on a Register tab, named for the account the tab shows.
 tab-register-close = Close { $account }
 
+## Account kinds
+
+account-kind-checking = Checking
+account-kind-savings = Savings
+account-kind-credit-card = Credit Card
+account-kind-investment = Investment
+# Retirement savings, such as a 401(k) or an IRA.
+account-kind-retirement = Retirement
+# Property, such as a house or a car.
+account-kind-asset = Asset
+# Debt, such as a mortgage or a loan.
+account-kind-liability = Liability
+
 ## Account bar
 
 account-bar-title = Accounts
@@ -74,6 +88,8 @@ account-bar-unfold = Unfold the { -account-bar }
 # An account's right-click menu.
 account-bar-open-register = Open { -register }
 account-bar-open-in-new-tab = Open in New Tab
+account-bar-reconcile = Reconcile
+account-bar-manage-accounts = Manage Accounts…
 # The button in the Account bar's header that opens the New Account wizard.
 account-bar-new-account = + Account
 
@@ -144,6 +160,34 @@ dialog-preferences-dense-rows = Dense rows
 dialog-preferences-monospace-money = Line up amounts in a fixed-width font
 dialog-preferences-coloured-negatives = Show negative amounts in red
 
+# Manage Accounts: a table of every account, with what can be changed about each.
+dialog-manage-accounts-title = Manage Accounts
+dialog-manage-accounts-name = Name
+dialog-manage-accounts-type = Type
+dialog-manage-accounts-balance = Balance
+dialog-manage-accounts-hidden = Hidden
+# The Hidden checkbox of the account named $name, for screen readers.
+dialog-manage-accounts-hide = Hide { $name }
+dialog-manage-accounts-status = Status
+# Beside the type of a closed account.
+dialog-manage-accounts-closed = closed
+dialog-manage-accounts-close = Close…
+    .a11y = Close { $name }…
+dialog-manage-accounts-reopen = Reopen
+    .a11y = Reopen { $name }
+dialog-manage-accounts-delete = Delete…
+    .a11y = Delete { $name }…
+# The buttons that move an account up and down within its sub-group, for screen
+# readers. On screen they are arrows.
+dialog-manage-accounts-move-up = Move { $name } up
+dialog-manage-accounts-move-down = Move { $name } down
+dialog-close-account-message = Close { $name }? Its { -register } becomes read-only. You can reopen it later.
+# The close confirm for an account whose balance isn't zero.
+dialog-close-account-message-balance = Close { $name }? It still has a balance of { $amount }. Its { -register } becomes read-only. You can reopen it later.
+dialog-close-account-close = Close
+dialog-delete-account-message = Delete { $name } and every transaction in it?
+dialog-delete-account-delete = Delete
+
 # The New Account wizard. Each step's heading says how far through it is.
 dialog-new-account-step-type = Step 1 of 4: Type
 dialog-new-account-step-details = Step 2 of 4: Details
@@ -152,16 +196,6 @@ dialog-new-account-step-review = Step 4 of 4: Review
 dialog-new-account-back = Back
 dialog-new-account-next = Next
 dialog-new-account-finish = Finish
-dialog-new-account-kind-checking = Checking
-dialog-new-account-kind-savings = Savings
-dialog-new-account-kind-credit-card = Credit Card
-dialog-new-account-kind-investment = Investment
-# Retirement savings, such as a 401(k) or an IRA.
-dialog-new-account-kind-retirement = Retirement
-# Property, such as a house or a car.
-dialog-new-account-kind-asset = Asset
-# Debt, such as a mortgage or a loan.
-dialog-new-account-kind-liability = Liability
 dialog-new-account-name = Name
 dialog-new-account-balance = Opening balance
 # The date of the opening balance.
@@ -217,6 +251,7 @@ status-account-closed = This account is closed, so its transactions can't be cha
 # A change to a transaction that no longer exists, such as one just deleted.
 status-unknown-transaction = That transaction no longer exists.
 status-blank-account-name = Enter a name for the account.
+status-sub-group-edge = That account can't move any further in its group.
 status-opening-balance-payee = The opening balance has no payee.
 # A change to an account that no longer exists, such as one just deleted.
 status-unknown-account = That account no longer exists.
