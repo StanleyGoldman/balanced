@@ -102,6 +102,20 @@ impl Localizer {
         .expect("the embedded en-US messages and ICU4X's built-in en-US data always load")
     }
 
+    /// A localizer for `text_language`, formatting in `formatting_locale`, with
+    /// Fluent's bidi isolation marks off as in [`Self::for_tests`].
+    ///
+    /// # Errors
+    ///
+    /// When the messages or the formatting data fail to load, as [`Self::new`].
+    #[cfg(feature = "test-support")]
+    pub fn for_tests_in(
+        text_language: &LanguageIdentifier,
+        formatting_locale: &Locale,
+    ) -> Result<Self, I18nError> {
+        Self::with_isolation(text_language, formatting_locale, Isolation::Off)
+    }
+
     fn with_isolation(
         text_language: &LanguageIdentifier,
         formatting_locale: &Locale,
@@ -337,7 +351,10 @@ mod tests {
     fn untranslated_message_falls_back_to_en_us() {
         let i18n = localizer(&langid!("de-AT"), &locale!("de-AT"));
 
-        assert_eq!(i18n.loader().get("register-column-amount"), "Amount");
+        assert_eq!(
+            i18n.loader().get("status-not-available-yet"),
+            "Not available yet"
+        );
     }
 
     #[test]
@@ -436,7 +453,7 @@ mod tests {
             .collect();
         // The German file grows with each feature, so check one message it lacks
         // and one it has rather than the whole list.
-        assert!(ids.contains(&(&de, "register-column-amount")), "{ids:?}");
+        assert!(ids.contains(&(&de, "status-not-available-yet")), "{ids:?}");
         assert!(!ids.contains(&(&de, "menu-file")), "{ids:?}");
     }
 
