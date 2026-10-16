@@ -3,18 +3,26 @@
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
-use balanced_ui::App;
+use balanced_ui::{App, Clock};
 use eframe::App as _;
 use eframe::egui::accesskit::Role;
 use eframe::egui::{Event, Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{By, NodeT as _, Queryable as _};
+use icu_calendar::Date;
 
 /// The App on stub data, in the test locale, wide enough to show every Register column.
 fn app() -> Harness<'static, App> {
     Harness::builder()
         .with_size(vec2(1280.0, 720.0))
-        .build_eframe(|cc| App::new(cc, Localizer::for_tests(), Ledger::stub()))
+        .build_eframe(|cc| {
+            App::new(
+                cc,
+                Localizer::for_tests(),
+                Ledger::stub(),
+                Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
+            )
+        })
 }
 
 /// Plays `event` in one frame, first passing it through the App's `raw_input_hook`

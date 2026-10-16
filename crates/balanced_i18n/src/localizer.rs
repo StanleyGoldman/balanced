@@ -11,11 +11,12 @@ use rust_decimal::Decimal;
 use rust_embed::Embed;
 
 use crate::chain::{SOURCE_LANGUAGE, fallback_chain};
+use crate::date::{self, DateSegments};
 use crate::format::{Formatters, format_fluent_value};
 use crate::missing::log_missing_messages;
 use crate::money::{self, AmountStyle, Currency};
 use crate::pseudo::{self, PSEUDO_LANGUAGE};
-use crate::{AmountParseError, AmountReader, I18nError};
+use crate::{AmountParseError, AmountReader, DateParseError, I18nError};
 
 /// The `.ftl` files, one folder per shipped language.
 #[derive(Embed)]
@@ -214,6 +215,33 @@ impl Localizer {
     /// four-digit year: `10/4/2026` in `en-US`, `04.10.2026` in `de-DE`.
     pub fn format_date(&self, date: Date<Iso>) -> String {
         self.formatters.date(date)
+    }
+
+    /// How the formatting locale writes a date as numbers: the order of its segments
+    /// and the separator between them.
+    pub fn date_segments(&self) -> &DateSegments {
+        self.formatters.date_segments()
+    }
+
+    /// Reads a full date the user typed or pasted. It takes the day, month and year
+    /// in the formatting locale's order (`10/5/2026` in `en-US`, `5.10.2026` in
+    /// `de-DE`), the ISO order (`2026-10-05`), or eight digits with no separators in
+    /// ISO order (`20261005`). A date missing a part, or naming a day the calendar
+    /// lacks, is rejected, never guessed.
+    pub fn parse_date(&self, text: &str) -> Result<Date<Iso>, DateParseError> {
+        date::parse_date(self.formatters.date_segments(), text)
+    }
+
+    /// The short name of `weekday` in the formatting locale, for a calendar's column
+    /// headings: `Sun` in `en-US`, `So` in `de-DE`.
+    pub fn format_weekday(&self, weekday: Weekday) -> String {
+        self.formatters.weekday(weekday)
+    }
+
+    /// The month and year of `date` in the formatting locale, for a calendar's title:
+    /// `October 2026` in `en-US`, `Oktober 2026` in `de-DE`.
+    pub fn format_month_year(&self, date: Date<Iso>) -> String {
+        self.formatters.month_year(date)
     }
 
     /// The day weeks start on in the formatting locale. A `-u-fw-` extension on

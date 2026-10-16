@@ -9,8 +9,10 @@ use eframe::egui::{self, vec2};
 use egui_kittest::{Harness, SnapshotOptions};
 use egui_wgpu::{WgpuSetup, WgpuSetupCreateNew, wgpu};
 
-use crate::App;
+use icu_calendar::Date;
+
 use crate::theme::{Scheme, Theme, ThemeSettings};
+use crate::{App, Clock};
 
 /// How much one pixel may differ before it counts as failing: kittest's weighted squared
 /// YIQ distance.
@@ -39,7 +41,12 @@ pub fn app(scheme: egui::Theme) -> Harness<'static, App> {
         // does. The Scheme alone must decide the look.
         .with_theme(scheme)
         .wgpu_setup(lavapipe())
-        .build_eframe(move |cc| App::with_theme(cc, Localizer::for_tests(), Ledger::stub(), theme))
+        .build_eframe(move |cc| App::with_theme(cc, Localizer::for_tests(), Ledger::stub(), clock(), theme))
+}
+
+/// A clock stopped on 14 October 2026.
+fn clock() -> Clock {
+    Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date"))
 }
 
 /// Renders `harness` and compares it with `tests/snapshots/{name}.png`, using the project

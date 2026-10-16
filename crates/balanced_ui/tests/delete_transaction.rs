@@ -3,17 +3,23 @@
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
-use balanced_ui::App;
+use balanced_ui::{App, Clock};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{Event, Key, Modifiers, Vec2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use icu_calendar::Date;
 
 /// The App on stub data, in the test locale, in a window of `size`.
 fn app(size: Vec2) -> Harness<'static, App> {
-    Harness::builder()
-        .with_size(size)
-        .build_eframe(|cc| App::new(cc, Localizer::for_tests(), Ledger::stub()))
+    Harness::builder().with_size(size).build_eframe(|cc| {
+        App::new(
+            cc,
+            Localizer::for_tests(),
+            Ledger::stub(),
+            Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
+        )
+    })
 }
 
 /// The App with Everyday Checking open and its Costco transaction selected.

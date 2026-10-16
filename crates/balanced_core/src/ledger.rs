@@ -388,12 +388,17 @@ impl Ledger {
         let old = &self.view.accounts[position.account].register[position.entry].transaction;
         let undo = old.undoing(&edit);
         let edited = old.edited(edit)?;
-        // The account is rebuilt, since a new amount moves every balance after it.
+        // The account is rebuilt, since a new amount moves every balance after it, and a
+        // new date moves the transaction into date order.
+        let moved = edited.date() != old.date();
         let currency = self.view.net_worth.currency();
         let (summary, ()) =
             self.view
                 .edit_register(position.account, currency, |transactions| {
                     transactions[position.entry] = edited;
+                    if moved {
+                        transactions.sort_by_key(Transaction::register_order);
+                    }
                 })?;
         self.replace_account(position.account, summary)?;
         Ok(DomainCommand::EditTransaction {
@@ -1410,6 +1415,108 @@ mod tests {
         ledger.redo().unwrap();
 
         assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn a_new_date_moves_the_transaction_into_date_order_and_rebalances() {
+        let groceries = CategoryId::new(0);
+        let mut ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(100.00))).with_transactions([
+                    NewTransaction::new(date(5), "Fresh Market", groceries, usd(dec!(-30.00))),
+                    NewTransaction::new(date(10), "Bean There", groceries, usd(dec!(-5.00))),
+                    NewTransaction::new(date(10), "Corner Shop", groceries, usd(dec!(-1.00))),
+                ]),
+            ],
+        )
+        .unwrap();
+        let fresh_market = transaction_id(&ledger, 1);
+
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Date(date(10))))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        let register: Vec<_> = view.accounts()[0]
+            .register()
+            .iter()
+            .map(|entry| {
+                let transaction = entry.transaction();
+                (transaction.payee(), transaction.date(), entry.balance())
+            })
+            .collect();
+        assert_eq!(
+            register,
+            [
+                ("", date(1), usd(dec!(100.00))),
+                ("Fresh Market", date(10), usd(dec!(70.00))),
+                ("Bean There", date(10), usd(dec!(65.00))),
+                ("Corner Shop", date(10), usd(dec!(64.00))),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_later_date_moves_the_transaction_after_its_new_neighbours() {
+        let groceries = CategoryId::new(0);
+        let mut ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(100.00))).with_transactions([
+                    NewTransaction::new(date(5), "Fresh Market", groceries, usd(dec!(-30.00))),
+                    NewTransaction::new(date(10), "Bean There", groceries, usd(dec!(-5.00))),
+                ]),
+            ],
+        )
+        .unwrap();
+        let fresh_market = transaction_id(&ledger, 1);
+
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Date(date(20))))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        let register: Vec<_> = view.accounts()[0]
+            .register()
+            .iter()
+            .map(|entry| (entry.transaction().payee(), entry.balance()))
+            .collect();
+        assert_eq!(
+            register,
+            [
+                ("", usd(dec!(100.00))),
+                ("Bean There", usd(dec!(95.00))),
+                ("Fresh Market", usd(dec!(65.00))),
+            ]
+        );
+    }
+
+    #[test]
+    fn undoing_a_date_edit_puts_the_transaction_back_where_it_was() {
+        let groceries = CategoryId::new(0);
+        let mut ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(100.00))).with_transactions([
+                    NewTransaction::new(date(5), "Fresh Market", groceries, usd(dec!(-30.00))),
+                    NewTransaction::new(date(10), "Bean There", groceries, usd(dec!(-5.00))),
+                ]),
+            ],
+        )
+        .unwrap();
+        let before = ledger.snapshot().accounts()[0].clone();
+        let fresh_market = transaction_id(&ledger, 1);
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Date(date(20))))
+            .unwrap();
+
+        ledger.undo().unwrap();
+
+        assert_eq!(ledger.snapshot().accounts()[0], before);
     }
 
     #[test]

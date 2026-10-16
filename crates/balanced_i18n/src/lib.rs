@@ -6,6 +6,7 @@
 
 mod calculator;
 mod chain;
+mod date;
 mod error;
 mod format;
 mod localizer;
@@ -14,6 +15,7 @@ mod money;
 mod pseudo;
 
 pub use calculator::{AmountReader, Calculation};
-pub use error::{AmountParseError, I18nError};
+pub use date::{DateSegment, DateSegments};
+pub use error::{AmountParseError, DateParseError, I18nError};
 pub use localizer::Localizer;
 pub use money::{AmountStyle, Currency};

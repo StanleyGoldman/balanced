@@ -10,7 +10,7 @@ use icu_calendar::{Date, Gregorian, Iso};
 use icu_collator::options::CollatorOptions;
 use icu_collator::{Collator, CollatorBorrowed};
 use icu_datetime::FixedCalendarDateTimeFormatter;
-use icu_datetime::fieldsets::YMD;
+use icu_datetime::fieldsets::{E, YM, YMD};
 use icu_datetime::options::YearStyle;
 use icu_decimal::DecimalFormatter;
 use icu_decimal::input::{Decimal, FloatPrecision};
@@ -18,6 +18,7 @@ use icu_decimal::options::{DecimalFormatterOptions, GroupingStrategy};
 use icu_locale::Locale;
 
 use crate::I18nError;
+use crate::date::{DateSegments, probe_date};
 use crate::money::NumberSymbols;
 
 /// The ICU4X formatters for one formatting locale.
@@ -26,15 +27,29 @@ pub(crate) struct Formatters {
     decimal: DecimalFormatter,
     ungrouped: DecimalFormatter,
     date: FixedCalendarDateTimeFormatter<Gregorian, YMD>,
+    weekday: FixedCalendarDateTimeFormatter<Gregorian, E>,
+    month_year: FixedCalendarDateTimeFormatter<Gregorian, YM>,
     week: WeekInformation,
     collator: CollatorBorrowed<'static>,
     symbols: NumberSymbols,
+    date_segments: DateSegments,
 }
 
 impl Formatters {
     pub(crate) fn new(locale: &Locale) -> Result<Self, I18nError> {
         let decimal = DecimalFormatter::try_new(locale.into(), DecimalFormatterOptions::default())?;
+        let date: FixedCalendarDateTimeFormatter<Gregorian, YMD> =
+            FixedCalendarDateTimeFormatter::try_new(
+                locale.into(),
+                YMD::short().with_year_style(YearStyle::Full),
+            )?;
+        let date_segments = DateSegments::from_probe(
+            &date
+                .format(&probe_date().to_calendar(Gregorian))
+                .to_string(),
+        );
         Ok(Self {
+            date_segments,
             symbols: NumberSymbols::new(&decimal),
             decimal,
             ungrouped: DecimalFormatter::try_new(locale.into(), {
@@ -42,9 +57,11 @@ impl Formatters {
                 options.grouping_strategy = Some(GroupingStrategy::Never);
                 options
             })?,
-            date: FixedCalendarDateTimeFormatter::try_new(
+            date,
+            weekday: FixedCalendarDateTimeFormatter::try_new(locale.into(), E::short())?,
+            month_year: FixedCalendarDateTimeFormatter::try_new(
                 locale.into(),
-                YMD::short().with_year_style(YearStyle::Full),
+                YM::long().with_year_style(YearStyle::Full),
             )?,
             week: WeekInformation::try_new(locale.into())?,
             collator: Collator::try_new(locale.into(), CollatorOptions::default())?,
@@ -57,6 +74,20 @@ impl Formatters {
 
     pub(crate) fn date(&self, date: Date<Iso>) -> String {
         self.date.format(&date.to_calendar(Gregorian)).to_string()
+    }
+
+    pub(crate) fn weekday(&self, weekday: Weekday) -> String {
+        self.weekday.format(&weekday).to_string()
+    }
+
+    pub(crate) fn month_year(&self, date: Date<Iso>) -> String {
+        self.month_year
+            .format(&date.to_calendar(Gregorian))
+            .to_string()
+    }
+
+    pub(crate) fn date_segments(&self) -> &DateSegments {
+        &self.date_segments
     }
 
     pub(crate) fn compare(&self, a: &str, b: &str) -> Ordering {

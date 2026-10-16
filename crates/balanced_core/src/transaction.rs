@@ -106,6 +106,7 @@ impl Transaction {
     pub(crate) fn edited(&self, edit: TransactionEdit) -> Result<Self, DomainError> {
         let mut edited = self.clone();
         match edit {
+            TransactionEdit::Date(date) => edited.date = date,
             TransactionEdit::Number(number) => edited.number = number,
             TransactionEdit::Payee(payee) => {
                 if self.allocation == Allocation::OpeningBalance {
@@ -147,6 +148,7 @@ impl Transaction {
         match edit {
             TransactionEdit::Number(_) => TransactionEdit::Number(self.number.clone()),
             TransactionEdit::Payee(_) => TransactionEdit::Payee(self.payee.clone()),
+            TransactionEdit::Date(_) => TransactionEdit::Date(self.date),
             TransactionEdit::Memo(_) => TransactionEdit::Memo(self.memo.clone()),
             TransactionEdit::Category(category) => match self.allocation {
                 Allocation::Category(old) => TransactionEdit::Category(old),

@@ -17,9 +17,11 @@ use eframe::egui::{
     TextEdit, TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, TableBody, TableBuilder};
+use icu_calendar::{Date, Iso};
 
 use crate::combobox::{FieldChoices, ListRow};
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
+use crate::date_field::{self, DateEdit};
 use crate::formatted_amount::i18n_currency;
 use crate::i18n::fl;
 use crate::register_model::{RegisterModel, RegisterRow, RegisterSort, SortDirection, SortKey};
@@ -170,18 +172,13 @@ impl RegisterColumn {
     fn field(self, row: &RegisterRow) -> Option<CellField> {
         let text = |field| Some(CellField::Text(field));
         match self {
+            Self::Date => Some(CellField::Date),
             Self::Number => text(TextField::Number),
             Self::Payee if !row.is_opening_balance() => text(TextField::Payee),
             Self::Category if row.category_id().is_some() => text(TextField::Category),
             Self::Memo => text(TextField::Memo),
             Self::Amount if !row.is_split() => Some(CellField::Amount),
-            // TODO(#91): edit Date in the segmented date field.
-            Self::Payee
-            | Self::Date
-            | Self::Category
-            | Self::Amount
-            | Self::Balance
-            | Self::Actions => None,
+            Self::Payee | Self::Category | Self::Amount | Self::Balance | Self::Actions => None,
         }
     }
 
@@ -309,20 +306,12 @@ struct Insets {
 /// A transaction field a Register cell edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CellField {
+    /// The date, in the segmented date field.
+    Date,
     /// Plain text, or text naming an entry.
     Text(TextField),
     /// The amount, typed as written or as arithmetic.
     Amount,
-}
-
-impl CellField {
-    /// The field's saved text on `row`.
-    fn saved(self, row: &RegisterRow) -> &str {
-        match self {
-            Self::Text(field) => field.saved(row),
-            Self::Amount => row.amount().text(),
-        }
-    }
 }
 
 /// A transaction field a Register cell edits as text.
@@ -461,6 +450,47 @@ impl EditField {
     }
 }
 
+/// The cell being edited, in the editor its field takes.
+#[derive(Debug, Clone)]
+enum Edit {
+    Text(CellEdit),
+    Date(DateCellEdit),
+}
+
+impl Edit {
+    fn cell(&self) -> CellAddress {
+        match self {
+            Self::Text(edit) => edit.cell,
+            Self::Date(edit) => edit.cell,
+        }
+    }
+
+    /// The id of the cell's editor.
+    fn editor_id(&self) -> Id {
+        editor_id(self.cell())
+    }
+
+    /// Whether the last commit was refused, so the edit stays open with its message.
+    fn is_rejected(&self) -> bool {
+        match self {
+            Self::Text(_) => false,
+            Self::Date(edit) => edit.date.is_rejected(),
+        }
+    }
+}
+
+/// The id of the editor over `cell`.
+fn editor_id(cell: CellAddress) -> Id {
+    Id::new(("register_editor", cell))
+}
+
+/// The Date cell being edited, and the date field's state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DateCellEdit {
+    cell: CellAddress,
+    date: DateEdit,
+}
+
 impl CellEdit {
     /// The edit after a commit refused by `error`, which it shows until the text
     /// changes.
@@ -473,7 +503,7 @@ impl CellEdit {
 
     /// The id of the cell's `TextEdit`.
     fn editor_id(&self) -> Id {
-        Id::new(("register_editor", self.cell))
+        editor_id(self.cell)
     }
 
     /// Opens the field's list of `scope`, if it offers one. A list of matches starts
@@ -633,7 +663,7 @@ pub(crate) struct Register {
     /// if any, scrolls to the middle of the Register.
     centre_pending: bool,
     cursor: Option<CellAddress>,
-    edit: Option<CellEdit>,
+    edit: Option<Edit>,
     /// What the Payee and Category comboboxes offer, rebuilt when it is out of date.
     choices: Option<FieldChoices>,
     /// The modifiers held with each Tab press `App::raw_input_hook` took for the
@@ -686,12 +716,21 @@ impl Register {
 
     /// Saves the cell being edited, if any, and closes its editor, as a Shortcut does
     /// before it acts.
-    pub(crate) fn commit_edit(&mut self, ctx: &egui::Context, commands: &CommandSender) {
+    pub(crate) fn commit_edit(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        commands: &CommandSender,
+    ) {
         let Some(edit) = self.edit.take() else {
             return;
         };
         if let (Some(model), Some(choices)) = (&self.model, &self.choices) {
-            let _refused = commit(&edit, model.rows(), choices, commands);
+            // A refused edit is dropped: the Shortcut acts on the saved value.
+            let _refused = match edit.clone() {
+                Edit::Text(edit) => commit(&edit, model.rows(), choices, commands),
+                Edit::Date(mut edit) => commit_date(i18n, &mut edit, model.rows(), commands),
+            };
         }
         ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
     }
@@ -702,10 +741,10 @@ impl Register {
     }
 
     /// Draws the Register of `summary`, an account in `view`, filling the space left in
-    /// `ui`. Only the rows in view are laid out.
+    /// `ui`. Only the rows in view are laid out. `today` is the date field's today.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the column widths are shared by every Register, so the Main window owns them and lends them here beside the account and its snapshot"
+        reason = "the column widths are shared by every Register, so the Main window owns them and lends them here beside the account, its snapshot and today's date"
     )]
     pub(crate) fn show(
         &mut self,
@@ -716,6 +755,7 @@ impl Register {
         summary: &AccountSummary,
         view: &LedgerView,
         widths: &mut ColumnWidths,
+        today: Date<Iso>,
     ) {
         let account = summary.account().id();
         if self
@@ -797,6 +837,7 @@ impl Register {
                     .body(|body| {
                         let frame = BodyFrame {
                             i18n,
+                            today,
                             theme,
                             commands,
                             rows: model.rows(),
@@ -811,7 +852,7 @@ impl Register {
         if std::mem::take(&mut self.refused_leave)
             && let Some(edit) = &self.edit
         {
-            self.cursor = Some(edit.cell);
+            self.cursor = Some(edit.cell());
         }
         self.model = Some(model);
         self.choices = Some(choices);
@@ -879,15 +920,20 @@ impl Register {
             viewport,
         };
         let (response, action) = cell.show(ui, i18n, theme);
-        if response.clicked() {
+        // A refused date keeps the cell cursor until it is fixed or cancelled.
+        if response.clicked() && !self.edit.as_ref().is_some_and(Edit::is_rejected) {
             self.place_cursor(row.id(), column);
             open_split_view(row, column, commands);
         }
         if let Some(action) = action {
             self.act(row.id(), action, commands);
         }
-        if self.edit.as_ref().is_some_and(|edit| edit.cell == address) {
-            self.edit_cell(ui, frame, column);
+        match &self.edit {
+            Some(Edit::Text(edit)) if edit.cell == address => self.edit_cell(ui, frame, column),
+            Some(Edit::Date(edit)) if edit.cell == address => {
+                self.edit_date_cell(ui, frame, column);
+            }
+            Some(Edit::Text(_) | Edit::Date(_)) | None => {}
         }
         let rules = theme.cell_rules(ui.max_rect(), column_index, ui.ctx().pixels_per_point());
         ui.ctx()
@@ -900,7 +946,7 @@ impl Register {
     /// its list when it has them, and acts on what they report: losing focus commits
     /// the edit, and pressing a list row takes it.
     fn edit_cell(&mut self, ui: &mut egui::Ui, frame: &BodyFrame<'_>, column: RegisterColumn) {
-        let Some(edit) = self.edit.as_mut() else {
+        let Some(Edit::Text(edit)) = self.edit.as_mut() else {
             return;
         };
         let cell = ui.max_rect();
@@ -928,6 +974,9 @@ impl Register {
             ui.memory_mut(|memory| memory.request_focus(edit.editor_id()));
         } else if response.lost_focus() {
             let edit = self.edit.take().expect("the edit was just shown");
+            let Edit::Text(edit) = edit else {
+                return;
+            };
             match commit(&edit, frame.rows, frame.choices, frame.commands) {
                 // A refused category leaves nothing to save; the Status bar says why.
                 Commit::Done | Commit::Refused => {}
@@ -936,20 +985,53 @@ impl Register {
                     // the cell cursor comes back to it once the rows are laid out.
                     ui.memory_mut(|memory| memory.request_focus(edit.editor_id()));
                     self.refused_leave = true;
-                    self.edit = Some(edit.refused(error));
-                    bubble(ui, frame.i18n, self.edit.as_ref().expect("just kept"), cell);
+                    let edit = edit.refused(error);
+                    bubble(ui, frame.i18n, &edit, cell);
+                    self.edit = Some(Edit::Text(edit));
                 }
             }
             return;
         }
         bubble(ui, frame.i18n, edit, cell);
         let pressed = list(ui, frame, edit, cell);
-        if let Some(row) = pressed {
-            let mut edit = self.edit.take().expect("the edit was just shown");
+        if let Some(row) = pressed
+            && let Some(Edit::Text(mut edit)) = self.edit.take()
+        {
             ui.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
             if take_row(&mut edit, row, frame.commands) == Taken::Choice {
                 let _refused = commit(&edit, frame.rows, frame.choices, frame.commands);
             }
+        }
+    }
+
+    /// Draws the date field over the Date cell being edited, in `column`. Losing focus
+    /// commits the date; a refused date keeps its edit and the cell cursor, unfocused,
+    /// until it is fixed or cancelled. Focus stays where the click put it.
+    fn edit_date_cell(&mut self, ui: &egui::Ui, frame: &BodyFrame<'_>, column: RegisterColumn) {
+        let Some(Edit::Date(edit)) = self.edit.as_mut() else {
+            return;
+        };
+        let rect = ui.max_rect();
+        let Insets { left, right } = column.insets();
+        let inner =
+            Rect::from_x_y_ranges(rect.left() + left..=rect.right() - right, rect.y_range());
+        let response = edit
+            .date
+            .show(
+                ui,
+                frame.i18n,
+                frame.theme,
+                frame.today,
+                editor_id(edit.cell),
+                inner,
+            )
+            .labelled_by(heading_id(frame.register_id, column));
+        if response.lost_focus()
+            && let Some(Edit::Date(mut edit)) = self.edit.take()
+            && commit_date(frame.i18n, &mut edit, frame.rows, frame.commands) == Commit::Refused
+        {
+            self.cursor = Some(edit.cell);
+            self.edit = Some(Edit::Date(edit));
         }
     }
 
@@ -989,8 +1071,10 @@ impl Register {
                 Move::NextEditable
             }
         });
-        if let Some(edit) = self.edit.take() {
-            return self.handle_edit_keys(ctx, keys, edit, cursor, tab);
+        match self.edit.take() {
+            Some(Edit::Text(edit)) => return self.handle_edit_keys(ctx, keys, edit, cursor, tab),
+            Some(Edit::Date(edit)) => return self.handle_date_keys(ctx, keys, edit, cursor, tab),
+            None => {}
         }
         let pressed = ctx.input_mut(|input| {
             [
@@ -1076,7 +1160,7 @@ impl Register {
             // The first Esc closes the list; the next cancels the edit.
             if list_open {
                 edit.list = None;
-                self.edit = Some(edit);
+                self.edit = Some(Edit::Text(edit));
             } else {
                 ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
             }
@@ -1093,11 +1177,11 @@ impl Register {
                 Commit::Done => {}
                 Commit::Refused => {
                     edit.list = None;
-                    self.edit = Some(edit);
+                    self.edit = Some(Edit::Text(edit));
                     return None;
                 }
                 Commit::Unreadable(error) => {
-                    self.edit = Some(edit.refused(error));
+                    self.edit = Some(Edit::Text(edit.refused(error)));
                     return None;
                 }
             }
@@ -1111,7 +1195,51 @@ impl Register {
             }
             return moved.scroll_offset;
         }
-        self.edit = Some(edit);
+        self.edit = Some(Edit::Text(edit));
+        None
+    }
+
+    /// Acts on this frame's keys for `edit`, the Date cell being edited under `cursor`,
+    /// with `tab` the move a Tab press asks for, and returns the scroll offset that
+    /// brings the cell cursor into view when it has left it. The first Esc closes the
+    /// calendar and the next cancels the edit; a refused date keeps the edit open.
+    fn handle_date_keys(
+        &mut self,
+        ctx: &egui::Context,
+        keys: &KeyContext<'_>,
+        mut edit: DateCellEdit,
+        cursor: CellAddress,
+        tab: Option<Move>,
+    ) -> Option<f32> {
+        let (escape, enter) = ctx.input_mut(|input| {
+            (
+                input.consume_key(Modifiers::NONE, Key::Escape),
+                input.consume_key(Modifiers::NONE, Key::Enter),
+            )
+        });
+        if escape {
+            if edit.date.close_calendar() {
+                self.edit = Some(Edit::Date(edit));
+            } else {
+                ctx.memory_mut(|memory| memory.surrender_focus(editor_id(edit.cell)));
+            }
+            return None;
+        }
+        if enter || tab.is_some() {
+            if commit_date(keys.i18n, &mut edit, keys.rows, keys.commands) == Commit::Refused {
+                self.edit = Some(Edit::Date(edit));
+                return None;
+            }
+            ctx.memory_mut(|memory| memory.surrender_focus(editor_id(edit.cell)));
+            let step = if enter { Move::Next } else { tab? };
+            let moved = self.move_cursor(cursor, step, keys.rows)?;
+            // Tab opens the cell it moved to, as it does from a text cell.
+            if !enter {
+                self.start_edit(ctx, keys, EditStart::Saved);
+            }
+            return moved.scroll_offset;
+        }
+        self.edit = Some(Edit::Date(edit));
         None
     }
 
@@ -1129,9 +1257,12 @@ impl Register {
             return;
         }
         let opened;
-        let reader = match self.edit.as_ref().map(|edit| &edit.field) {
-            Some(EditField::Amount { reader, .. }) => reader,
-            Some(EditField::Text(_)) => return,
+        let reader = match &self.edit {
+            Some(Edit::Text(CellEdit {
+                field: EditField::Amount { reader, .. },
+                ..
+            })) => reader,
+            Some(Edit::Text(_) | Edit::Date(_)) => return,
             None => {
                 let Some((row, CellField::Amount)) = field_at(keys.rows, cursor) else {
                     return;
@@ -1224,19 +1355,27 @@ impl Register {
                 .send(AppCommand::ShowStatus(StatusMessage::Rejected(error)));
             return;
         }
-        let text = match start {
-            EditStart::Saved => field.saved(row).to_owned(),
-            EditStart::Empty => String::new(),
-        };
-        let field = match field {
-            CellField::Text(field) => EditField::Text(field),
+        let (saved, field) = match field {
+            CellField::Date => {
+                // Typing goes to the date field, which starts the date over or acts on
+                // a shortcut, so it opens on the saved date however the edit starts.
+                ctx.memory_mut(|memory| memory.request_focus(editor_id(cursor)));
+                self.edit = Some(Edit::Date(DateCellEdit {
+                    cell: cursor,
+                    date: DateEdit::new(row.saved_date()),
+                }));
+                return;
+            }
+            CellField::Text(field) => (field.saved(row), EditField::Text(field)),
             CellField::Amount => {
                 let currency = row.currency();
-                EditField::Amount {
-                    reader: keys.i18n.amount_reader(i18n_currency(currency)),
-                    currency,
-                }
+                let reader = keys.i18n.amount_reader(i18n_currency(currency));
+                (row.amount().text(), EditField::Amount { reader, currency })
             }
+        };
+        let text = match start {
+            EditStart::Saved => saved.to_owned(),
+            EditStart::Empty => String::new(),
         };
         let edit = CellEdit {
             cell: cursor,
@@ -1256,7 +1395,7 @@ impl Register {
             ))));
         state.store(ctx, id);
         ctx.memory_mut(|memory| memory.request_focus(id));
-        self.edit = Some(edit);
+        self.edit = Some(Edit::Text(edit));
     }
 }
 
@@ -1267,8 +1406,8 @@ struct Moved {
     scroll_offset: Option<f32>,
 }
 
-/// The row of `cell` and the field it edits as text, or `None` when its row is gone or
-/// it can't be edited as text.
+/// The row of `cell` and the field it edits, or `None` when its row is gone or it
+/// can't be edited.
 fn field_at(rows: &[RegisterRow], cell: CellAddress) -> Option<(&RegisterRow, CellField)> {
     let row = rows.iter().find(|row| row.id() == cell.row)?;
     Some((row, cell.column.field(row)?))
@@ -1287,6 +1426,8 @@ enum EditStart {
 #[derive(Clone, Copy)]
 struct BodyFrame<'a> {
     i18n: &'a Localizer,
+    /// Today's date, for the date field.
+    today: Date<Iso>,
     theme: &'a Theme,
     commands: &'a CommandSender,
     rows: &'a [RegisterRow],
@@ -1351,9 +1492,10 @@ fn open_split_view(row: &RegisterRow, column: RegisterColumn, commands: &Command
 /// Whether a commit went through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Commit {
-    /// The text was saved, or matched the saved text, or its row is gone.
+    /// The value was saved, or matched the saved one, or its row is gone.
     Done,
-    /// The text names no category, so nothing was sent, and the Status bar says so.
+    /// The value can't be saved, so nothing was sent: a category no category is named
+    /// (the Status bar says so), or a refused date (its bubble says so).
     Refused,
     /// The amount's text can't be read, for this reason, so nothing was sent.
     Unreadable(AmountParseError),
@@ -1408,6 +1550,30 @@ fn amount_edit(
     let money = Money::new(amount, currency)
         .expect("the reader gives amounts at the currency's decimal places");
     Ok((money != row.amount().money()).then_some(TransactionEdit::Amount(money)))
+}
+
+/// Saves `edit`'s date by sending one edit Command, unless it matches the saved date.
+/// A refused date shows the format message and sends nothing.
+fn commit_date(
+    i18n: &Localizer,
+    edit: &mut DateCellEdit,
+    rows: &[RegisterRow],
+    commands: &CommandSender,
+) -> Commit {
+    let Some(row) = rows.iter().find(|row| row.id() == edit.cell.row) else {
+        return Commit::Done;
+    };
+    match edit.date.commit(i18n) {
+        date_field::Commit::Unchanged => Commit::Done,
+        date_field::Commit::Changed(date) => {
+            commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
+                transaction: row.id(),
+                edit: TransactionEdit::Date(date),
+            }));
+            Commit::Done
+        }
+        date_field::Commit::Rejected => Commit::Refused,
+    }
 }
 
 /// What taking a list row did.
@@ -2030,7 +2196,16 @@ mod tests {
                         .iter()
                         .find(|summary| summary.account().name() == "Everyday Checking")
                         .expect("the stub has Everyday Checking");
-                    register.show(ui, i18n, theme, commands, summary, view, widths);
+                    register.show(
+                        ui,
+                        i18n,
+                        theme,
+                        commands,
+                        summary,
+                        view,
+                        widths,
+                        Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date"),
+                    );
                 },
                 shown,
             );

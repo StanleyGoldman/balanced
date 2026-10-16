@@ -1,6 +1,8 @@
 //! [`DomainCommand`]s, the only way the ledger changes, and the [`DomainError`]s that
 //! reject them.
 
+use icu_calendar::{Date, Iso};
+
 use crate::{AccountId, CategoryId, Money, MoneyError, Transaction, TransactionId};
 
 /// A change to the ledger. `Ledger::apply` applies it, or rejects it with a
@@ -29,6 +31,8 @@ pub enum DomainCommand {
 /// The new value of one field of a transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransactionEdit {
+    /// The date, which moves the transaction into date order in its register.
+    Date(Date<Iso>),
     /// The cheque or reference number, or `None` to clear it.
     Number(Option<String>),
     Payee(String),

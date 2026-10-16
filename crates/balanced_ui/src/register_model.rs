@@ -9,6 +9,7 @@ use balanced_core::{
     TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
+use icu_calendar::{Date, Iso};
 use icu_locale::LanguageIdentifier;
 use icu_locale::Locale;
 
@@ -34,6 +35,7 @@ pub(crate) struct RegisterRow {
     /// The row's place in date order, which breaks ties in every sort.
     place: usize,
     kind: RowKind,
+    saved_date: Date<Iso>,
     date: String,
     number: String,
     payee: String,
@@ -66,6 +68,11 @@ impl RegisterRow {
     /// Whether the amount is split between categories.
     pub(crate) fn is_split(&self) -> bool {
         self.kind == RowKind::Split
+    }
+
+    /// The transaction's date, which the Date cell shows formatted.
+    pub(crate) fn saved_date(&self) -> Date<Iso> {
+        self.saved_date
     }
 
     pub(crate) fn date(&self) -> &str {
@@ -249,6 +256,7 @@ impl RegisterModel {
                     id: transaction.id(),
                     place,
                     kind,
+                    saved_date: transaction.date(),
                     date: i18n.format_date(transaction.date()),
                     number: transaction.number().unwrap_or_default().to_owned(),
                     payee,

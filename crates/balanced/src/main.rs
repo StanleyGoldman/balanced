@@ -3,7 +3,7 @@
 use anyhow::{Context as _, Result, anyhow};
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
-use balanced_ui::App;
+use balanced_ui::{App, Clock};
 use icu_locale::Locale;
 use tracing_subscriber::EnvFilter;
 
@@ -22,7 +22,7 @@ fn main() -> Result<()> {
     eframe::run_native(
         "Balanced",
         eframe::NativeOptions::default(),
-        Box::new(|cc| Ok(Box::new(App::new(cc, i18n, ledger)))),
+        Box::new(|cc| Ok(Box::new(App::new(cc, i18n, ledger, Clock::default())))),
     )
     // `eframe::Error` isn't `Send + Sync`, so it can't be kept as the source.
     .map_err(|err| anyhow!("the Main window failed: {err}"))
