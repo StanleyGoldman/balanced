@@ -8,12 +8,13 @@ use icu_calendar::{Date, Iso};
 use crate::account_bar::AccountBar;
 use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
-use crate::dialog::{DialogOutcome, FocusReturn, LightDialog, OpenDialog};
+use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
 use crate::layout::Layout;
 use crate::menu_nav::{DrawnMenus, MenuNav};
 use crate::new_account::{self, NewAccountForm, WizardOutcome};
+use crate::new_category::NewCategoryForm;
 use crate::register::ColumnWidths;
 use crate::register_model::RegisterRow;
 use crate::register_tabs::RegisterTabs;
@@ -38,6 +39,8 @@ pub(crate) struct MainWindow {
     delete_transaction: Option<OpenDialog<DeleteTransactionForm>>,
     /// The New Account wizard, while it is open.
     new_account: Option<OpenDialog<NewAccountForm>>,
+    /// The New Category Dialog, while it is open.
+    new_category: Option<OpenDialog<NewCategoryForm>>,
     /// Where focus goes now that a Dialog has closed, until a frame restores it.
     focus_return: Option<FocusReturn>,
     menu_nav: MenuNav,
@@ -62,6 +65,7 @@ impl MainWindow {
             column_widths: layout.column_widths(),
             delete_transaction: None,
             new_account: None,
+            new_category: None,
             focus_return: None,
             menu_nav: MenuNav::default(),
         }
@@ -233,9 +237,9 @@ impl MainWindow {
                 let form = NewAccountForm::new(i18n, view.net_worth().currency(), today);
                 self.new_account = Some(OpenDialog::new(ctx, form));
             }
-            DialogKind::NewCategory { .. } => {
-                // TODO(#95): open the New Category Dialog, prefilled with the name.
-                tracing::debug!("the New Category Dialog was asked for");
+            DialogKind::NewCategory { name } => {
+                let form = NewCategoryForm::new(name.clone());
+                self.new_category = Some(OpenDialog::new(ctx, form));
             }
         }
     }
@@ -251,9 +255,28 @@ impl MainWindow {
         }
     }
 
+    /// Hands the open Dialog the ledger's answer to the change its form asked for: it
+    /// closes once the change is `applied`, or shows why the ledger refused it.
+    pub(crate) fn dialog_applied(&mut self, ctx: &egui::Context, applied: Result<(), DomainError>) {
+        let Some(dialog) = &mut self.new_category else {
+            return;
+        };
+        if let Err(error) = applied {
+            dialog.form.rejected(error);
+            return;
+        }
+        let path = dialog.form.take_created_path();
+        self.close_dialog(ctx, |window| &mut window.new_category);
+        if let (Some(path), Some(register)) = (path, self.registers.current_register_mut()) {
+            register.category_created(path);
+        }
+    }
+
     /// Whether a Dialog is open over the Main window.
     fn dialog_open(&self) -> bool {
-        self.delete_transaction.is_some() || self.new_account.is_some()
+        self.delete_transaction.is_some()
+            || self.new_account.is_some()
+            || self.new_category.is_some()
     }
 
     /// The account the Main view shows, if it shows one.
@@ -360,6 +383,7 @@ impl MainWindow {
         self.accounts = Some(accounts);
         self.delete_transaction_dialog(ui.ctx(), i18n, commands, view);
         self.new_account_dialog(ui.ctx(), i18n, theme, commands, today);
+        self.new_category_dialog(ui.ctx(), i18n, commands, view);
     }
 
     /// The New Account wizard, while it is open.
@@ -377,6 +401,42 @@ impl MainWindow {
         match new_account::show(ctx, i18n, theme, commands, dialog, today) {
             WizardOutcome::Open => {}
             WizardOutcome::Cancelled => self.close_dialog(ctx, |window| &mut window.new_account),
+        }
+    }
+
+    /// The New Category Dialog, while it is open. OK sends the Command creating the
+    /// category, and the Dialog stays open until the ledger answers.
+    fn new_category_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        commands: &CommandSender,
+        view: &LedgerView,
+    ) {
+        let Some(dialog) = &mut self.new_category else {
+            return;
+        };
+        let outcome = HeavyDialog::new(
+            Id::new("new_category_dialog"),
+            fl!(i18n, "dialog-new-category-title"),
+            fl!(i18n, "dialog-ok"),
+            fl!(i18n, "dialog-cancel"),
+        )
+        .show(ctx, dialog, |ui, form| form.show(ui, i18n));
+        match outcome {
+            DialogOutcome::Open => {}
+            DialogOutcome::Accepted => {
+                if let Some(command) = dialog.form.submit(view) {
+                    commands.send(AppCommand::SubmitDialog(command));
+                }
+            }
+            DialogOutcome::Back => unreachable!("a heavy Dialog has no Back button"),
+            DialogOutcome::Cancelled => {
+                self.close_dialog(ctx, |window| &mut window.new_category);
+                if let Some(register) = self.registers.current_register_mut() {
+                    register.category_cancelled();
+                }
+            }
         }
     }
 

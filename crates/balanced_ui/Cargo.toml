@@ -76,3 +76,7 @@ required-features = ["test-support"]
 
 [lints]
 workspace = true
+
+[[test]]
+name = "new_category"
+required-features = ["test-support"]

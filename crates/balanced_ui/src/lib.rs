@@ -17,6 +17,7 @@ mod layout;
 mod main_window;
 mod menu_nav;
 mod new_account;
+mod new_category;
 mod register;
 mod register_model;
 mod register_tabs;

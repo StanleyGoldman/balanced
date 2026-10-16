@@ -120,6 +120,14 @@ dialog-cancel = Cancel
 # Asks before deleting the transaction the payee, date and amount describe.
 dialog-delete-transaction-message = Delete this transaction? { $payee }, { $date }, { $amount }
 dialog-delete-transaction-delete = Delete
+dialog-ok = OK
+dialog-new-category-title = New Category
+dialog-new-category-name = Name
+# Below the Name field. A colon in the name puts the category under the one the
+# text before it names.
+dialog-new-category-hint = Use “:” to put it under another category, as in Home:Garden.
+# $parent is the text before the last colon of the typed name.
+dialog-new-category-no-parent = No category is named “{ $parent }”.
 
 # The New Account wizard. Each step's heading says how far through it is.
 dialog-new-account-step-type = Step 1 of 4: Type
@@ -202,3 +210,7 @@ status-not-in-one-category = Only a transaction in one category can change its c
 status-unknown-category = That category no longer exists.
 status-split-amount = A split transaction's amount is the sum of its lines.
 status-currency-mismatch = The amount is in another currency than the account.
+status-duplicate-category = A category named “{ $name }” is already there.
+# Deleting a category that a transaction or another category still uses.
+status-category-in-use = That category is still in use, so it can't be deleted.
+status-blank-category-name = Enter a name for the category.

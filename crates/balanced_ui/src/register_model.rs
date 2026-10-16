@@ -18,7 +18,7 @@ use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
 
 /// Separates a category from the one it sits under: `Food & Dining:Groceries`.
-const CATEGORY_SEPARATOR: &str = ":";
+pub(crate) const CATEGORY_SEPARATOR: &str = ":";
 
 /// Which row of the Register a row is: a transaction's, or the draft row below them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

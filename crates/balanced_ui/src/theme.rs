@@ -219,6 +219,13 @@ impl Theme {
     /// The width of a light Dialog's content, in a window wide enough for it.
     pub(crate) const LIGHT_DIALOG_WIDTH: f32 = 360.0;
 
+    /// The width a heavy Dialog opens at, in a window wide enough for it.
+    pub(crate) const HEAVY_DIALOG_WIDTH: f32 = 420.0;
+
+    /// The tint over the window behind a Dialog, in either scheme: the dim of
+    /// `egui::Modal`.
+    pub(crate) const BACKDROP: Color32 = Color32::from_black_alpha(100);
+
     pub(crate) fn new(settings: ThemeSettings) -> Self {
         Self {
             settings,

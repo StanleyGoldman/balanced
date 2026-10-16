@@ -738,6 +738,8 @@ pub(crate) struct Register {
     missing: Option<Missing>,
     /// Whether the draft row is to scroll into view on the next frame.
     reveal_draft: bool,
+    /// The Category cell edit waiting on the New Category Dialog its Create row opened.
+    awaiting_category: Option<AwaitingCategory>,
 }
 
 impl Register {
@@ -828,6 +830,7 @@ impl Register {
         self.centre_pending = false;
         self.cursor = None;
         self.edit = None;
+        self.awaiting_category = None;
         self.rows_in_view = None;
         self.draft = Draft::default();
         self.missing = None;
@@ -1187,14 +1190,23 @@ impl Register {
             && let Some(Edit::Text(mut edit)) = self.edit.take()
         {
             ui.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
-            if take_row(&mut edit, row, frame.commands) == Taken::Choice {
-                let _refused = commit(
-                    &edit,
-                    frame.rows,
-                    frame.choices,
-                    frame.commands,
-                    &mut self.draft,
-                );
+            match take_row(&mut edit, row, frame.commands) {
+                Taken::Choice => {
+                    let _refused = commit(
+                        &edit,
+                        frame.rows,
+                        frame.choices,
+                        frame.commands,
+                        &mut self.draft,
+                    );
+                }
+                Taken::Create => {
+                    self.awaiting_category = Some(AwaitingCategory {
+                        edit,
+                        leave: Leave::Stay,
+                        outcome: None,
+                    });
+                }
             }
         }
     }
@@ -1259,6 +1271,9 @@ impl Register {
             return None;
         }
         let cursor = self.cursor?;
+        if let Some(moved) = self.resume_category_edit(ctx, keys, cursor) {
+            return moved.scroll_offset;
+        }
         self.refuse_characters(ctx, keys, cursor);
         if cursor.row == RowId::Draft
             && ctx.input_mut(|input| input.consume_key(Modifiers::COMMAND, Key::Enter))
@@ -1376,48 +1391,131 @@ impl Register {
             }
             return None;
         }
-        if enter || tab.is_some() {
+        let leave = match tab {
+            _ if enter => Some(Leave::Enter),
+            Some(step) => Some(Leave::Tab(step)),
+            None => None,
+        };
+        if let Some(leave) = leave {
             if let Some(row) = edit.highlighted(keys.choices)
                 && take_row(&mut edit, row, keys.commands) == Taken::Create
             {
                 ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+                self.awaiting_category = Some(AwaitingCategory {
+                    edit,
+                    leave,
+                    outcome: None,
+                });
                 return None;
             }
-            match commit(
-                &edit,
-                keys.rows,
-                keys.choices,
-                keys.commands,
-                &mut self.draft,
-            ) {
-                Commit::Done => {}
-                Commit::Refused => {
-                    edit.list = None;
-                    self.edit = Some(Edit::Text(edit));
-                    return None;
-                }
-                Commit::Unreadable(error) => {
-                    self.edit = Some(Edit::Text(edit.refused(error)));
-                    return None;
-                }
-            }
-            ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
-            if enter && cursor.row == RowId::Draft && cursor.column == RegisterColumn::LAST {
-                // Enter on the draft row's last cell adds the row.
-                self.post(keys);
-                return None;
-            }
-            let step = if enter { Move::Next } else { tab? };
-            let moved = self.move_cursor(cursor, step, keys.rows)?;
-            // Tab opens the cell it moved to. With nowhere to move it opens nothing,
-            // since this frame's rows don't hold the text just committed yet.
-            if !enter {
-                self.start_edit(ctx, keys, EditStart::Saved);
-            }
-            return moved.scroll_offset;
+            return self.leave_cell(ctx, keys, edit, cursor, leave);
         }
         self.edit = Some(Edit::Text(edit));
         None
+    }
+
+    /// Saves `edit`, the cell being edited under `cursor`, and leaves the cell as
+    /// `leave` says, returning the scroll offset that brings the cell cursor into view
+    /// when it has left it. A refused commit keeps the edit open.
+    fn leave_cell(
+        &mut self,
+        ctx: &egui::Context,
+        keys: &KeyContext<'_>,
+        mut edit: CellEdit,
+        cursor: CellAddress,
+        leave: Leave,
+    ) -> Option<f32> {
+        match commit(
+            &edit,
+            keys.rows,
+            keys.choices,
+            keys.commands,
+            &mut self.draft,
+        ) {
+            Commit::Done => {}
+            Commit::Refused => {
+                edit.list = None;
+                ctx.memory_mut(|memory| memory.request_focus(edit.editor_id()));
+                self.edit = Some(Edit::Text(edit));
+                return None;
+            }
+            Commit::Unreadable(error) => {
+                self.edit = Some(Edit::Text(edit.refused(error)));
+                return None;
+            }
+        }
+        ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+        if leave == Leave::Enter
+            && cursor.row == RowId::Draft
+            && cursor.column == RegisterColumn::LAST
+        {
+            // Enter on the draft row's last cell adds the row.
+            self.post(keys);
+            return None;
+        }
+        let step = match leave {
+            Leave::Enter => Move::Next,
+            Leave::Tab(step) => step,
+            Leave::Stay => return None,
+        };
+        let moved = self.move_cursor(cursor, step, keys.rows)?;
+        // Tab opens the cell it moved to. With nowhere to move it opens nothing,
+        // since this frame's rows don't hold the text just committed yet.
+        if matches!(leave, Leave::Tab(_)) {
+            self.start_edit(ctx, keys, EditStart::Saved);
+        }
+        moved.scroll_offset
+    }
+
+    /// Tells the Category cell edit waiting on the New Category Dialog that the
+    /// category it asked for was created, with `path` its path. The edit saves it and
+    /// carries on as the key that took the Create row says.
+    pub(crate) fn category_created(&mut self, path: String) {
+        if let Some(awaiting) = &mut self.awaiting_category {
+            awaiting.outcome = Some(CategoryOutcome::Created(path));
+        }
+    }
+
+    /// Tells the Category cell edit waiting on the New Category Dialog that the Dialog
+    /// was cancelled. The edit opens again with its typed text.
+    pub(crate) fn category_cancelled(&mut self) {
+        if let Some(awaiting) = &mut self.awaiting_category {
+            awaiting.outcome = Some(CategoryOutcome::Cancelled);
+        }
+    }
+
+    /// Carries on with the Category cell edit that waited on the New Category Dialog,
+    /// once the Dialog has closed. Returns `None` while there is none to carry on
+    /// with, else where the cell cursor went.
+    fn resume_category_edit(
+        &mut self,
+        ctx: &egui::Context,
+        keys: &KeyContext<'_>,
+        cursor: CellAddress,
+    ) -> Option<Moved> {
+        let AwaitingCategory {
+            mut edit,
+            leave,
+            outcome,
+        } = self
+            .awaiting_category
+            .take_if(|awaiting| awaiting.outcome.is_some())?;
+        edit.list = None;
+        match outcome? {
+            CategoryOutcome::Created(path) => {
+                edit.text = path;
+                Some(Moved {
+                    scroll_offset: self.leave_cell(ctx, keys, edit, cursor, leave),
+                })
+            }
+            CategoryOutcome::Cancelled => {
+                focus_at_end(ctx, &edit);
+                self.edit = Some(Edit::Text(edit));
+                Some(Moved {
+                    scroll_offset: None,
+                })
+            }
+        }
     }
 
     /// Acts on this frame's keys for `edit`, the Date cell being edited under `cursor`,
@@ -1601,16 +1699,7 @@ impl Register {
             error: None,
             preview: None,
         };
-        let id = edit.editor_id();
-        // The text cursor starts at the end, wherever an earlier edit left it.
-        let mut state = TextEditState::load(ctx, id).unwrap_or_default();
-        state
-            .cursor
-            .set_char_range(Some(CCursorRange::one(CCursor::new(
-                edit.text.chars().count(),
-            ))));
-        state.store(ctx, id);
-        ctx.memory_mut(|memory| memory.request_focus(id));
+        focus_at_end(ctx, &edit);
         self.edit = Some(Edit::Text(edit));
     }
 
@@ -1686,6 +1775,50 @@ fn missing_column(missing: Missing) -> RegisterColumn {
         Missing::Category => RegisterColumn::Category,
         Missing::Amount => RegisterColumn::Amount,
     }
+}
+
+/// Gives `edit`'s editor keyboard focus, with the text cursor at the end of its text
+/// wherever an earlier edit left it.
+fn focus_at_end(ctx: &egui::Context, edit: &CellEdit) {
+    let id = edit.editor_id();
+    let mut state = TextEditState::load(ctx, id).unwrap_or_default();
+    state
+        .cursor
+        .set_char_range(Some(CCursorRange::one(CCursor::new(
+            edit.text.chars().count(),
+        ))));
+    state.store(ctx, id);
+    ctx.memory_mut(|memory| memory.request_focus(id));
+}
+
+/// How a cell edit leaves its cell once its text is saved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Leave {
+    /// As Enter does: the cell cursor moves to the next cell, which stays closed.
+    Enter,
+    /// As Tab and Shift+Tab do: the cell cursor makes this move and opens the cell.
+    Tab(Move),
+    /// As a click on a list row does: the cell cursor stays.
+    Stay,
+}
+
+/// A Category cell edit whose Create row opened the New Category Dialog, waiting for
+/// the Dialog to close.
+#[derive(Debug, Clone)]
+struct AwaitingCategory {
+    edit: CellEdit,
+    /// How the edit leaves its cell once the new category is saved in it.
+    leave: Leave,
+    /// How the Dialog closed, or `None` while it is open.
+    outcome: Option<CategoryOutcome>,
+}
+
+/// How the New Category Dialog closed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CategoryOutcome {
+    /// It created the category with this path.
+    Created(String),
+    Cancelled,
 }
 
 /// A move of the cell cursor that happened.
@@ -1897,7 +2030,7 @@ enum Taken {
     /// The row's text replaced the edit's, ready to commit.
     Choice,
     /// The New Category Dialog was asked for, prefilled with the typed name, and the
-    /// edit is over.
+    /// edit waits for it to close.
     Create,
 }
 
