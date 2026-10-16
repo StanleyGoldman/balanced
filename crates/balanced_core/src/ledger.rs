@@ -2,12 +2,14 @@
 
 use std::sync::Arc;
 
+use icu_calendar::{Date, Iso};
+
 use crate::account::NewAccount;
 use crate::category::NewCategory;
 use crate::transaction::TransactionId;
 use crate::{
-    Account, AccountId, Applied, Category, CategoryId, CurrencyCode, DomainCommand, DomainError,
-    Money, MoneyError, Transaction, TransactionEdit,
+    Account, AccountId, AccountKind, Applied, Category, CategoryId, CurrencyCode, DomainCommand,
+    DomainError, Money, MoneyError, Transaction, TransactionEdit,
 };
 
 /// Counts the changes applied to a [`Ledger`]. A window's view model rebuilds when
@@ -172,6 +174,18 @@ impl LedgerView {
             })
     }
 
+    /// The indices in [`Self::accounts`] of the accounts of `kind`. Where there are
+    /// none, it is the empty range where one would go.
+    fn sub_group(&self, kind: AccountKind) -> std::ops::Range<usize> {
+        let start = self
+            .accounts
+            .partition_point(|summary| summary.account.kind() < kind);
+        let end = self
+            .accounts
+            .partition_point(|summary| summary.account.kind() <= kind);
+        start..end
+    }
+
     /// The account at `index` in [`Self::accounts`], rebuilt in `currency` after `edit`
     /// changes its transactions, with what `edit` returned. Fails when a balance
     /// overflows.
@@ -223,6 +237,10 @@ pub struct Ledger {
     undo_stack: Vec<DomainCommand>,
     /// The inverses of the undone changes Redo can make again, the latest undone last.
     redo_stack: Vec<DomainCommand>,
+    /// The id the next created account takes. Ids are never reused.
+    next_account: u32,
+    /// The id the next posted transaction takes. Ids are never reused.
+    next_transaction: u32,
 }
 
 impl Ledger {
@@ -253,7 +271,9 @@ impl Ledger {
         let mut transaction_ids = (0..).map(TransactionId::new);
         let mut summaries: Vec<AccountSummary> = Vec::new();
         let mut net_worth = Money::zero(currency);
+        let mut next_account = 0;
         for (id, new) in (0..).zip(accounts) {
+            next_account = id + 1;
             let kind = new.kind();
             let (account, transactions) = new.into_account(AccountId::new(id));
             let mut posted = Vec::new();
@@ -286,6 +306,8 @@ impl Ledger {
             }),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            next_account,
+            next_transaction: transaction_ids.next().expect("the ids never run out").raw(),
         })
     }
 
@@ -343,6 +365,18 @@ impl Ledger {
     /// Applies `command` without recording it for Undo.
     fn apply_unrecorded(&mut self, command: DomainCommand) -> Result<Applied, DomainError> {
         let inverse = match command {
+            DomainCommand::CreateAccount {
+                name,
+                kind,
+                opened,
+                opening_balance,
+            } => self.create_account(&name, kind, opened, opening_balance)?,
+            DomainCommand::DeleteAccount { account } => self.delete_account(account)?,
+            DomainCommand::RestoreAccount {
+                account,
+                transactions,
+                place,
+            } => self.restore_account(account, transactions, place)?,
             DomainCommand::EditTransaction { transaction, edit } => {
                 self.edit_transaction(transaction, edit)?
             }
@@ -355,6 +389,98 @@ impl Ledger {
             } => self.restore_transaction(account, transaction)?,
         };
         Ok(Applied { inverse })
+    }
+
+    fn create_account(
+        &mut self,
+        name: &str,
+        kind: AccountKind,
+        opened: Date<Iso>,
+        opening_balance: Money,
+    ) -> Result<DomainCommand, DomainError> {
+        if name.trim().is_empty() {
+            return Err(DomainError::BlankAccountName);
+        }
+        let currency = self.view.net_worth.currency();
+        let id = AccountId::new(self.next_account);
+        let (account, transactions) =
+            NewAccount::new(name, kind, opened, opening_balance).into_account(id);
+        let mut next_transaction = self.next_transaction;
+        let mut posted = Vec::with_capacity(transactions.len());
+        for new in transactions {
+            posted.push(new.into_transaction(TransactionId::new(next_transaction), currency)?);
+            next_transaction += 1;
+        }
+        let summary = AccountSummary::new(account, posted, currency)?;
+        let place = self.view.sub_group(kind).len();
+        self.insert_account(summary, place)?;
+        self.next_account += 1;
+        self.next_transaction = next_transaction;
+        Ok(DomainCommand::DeleteAccount { account: id })
+    }
+
+    fn delete_account(&mut self, id: AccountId) -> Result<DomainCommand, DomainError> {
+        let index = self
+            .view
+            .accounts
+            .iter()
+            .position(|summary| summary.account.id() == id)
+            .ok_or(DomainError::UnknownAccount { account: id })?;
+        let place = index
+            - self
+                .view
+                .sub_group(self.view.accounts[index].account.kind())
+                .start;
+        let currency = self.view.net_worth.currency();
+        let net_worth = self
+            .view
+            .accounts
+            .iter()
+            .enumerate()
+            .filter(|&(other, _)| other != index)
+            .try_fold(Money::zero(currency), |sum, (_, summary)| {
+                sum.checked_add(summary.balance)
+            })?;
+        let view = Arc::make_mut(&mut self.view);
+        let summary = view.accounts.remove(index);
+        view.net_worth = net_worth;
+        view.generation = view.generation.next();
+        let transactions = summary.transactions();
+        Ok(DomainCommand::RestoreAccount {
+            account: summary.account,
+            transactions,
+            place,
+        })
+    }
+
+    fn restore_account(
+        &mut self,
+        account: Account,
+        transactions: Vec<Transaction>,
+        place: usize,
+    ) -> Result<DomainCommand, DomainError> {
+        debug_assert!(
+            self.view.account(account.id()).is_none(),
+            "a restored account's id is not in use"
+        );
+        let id = account.id();
+        let currency = self.view.net_worth.currency();
+        let summary = AccountSummary::new(account, transactions, currency)?;
+        self.insert_account(summary, place)?;
+        Ok(DomainCommand::DeleteAccount { account: id })
+    }
+
+    /// Puts `summary` at `place` among the accounts of its sub-group, recounting Net
+    /// Worth, and moves to the next generation. Fails, changing nothing, when Net Worth
+    /// overflows.
+    fn insert_account(&mut self, summary: AccountSummary, place: usize) -> Result<(), MoneyError> {
+        let net_worth = self.view.net_worth.checked_add(summary.balance)?;
+        let index = self.view.sub_group(summary.account.kind()).start + place;
+        let view = Arc::make_mut(&mut self.view);
+        view.accounts.insert(index, summary);
+        view.net_worth = net_worth;
+        view.generation = view.generation.next();
+        Ok(())
     }
 
     /// Where transaction `id` is, when its account is open to changes.
@@ -1086,6 +1212,199 @@ mod tests {
             [],
         )
         .ok();
+    }
+
+    /// The command that creates an account opened on 15 September 2026.
+    fn create(name: &str, kind: AccountKind, opening_balance: Money) -> DomainCommand {
+        DomainCommand::CreateAccount {
+            name: name.to_owned(),
+            kind,
+            opened: date(15),
+            opening_balance,
+        }
+    }
+
+    #[test]
+    fn a_created_account_lands_last_in_its_sub_group_with_its_balance() {
+        let mut ledger = three_payments();
+
+        ledger
+            .apply(create("Joint", AccountKind::Checking, usd(dec!(250.00))))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        let accounts: Vec<_> = view
+            .accounts()
+            .iter()
+            .map(|summary| (summary.account().name(), summary.balance()))
+            .collect();
+        assert_eq!(
+            accounts,
+            [
+                ("Everyday", usd(dec!(565.00))),
+                ("Joint", usd(dec!(250.00))),
+                ("Visa", usd(dec!(-50.00))),
+            ]
+        );
+        assert_eq!(view.net_worth(), usd(dec!(765.00)));
+    }
+
+    #[test]
+    fn an_account_of_a_kind_with_no_accounts_yet_lands_where_its_sub_group_goes() {
+        let mut ledger = three_payments();
+
+        ledger
+            .apply(create("Rainy Day", AccountKind::Savings, usd(dec!(10.00))))
+            .unwrap();
+
+        assert_eq!(names(&ledger.snapshot()), ["Everyday", "Rainy Day", "Visa"]);
+    }
+
+    #[test]
+    fn undoing_a_create_takes_the_account_out_again() {
+        let mut ledger = three_payments();
+        let before = ledger.snapshot();
+        ledger
+            .apply(create("Joint", AccountKind::Checking, usd(dec!(250.00))))
+            .unwrap();
+
+        ledger.undo().unwrap();
+
+        let after = ledger.snapshot();
+        assert_eq!(after.accounts(), before.accounts());
+        assert_eq!(after.net_worth(), before.net_worth());
+    }
+
+    #[test]
+    fn redo_brings_back_a_created_account_with_the_same_ids() {
+        let mut ledger = three_payments();
+        ledger
+            .apply(create("Joint", AccountKind::Checking, usd(dec!(250.00))))
+            .unwrap();
+        let created = ledger.snapshot();
+        ledger.undo().unwrap();
+
+        ledger.redo().unwrap();
+
+        assert_eq!(ledger.snapshot().accounts(), created.accounts());
+    }
+
+    #[test]
+    fn an_account_with_a_blank_name_is_rejected_and_changes_nothing() {
+        let mut ledger = three_payments();
+        let before = ledger.snapshot();
+
+        let result = ledger.apply(create(" \t", AccountKind::Checking, usd(dec!(1.00))));
+
+        assert_eq!(result, Err(DomainError::BlankAccountName));
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    /// The ids of the account named `name` and of its transactions.
+    fn ids(view: &LedgerView, name: &str) -> (AccountId, Vec<TransactionId>) {
+        let summary = view
+            .accounts()
+            .iter()
+            .find(|summary| summary.account().name() == name)
+            .unwrap();
+        let transactions = summary
+            .register()
+            .iter()
+            .map(|entry| entry.transaction().id())
+            .collect();
+        (summary.account().id(), transactions)
+    }
+
+    #[test]
+    fn a_created_account_never_reuses_an_id() {
+        let mut ledger = three_payments();
+        ledger
+            .apply(create("Joint", AccountKind::Checking, usd(dec!(1.00))))
+            .unwrap();
+        let undone = ids(&ledger.snapshot(), "Joint");
+        ledger.undo().unwrap();
+
+        ledger
+            .apply(create("Shared", AccountKind::Checking, usd(dec!(1.00))))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        let mut accounts: Vec<_> = view
+            .accounts()
+            .iter()
+            .map(|summary| summary.account().id())
+            .collect();
+        accounts.push(undone.0);
+        let mut transactions: Vec<_> = view
+            .accounts()
+            .iter()
+            .flat_map(AccountSummary::register)
+            .map(|entry| entry.transaction().id())
+            .collect();
+        transactions.extend(undone.1);
+        let (account_count, transaction_count) = (accounts.len(), transactions.len());
+        accounts.sort();
+        accounts.dedup();
+        transactions.sort();
+        transactions.dedup();
+        assert_eq!(
+            (accounts.len(), transactions.len()),
+            (account_count, transaction_count)
+        );
+    }
+
+    #[test]
+    fn a_created_account_holds_its_opening_balance_on_its_opening_date() {
+        let mut ledger = three_payments();
+
+        ledger
+            .apply(create("Joint", AccountKind::Checking, usd(dec!(250.00))))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        let joint = view.account(ids(&view, "Joint").0).unwrap();
+        let register: Vec<_> = joint
+            .register()
+            .iter()
+            .map(|entry| {
+                let transaction = entry.transaction();
+                (
+                    transaction.date(),
+                    transaction.allocation().clone(),
+                    transaction.amount(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            register,
+            [(date(15), Allocation::OpeningBalance, usd(dec!(250.00)))]
+        );
+        assert_eq!(joint.account().currency(), usd_code());
+    }
+
+    #[test]
+    fn deleting_an_unknown_account_is_rejected() {
+        let mut ledger = three_payments();
+        let unknown = AccountId::new(9);
+
+        let result = ledger.apply(DomainCommand::DeleteAccount { account: unknown });
+
+        assert_eq!(
+            result,
+            Err(DomainError::UnknownAccount { account: unknown })
+        );
+    }
+
+    #[test]
+    fn an_account_that_takes_net_worth_out_of_range_is_rejected_and_changes_nothing() {
+        let mut ledger = three_payments();
+        let before = ledger.snapshot();
+        let largest = usd(Decimal::MAX.trunc() / dec!(100));
+
+        let result = ledger.apply(create("Joint", AccountKind::Checking, largest));
+
+        assert_eq!(result, Err(DomainError::Money(MoneyError::Overflow)));
+        assert_eq!(ledger.snapshot(), before);
     }
 
     /// A ledger with the categories Groceries and Household, and one open account,
