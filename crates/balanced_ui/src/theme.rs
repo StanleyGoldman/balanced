@@ -551,6 +551,7 @@ mod tests {
             dense_rows: true,
             monospace_money: true,
             coloured_negatives: false,
+            ..Preferences::default()
         };
 
         let settings = ThemeSettings::from(&preferences);

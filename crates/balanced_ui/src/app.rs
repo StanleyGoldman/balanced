@@ -102,6 +102,16 @@ impl App {
         apply_theme(ctx, &self.theme);
     }
 
+    /// Puts `preferences` in use and writes them to the preferences file.
+    fn set_preferences(&mut self, preferences: Preferences) {
+        if let Err(error) = self.preferences_file.save(&preferences) {
+            tracing::warn!(?error, "saving the Preferences failed");
+            self.main_window
+                .show_status(StatusMessage::PreferencesNotSaved);
+        }
+        self.preferences = preferences;
+    }
+
     fn apply(&mut self, ctx: &egui::Context, command: AppCommand) {
         match command {
             AppCommand::Domain(command) => {
@@ -154,13 +164,12 @@ impl App {
                 let applied = self.ledger.apply(command).map(drop);
                 self.main_window.dialog_applied(ctx, applied);
             }
-            AppCommand::SetPreferences(preferences) => {
-                if let Err(error) = self.preferences_file.save(&preferences) {
-                    tracing::warn!(?error, "saving the Preferences failed");
-                    self.main_window
-                        .show_status(StatusMessage::PreferencesNotSaved);
-                }
-                self.preferences = preferences;
+            AppCommand::SetPreferences(preferences) => self.set_preferences(preferences),
+            AppCommand::SetRegisterColumns(register_columns) => {
+                self.set_preferences(Preferences {
+                    register_columns,
+                    ..self.preferences.clone()
+                });
             }
             AppCommand::ShowStatus(message) => self.main_window.show_status(message),
             AppCommand::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
@@ -226,8 +235,15 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let view = self.ledger.snapshot();
         let today = self.clock.today();
-        self.main_window
-            .show(ui, &self.i18n, &self.theme, &self.commands, &view, today);
+        self.main_window.show(
+            ui,
+            &self.i18n,
+            &self.theme,
+            &self.commands,
+            &view,
+            &self.preferences.register_columns,
+            today,
+        );
     }
 }
 

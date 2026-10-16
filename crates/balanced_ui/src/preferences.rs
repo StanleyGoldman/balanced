@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::register_columns::RegisterColumns;
+
 /// Light or dark colours.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -66,6 +68,9 @@ pub(crate) struct Preferences {
     pub(crate) monospace_money: bool,
     /// Negative amounts in the negative colour.
     pub(crate) coloured_negatives: bool,
+    /// The columns every Register shows, and their order.
+    #[serde(flatten)]
+    pub(crate) register_columns: RegisterColumns,
 }
 
 impl Default for Preferences {
@@ -76,6 +81,7 @@ impl Default for Preferences {
             dense_rows: false,
             monospace_money: false,
             coloured_negatives: true,
+            register_columns: RegisterColumns::default(),
         }
     }
 }
@@ -208,6 +214,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::register_columns::RegisterColumn;
 
     /// A preferences file in a new, empty directory, which lasts as long as the
     /// returned `TempDir`.
@@ -220,12 +227,16 @@ mod tests {
     #[test]
     fn saved_preferences_load_back() {
         let (_dir, file) = file();
+        let mut register_columns = RegisterColumns::default();
+        register_columns.move_up(RegisterColumn::Payee);
+        register_columns.set_shown(RegisterColumn::Memo, false);
         let preferences = Preferences {
             scheme: Scheme::Dark,
             font_face: FontFace::NotoSans,
             dense_rows: true,
             monospace_money: true,
             coloured_negatives: false,
+            register_columns,
         };
 
         file.save(&preferences).unwrap();
@@ -285,6 +296,33 @@ mod tests {
     }
 
     #[test]
+    fn unknown_column_ids_are_dropped_and_missing_columns_appended() {
+        let (dir, file) = file();
+        std::fs::write(
+            dir.path().join("preferences.toml"),
+            "version = 1\n\
+             register_columns = [\"payee\", \"tags\", \"actions\", \"date\", \"payee\"]\n\
+             hidden_register_columns = [\"memo\", \"tags\", \"amount\"]\n",
+        )
+        .unwrap();
+
+        let loaded = file.load().unwrap();
+
+        assert_eq!(
+            loaded.register_columns.shown(),
+            [
+                RegisterColumn::Payee,
+                RegisterColumn::Date,
+                RegisterColumn::Number,
+                RegisterColumn::Category,
+                RegisterColumn::Amount,
+                RegisterColumn::Balance,
+                RegisterColumn::Actions,
+            ]
+        );
+    }
+
+    #[test]
     fn no_file_loads_the_defaults() {
         let (_dir, file) = file();
 
@@ -335,7 +373,9 @@ mod tests {
              font_face = \"liberation_sans\"\n\
              dense_rows = false\n\
              monospace_money = false\n\
-             coloured_negatives = true\n"
+             coloured_negatives = true\n\
+             register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+             hidden_register_columns = []\n"
         );
     }
 

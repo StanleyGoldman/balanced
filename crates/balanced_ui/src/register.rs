@@ -12,9 +12,10 @@ use eframe::egui::accesskit::{self, Role};
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
 use eframe::egui::{
-    self, Align, Area, Button, CursorIcon, Event, EventFilter, Frame, Id, Key, Label, Layout,
-    Margin, Modifiers, Order, Popup, Rect, Response, ScrollArea, Sense, Shape, Stroke, StrokeKind,
-    TextEdit, TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
+    self, Align, Align2, Area, Button, Checkbox, CursorIcon, Event, EventFilter, Frame, Id, Key,
+    Label, Layout, Margin, Modifiers, Order, Popup, PopupCloseBehavior, Rect, Response, ScrollArea,
+    Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, WidgetInfo, WidgetText,
+    WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, TableBody, TableBuilder};
 use icu_calendar::{Date, Iso};
@@ -26,6 +27,7 @@ use crate::date_field::{self, DateEdit};
 use crate::draft_row::{Draft, Missing};
 use crate::formatted_amount::{FormattedAmount, i18n_currency};
 use crate::i18n::fl;
+use crate::register_columns::{RegisterColumn, RegisterColumns};
 use crate::register_model::{
     RegisterModel, RegisterRow, RegisterSort, RowId, SortDirection, SortKey,
 };
@@ -56,51 +58,7 @@ const SORT_ARROW_WIDTH: f32 = 7.0;
 const SORT_ARROW_HEIGHT: f32 = 4.0;
 const SORT_ARROW_GAP: f32 = 4.0;
 
-/// A Register column, in the default left-to-right order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum RegisterColumn {
-    Date,
-    Number,
-    Payee,
-    Category,
-    Memo,
-    Amount,
-    Balance,
-    /// The untitled column holding each row's Actions menu.
-    Actions,
-}
-
 impl RegisterColumn {
-    /// The last column the cell cursor can rest in.
-    const LAST: Self = Self::Amount;
-
-    /// Every column, in the order the Register shows them. A new column goes here as well
-    /// as in the matches below, which the compiler checks; it can't check this list.
-    const ALL: [Self; 8] = [
-        Self::Date,
-        Self::Number,
-        Self::Payee,
-        Self::Category,
-        Self::Memo,
-        Self::Amount,
-        Self::Balance,
-        Self::Actions,
-    ];
-
-    /// The column's stable id, which the saved layout names it by.
-    fn id(self) -> &'static str {
-        match self {
-            Self::Date => "date",
-            Self::Number => "num",
-            Self::Payee => "payee",
-            Self::Category => "category",
-            Self::Memo => "memo",
-            Self::Amount => "amount",
-            Self::Balance => "balance",
-            Self::Actions => "actions",
-        }
-    }
-
     /// The column's width before the user resizes it, for a column that resizes.
     /// Payee and Category share the width the others leave, and the Actions column
     /// fits its button, so neither resizes.
@@ -203,27 +161,13 @@ impl RegisterColumn {
     }
 
     /// Space between the cell's edges and its text: [`Theme::EDGE_INSET`] on the
-    /// Register's outer edges, none elsewhere.
-    fn insets(self) -> Insets {
+    /// Register's outer edges, none elsewhere. `first` says whether the column is the
+    /// first shown; the Actions column is always the last.
+    fn insets(self, first: bool) -> Insets {
         let edge = Theme::EDGE_INSET;
-        match self {
-            Self::Date => Insets {
-                left: edge,
-                right: 0.0,
-            },
-            Self::Actions => Insets {
-                left: 0.0,
-                right: edge,
-            },
-            Self::Number
-            | Self::Payee
-            | Self::Category
-            | Self::Memo
-            | Self::Amount
-            | Self::Balance => Insets {
-                left: 0.0,
-                right: 0.0,
-            },
+        Insets {
+            left: if first { edge } else { 0.0 },
+            right: if self == Self::Actions { edge } else { 0.0 },
         }
     }
 }
@@ -738,6 +682,8 @@ pub(crate) struct Register {
     missing: Option<Missing>,
     /// Whether the draft row is to scroll into view on the next frame.
     reveal_draft: bool,
+    /// The columns shown, left to right, as the column chooser last left them.
+    shown: Vec<RegisterColumn>,
     /// The Category cell edit waiting on the New Category Dialog its Create row opened.
     awaiting_category: Option<AwaitingCategory>,
 }
@@ -871,6 +817,26 @@ impl Register {
         self.reveal_draft = true;
     }
 
+    /// Shows `columns`, left to right. A cell cursor in a column that is no longer shown
+    /// moves to the Date column.
+    fn show_columns(&mut self, columns: &RegisterColumns) {
+        self.shown = columns.shown();
+        if let Some(cursor) = self.cursor.as_mut()
+            && !self.shown.contains(&cursor.column)
+        {
+            cursor.column = RegisterColumn::Date;
+        }
+    }
+
+    /// The columns the cell cursor can rest in, left to right.
+    fn cursor_columns(&self) -> Vec<RegisterColumn> {
+        self.shown
+            .iter()
+            .copied()
+            .filter(|column| column.holds_cursor())
+            .collect()
+    }
+
     /// Carries out `action`, picked from transaction `id`'s Actions menu.
     fn act(&mut self, id: TransactionId, action: RowAction, commands: &CommandSender) {
         match action {
@@ -917,7 +883,7 @@ impl Register {
     /// `ui`. Only the rows in view are laid out. `today` is the date field's today.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the column widths are shared by every Register, so the Main window owns them and lends them here beside the account, its snapshot and today's date"
+        reason = "the column widths and the columns shown are shared by every Register, so the Main window lends them here beside the account, its snapshot and today's date"
     )]
     pub(crate) fn show(
         &mut self,
@@ -928,8 +894,10 @@ impl Register {
         summary: &AccountSummary,
         view: &LedgerView,
         widths: &mut ColumnWidths,
+        columns: &RegisterColumns,
         today: Date<Iso>,
     ) {
+        self.show_columns(columns);
         let account = summary.account().id();
         let closed = summary.account().is_closed();
         self.catch_up(account, closed, view);
@@ -982,7 +950,7 @@ impl Register {
                     .cell_layout(Layout::left_to_right(Align::Center))
                     .auto_shrink(false)
                     .max_scroll_height(f32::INFINITY);
-                for column in RegisterColumn::ALL {
+                for &column in &self.shown {
                     table = table.column(column.width(theme, widths));
                 }
                 if let Some(offset) = scroll_offset {
@@ -990,21 +958,23 @@ impl Register {
                 }
                 table
                     .header(row_height, |mut header| {
-                        for column in RegisterColumn::ALL {
+                        let frame = HeaderFrame {
+                            i18n,
+                            theme,
+                            commands,
+                            columns,
+                        };
+                        let shown = self.shown.clone();
+                        for (index, column) in shown.into_iter().enumerate() {
                             header.col(|ui| {
                                 let heading = Heading {
                                     register_id,
                                     column,
+                                    first: index == 0,
                                     sort: self.sort,
                                     viewport,
                                 };
-                                if let Some(key) = heading.show(ui, i18n, theme) {
-                                    self.sort = self.sort.clicked(key);
-                                    self.centre_pending = true;
-                                    // The rows sort and scroll on the next frame.
-                                    ui.ctx().request_repaint();
-                                }
-                                widths.resize_handle(ui, i18n, column);
+                                self.heading_cell(ui, &heading, &frame, widths);
                             });
                         }
                     })
@@ -1028,6 +998,35 @@ impl Register {
         self.choices = Some(choices);
     }
 
+    /// Draws `heading` in its cell `ui`, with the column's resize handle, and the
+    /// column chooser on the Actions column. Clicking a sortable heading sorts by it.
+    fn heading_cell(
+        &mut self,
+        ui: &egui::Ui,
+        heading: &Heading,
+        frame: &HeaderFrame<'_>,
+        widths: &mut ColumnWidths,
+    ) {
+        let HeaderFrame {
+            i18n,
+            theme,
+            commands,
+            columns,
+        } = *frame;
+        if let Some(key) = heading.show(ui, i18n, theme) {
+            self.sort = self.sort.clicked(key);
+            self.centre_pending = true;
+            // The rows sort and scroll on the next frame.
+            ui.ctx().request_repaint();
+        }
+        widths.resize_handle(ui, i18n, heading.column);
+        if heading.column == RegisterColumn::Actions
+            && let Some(columns) = column_chooser(ui, i18n, heading.register_id, columns)
+        {
+            commands.send(AppCommand::SetRegisterColumns(columns));
+        }
+    }
+
     /// Lays out the rows in view of the Register's body, and notes which of them are
     /// fully in view for keyboard scrolling. `frame`'s viewport is filled in here.
     fn body(&mut self, mut body: TableBody<'_>, frame: BodyFrame<'_>, row_height: f32, pitch: f32) {
@@ -1041,7 +1040,8 @@ impl Register {
                 .get(index)
                 .expect("`rows` lays out indices below `rows.len()` only");
             table_row.set_selected(self.cursor.is_some_and(|cursor| cursor.row == row.id()));
-            for (column_index, column) in RegisterColumn::ALL.into_iter().enumerate() {
+            let shown = self.shown.clone();
+            for (column_index, column) in shown.into_iter().enumerate() {
                 table_row.col(|ui| {
                     if column_index == 0 && fully_in(viewport, ui.max_rect()) {
                         in_view = Some(in_view.map_or((index, index), |(first, _)| (first, index)));
@@ -1085,6 +1085,7 @@ impl Register {
             register_id,
             row,
             column,
+            first: column_index == 0,
             selected: self.cursor.is_some_and(|cursor| cursor.row == row.id()),
             cursor: self.cursor == Some(address),
             access,
@@ -1144,7 +1145,14 @@ impl Register {
             list_button(ui, frame.i18n, button, edit.editor_id())
         });
         let typed = edit.text.clone();
-        let response = editor(ui, edit, field, heading_id(frame.register_id, column));
+        let insets = column.insets(self.shown.first() == Some(&column));
+        let response = editor(
+            ui,
+            edit,
+            field,
+            insets,
+            heading_id(frame.register_id, column),
+        );
         if edit.text != typed {
             edit.open_list(ListScope::Matching, frame.choices);
             edit.error = None;
@@ -1219,7 +1227,7 @@ impl Register {
             return;
         };
         let rect = ui.max_rect();
-        let Insets { left, right } = column.insets();
+        let Insets { left, right } = column.insets(self.shown.first() == Some(&column));
         let inner =
             Rect::from_x_y_ranges(rect.left() + left..=rect.right() - right, rect.y_range());
         let response = edit
@@ -1447,7 +1455,7 @@ impl Register {
         ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
         if leave == Leave::Enter
             && cursor.row == RowId::Draft
-            && cursor.column == RegisterColumn::LAST
+            && self.cursor_columns().last() == Some(&cursor.column)
         {
             // Enter on the draft row's last cell adds the row.
             self.post(keys);
@@ -1603,10 +1611,7 @@ impl Register {
     /// Moves the cell cursor from `cursor` by `step`. Returns `None`, leaving the
     /// cursor where it is, when there is nowhere to go.
     fn move_cursor(&mut self, cursor: CellAddress, step: Move, rows: Rows<'_>) -> Option<Moved> {
-        let columns: Vec<RegisterColumn> = RegisterColumn::ALL
-            .into_iter()
-            .filter(|column| column.holds_cursor())
-            .collect();
+        let columns = self.cursor_columns();
         let row = rows.position(cursor.row)?;
         let column = columns.iter().position(|&column| column == cursor.column)?;
         let (row, column) = match step {
@@ -2056,8 +2061,13 @@ fn heading_id(register_id: Id, column: RegisterColumn) -> Id {
 /// The `TextEdit` over the cell being edited, filling `rect`. It keeps Esc, so the
 /// Register can cancel the edit before egui drops the field's focus. A field with a
 /// list keeps ↑ and ↓ too, which would otherwise move focus out of it.
-fn editor(ui: &mut egui::Ui, edit: &mut CellEdit, rect: Rect, heading: Id) -> Response {
-    let Insets { left, right } = edit.cell.column.insets();
+fn editor(
+    ui: &mut egui::Ui,
+    edit: &mut CellEdit,
+    rect: Rect,
+    Insets { left, right }: Insets,
+    heading: Id,
+) -> Response {
     let inner = Rect::from_x_y_ranges(rect.left() + left..=rect.right() - right, rect.y_range());
     let id = edit.editor_id();
     ui.put(
@@ -2263,11 +2273,23 @@ fn centring_offset(ui: &egui::Ui, row_height: f32, index: usize) -> f32 {
     (top - (body - row_height) / 2.0).max(0.0)
 }
 
+/// What drawing the header needs beside the heading itself.
+#[derive(Clone, Copy)]
+struct HeaderFrame<'a> {
+    i18n: &'a Localizer,
+    theme: &'a Theme,
+    commands: &'a CommandSender,
+    /// The columns every Register shows, which the column chooser changes.
+    columns: &'a RegisterColumns,
+}
+
 /// A column heading on the header band.
 struct Heading {
     /// The Register's id, which the heading's id derives from.
     register_id: Id,
     column: RegisterColumn,
+    /// Whether the column is the first shown.
+    first: bool,
     /// The Register's sort, which puts an arrow on the sorted column's heading.
     sort: RegisterSort,
     /// The visible part of the Register.
@@ -2282,6 +2304,7 @@ impl Heading {
         let Self {
             register_id,
             column,
+            first,
             sort,
             viewport,
         } = *self;
@@ -2319,6 +2342,7 @@ impl Heading {
             ui,
             rect,
             column,
+            column.insets(first),
             WidgetText::from(egui::RichText::new(title).strong()),
         );
         if let (Some(direction), Some(text)) = (direction, text) {
@@ -2367,6 +2391,8 @@ struct Cell<'a> {
     register_id: Id,
     row: &'a RegisterRow,
     column: RegisterColumn,
+    /// Whether the column is the first shown.
+    first: bool,
     selected: bool,
     /// Whether the cell cursor is on this cell.
     cursor: bool,
@@ -2388,6 +2414,7 @@ impl Cell<'_> {
             register_id,
             row,
             column,
+            first,
             selected,
             cursor,
             access,
@@ -2447,7 +2474,7 @@ impl Cell<'_> {
                 node.set_selected(true);
             }
         });
-        paint_text(ui, rect, column, text);
+        paint_text(ui, rect, column, column.insets(first), text);
         if cursor {
             ui.painter()
                 .rect_stroke(rect, 0.0, theme.cell_cursor_stroke(), StrokeKind::Inside);
@@ -2471,13 +2498,19 @@ fn cell_info(ui: &egui::Ui, response: &Response, selected: bool, label: &str) {
         .accesskit_node_builder(response.id, |node| node.set_role(Role::Cell));
 }
 
-/// Paints `text` in `rect`, inset and aligned as `column` says, truncated to fit.
+/// Paints `text` in `rect`, inset by `insets` and aligned as `column` says, truncated
+/// to fit.
 /// Returns where the text went, unless `rect` is out of view.
-fn paint_text(ui: &egui::Ui, rect: Rect, column: RegisterColumn, text: WidgetText) -> Option<Rect> {
+fn paint_text(
+    ui: &egui::Ui,
+    rect: Rect,
+    column: RegisterColumn,
+    Insets { left, right }: Insets,
+    text: WidgetText,
+) -> Option<Rect> {
     if !ui.is_rect_visible(rect) {
         return None;
     }
-    let Insets { left, right } = column.insets();
     let inner = Rect::from_x_y_ranges(rect.left() + left..=rect.right() - right, rect.y_range());
     let galley = text.into_galley(
         ui,
@@ -2537,6 +2570,79 @@ fn actions_menu(
                 .then_some(RowAction::Delete)
         })
         .and_then(|menu| menu.inner)
+}
+
+/// The column chooser: a ⚙ button on the right of the Actions heading cell `ui`, which
+/// opens a list of the columns, each with buttons that move it and a checkbox that shows
+/// or hides it. The list stays open until a click lands outside it. Returns `columns`
+/// as the user changed them, in the frame they change. The button's id, and so the
+/// list's, derives from `register_id`, so the list stays open when the cell moves.
+fn column_chooser(
+    ui: &egui::Ui,
+    i18n: &Localizer,
+    register_id: Id,
+    columns: &RegisterColumns,
+) -> Option<RegisterColumns> {
+    let cell = ui.max_rect();
+    let size = cell.height();
+    let button = Rect::from_center_size(
+        pos2(
+            cell.right() - Theme::EDGE_INSET - size / 2.0,
+            cell.center().y,
+        ),
+        vec2(size, size),
+    );
+    let id = register_id.with("register_column_chooser");
+    let response = ui.interact(button, id, Sense::click());
+    let label = fl!(i18n, "register-column-chooser");
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
+    if ui.is_rect_visible(button) {
+        let visuals = ui.style().interact(&response);
+        if response.hovered() || response.is_pointer_button_down_on() {
+            ui.painter().rect_filled(button, 0.0, visuals.weak_bg_fill);
+        }
+        ui.painter().text(
+            button.center(),
+            Align2::CENTER_CENTER,
+            "⚙",
+            TextStyle::Body.resolve(ui.style()),
+            visuals.text_color(),
+        );
+    }
+    Popup::menu(&response)
+        .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            let mut changed = columns.clone();
+            let entries = columns.entries();
+            let last = entries.len().saturating_sub(1);
+            for (index, (column, shown)) in entries.into_iter().enumerate() {
+                ui.horizontal(|ui| {
+                    let title = column.title(i18n);
+                    let up = fl!(i18n, "register-column-move-up", column = title.clone());
+                    if icon_button(ui, "⏶", &up, index > 0).clicked() {
+                        changed.move_up(column);
+                    }
+                    let down = fl!(i18n, "register-column-move-down", column = title.clone());
+                    if icon_button(ui, "⏷", &down, index < last).clicked() {
+                        changed.move_down(column);
+                    }
+                    let mut ticked = shown;
+                    let checkbox = Checkbox::new(&mut ticked, title);
+                    if ui.add_enabled(column.hides(), checkbox).changed() {
+                        changed.set_shown(column, ticked);
+                    }
+                });
+            }
+            (changed != *columns).then_some(changed)
+        })
+        .and_then(|popup| popup.inner)
+}
+
+/// A button showing `glyph`, which assistive technology reads as `label`.
+fn icon_button(ui: &mut egui::Ui, glyph: &str, label: &str, enabled: bool) -> Response {
+    let response = ui.add_enabled(enabled, Button::new(glyph));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
+    response
 }
 
 #[cfg(test)]
@@ -2616,6 +2722,7 @@ mod tests {
                         summary,
                         view,
                         widths,
+                        &RegisterColumns::default(),
                         Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date"),
                     );
                 },
