@@ -178,6 +178,7 @@ fn hidden_accounts_are_left_out_but_count_in_net_worth() {
 }
 
 /// The text of every `Label` on screen, which holds a tooltip's text as its value.
+/// A tooltip shows among the window's other Labels, so tests check it is among them.
 fn label_values(harness: &Harness<'static, App>) -> Vec<String> {
     harness
         .query_all_by_role(Role::Label)

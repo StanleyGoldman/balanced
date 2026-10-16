@@ -13,7 +13,8 @@ use icu_calendar::Date;
 use icu_locale::{langid, locale};
 
 /// The App on stub data in German with `de-DE` formatting, wide enough to show every
-/// Register column, with the Account bar unfolded.
+/// Register column, with the Account bar unfolded. Its labels are German, so it
+/// unfolds the Account bar itself rather than with `testing::unfold_account_bar`.
 fn app() -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
@@ -178,6 +179,7 @@ fn hovering_a_heading_cut_short_beside_its_total_shows_the_whole_heading() {
         .hover();
     harness.run();
 
+    // The tooltip shows among the window's other Labels.
     let labels: Vec<String> = harness
         .query_all_by_role(Role::Label)
         .filter_map(|label| label.accesskit_node().value())
@@ -186,4 +188,33 @@ fn hovering_a_heading_cut_short_beside_its_total_shows_the_whole_heading() {
         labels.contains(&"Anlagen & Verbindlichkeiten".to_owned()),
         "{labels:?}"
     );
+}
+
+#[test]
+fn the_new_account_wizard_reads_and_shows_german_amounts_and_dates_in_english_text() {
+    let mut harness = app();
+    for label in ["Datei", "Neues Konto …", "Weiter"] {
+        harness.get_by_role_and_label(Role::Button, label).click();
+        harness.run();
+    }
+    // The wizard's fields and Review lines fall back to en-US text.
+    let name = harness.get_by_role_and_label(Role::TextInput, "Name");
+    name.focus();
+    name.type_text("Rainy Day");
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Weiter")
+        .click();
+    harness.run();
+    let balance = harness.get_by_role_and_label(Role::TextInput, "Opening balance");
+    balance.focus();
+    balance.type_text("1.234,56");
+    harness.run();
+
+    harness
+        .get_by_role_and_label(Role::Button, "Weiter")
+        .click();
+    harness.run();
+
+    harness.get_by_value("Opening balance: 1.234,56\u{a0}$ as of 14.10.2026");
 }

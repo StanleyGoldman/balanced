@@ -555,8 +555,13 @@ fn heading(
         elided = galley.elided;
         paint_centred(ui, galley, text_left, rect, visuals.text_color());
     }
+    whole_on_hover(response, elided, label)
+}
+
+/// `response`, with `text` shown whole in a tooltip when it was `elided` to fit.
+fn whole_on_hover(response: Response, elided: bool, text: impl Into<WidgetText>) -> Response {
     if elided {
-        response.on_hover_text(label)
+        response.on_hover_text(text)
     } else {
         response
     }
@@ -623,9 +628,5 @@ fn account_row(
     let elided = name_galley.elided;
     paint_centred(ui, name_galley, indent, rect, text_color);
     paint_centred(ui, balance_galley, balance_left, rect, text_color);
-    if elided {
-        response.on_hover_text(row.name())
-    } else {
-        response
-    }
+    whole_on_hover(response, elided, row.name())
 }
