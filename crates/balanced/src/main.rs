@@ -1,9 +1,12 @@
 //! The Balanced desktop application.
 
+use std::path::PathBuf;
+
 use anyhow::{Context as _, Result, anyhow};
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
-use balanced_ui::{App, Clock};
+use balanced_ui::{App, Clock, PreferencesFile};
+use directories::ProjectDirs;
 use icu_locale::Locale;
 use tracing_subscriber::EnvFilter;
 
@@ -19,13 +22,30 @@ fn main() -> Result<()> {
         .filter(|tag| !tag.is_empty());
     let i18n = localizer(locale_override.as_deref())?;
     let ledger = Ledger::stub();
+    let preferences_file = PreferencesFile::in_dir(&config_dir()?);
     eframe::run_native(
         "Balanced",
         eframe::NativeOptions::default(),
-        Box::new(|cc| Ok(Box::new(App::new(cc, i18n, ledger, Clock::default())))),
+        Box::new(|cc| {
+            Ok(Box::new(App::new(
+                cc,
+                i18n,
+                ledger,
+                Clock::default(),
+                preferences_file,
+            )))
+        }),
     )
     // `eframe::Error` isn't `Send + Sync`, so it can't be kept as the source.
     .map_err(|err| anyhow!("the Main window failed: {err}"))
+}
+
+/// The directory Balanced keeps its configuration in, such as `~/.config/balanced`
+/// on Linux.
+fn config_dir() -> Result<PathBuf> {
+    let dirs = ProjectDirs::from("", "", "Balanced")
+        .context("the OS reports no home directory to keep the configuration in")?;
+    Ok(dirs.config_dir().to_owned())
 }
 
 /// Logs to stderr at `info` and above, or as `RUST_LOG` says.

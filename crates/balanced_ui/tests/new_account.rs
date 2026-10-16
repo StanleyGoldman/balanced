@@ -3,7 +3,7 @@
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
-use balanced_ui::{App, Clock};
+use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{Event, Key, Modifiers};
 use egui_kittest::Harness;
@@ -18,6 +18,7 @@ fn app() -> Harness<'static, App> {
             Localizer::for_tests(),
             Ledger::stub(),
             Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
+            PreferencesFile::for_tests(),
         )
     })
 }
@@ -193,4 +194,25 @@ fn a_refused_finish_shows_why_and_keeps_the_wizard_open() {
         &harness,
         "That change would make a balance too large to hold."
     ));
+}
+
+#[test]
+fn a_day_picked_from_the_calendar_dates_the_opening_balance() {
+    let mut harness = wizard();
+    press(&mut harness, Key::Enter);
+    type_into(&mut harness, "Name", "Rainy Day");
+    press(&mut harness, Key::Enter);
+    type_into(&mut harness, "Opening balance", "10.00");
+    harness
+        .get_by_role_and_label(Role::Button, "Calendar")
+        .click();
+    harness.run();
+
+    harness
+        .get_by_role_and_label(Role::Button, "10/24/2026")
+        .click();
+    harness.run();
+    press(&mut harness, Key::Enter);
+
+    assert!(shows(&harness, "Opening balance: $10.00 as of 10/24/2026"));
 }

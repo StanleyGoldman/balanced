@@ -1,6 +1,10 @@
 # Theme
 
-Balanced has one look, in light and dark; the decisions behind it are in issue #16, "Prototype theming and density". `balanced_ui`'s `theme` module builds it from a `ThemeSettings`: the Preferences that shape the look. Until issue #48 settles where Preferences live, the caller builds `ThemeSettings` itself.
+Balanced has one look, in light and dark; the decisions behind it are in issue #16, "Prototype theming and density". `balanced_ui`'s `theme` module builds it from a `ThemeSettings`, the view of the Preferences that shape the look (`ThemeSettings::from(&preferences)`). The App rebuilds the `Theme` whenever the Preferences it shows change, and applies its style and fonts with `apply_theme`.
+
+## Fonts
+
+`Theme::fonts` puts the chosen face (Noto Sans or Liberation Sans, bundled in `crates/balanced_ui/fonts/` with their OFL licences) first in the proportional family, with egui's fonts behind it for the glyphs it lacks. Monospace money uses egui's Hack. A new face goes into `FontFace` (its id in `preferences.toml`), `Theme::fonts`, and the font list's labels.
 
 ## How a widget gets its colours and sizes
 

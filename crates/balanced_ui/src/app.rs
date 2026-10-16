@@ -12,14 +12,20 @@ use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::i18n::fl;
 use crate::layout::Layout;
 use crate::main_window::MainWindow;
+use crate::preferences::{Preferences, PreferencesFile};
 use crate::register_tabs::RegisterTabs;
-use crate::theme::Theme;
+use crate::theme::{Theme, ThemeSettings};
 
 /// Balanced's eframe application.
 #[derive(Debug)]
 pub struct App {
     i18n: Localizer,
     ledger: Ledger,
+    preferences_file: PreferencesFile,
+    /// The Preferences in use.
+    preferences: Preferences,
+    /// The look, built from the open Preferences Dialog's draft, or else from the
+    /// Preferences in use.
     theme: Theme,
     clock: Clock,
     commands: CommandSender,
@@ -28,31 +34,40 @@ pub struct App {
 }
 
 impl App {
-    /// The App over `ledger`, showing text through `i18n` and reading today's date
-    /// from `clock`.
+    /// The App over `ledger`, showing text through `i18n`, reading today's date from
+    /// `clock` and keeping the Preferences in `preferences_file`.
+    ///
+    /// A preferences file that can't be read is renamed to `preferences.toml.broken`,
+    /// and the App starts from the default Preferences and says so in the Status bar.
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         i18n: Localizer,
         ledger: Ledger,
         clock: Clock,
+        preferences_file: PreferencesFile,
     ) -> Self {
-        Self::with_theme(cc, i18n, ledger, clock, Theme::default())
-    }
-
-    /// The App over `ledger`, showing text through `i18n` in `theme`, and reading
-    /// today's date from `clock`.
-    pub(crate) fn with_theme(
-        cc: &eframe::CreationContext<'_>,
-        i18n: Localizer,
-        ledger: Ledger,
-        clock: Clock,
-        theme: Theme,
-    ) -> Self {
-        // Balanced's Scheme, not the OS, picks light or dark, so egui's light and dark
-        // styles are both the theme's style.
-        let style = Arc::new(theme.style());
-        cc.egui_ctx.set_style_of(egui::Theme::Light, style.clone());
-        cc.egui_ctx.set_style_of(egui::Theme::Dark, style);
+        let (preferences, problem) = match preferences_file.load() {
+            Ok(preferences) => (preferences, None),
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    "the preferences file can't be read; using the defaults"
+                );
+                let message = match preferences_file.set_aside() {
+                    Ok(()) => StatusMessage::PreferencesReset,
+                    Err(error) => {
+                        tracing::warn!(
+                            ?error,
+                            "setting the unreadable preferences file aside failed"
+                        );
+                        StatusMessage::PreferencesUnreadable
+                    }
+                };
+                (Preferences::default(), Some(message))
+            }
+        };
+        let theme = Theme::new(ThemeSettings::from(&preferences));
+        apply_theme(&cc.egui_ctx, &theme);
         cc.egui_ctx
             .send_viewport_cmd(egui::ViewportCommand::Title(fl!(
                 &i18n,
@@ -60,15 +75,31 @@ impl App {
             )));
         let (commands, command_receiver) = CommandSender::new(cc.egui_ctx.clone());
         let layout = Layout::load(cc.storage);
+        let mut main_window = MainWindow::new(&layout);
+        if let Some(message) = problem {
+            main_window.show_status(message);
+        }
         Self {
             i18n,
             ledger,
+            preferences_file,
+            preferences,
             theme,
             clock,
             commands,
             command_receiver,
-            main_window: MainWindow::new(&layout),
+            main_window,
         }
+    }
+
+    /// Builds the look from `preferences`, unless it is already built from them.
+    fn show_preferences(&mut self, ctx: &egui::Context, preferences: &Preferences) {
+        let settings = ThemeSettings::from(preferences);
+        if settings == self.theme.settings() {
+            return;
+        }
+        self.theme = Theme::new(settings);
+        apply_theme(ctx, &self.theme);
     }
 
     fn apply(&mut self, ctx: &egui::Context, command: AppCommand) {
@@ -116,11 +147,20 @@ impl App {
                     &kind,
                     &self.ledger.snapshot(),
                     self.clock.today(),
+                    &self.preferences,
                 );
             }
             AppCommand::SubmitDialog(command) => {
                 let applied = self.ledger.apply(command).map(drop);
                 self.main_window.dialog_applied(ctx, applied);
+            }
+            AppCommand::SetPreferences(preferences) => {
+                if let Err(error) = self.preferences_file.save(&preferences) {
+                    tracing::warn!(?error, "saving the Preferences failed");
+                    self.main_window
+                        .show_status(StatusMessage::PreferencesNotSaved);
+                }
+                self.preferences = preferences;
             }
             AppCommand::ShowStatus(message) => self.main_window.show_status(message),
             AppCommand::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
@@ -129,11 +169,18 @@ impl App {
 }
 
 impl eframe::App for App {
-    /// Applies every Command sent since the last frame.
+    /// Applies every Command sent since the last frame, then shows the open
+    /// Preferences Dialog's draft, or else the Preferences in use.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         while let Ok(command) = self.command_receiver.try_recv() {
             self.apply(ctx, command);
         }
+        let preferences = self
+            .main_window
+            .preferences_draft()
+            .unwrap_or(&self.preferences)
+            .clone();
+        self.show_preferences(ctx, &preferences);
     }
 
     /// Takes the arrow keys away from egui's focus navigation while a menu is open, and
@@ -184,6 +231,16 @@ impl eframe::App for App {
     }
 }
 
+/// Gives every window `theme`'s style and fonts.
+fn apply_theme(ctx: &egui::Context, theme: &Theme) {
+    // Balanced's Scheme, not the OS, picks light or dark, so egui's light and dark
+    // styles are both the theme's style.
+    let style = Arc::new(theme.style());
+    ctx.set_style_of(egui::Theme::Light, style.clone());
+    ctx.set_style_of(egui::Theme::Dark, style);
+    ctx.set_fonts(theme.fonts());
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -208,6 +265,7 @@ mod tests {
                 Localizer::for_tests(),
                 Ledger::stub(),
                 Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
+                PreferencesFile::for_tests(),
             )
         });
         let mut storage = MemoryStorage::default();

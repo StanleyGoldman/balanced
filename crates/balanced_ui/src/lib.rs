@@ -19,6 +19,8 @@ mod manage_accounts;
 mod menu_nav;
 mod new_account;
 mod new_category;
+mod preferences;
+mod preferences_dialog;
 mod register;
 mod register_model;
 mod register_tabs;
@@ -31,3 +33,4 @@ mod user_action;
 
 pub use app::App;
 pub use clock::Clock;
+pub use preferences::PreferencesFile;

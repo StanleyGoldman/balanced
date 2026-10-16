@@ -154,22 +154,20 @@ impl LightDialog {
         let first_frame = !dialog.shown;
         dialog.shown = true;
         let frame = Frame::popup(&ctx.global_style());
-        let modal = Modal::new(id).frame(frame).backdrop_color(backdrop);
-        let layer = modal.area.layer();
-        let modal = modal.show(ctx, |ui| {
-            let inner = (room - frame.total_margin().sum()).max(Vec2::ZERO);
-            let width = Theme::LIGHT_DIALOG_WIDTH.min(inner.x);
-            ui.set_width(width);
-            body_area(ui, inner.y, |ui| body(ui, &mut dialog.form));
-            let (accept, cancel, back) = buttons(ui, accept, cancel, back);
-            if first_frame {
-                accept.request_focus();
-            }
-            (accept, cancel, back)
-        });
-        // A confirm opened from a heavy Dialog draws above it: the heavy Dialog raises
-        // itself every frame, before this.
-        ctx.move_to_top(layer);
+        let modal = Modal::new(id)
+            .frame(frame)
+            .backdrop_color(backdrop)
+            .show(ctx, |ui| {
+                let inner = (room - frame.total_margin().sum()).max(Vec2::ZERO);
+                let width = Theme::LIGHT_DIALOG_WIDTH.min(inner.x);
+                ui.set_width(width);
+                body_area(ui, inner.y, |ui| body(ui, &mut dialog.form));
+                let (accept, cancel, back) = buttons(ui, accept, cancel, back);
+                if first_frame {
+                    accept.request_focus();
+                }
+                (accept, cancel, back)
+            });
         let (accept, cancel, back) = &modal.inner;
         if accept.clicked() || (modal.is_top_modal && enter_pressed(ctx, cancel, back.as_ref())) {
             DialogOutcome::Accepted
@@ -248,8 +246,10 @@ impl HeavyDialog {
         let room = window.shrink(Theme::DIALOG_MARGIN);
         let first_frame = !dialog.shown;
         dialog.shown = true;
+        // Windows' order: above the Main window's panels, and below popups and light
+        // Dialogs, so a list or confirm the Dialog opens draws over it.
         let backdrop_layer = heavy_backdrop(id);
-        let dialog_layer = LayerId::new(Order::Foreground, id);
+        let dialog_layer = LayerId::new(Order::Middle, id);
         // Widgets below the backdrop take no input or focus, as below an `egui::Modal`.
         let is_top = ctx.memory_mut(|memory| {
             memory.set_modal_layer(backdrop_layer);
@@ -257,7 +257,7 @@ impl HeavyDialog {
         });
         let popup_open = Popup::is_any_open(ctx);
         let backdrop = Area::new(backdrop_layer.id)
-            .order(Order::Foreground)
+            .order(Order::Middle)
             .fixed_pos(window.min)
             .show(ctx, |ui| {
                 ui.painter().rect_filled(window, 0.0, tint);
@@ -267,7 +267,7 @@ impl HeavyDialog {
         let mut open = true;
         let mut heavy = Window::new(title)
             .id(id)
-            .order(Order::Foreground)
+            .order(Order::Middle)
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
@@ -317,7 +317,7 @@ impl HeavyDialog {
 /// The layer of the backdrop behind the heavy Dialog with id `heavy`, which is its
 /// modal layer.
 fn heavy_backdrop(heavy: Id) -> LayerId {
-    LayerId::new(Order::Foreground, heavy.with("backdrop"))
+    LayerId::new(Order::Middle, heavy.with("backdrop"))
 }
 
 /// Draws a Dialog's `body` in `ui`, scrolling when it is taller than `height` less a

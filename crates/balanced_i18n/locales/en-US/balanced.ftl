@@ -25,6 +25,7 @@ menu-view-previous-register-tab = Previous { -register } Tab
 menu-view-switch-pane = Switch Pane
 menu-tools = Tools
 menu-tools-manage-accounts = Manage Accounts…
+menu-tools-preferences = Preferences…
 menu-help = Help
 menu-help-about = About { -brand-name }
 menu-new-transaction = New Transaction
@@ -144,6 +145,20 @@ dialog-new-category-name = Name
 dialog-new-category-hint = Use “:” to put it under another category, as in Home:Garden.
 # $parent is the text before the last colon of the typed name.
 dialog-new-category-no-parent = No category is named “{ $parent }”.
+dialog-preferences-title = Preferences
+# The groups listed down the left of the Preferences Dialog.
+dialog-preferences-group-display = Display
+dialog-preferences-scheme = Theme
+dialog-preferences-scheme-light = Light
+dialog-preferences-scheme-dark = Dark
+dialog-preferences-font-face = Font
+# The font egui, the toolkit Balanced is drawn with, uses by default.
+dialog-preferences-font-face-egui = Standard
+dialog-preferences-font-face-noto-sans = Noto Sans
+dialog-preferences-font-face-liberation-sans = Liberation Sans
+dialog-preferences-dense-rows = Dense rows
+dialog-preferences-monospace-money = Line up amounts in a fixed-width font
+dialog-preferences-coloured-negatives = Show negative amounts in red
 
 # Manage Accounts: a table of every account, with what can be changed about each.
 dialog-manage-accounts-title = Manage Accounts
@@ -249,3 +264,6 @@ status-duplicate-category = A category named “{ $name }” is already there.
 # Deleting a category that a transaction or another category still uses.
 status-category-in-use = That category is still in use, so it can't be deleted.
 status-blank-category-name = Enter a name for the category.
+status-preferences-reset = Your preferences couldn't be read, so the defaults are in use. The old file is kept as preferences.toml.broken.
+status-preferences-unreadable = Your preferences couldn't be read, so the defaults are in use.
+status-preferences-not-saved = Your preferences couldn't be saved, so they last only until you quit.

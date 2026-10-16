@@ -25,6 +25,8 @@ pub(crate) enum UserAction {
     /// Open Manage Accounts.
     ManageAccounts,
     Quit,
+    /// Open the Preferences Dialog.
+    Preferences,
     About,
 }
 
@@ -43,6 +45,7 @@ impl UserAction {
             Self::NewAccount => fl!(i18n, "menu-file-new-account"),
             Self::ManageAccounts => fl!(i18n, "menu-tools-manage-accounts"),
             Self::Quit => fl!(i18n, "menu-file-quit"),
+            Self::Preferences => fl!(i18n, "menu-tools-preferences"),
             Self::About => fl!(i18n, "menu-help-about"),
         }
     }
@@ -61,6 +64,7 @@ impl UserAction {
             | Self::NewAccount
             | Self::ManageAccounts
             | Self::Quit
+            | Self::Preferences
             | Self::About => false,
         }
     }
@@ -79,6 +83,7 @@ impl UserAction {
             Self::NewAccount => AppCommand::OpenDialog(DialogKind::NewAccount),
             Self::ManageAccounts => AppCommand::OpenDialog(DialogKind::ManageAccounts),
             Self::Quit => AppCommand::Quit,
+            Self::Preferences => AppCommand::OpenDialog(DialogKind::Preferences),
             Self::About => AppCommand::ShowStatus(StatusMessage::About),
         }
     }

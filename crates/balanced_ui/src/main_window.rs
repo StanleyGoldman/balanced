@@ -16,6 +16,8 @@ use crate::manage_accounts::{self, ManageAccountsForm, ManageAccountsOutcome};
 use crate::menu_nav::{DrawnMenus, MenuNav};
 use crate::new_account::{self, NewAccountForm, WizardOutcome};
 use crate::new_category::NewCategoryForm;
+use crate::preferences::Preferences;
+use crate::preferences_dialog::PreferencesForm;
 use crate::register::ColumnWidths;
 use crate::register_model::RegisterRow;
 use crate::register_tabs::RegisterTabs;
@@ -44,6 +46,8 @@ pub(crate) struct MainWindow {
     new_category: Option<OpenDialog<NewCategoryForm>>,
     /// Manage Accounts, while it is open.
     manage_accounts: Option<OpenDialog<ManageAccountsForm>>,
+    /// The Preferences Dialog, while it is open.
+    preferences: Option<OpenDialog<PreferencesForm>>,
     /// Where focus goes now that a Dialog has closed, until a frame restores it.
     focus_return: Option<FocusReturn>,
     menu_nav: MenuNav,
@@ -70,6 +74,7 @@ impl MainWindow {
             new_account: None,
             new_category: None,
             manage_accounts: None,
+            preferences: None,
             focus_return: None,
             menu_nav: MenuNav::default(),
         }
@@ -126,6 +131,7 @@ impl MainWindow {
             | UserAction::NewAccount
             | UserAction::ManageAccounts
             | UserAction::Quit
+            | UserAction::Preferences
             | UserAction::About => true,
         }
     }
@@ -207,7 +213,8 @@ impl MainWindow {
     }
 
     /// Opens the Dialog `kind` over `view`, unless a Dialog is already open or there is
-    /// nothing for it to act on. A Dialog that dates anything starts on `today`.
+    /// nothing for it to act on. A Dialog that dates anything starts on `today`, and
+    /// the Preferences Dialog on the `preferences` in use.
     pub(crate) fn open_dialog(
         &mut self,
         ctx: &egui::Context,
@@ -215,6 +222,7 @@ impl MainWindow {
         kind: &DialogKind,
         view: &LedgerView,
         today: Date<Iso>,
+        preferences: &Preferences,
     ) {
         if self.dialog_open() {
             return;
@@ -248,6 +256,10 @@ impl MainWindow {
             DialogKind::NewCategory { name } => {
                 let form = NewCategoryForm::new(name.clone());
                 self.new_category = Some(OpenDialog::new(ctx, form));
+            }
+            DialogKind::Preferences => {
+                let form = PreferencesForm::new(preferences.clone());
+                self.preferences = Some(OpenDialog::new(ctx, form));
             }
         }
     }
@@ -297,6 +309,7 @@ impl MainWindow {
             || self.new_account.is_some()
             || self.new_category.is_some()
             || self.manage_accounts.is_some()
+            || self.preferences.is_some()
     }
 
     /// The account the Main view shows, if it shows one.
@@ -404,6 +417,7 @@ impl MainWindow {
         self.delete_transaction_dialog(ui.ctx(), i18n, theme, commands, view);
         self.new_account_dialog(ui.ctx(), i18n, theme, commands, today);
         self.new_category_dialog(ui.ctx(), i18n, theme, commands, view);
+        self.preferences_dialog(ui.ctx(), i18n, theme, commands);
         self.manage_accounts_dialog(ui.ctx(), i18n, theme, commands, view);
     }
 
@@ -443,6 +457,43 @@ impl MainWindow {
             WizardOutcome::Open => {}
             WizardOutcome::Cancelled => self.close_dialog(ctx, |window| &mut window.new_account),
         }
+    }
+
+    /// The Preferences in the open Preferences Dialog, which the App shows while it is
+    /// open.
+    pub(crate) fn preferences_draft(&self) -> Option<&Preferences> {
+        self.preferences.as_ref().map(|dialog| dialog.form.draft())
+    }
+
+    /// The Preferences Dialog, while it is open. OK sends its Preferences; Cancel
+    /// closes it, and the App goes back to showing the Preferences in use.
+    fn preferences_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        theme: &Theme,
+        commands: &CommandSender,
+    ) {
+        let Some(dialog) = &mut self.preferences else {
+            return;
+        };
+        let outcome = HeavyDialog::new(
+            Id::new("preferences_dialog"),
+            fl!(i18n, "dialog-preferences-title"),
+            fl!(i18n, "dialog-ok"),
+            fl!(i18n, "dialog-cancel"),
+            theme,
+        )
+        .show(ctx, dialog, |ui, form| form.show(ui, i18n));
+        match outcome {
+            DialogOutcome::Open => return,
+            DialogOutcome::Accepted => {
+                commands.send(AppCommand::SetPreferences(dialog.form.draft().clone()));
+            }
+            DialogOutcome::Back => unreachable!("a heavy Dialog has no Back button"),
+            DialogOutcome::Cancelled => {}
+        }
+        self.close_dialog(ctx, |window| &mut window.preferences);
     }
 
     /// The New Category Dialog, while it is open. OK sends the Command creating the
@@ -609,6 +660,7 @@ impl MainWindow {
             drawn.note_menu(&view_menu.response);
             let tools = ui.menu_button(fl!(i18n, "menu-tools"), |ui| {
                 item(ui, &mut drawn, UserAction::ManageAccounts);
+                item(ui, &mut drawn, UserAction::Preferences);
             });
             drawn.note_menu(&tools.response);
             let help = ui.menu_button(fl!(i18n, "menu-help"), |ui| {
