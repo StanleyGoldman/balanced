@@ -17,17 +17,22 @@ use crate::i18n::fl;
 /// Separates a category from the one it sits under: `Food & Dining:Groceries`.
 const CATEGORY_SEPARATOR: &str = ":";
 
+/// Where a row's amount went, as far as its Payee and Category cells care.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowKind {
+    OpeningBalance,
+    /// The whole amount, in one category.
+    Category(CategoryId),
+    Split,
+}
+
 /// One transaction's row in the Register, every cell formatted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisterRow {
     id: TransactionId,
     /// The row's place in date order, which breaks ties in every sort.
     place: usize,
-    opening_balance: bool,
-    /// The one category the whole amount is in, unless the row is the opening balance
-    /// or split.
-    category_id: Option<CategoryId>,
-    split: bool,
+    kind: RowKind,
     date: String,
     number: String,
     payee: String,
@@ -45,18 +50,21 @@ impl RegisterRow {
     /// Whether this is the account's opening balance, whose Payee cell shows a
     /// caption rather than a payee.
     pub(crate) fn is_opening_balance(&self) -> bool {
-        self.opening_balance
+        self.kind == RowKind::OpeningBalance
     }
 
     /// The one category the whole amount is in, unless the row is the opening balance
     /// or split.
     pub(crate) fn category_id(&self) -> Option<CategoryId> {
-        self.category_id
+        match self.kind {
+            RowKind::Category(id) => Some(id),
+            RowKind::OpeningBalance | RowKind::Split => None,
+        }
     }
 
     /// Whether the amount is split between categories.
     pub(crate) fn is_split(&self) -> bool {
-        self.split
+        self.kind == RowKind::Split
     }
 
     pub(crate) fn date(&self) -> &str {
@@ -214,22 +222,27 @@ impl RegisterModel {
             .enumerate()
             .map(|(place, entry)| {
                 let transaction = entry.transaction();
-                let (payee, category) = match transaction.allocation() {
-                    Allocation::OpeningBalance => (opening_balance.clone(), String::new()),
-                    Allocation::Category(id) => {
-                        (transaction.payee().to_owned(), paths.path(*id).to_owned())
-                    }
-                    Allocation::Split(_) => (transaction.payee().to_owned(), split.clone()),
+                let (kind, payee, category) = match transaction.allocation() {
+                    Allocation::OpeningBalance => (
+                        RowKind::OpeningBalance,
+                        opening_balance.clone(),
+                        String::new(),
+                    ),
+                    Allocation::Category(id) => (
+                        RowKind::Category(*id),
+                        transaction.payee().to_owned(),
+                        paths.path(*id).to_owned(),
+                    ),
+                    Allocation::Split(_) => (
+                        RowKind::Split,
+                        transaction.payee().to_owned(),
+                        split.clone(),
+                    ),
                 };
                 RegisterRow {
                     id: transaction.id(),
                     place,
-                    opening_balance: *transaction.allocation() == Allocation::OpeningBalance,
-                    category_id: match transaction.allocation() {
-                        Allocation::Category(id) => Some(*id),
-                        Allocation::OpeningBalance | Allocation::Split(_) => None,
-                    },
-                    split: matches!(transaction.allocation(), Allocation::Split(_)),
+                    kind,
                     date: i18n.format_date(transaction.date()),
                     number: transaction.number().unwrap_or_default().to_owned(),
                     payee,

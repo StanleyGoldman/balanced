@@ -12,9 +12,9 @@ use eframe::egui::accesskit::{self, Role};
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
 use eframe::egui::{
-    self, Align, Area, Button, CursorIcon, Event, EventFilter, Frame, Id, Key, Layout, Margin, Modifiers,
-    Order, Popup, Rect, Response, ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit,
-    TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
+    self, Align, Area, Button, CursorIcon, Event, EventFilter, Frame, Id, Key, Layout, Margin,
+    Modifiers, Order, Popup, Rect, Response, ScrollArea, Sense, Shape, Stroke, StrokeKind,
+    TextEdit, TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, TableBody, TableBuilder};
 
@@ -41,7 +41,7 @@ const ACTION_DOT_SPACING: f32 = 4.5;
 const LIST_MIN_WIDTH: f32 = 240.0;
 
 /// How many rows a combobox list shows before it scrolls.
-const LIST_MAX_ROWS: f32 = 10.0;
+const LIST_MAX_ROWS: usize = 10;
 
 /// The sort arrow beside the sorted column's heading: its width, its height, and the
 /// space between it and the heading.
@@ -365,7 +365,8 @@ impl TextField {
 }
 
 /// Why a Category cell's text can't be saved: no category has that name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("no category has the typed name")]
 struct NoSuchCategory;
 
 /// One cell of the Register: a transaction's row and a column.
@@ -392,7 +393,7 @@ enum Move {
 
 /// The cell being edited, the field it edits, its unsaved text, and its combobox list
 /// while that is open.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct CellEdit {
     cell: CellAddress,
     field: TextField,
@@ -406,14 +407,27 @@ impl CellEdit {
         Id::new(("register_editor", self.cell))
     }
 
-    /// Opens the field's list, if it offers one, with its top row highlighted: every
-    /// entry when `all`, else those matching the text.
-    fn open_list(&mut self, all: bool) {
-        if self.field.offers_list() {
-            self.list = Some(ListState {
-                all,
-                highlight: Some(0),
-            });
+    /// Opens the field's list of `scope`, if it offers one. A list of matches starts
+    /// with its top row highlighted, and a list of every entry with the entry the text
+    /// names, else its top row.
+    fn open_list(&mut self, scope: ListScope, choices: &FieldChoices) {
+        if !self.field.offers_list() {
+            return;
+        }
+        self.list = Some(ListState {
+            scope,
+            highlight: Some(0),
+            reveal: true,
+            offset: 0.0,
+        });
+        let named = match scope {
+            ListScope::Matching => None,
+            ListScope::All => self.list_rows(choices).iter().position(
+                |row| matches!(row, ListRow::Choice(text) if text.eq_ignore_ascii_case(self.text.trim())),
+            ),
+        };
+        if let (Some(list), Some(named)) = (&mut self.list, named) {
+            list.highlight = Some(named);
         }
     }
 
@@ -422,10 +436,18 @@ impl CellEdit {
         let Some(list) = self.list else {
             return Vec::new();
         };
-        let text = if list.all { "" } else { self.text.as_str() };
+        let text = match list.scope {
+            ListScope::Matching => self.text.as_str(),
+            ListScope::All => "",
+        };
         match self.field {
-            TextField::Payee => choices.payees().list(text, false),
-            TextField::Category => choices.categories().list(text, true),
+            TextField::Payee => choices.payees().list(text),
+            TextField::Category => {
+                let categories = choices.categories();
+                let mut rows = categories.list(text);
+                rows.extend(categories.create_row(text));
+                rows
+            }
             TextField::Number | TextField::Memo => Vec::new(),
         }
     }
@@ -441,6 +463,7 @@ impl CellEdit {
         if let Some(list) = &mut self.list {
             let last = rows.saturating_sub(1);
             list.highlight = Some(list.highlight.map_or(0, |row| (row + 1).min(last)));
+            list.reveal = true;
         }
     }
 
@@ -449,18 +472,52 @@ impl CellEdit {
     fn highlight_previous(&mut self) {
         if let Some(list) = &mut self.list {
             list.highlight = list.highlight.and_then(|row| row.checked_sub(1));
+            list.reveal = true;
         }
     }
 }
 
-/// An open combobox list: which entries it lists, and its highlighted row.
+/// Which entries a combobox list shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ListScope {
+    /// Those matching the typed text, as typing opens it.
+    Matching,
+    /// Every entry, as ⏷ and Alt+↓ open it.
+    All,
+}
+
+/// An open combobox list: which entries it lists, its highlighted row, and how far
+/// it is scrolled.
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct ListState {
-    /// Whether it lists every entry, as ⏷ and Alt+↓ open it, rather than those
-    /// matching the typed text.
-    all: bool,
+    scope: ListScope,
     /// The row Enter takes, or `None` to keep the typed text.
     highlight: Option<usize>,
+    /// Whether the highlight moved since the list was last drawn, so the list scrolls
+    /// to show it.
+    reveal: bool,
+    /// The list's scroll offset when it was last drawn.
+    offset: f32,
+}
+
+impl ListState {
+    /// The scroll offset that shows the highlighted row, row `pitch` apart, in a list
+    /// `height` high, when the highlight moved out of view; else `None`.
+    fn reveal_offset(self, pitch: f32, height: f32) -> Option<f32> {
+        let highlight = self.highlight.filter(|_| self.reveal)?;
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "list rows stay far below 2^24, where f32 stops counting whole numbers"
+        )]
+        let top = highlight as f32 * pitch;
+        if top < self.offset {
+            Some(top)
+        } else if top + pitch > self.offset + height {
+            Some(top + pitch - height)
+        } else {
+            None
+        }
+    }
 }
 
 /// The rows fully in view in the last frame, which keyboard scrolling keeps the cell
@@ -733,9 +790,7 @@ impl Register {
         let (response, action) = cell.show(ui, i18n, theme);
         if response.clicked() {
             self.place_cursor(row.id(), column);
-            if column == RegisterColumn::Category && row.is_split() {
-                commands.send(AppCommand::OpenSplitView(row.id()));
-            }
+            open_split_view(row, column, commands);
         }
         if let Some(action) = action {
             self.act(row.id(), action, commands);
@@ -768,14 +823,14 @@ impl Register {
         let typed = edit.text.clone();
         let response = editor(ui, edit, field, heading_id(frame.register_id, column));
         if edit.text != typed {
-            edit.open_list(false);
+            edit.open_list(ListScope::Matching, frame.choices);
         }
         if list_button.as_ref().is_some_and(Response::clicked) {
             // The click took focus from the editor, which keeps the edit.
-            if edit.list.is_some_and(|list| list.all) {
+            if edit.list.is_some_and(|list| list.scope == ListScope::All) {
                 edit.list = None;
             } else {
-                edit.open_list(true);
+                edit.open_list(ListScope::All, frame.choices);
             }
             ui.memory_mut(|memory| memory.request_focus(edit.editor_id()));
         } else if response.lost_focus() {
@@ -855,11 +910,9 @@ impl Register {
                 self.start_edit(ctx, keys, EditStart::Saved);
                 return None;
             }
-            if cursor.column == RegisterColumn::Category
-                && let Some(row) = keys.rows.iter().find(|row| row.id() == cursor.row)
-                && row.is_split()
+            if let Some(row) = keys.rows.iter().find(|row| row.id() == cursor.row)
+                && open_split_view(row, cursor.column, keys.commands)
             {
-                keys.commands.send(AppCommand::OpenSplitView(row.id()));
                 return None;
             }
             return self
@@ -906,11 +959,11 @@ impl Register {
             )
         });
         if alt_down {
-            edit.open_list(true);
+            edit.open_list(ListScope::All, keys.choices);
         } else if down && list_open {
             edit.highlight_next(rows);
         } else if down {
-            edit.open_list(false);
+            edit.open_list(ListScope::Matching, keys.choices);
         } else if up {
             edit.highlight_previous();
         }
@@ -1126,6 +1179,16 @@ struct KeyContext<'a> {
     commands: &'a CommandSender,
 }
 
+/// Asks for the split view of `row` when `column` is the Category cell of a split
+/// transaction, whose `[Split]` acts as a button. Returns whether it asked.
+fn open_split_view(row: &RegisterRow, column: RegisterColumn, commands: &CommandSender) -> bool {
+    let opens = column == RegisterColumn::Category && row.is_split();
+    if opens {
+        commands.send(AppCommand::OpenSplitView(row.id()));
+    }
+    opens
+}
+
 /// Whether a commit went through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Commit {
@@ -1233,41 +1296,59 @@ fn list_button(ui: &egui::Ui, i18n: &Localizer, rect: Rect, editor: Id) -> Respo
     response
 }
 
-/// Draws `edit`'s list, while it is open, in a popup below `cell`, and returns the row
-/// pressed this frame. A row is taken on the press, since the release would come after
-/// the press has moved focus off the editor.
+/// Draws `edit`'s list, while it is open, in a popup below `cell`, scrolled to show
+/// a highlight that moved, and returns the row pressed this frame. A row is taken on
+/// the press, since the release would come after the press has moved focus off the
+/// editor.
 fn list<'a>(
     ui: &egui::Ui,
     frame: &BodyFrame<'a>,
-    edit: &CellEdit,
+    edit: &mut CellEdit,
     cell: Rect,
 ) -> Option<ListRow<'a>> {
     let rows = edit.list_rows(frame.choices);
-    if rows.is_empty() {
-        return None;
-    }
-    let highlight = edit.list.and_then(|list| list.highlight);
+    let state = edit.list.as_mut().filter(|_| !rows.is_empty())?;
     let row_height = frame.theme.row_height();
+    let pitch = row_height + ui.spacing().item_spacing.y;
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "at most LIST_MAX_ROWS rows show at once"
+    )]
+    let height = rows.len().min(LIST_MAX_ROWS) as f32 * pitch - ui.spacing().item_spacing.y;
     let width = cell.width().max(LIST_MIN_WIDTH);
+    let mut scroll = ScrollArea::vertical()
+        .max_height(height)
+        .min_scrolled_height(height);
+    if let Some(offset) = state.reveal_offset(pitch, height) {
+        scroll = scroll.vertical_scroll_offset(offset);
+    }
+    state.reveal = false;
+    let highlight = state.highlight;
     let mut pressed = None;
-    Area::new(edit.editor_id().with("list"))
+    let output = Area::new(edit.editor_id().with("list"))
         .order(Order::Foreground)
         .fixed_pos(cell.left_bottom())
         .show(ui.ctx(), |ui| {
-            Frame::popup(ui.style()).show(ui, |ui| {
-                ui.set_width(width);
-                ScrollArea::vertical()
-                    .max_height(row_height * LIST_MAX_ROWS)
-                    .show(ui, |ui| {
-                        for (index, row) in rows.into_iter().enumerate() {
+            Frame::popup(ui.style())
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    scroll.show_rows(ui, row_height, rows.len(), |ui, in_view| {
+                        for index in in_view {
+                            // `show_rows` lays out indices below `rows.len()` only.
+                            let row = &rows[index];
                             let highlighted = highlight == Some(index);
-                            if list_row(ui, frame.i18n, &row, highlighted, row_height) {
-                                pressed = Some(row);
+                            if list_row(ui, frame.i18n, row, highlighted, row_height) {
+                                pressed = Some(row.clone());
                             }
                         }
-                    });
-            });
-        });
+                    })
+                })
+                .inner
+        })
+        .inner;
+    if let Some(state) = &mut edit.list {
+        state.offset = output.state.offset.y;
+    }
     pressed
 }
 

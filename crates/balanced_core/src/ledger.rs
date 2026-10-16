@@ -386,9 +386,8 @@ impl Ledger {
             return Err(DomainError::UnknownCategory { category });
         }
         let old = &self.view.accounts[position.account].register[position.entry].transaction;
-        // Editing first refuses an edit `old` can't take, which has nothing to undo.
-        let edited = old.edited(edit.clone())?;
         let undo = old.undoing(&edit);
+        let edited = old.edited(edit)?;
         // Windows still holding the old snapshot keep it; the ledger moves to a copy.
         let view = Arc::make_mut(&mut self.view);
         view.accounts[position.account].register[position.entry].transaction = edited;
@@ -1506,5 +1505,24 @@ mod tests {
             Err(DomainError::UnknownCategory { category: unknown })
         );
         assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn a_category_edit_is_undone_by_putting_the_old_category_back() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        let groceries = CategoryId::new(0);
+
+        let applied = ledger
+            .apply(edit(
+                fresh_market,
+                TransactionEdit::Category(CategoryId::new(1)),
+            ))
+            .unwrap();
+
+        assert_eq!(
+            applied.inverse(),
+            &edit(fresh_market, TransactionEdit::Category(groceries))
+        );
     }
 }

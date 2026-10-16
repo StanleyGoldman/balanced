@@ -79,19 +79,18 @@ pub(crate) enum ListRow<'a> {
 }
 
 impl<T> Choices<T> {
-    /// The list for `text`: the choices matching it, then, when `offers_create` and no
-    /// choice is named `text`, a row creating it. Blank text creates nothing.
-    pub(crate) fn list(&self, text: &str, offers_create: bool) -> Vec<ListRow<'_>> {
-        let mut rows: Vec<ListRow<'_>> = self
-            .matching(text)
+    /// The list for `text`: the choices matching it.
+    pub(crate) fn list(&self, text: &str) -> Vec<ListRow<'_>> {
+        self.matching(text)
             .into_iter()
             .map(|choice| ListRow::Choice(choice.text()))
-            .collect();
+            .collect()
+    }
+
+    /// The row creating `text`, trimmed, unless it is blank or a choice has that name.
+    pub(crate) fn create_row(&self, text: &str) -> Option<ListRow<'static>> {
         let text = text.trim();
-        if offers_create && !text.is_empty() && self.named(text).is_none() {
-            rows.push(ListRow::Create(text.to_owned()));
-        }
-        rows
+        (!text.is_empty() && self.named(text).is_none()).then(|| ListRow::Create(text.to_owned()))
     }
 }
 
@@ -185,37 +184,47 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_name_lists_a_create_row_after_its_matches() {
+    fn an_unknown_name_gets_a_create_row() {
         let categories = categories();
 
-        let list = categories.list("Insur", true);
+        let row = categories.create_row(" Insur ");
+
+        assert_eq!(row, Some(ListRow::Create("Insur".to_owned())));
+    }
+
+    #[test]
+    fn a_known_name_in_any_case_gets_no_create_row() {
+        let categories = categories();
+
+        let row = categories.create_row("home:INSURANCE");
+
+        assert_eq!(row, None);
+    }
+
+    #[test]
+    fn blank_text_lists_every_choice() {
+        let categories = categories();
+
+        let list = categories.list("  ");
 
         assert_eq!(
             list,
             [
                 ListRow::Choice("Auto & Transport:Insurance"),
+                ListRow::Choice("Food & Dining:Groceries"),
+                ListRow::Choice("Food & Dining:Restaurants"),
                 ListRow::Choice("Home:Insurance"),
-                ListRow::Create("Insur".to_owned()),
+                ListRow::Choice("Income:Salary"),
             ]
         );
     }
 
     #[test]
-    fn a_known_name_in_any_case_lists_no_create_row() {
+    fn blank_text_gets_no_create_row() {
         let categories = categories();
 
-        let list = categories.list("home:INSURANCE", true);
+        let row = categories.create_row("  ");
 
-        assert_eq!(list, [ListRow::Choice("Home:Insurance")]);
-    }
-
-    #[test]
-    fn blank_text_lists_every_choice_and_no_create_row() {
-        let categories = categories();
-
-        let list = categories.list("  ", true);
-
-        assert_eq!(list.len(), 5);
-        assert!(list.iter().all(|row| matches!(row, ListRow::Choice(_))));
+        assert_eq!(row, None);
     }
 }

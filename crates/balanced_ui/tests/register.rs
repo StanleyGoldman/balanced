@@ -824,7 +824,7 @@ fn up_past_the_top_match_then_enter_keeps_the_typed_payee() {
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
     let payees = column(&harness, "Payee");
-    assert!(payees.iter().any(|payee| payee == "Fresh"));
+    assert_eq!(payees.iter().filter(|payee| *payee == "Fresh").count(), 1);
     assert_eq!(
         payees
             .iter()
@@ -939,7 +939,16 @@ fn the_list_button_lists_every_category_and_keeps_the_edit() {
         .click();
     harness.run();
 
-    assert_eq!(list_rows(&harness).len(), 15);
+    // The list scrolls, so only its top rows are laid out.
+    assert_eq!(
+        list_rows(&harness)[..4],
+        [
+            "Auto & Transport",
+            "Auto & Transport:Fuel",
+            "Auto & Transport:Insurance",
+            "Food & Dining",
+        ]
+    );
     assert_eq!(
         editor(&harness, "Category").as_deref(),
         Some("Auto & Transport:Fuel")
@@ -955,7 +964,16 @@ fn alt_down_lists_every_category() {
 
     press(&mut harness, Modifiers::ALT, Key::ArrowDown);
 
-    assert_eq!(list_rows(&harness).len(), 15);
+    // The list scrolls, so only its top rows are laid out.
+    assert_eq!(
+        list_rows(&harness)[..4],
+        [
+            "Auto & Transport",
+            "Auto & Transport:Fuel",
+            "Auto & Transport:Insurance",
+            "Food & Dining",
+        ]
+    );
 }
 
 #[test]
@@ -1003,4 +1021,34 @@ fn typing_a_payee_lists_every_accounts_matching_payees_alphabetically() {
     type_text(&mut harness, "ar");
 
     assert_eq!(list_rows(&harness), ["Fresh Market", "Hardware Barn"]);
+}
+
+#[test]
+fn listing_every_category_highlights_the_cells_own() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Auto & Transport:Fuel");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+
+    assert_eq!(
+        highlighted(&harness).as_deref(),
+        Some("Auto & Transport:Fuel")
+    );
+}
+
+#[test]
+fn moving_the_highlight_past_the_visible_rows_scrolls_the_list() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Auto & Transport:Fuel");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+
+    for _ in 0..14 {
+        press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+    }
+
+    assert_eq!(highlighted(&harness).as_deref(), Some("Shopping:Household"));
 }
