@@ -12,6 +12,7 @@ use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDi
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
 use crate::layout::Layout;
+use crate::manage_accounts::{self, ManageAccountsForm, ManageAccountsOutcome};
 use crate::menu_nav::{DrawnMenus, MenuNav};
 use crate::new_account::{self, NewAccountForm, WizardOutcome};
 use crate::new_category::NewCategoryForm;
@@ -41,6 +42,8 @@ pub(crate) struct MainWindow {
     new_account: Option<OpenDialog<NewAccountForm>>,
     /// The New Category Dialog, while it is open.
     new_category: Option<OpenDialog<NewCategoryForm>>,
+    /// Manage Accounts, while it is open.
+    manage_accounts: Option<OpenDialog<ManageAccountsForm>>,
     /// Where focus goes now that a Dialog has closed, until a frame restores it.
     focus_return: Option<FocusReturn>,
     menu_nav: MenuNav,
@@ -66,6 +69,7 @@ impl MainWindow {
             delete_transaction: None,
             new_account: None,
             new_category: None,
+            manage_accounts: None,
             focus_return: None,
             menu_nav: MenuNav::default(),
         }
@@ -120,6 +124,7 @@ impl MainWindow {
             }
             UserAction::SwitchPane
             | UserAction::NewAccount
+            | UserAction::ManageAccounts
             | UserAction::Quit
             | UserAction::About => true,
         }
@@ -237,6 +242,9 @@ impl MainWindow {
                 let form = NewAccountForm::new(i18n, view.net_worth().currency(), today);
                 self.new_account = Some(OpenDialog::new(ctx, form));
             }
+            DialogKind::ManageAccounts => {
+                self.manage_accounts = Some(OpenDialog::new(ctx, ManageAccountsForm::new(view)));
+            }
             DialogKind::NewCategory { name } => {
                 let form = NewCategoryForm::new(name.clone());
                 self.new_category = Some(OpenDialog::new(ctx, form));
@@ -259,6 +267,13 @@ impl MainWindow {
     /// closes once the change is `applied`, or shows why the ledger refused it.
     /// A refusal with no Dialog open to show it goes to the Status bar.
     pub(crate) fn dialog_applied(&mut self, ctx: &egui::Context, applied: Result<(), DomainError>) {
+        if let Some(dialog) = &mut self.manage_accounts {
+            match applied {
+                Ok(()) => self.close_dialog(ctx, |window| &mut window.manage_accounts),
+                Err(error) => dialog.form.rejected(error),
+            }
+            return;
+        }
         let Some(dialog) = &mut self.new_category else {
             if let Err(error) = applied {
                 self.show_status(StatusMessage::Rejected(error));
@@ -281,6 +296,7 @@ impl MainWindow {
         self.delete_transaction.is_some()
             || self.new_account.is_some()
             || self.new_category.is_some()
+            || self.manage_accounts.is_some()
     }
 
     /// The account the Main view shows, if it shows one.
@@ -388,6 +404,27 @@ impl MainWindow {
         self.delete_transaction_dialog(ui.ctx(), i18n, theme, commands, view);
         self.new_account_dialog(ui.ctx(), i18n, theme, commands, today);
         self.new_category_dialog(ui.ctx(), i18n, theme, commands, view);
+        self.manage_accounts_dialog(ui.ctx(), i18n, theme, commands, view);
+    }
+
+    /// Manage Accounts, while it is open.
+    fn manage_accounts_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        theme: &Theme,
+        commands: &CommandSender,
+        view: &LedgerView,
+    ) {
+        let (Some(dialog), Some(model)) = (&mut self.manage_accounts, &self.accounts) else {
+            return;
+        };
+        match manage_accounts::show(ctx, i18n, theme, commands, dialog, view, model) {
+            ManageAccountsOutcome::Open => {}
+            ManageAccountsOutcome::Closed => {
+                self.close_dialog(ctx, |window| &mut window.manage_accounts);
+            }
+        }
     }
 
     /// The New Account wizard, while it is open.
@@ -570,6 +607,10 @@ impl MainWindow {
                 item(ui, &mut drawn, UserAction::SwitchPane);
             });
             drawn.note_menu(&view_menu.response);
+            let tools = ui.menu_button(fl!(i18n, "menu-tools"), |ui| {
+                item(ui, &mut drawn, UserAction::ManageAccounts);
+            });
+            drawn.note_menu(&tools.response);
             let help = ui.menu_button(fl!(i18n, "menu-help"), |ui| {
                 item(ui, &mut drawn, UserAction::About);
             });

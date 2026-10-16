@@ -13,12 +13,13 @@ use eframe::egui::{
 };
 
 use crate::accounts_model::{AccountRow, AccountsModel, Section};
-use crate::command::{AppCommand, CommandSender};
+use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
 use crate::layout::Layout;
 use crate::route::{OpenIn, Route};
 use crate::theme::Theme;
+use crate::triangle_button::{Direction, triangle_button};
 use crate::user_action::UserAction;
 
 /// Whether the Account bar shows its accounts or is folded to a narrow rail.
@@ -159,7 +160,8 @@ impl AccountBar {
             .show_separator_line(false)
             .show(ui, |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let button = rail_button(ui, fl!(i18n, "account-bar-fold"), Direction::Left);
+                    let button =
+                        triangle_button(ui, fl!(i18n, "account-bar-fold"), Direction::Left);
                     focus.note(&button, Candidate::Fallback);
                     let new_account = ui.small_button(fl!(i18n, "account-bar-new-account"));
                     focus.note(&new_account, Candidate::Fallback);
@@ -186,7 +188,7 @@ impl AccountBar {
     /// Returns whether that button was clicked.
     fn rail(ui: &mut egui::Ui, i18n: &Localizer, focus: &mut Focus) -> bool {
         ui.vertical_centered(|ui| {
-            let button = rail_button(ui, fl!(i18n, "account-bar-unfold"), Direction::Right);
+            let button = triangle_button(ui, fl!(i18n, "account-bar-unfold"), Direction::Right);
             focus.note(&button, Candidate::Fallback);
             button.clicked()
         })
@@ -395,43 +397,20 @@ fn account_menu(ui: &mut egui::Ui, i18n: &Localizer, commands: &CommandSender, a
     {
         open(commands, account, OpenIn::NewTab);
     }
+    if ui.button(fl!(i18n, "account-bar-reconcile")).clicked() {
+        commands.send(AppCommand::ShowStatus(StatusMessage::NotAvailableYet));
+    }
+    ui.separator();
+    if ui
+        .button(fl!(i18n, "account-bar-manage-accounts"))
+        .clicked()
+    {
+        commands.send(UserAction::ManageAccounts.command());
+    }
 }
 
 /// The width of the rail the Account bar folds to.
 const RAIL_WIDTH: f32 = 28.0;
-
-/// Which way a rail button's triangle points.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Direction {
-    Left,
-    Right,
-}
-
-/// A square button labelled `label` for AccessKit, showing a triangle pointing
-/// `direction`. The triangle is painted, as the fold triangles are.
-fn rail_button(ui: &mut egui::Ui, label: String, direction: Direction) -> Response {
-    let size = ui.spacing().interact_size.y;
-    let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::click());
-    let enabled = ui.is_enabled();
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, &label));
-    if ui.is_rect_visible(rect) {
-        let visuals = ui.style().interact(&response);
-        if response.hovered() || response.is_pointer_button_down_on() {
-            ui.painter().rect_filled(rect, 0.0, visuals.weak_bg_fill);
-        }
-        let icon = Rect::from_center_size(rect.center(), vec2(size / 3.0, size / 2.0));
-        let points = match direction {
-            Direction::Left => vec![icon.right_top(), icon.left_center(), icon.right_bottom()],
-            Direction::Right => vec![icon.left_top(), icon.right_center(), icon.left_bottom()],
-        };
-        ui.painter().add(Shape::convex_polygon(
-            points,
-            visuals.text_color(),
-            Stroke::NONE,
-        ));
-    }
-    response.on_hover_text(label)
-}
 
 /// Whether a section shows its accounts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

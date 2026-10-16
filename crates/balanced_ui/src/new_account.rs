@@ -11,6 +11,7 @@ use balanced_i18n::{AmountParseError, AmountReader, AmountStyle, Localizer};
 use eframe::egui::{self, Id, Label, RichText, Sense, TextEdit, vec2};
 use icu_calendar::{Date, Iso};
 
+use crate::accounts_model::kind_label;
 use crate::amount_field::{self, Preview};
 use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::date_field::{self, DateEdit};
@@ -367,19 +368,6 @@ pub(crate) fn show(
         dialog.focus_default_button();
     }
     WizardOutcome::Open
-}
-
-/// The name of `kind` in the Type step's list and on the Review step.
-fn kind_label(i18n: &Localizer, kind: AccountKind) -> String {
-    match kind {
-        AccountKind::Checking => fl!(i18n, "dialog-new-account-kind-checking"),
-        AccountKind::Savings => fl!(i18n, "dialog-new-account-kind-savings"),
-        AccountKind::CreditCard => fl!(i18n, "dialog-new-account-kind-credit-card"),
-        AccountKind::Investment => fl!(i18n, "dialog-new-account-kind-investment"),
-        AccountKind::Retirement => fl!(i18n, "dialog-new-account-kind-retirement"),
-        AccountKind::Asset => fl!(i18n, "dialog-new-account-kind-asset"),
-        AccountKind::Liability => fl!(i18n, "dialog-new-account-kind-liability"),
-    }
 }
 
 /// Shows why the step's input, or Finish, was refused, below what was refused.
