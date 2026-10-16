@@ -70,8 +70,7 @@ impl UserAction {
             Self::NextRegisterTab => AppCommand::NextRegisterTab,
             Self::PreviousRegisterTab => AppCommand::PreviousRegisterTab,
             Self::SwitchPane => AppCommand::SwitchPane,
-            // TODO(#93): go to the draft row.
-            Self::NewTransaction => AppCommand::ShowStatus(StatusMessage::NotAvailableYet),
+            Self::NewTransaction => AppCommand::GoToDraftRow,
             Self::DeleteTransaction => AppCommand::OpenDialog(DialogKind::DeleteTransaction),
             Self::NewAccount => AppCommand::OpenDialog(DialogKind::NewAccount),
             Self::Quit => AppCommand::Quit,

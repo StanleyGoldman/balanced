@@ -117,7 +117,7 @@ impl NewAccountForm {
             balance_error: None,
             reader: i18n.amount_reader(i18n_currency(currency)),
             currency,
-            date: DateEdit::new(today),
+            date: DateEdit::new(Some(today)),
             opened_on: today,
             reviewed: None,
             focus_field: false,

@@ -6,7 +6,7 @@ use icu_calendar::{Date, Iso};
 
 use crate::account::NewAccount;
 use crate::category::NewCategory;
-use crate::transaction::TransactionId;
+use crate::transaction::{NewTransaction, TransactionId};
 use crate::{
     Account, AccountId, AccountKind, Applied, Category, CategoryId, CurrencyCode, DomainCommand,
     DomainError, Money, MoneyError, Transaction, TransactionEdit,
@@ -377,6 +377,10 @@ impl Ledger {
                 transactions,
                 place,
             } => self.restore_account(account, transactions, place)?,
+            DomainCommand::PostTransaction {
+                account,
+                transaction,
+            } => self.post_transaction(account, transaction)?,
             DomainCommand::EditTransaction { transaction, edit } => {
                 self.edit_transaction(transaction, edit)?
             }
@@ -532,6 +536,42 @@ impl Ledger {
             transaction: id,
             edit: undo,
         })
+    }
+
+    fn post_transaction(
+        &mut self,
+        account: AccountId,
+        transaction: NewTransaction,
+    ) -> Result<DomainCommand, DomainError> {
+        let index = self
+            .view
+            .accounts
+            .iter()
+            .position(|summary| summary.account.id() == account)
+            .ok_or(DomainError::UnknownAccount { account })?;
+        // `position` returns the index of an account in the view.
+        if self.view.accounts[index].account.is_closed() {
+            return Err(DomainError::AccountClosed { account });
+        }
+        if let Some(category) = transaction
+            .categories()
+            .into_iter()
+            .find(|&category| self.view.category(category).is_none())
+        {
+            return Err(DomainError::UnknownCategory { category });
+        }
+        let id = self.next_transaction;
+        let currency = self.view.net_worth.currency();
+        let transaction = transaction.into_transaction(id, currency)?;
+        let (summary, ()) = self.view.edit_register(index, currency, |transactions| {
+            // The new id is the largest yet, so it goes after the rest of its date.
+            let position = transactions
+                .partition_point(|other| other.register_order() < transaction.register_order());
+            transactions.insert(position, transaction);
+        })?;
+        self.replace_account(index, summary)?;
+        self.next_transaction = id.next();
+        Ok(DomainCommand::DeleteTransaction { transaction: id })
     }
 
     fn delete_transaction(&mut self, id: TransactionId) -> Result<DomainCommand, DomainError> {
@@ -2087,5 +2127,103 @@ mod tests {
 
         assert_eq!(result, Err(DomainError::Money(MoneyError::Overflow)));
         assert_eq!(ledger.snapshot(), before);
+    }
+
+    /// Posts 12.00 paid to Corner Cafe on `day`, in the ledger's first category, to
+    /// its first account.
+    fn post(ledger: &Ledger, day: u8) -> DomainCommand {
+        DomainCommand::PostTransaction {
+            account: ledger.snapshot().accounts()[0].account().id(),
+            transaction: NewTransaction::new(
+                date(day),
+                "Corner Cafe",
+                CategoryId::new(0),
+                usd(dec!(-12.00)),
+            ),
+        }
+    }
+
+    #[test]
+    fn posting_puts_the_transaction_in_date_order_with_its_running_balance() {
+        let mut ledger = three_payments();
+
+        ledger.apply(post(&ledger, 7)).unwrap();
+
+        assert_eq!(
+            register(&ledger),
+            [
+                (String::new(), usd(dec!(100.00))),
+                ("Acme Corp".to_owned(), usd(dec!(600.00))),
+                ("Corner Cafe".to_owned(), usd(dec!(588.00))),
+                ("Fresh Market".to_owned(), usd(dec!(557.75))),
+                ("Bean There".to_owned(), usd(dec!(553.00))),
+            ]
+        );
+        assert_eq!(ledger.snapshot().net_worth(), usd(dec!(503.00)));
+    }
+
+    #[test]
+    fn posting_to_a_closed_account_is_rejected_and_changes_nothing() {
+        let mut ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [account("Old Checking", AccountKind::Checking, usd(dec!(1))).closed()],
+        )
+        .unwrap();
+        let before = ledger.snapshot();
+
+        let result = ledger.apply(post(&ledger, 7));
+
+        let old_checking = before.accounts()[0].account().id();
+        assert_eq!(
+            result.unwrap_err(),
+            DomainError::AccountClosed {
+                account: old_checking
+            }
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn undo_takes_a_posted_transaction_out_and_redo_puts_it_back() {
+        let mut ledger = three_payments();
+        let before = register(&ledger);
+        ledger.apply(post(&ledger, 7)).unwrap();
+        let posted = register(&ledger);
+
+        ledger.undo().unwrap();
+        let undone = register(&ledger);
+        ledger.redo().unwrap();
+
+        assert_eq!((undone, register(&ledger)), (before, posted));
+    }
+
+    #[test]
+    fn a_transaction_posted_after_an_undone_one_takes_a_new_id() {
+        let mut ledger = three_payments();
+        ledger.apply(post(&ledger, 7)).unwrap();
+        let first = transaction(&ledger, "Corner Cafe");
+        ledger.undo().unwrap();
+
+        ledger.apply(post(&ledger, 7)).unwrap();
+
+        assert_ne!(transaction(&ledger, "Corner Cafe"), first);
+    }
+
+    #[test]
+    fn posting_to_an_unknown_category_is_rejected() {
+        let mut ledger = three_payments();
+        let unknown = CategoryId::new(9);
+        let command = DomainCommand::PostTransaction {
+            account: ledger.snapshot().accounts()[0].account().id(),
+            transaction: NewTransaction::new(date(7), "Corner Cafe", unknown, usd(dec!(-1))),
+        };
+
+        let result = ledger.apply(command);
+
+        assert_eq!(
+            result.unwrap_err(),
+            DomainError::UnknownCategory { category: unknown }
+        );
     }
 }

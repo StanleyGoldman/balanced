@@ -4,7 +4,8 @@
 use icu_calendar::{Date, Iso};
 
 use crate::{
-    Account, AccountId, AccountKind, CategoryId, Money, MoneyError, Transaction, TransactionId,
+    Account, AccountId, AccountKind, CategoryId, Money, MoneyError, NewTransaction, Transaction,
+    TransactionId,
 };
 
 /// A change to the ledger. `Ledger::apply` applies it, or rejects it with a
@@ -29,6 +30,11 @@ pub enum DomainCommand {
         account: Account,
         transactions: Vec<Transaction>,
         place: usize,
+    },
+    /// Add a transaction to `account`, in date order after any already on its date.
+    PostTransaction {
+        account: AccountId,
+        transaction: NewTransaction,
     },
     /// Change one field of an existing transaction.
     EditTransaction {

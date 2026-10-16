@@ -23,9 +23,12 @@ use crate::amount_field::{self, Preview};
 use crate::combobox::{FieldChoices, ListRow};
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::date_field::{self, DateEdit};
-use crate::formatted_amount::i18n_currency;
+use crate::draft_row::{Draft, Missing};
+use crate::formatted_amount::{FormattedAmount, i18n_currency};
 use crate::i18n::fl;
-use crate::register_model::{RegisterModel, RegisterRow, RegisterSort, SortDirection, SortKey};
+use crate::register_model::{
+    RegisterModel, RegisterRow, RegisterSort, RowId, SortDirection, SortKey,
+};
 use crate::theme::Theme;
 
 /// The narrowest Payee and Category get before the Register scrolls sideways.
@@ -68,6 +71,9 @@ enum RegisterColumn {
 }
 
 impl RegisterColumn {
+    /// The last column the cell cursor can rest in.
+    const LAST: Self = Self::Amount;
+
     /// Every column, in the order the Register shows them. A new column goes here as well
     /// as in the matches below, which the compiler checks; it can't check this list.
     const ALL: [Self; 8] = [
@@ -168,15 +174,15 @@ impl RegisterColumn {
 
     /// The field the column's cell on `row` edits, or `None` when the cell can't be
     /// edited. The opening balance's Payee cell shows a caption, not a payee, only a
-    /// row in one category edits its Category cell, and a split transaction's amount
-    /// is the sum of its lines.
+    /// row in one category, or the draft row, edits its Category cell, and a split
+    /// transaction's amount is the sum of its lines.
     fn field(self, row: &RegisterRow) -> Option<CellField> {
         let text = |field| Some(CellField::Text(field));
         match self {
             Self::Date => Some(CellField::Date),
             Self::Number => text(TextField::Number),
             Self::Payee if !row.is_opening_balance() => text(TextField::Payee),
-            Self::Category if row.category_id().is_some() => text(TextField::Category),
+            Self::Category if row.takes_category() => text(TextField::Category),
             Self::Memo => text(TextField::Memo),
             Self::Amount if !row.is_split() => Some(CellField::Amount),
             Self::Payee | Self::Category | Self::Amount | Self::Balance | Self::Actions => None,
@@ -381,11 +387,58 @@ impl TextField {
 #[error("no category has the typed name")]
 struct NoSuchCategory;
 
-/// One cell of the Register: a transaction's row and a column.
+/// One cell of the Register: a row and a column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct CellAddress {
-    row: TransactionId,
+    row: RowId,
     column: RegisterColumn,
+}
+
+impl CellAddress {
+    /// The draft row's cell in `column`.
+    fn draft(column: RegisterColumn) -> Self {
+        Self {
+            row: RowId::Draft,
+            column,
+        }
+    }
+}
+
+/// The Register's rows: the transactions' in the order of the sort, then the draft
+/// row, which an account that can't change has none of.
+#[derive(Debug, Clone, Copy)]
+struct Rows<'a> {
+    transactions: &'a [RegisterRow],
+    draft: Option<&'a RegisterRow>,
+}
+
+impl<'a> Rows<'a> {
+    fn len(self) -> usize {
+        self.transactions.len() + usize::from(self.draft.is_some())
+    }
+
+    /// The row at `index`, top row first.
+    fn get(self, index: usize) -> Option<&'a RegisterRow> {
+        self.transactions
+            .get(index)
+            .or_else(|| self.draft.filter(|_| index == self.transactions.len()))
+    }
+
+    /// The row with `id`, unless it is gone.
+    fn find(self, id: RowId) -> Option<&'a RegisterRow> {
+        match id {
+            RowId::Transaction(_) => self.transactions.iter().find(|row| row.id() == id),
+            RowId::Draft => self.draft,
+        }
+    }
+
+    /// The index of the row with `id`, unless it is gone.
+    fn position(self, id: RowId) -> Option<usize> {
+        match id {
+            RowId::Transaction(_) => self.transactions.iter().position(|row| row.id() == id),
+            RowId::Draft => self.draft.map(|_| self.transactions.len()),
+        }
+    }
 }
 
 /// Where the cell cursor goes when a key moves it.
@@ -642,9 +695,10 @@ impl RowsInView {
     }
 }
 
-/// The open account's Register: its cached rows, its sort, the cell cursor, and the
-/// cell being edited. The cursor's row is the selected row. Opening another account
-/// sorts it by date and clears the cursor. None of it outlives the run.
+/// The open account's Register: its cached rows, its sort, the cell cursor, the cell
+/// being edited, and the draft row. The cursor's row is the selected row. Opening
+/// another account sorts it by date, empties the draft row and puts the cursor on it.
+/// None of it outlives the run.
 #[derive(Debug, Default)]
 pub(crate) struct Register {
     /// The rows of the last account shown, rebuilt when they are out of date.
@@ -663,6 +717,16 @@ pub(crate) struct Register {
     rows_in_view: Option<RowsInView>,
     /// Whether the edit refused to let the keyboard leave its cell this frame.
     refused_leave: bool,
+    /// What the draft row holds.
+    draft: Draft,
+    /// The draft row as the last frame left it, for saving an edit before the next
+    /// frame draws the Register. `None` while the account can't change.
+    draft_row: Option<RegisterRow>,
+    /// The cell a refused draft row still needs, outlined with a bubble saying so
+    /// until it is filled.
+    missing: Option<Missing>,
+    /// Whether the draft row is to scroll into view on the next frame.
+    reveal_draft: bool,
 }
 
 impl Register {
@@ -680,9 +744,13 @@ impl Register {
             })
     }
 
-    /// The selected transaction's row, while `account`'s Register shows it.
+    /// The selected transaction's row, while `account`'s Register shows it. The draft
+    /// row is no transaction's.
     pub(crate) fn selected_row(&self, account: AccountId) -> Option<&RegisterRow> {
-        self.row(account, self.cursor?.row)
+        let RowId::Transaction(id) = self.cursor?.row else {
+            return None;
+        };
+        self.row(account, id)
     }
 
     /// Transaction `id`'s row, while `account`'s Register shows it.
@@ -691,7 +759,44 @@ impl Register {
             .model
             .as_ref()
             .filter(|model| model.account() == account)?;
+        let id = RowId::Transaction(id);
         model.rows().iter().find(|row| row.id() == id)
+    }
+
+    /// The index of the row this frame scrolls to the middle of the Register, if any:
+    /// the draft row when it is to come into view, else the cursor's row after a sort.
+    /// The draft row is the last row, so centring it scrolls to the bottom.
+    fn row_to_centre(&mut self, rows: Rows<'_>) -> Option<usize> {
+        let centre_pending = std::mem::take(&mut self.centre_pending);
+        if std::mem::take(&mut self.reveal_draft) {
+            return rows.position(RowId::Draft);
+        }
+        self.cursor
+            .filter(|_| centre_pending)
+            .and_then(|cursor| rows.position(cursor.row))
+    }
+
+    /// Starts the Register over for another account, sorted by date with an empty
+    /// draft row and the cell cursor on it. A closed account has no draft row, so its
+    /// Register starts with no cursor.
+    fn start_over(&mut self, closed: bool) {
+        self.sort = RegisterSort::default();
+        self.centre_pending = false;
+        self.cursor = None;
+        self.edit = None;
+        self.rows_in_view = None;
+        self.draft = Draft::default();
+        self.missing = None;
+        if !closed {
+            self.go_to_draft_row();
+        }
+    }
+
+    /// Puts the cell cursor on the draft row's first cell, scrolling it into view on
+    /// the next frame.
+    pub(crate) fn go_to_draft_row(&mut self) {
+        self.cursor = Some(CellAddress::draft(RegisterColumn::Date));
+        self.reveal_draft = true;
     }
 
     /// Carries out `action`, picked from transaction `id`'s Actions menu.
@@ -699,7 +804,7 @@ impl Register {
         match action {
             RowAction::Delete => {
                 // The confirm asks about the selected row.
-                self.place_cursor(id, RegisterColumn::Actions);
+                self.place_cursor(RowId::Transaction(id), RegisterColumn::Actions);
                 commands.send(AppCommand::OpenDialog(DialogKind::DeleteTransaction));
             }
         }
@@ -717,10 +822,15 @@ impl Register {
             return;
         };
         if let (Some(model), Some(choices)) = (&self.model, &self.choices) {
+            let rows = Rows {
+                transactions: model.rows(),
+                draft: self.draft_row.as_ref(),
+            };
+            let draft = &mut self.draft;
             // A refused edit is dropped: the Shortcut acts on the saved value.
             let _refused = match edit.clone() {
-                Edit::Text(edit) => commit(&edit, model.rows(), choices, commands),
-                Edit::Date(mut edit) => commit_date(i18n, &mut edit, model.rows(), commands),
+                Edit::Text(edit) => commit(&edit, rows, choices, commands, draft),
+                Edit::Date(mut edit) => commit_date(i18n, &mut edit, rows, commands, draft),
             };
         }
         ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
@@ -749,16 +859,9 @@ impl Register {
         today: Date<Iso>,
     ) {
         let account = summary.account().id();
-        if self
-            .model
-            .as_ref()
-            .is_some_and(|model| model.account() != account)
-        {
-            self.sort = RegisterSort::default();
-            self.centre_pending = false;
-            self.cursor = None;
-            self.edit = None;
-            self.rows_in_view = None;
+        let closed = summary.account().is_closed();
+        if self.model.as_ref().map(RegisterModel::account) != Some(account) {
+            self.start_over(closed);
         }
         let model = match self.model.take() {
             Some(model) if model.is_current(account, view, self.sort, i18n) => model,
@@ -768,22 +871,24 @@ impl Register {
             Some(choices) if choices.is_current(view, i18n) => choices,
             _ => FieldChoices::new(view, i18n),
         };
+        let currency = summary.account().currency();
+        let draft_row = (!closed).then(|| RegisterRow::draft(&self.draft, currency, view, i18n));
+        let rows = Rows {
+            transactions: model.rows(),
+            draft: draft_row.as_ref(),
+        };
         let keys = KeyContext {
             i18n,
             account,
-            closed: summary.account().is_closed(),
-            rows: model.rows(),
+            closed,
+            rows,
             choices: &choices,
             commands,
         };
         let key_scroll_offset = self.handle_keys(ui.ctx(), &keys);
         let row_height = theme.row_height();
         let pitch = row_height + ui.spacing().item_spacing.y;
-        let centre_pending = std::mem::take(&mut self.centre_pending);
-        let centre_on = self
-            .cursor
-            .filter(|_| centre_pending)
-            .and_then(|cursor| model.rows().iter().position(|row| row.id() == cursor.row));
+        let centre_on = self.row_to_centre(rows);
         ScrollArea::horizontal()
             .id_salt(("register_sideways", account))
             .auto_shrink(false)
@@ -831,7 +936,7 @@ impl Register {
                             today,
                             theme,
                             commands,
-                            rows: model.rows(),
+                            rows,
                             choices: &choices,
                             register_id,
                             access: Access::of(summary.account()),
@@ -845,6 +950,9 @@ impl Register {
         {
             self.cursor = Some(edit.cell());
         }
+        let draft = &self.draft;
+        self.missing = self.missing.filter(|&missing| draft.lacks(missing));
+        self.draft_row = (!closed).then(|| RegisterRow::draft(draft, currency, view, i18n));
         self.model = Some(model);
         self.choices = Some(choices);
     }
@@ -858,8 +966,9 @@ impl Register {
         let mut in_view: Option<(usize, usize)> = None;
         body.rows(row_height, rows.len(), |mut table_row| {
             let index = table_row.index();
-            // `rows` lays out indices below `rows.len()` only.
-            let row = &rows[index];
+            let row = rows
+                .get(index)
+                .expect("`rows` lays out indices below `rows.len()` only");
             table_row.set_selected(self.cursor.is_some_and(|cursor| cursor.row == row.id()));
             for (column_index, column) in RegisterColumn::ALL.into_iter().enumerate() {
                 table_row.col(|ui| {
@@ -916,8 +1025,23 @@ impl Register {
             self.place_cursor(row.id(), column);
             open_split_view(row, column, commands);
         }
-        if let Some(action) = action {
-            self.act(row.id(), action, commands);
+        if let (Some(action), Some(id)) = (action, row.transaction()) {
+            self.act(id, action, commands);
+        }
+        let editing = self
+            .edit
+            .as_ref()
+            .is_some_and(|edit| edit.cell() == address);
+        if let Some(missing) = self.missing
+            && address == CellAddress::draft(missing_column(missing))
+            && !editing
+        {
+            let rect = ui.max_rect();
+            ui.painter()
+                .rect_stroke(rect, 0.0, theme.missing_cell_stroke(), StrokeKind::Inside);
+            let id = register_id.with("register_missing");
+            let colour = ui.visuals().error_fg_color;
+            floating_bubble(ui, id, rect, missing.message(i18n), colour);
         }
         match &self.edit {
             Some(Edit::Text(edit)) if edit.cell == address => self.edit_cell(ui, frame, column),
@@ -968,7 +1092,13 @@ impl Register {
             let Edit::Text(edit) = edit else {
                 return;
             };
-            match commit(&edit, frame.rows, frame.choices, frame.commands) {
+            match commit(
+                &edit,
+                frame.rows,
+                frame.choices,
+                frame.commands,
+                &mut self.draft,
+            ) {
                 // A refused category leaves nothing to save; the Status bar says why.
                 Commit::Done | Commit::Refused => {}
                 Commit::Unreadable(error) => {
@@ -990,7 +1120,13 @@ impl Register {
         {
             ui.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
             if take_row(&mut edit, row, frame.commands) == Taken::Choice {
-                let _refused = commit(&edit, frame.rows, frame.choices, frame.commands);
+                let _refused = commit(
+                    &edit,
+                    frame.rows,
+                    frame.choices,
+                    frame.commands,
+                    &mut self.draft,
+                );
             }
         }
     }
@@ -1019,16 +1155,22 @@ impl Register {
             .labelled_by(heading_id(frame.register_id, column));
         if response.lost_focus()
             && let Some(Edit::Date(mut edit)) = self.edit.take()
-            && commit_date(frame.i18n, &mut edit, frame.rows, frame.commands) == Commit::Refused
+            && commit_date(
+                frame.i18n,
+                &mut edit,
+                frame.rows,
+                frame.commands,
+                &mut self.draft,
+            ) == Commit::Refused
         {
             self.cursor = Some(edit.cell);
             self.edit = Some(Edit::Date(edit));
         }
     }
 
-    /// Puts the cell cursor on a click in `column` of transaction `row`. A click in a
-    /// column the cursor can't rest in keeps the cursor's column.
-    fn place_cursor(&mut self, row: TransactionId, column: RegisterColumn) {
+    /// Puts the cell cursor on a click in `column` of `row`. A click in a column the
+    /// cursor can't rest in keeps the cursor's column.
+    fn place_cursor(&mut self, row: RowId, column: RegisterColumn) {
         let column = if column.holds_cursor() {
             column
         } else {
@@ -1050,6 +1192,15 @@ impl Register {
         }
         let cursor = self.cursor?;
         self.refuse_characters(ctx, keys, cursor);
+        if cursor.row == RowId::Draft
+            && ctx.input_mut(|input| input.consume_key(Modifiers::COMMAND, Key::Enter))
+        {
+            // Ctrl+Enter saves the cell being edited, then adds the row.
+            if self.commit_open_edit(ctx, keys) {
+                self.post(keys);
+            }
+            return None;
+        }
         let tab = (!self.tabs.is_empty()).then(|| self.tabs.remove(0));
         if !self.tabs.is_empty() {
             // Each Tab acts on the cell the one before it opened, so the rest wait.
@@ -1090,7 +1241,7 @@ impl Register {
                 self.start_edit(ctx, keys, EditStart::Saved);
                 return None;
             }
-            if let Some(row) = keys.rows.iter().find(|row| row.id() == cursor.row)
+            if let Some(row) = keys.rows.find(cursor.row)
                 && open_split_view(row, cursor.column, keys.commands)
             {
                 return None;
@@ -1164,7 +1315,13 @@ impl Register {
                 ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
                 return None;
             }
-            match commit(&edit, keys.rows, keys.choices, keys.commands) {
+            match commit(
+                &edit,
+                keys.rows,
+                keys.choices,
+                keys.commands,
+                &mut self.draft,
+            ) {
                 Commit::Done => {}
                 Commit::Refused => {
                     edit.list = None;
@@ -1177,6 +1334,11 @@ impl Register {
                 }
             }
             ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+            if enter && cursor.row == RowId::Draft && cursor.column == RegisterColumn::LAST {
+                // Enter on the draft row's last cell adds the row.
+                self.post(keys);
+                return None;
+            }
             let step = if enter { Move::Next } else { tab? };
             let moved = self.move_cursor(cursor, step, keys.rows)?;
             // Tab opens the cell it moved to. With nowhere to move it opens nothing,
@@ -1217,7 +1379,14 @@ impl Register {
             return None;
         }
         if enter || tab.is_some() {
-            if commit_date(keys.i18n, &mut edit, keys.rows, keys.commands) == Commit::Refused {
+            if commit_date(
+                keys.i18n,
+                &mut edit,
+                keys.rows,
+                keys.commands,
+                &mut self.draft,
+            ) == Commit::Refused
+            {
                 self.edit = Some(Edit::Date(edit));
                 return None;
             }
@@ -1267,17 +1436,12 @@ impl Register {
 
     /// Moves the cell cursor from `cursor` by `step`. Returns `None`, leaving the
     /// cursor where it is, when there is nowhere to go.
-    fn move_cursor(
-        &mut self,
-        cursor: CellAddress,
-        step: Move,
-        rows: &[RegisterRow],
-    ) -> Option<Moved> {
+    fn move_cursor(&mut self, cursor: CellAddress, step: Move, rows: Rows<'_>) -> Option<Moved> {
         let columns: Vec<RegisterColumn> = RegisterColumn::ALL
             .into_iter()
             .filter(|column| column.holds_cursor())
             .collect();
-        let row = rows.iter().position(|row| row.id() == cursor.row)?;
+        let row = rows.position(cursor.row)?;
         let column = columns.iter().position(|&column| column == cursor.column)?;
         let (row, column) = match step {
             Move::Up => (row.checked_sub(1)?, column),
@@ -1288,7 +1452,6 @@ impl Register {
                 if column + 1 < columns.len() {
                     (row, column + 1)
                 } else {
-                    // TODO(#93): Enter on the last row's last cell goes to the draft row.
                     (row + 1, 0)
                 }
             }
@@ -1355,7 +1518,7 @@ impl Register {
             CellField::Amount => {
                 let currency = row.currency();
                 let reader = keys.i18n.amount_reader(i18n_currency(currency));
-                (row.amount().text(), EditField::Amount { reader, currency })
+                (row.amount_text(), EditField::Amount { reader, currency })
             }
         };
         let text = match start {
@@ -1382,6 +1545,79 @@ impl Register {
         ctx.memory_mut(|memory| memory.request_focus(id));
         self.edit = Some(Edit::Text(edit));
     }
+
+    /// Saves the cell being edited, if any, and closes its editor, as Ctrl+Enter does
+    /// before it adds the draft row. A highlighted list entry is taken first. Returns
+    /// whether the edit, if any, was saved; a refused one stays open, saying why.
+    fn commit_open_edit(&mut self, ctx: &egui::Context, keys: &KeyContext<'_>) -> bool {
+        let Some(edit) = self.edit.take() else {
+            return true;
+        };
+        let editor = edit.editor_id();
+        let refused = match edit {
+            Edit::Text(mut edit) => {
+                if let Some(ListRow::Choice(text)) = edit.highlighted(keys.choices) {
+                    text.clone_into(&mut edit.text);
+                }
+                match commit(
+                    &edit,
+                    keys.rows,
+                    keys.choices,
+                    keys.commands,
+                    &mut self.draft,
+                ) {
+                    Commit::Done => None,
+                    Commit::Refused => {
+                        edit.list = None;
+                        Some(Edit::Text(edit))
+                    }
+                    Commit::Unreadable(error) => Some(Edit::Text(edit.refused(error))),
+                }
+            }
+            Edit::Date(mut edit) => {
+                let commit = commit_date(
+                    keys.i18n,
+                    &mut edit,
+                    keys.rows,
+                    keys.commands,
+                    &mut self.draft,
+                );
+                (commit == Commit::Refused).then_some(Edit::Date(edit))
+            }
+        };
+        if refused.is_none() {
+            ctx.memory_mut(|memory| memory.surrender_focus(editor));
+        }
+        self.edit = refused;
+        self.edit.is_none()
+    }
+
+    /// Adds the draft row to the account, emptying it and putting the cell cursor on
+    /// its first cell. A row missing a cell the transaction needs is refused: the cursor
+    /// goes to the first such cell, outlined, with a bubble saying what is missing.
+    fn post(&mut self, keys: &KeyContext<'_>) {
+        match self.draft.posting(keys.account) {
+            Ok(command) => {
+                keys.commands.send(AppCommand::Domain(command));
+                self.draft = Draft::default();
+                self.missing = None;
+                self.go_to_draft_row();
+            }
+            Err(missing) => {
+                self.missing = Some(missing);
+                self.cursor = Some(CellAddress::draft(missing_column(missing)));
+            }
+        }
+    }
+}
+
+/// The draft row cell that `missing` names.
+fn missing_column(missing: Missing) -> RegisterColumn {
+    match missing {
+        Missing::Date => RegisterColumn::Date,
+        Missing::Category => RegisterColumn::Category,
+        Missing::Amount => RegisterColumn::Amount,
+    }
 }
 
 /// A move of the cell cursor that happened.
@@ -1393,8 +1629,8 @@ struct Moved {
 
 /// The row of `cell` and the field it edits, or `None` when its row is gone or it
 /// can't be edited.
-fn field_at(rows: &[RegisterRow], cell: CellAddress) -> Option<(&RegisterRow, CellField)> {
-    let row = rows.iter().find(|row| row.id() == cell.row)?;
+fn field_at(rows: Rows<'_>, cell: CellAddress) -> Option<(&RegisterRow, CellField)> {
+    let row = rows.find(cell.row)?;
     Some((row, cell.column.field(row)?))
 }
 
@@ -1415,7 +1651,7 @@ struct BodyFrame<'a> {
     today: Date<Iso>,
     theme: &'a Theme,
     commands: &'a CommandSender,
-    rows: &'a [RegisterRow],
+    rows: Rows<'a>,
     choices: &'a FieldChoices,
     register_id: Id,
     access: Access,
@@ -1459,7 +1695,7 @@ struct KeyContext<'a> {
     i18n: &'a Localizer,
     account: AccountId,
     closed: bool,
-    rows: &'a [RegisterRow],
+    rows: Rows<'a>,
     choices: &'a FieldChoices,
     commands: &'a CommandSender,
 }
@@ -1467,11 +1703,13 @@ struct KeyContext<'a> {
 /// Asks for the split view of `row` when `column` is the Category cell of a split
 /// transaction, whose `[Split]` acts as a button. Returns whether it asked.
 fn open_split_view(row: &RegisterRow, column: RegisterColumn, commands: &CommandSender) -> bool {
-    let opens = column == RegisterColumn::Category && row.is_split();
-    if opens {
-        commands.send(AppCommand::OpenSplitView(row.id()));
+    let split = row
+        .transaction()
+        .filter(|_| column == RegisterColumn::Category && row.is_split());
+    if let Some(transaction) = split {
+        commands.send(AppCommand::OpenSplitView(transaction));
     }
-    opens
+    split.is_some()
 }
 
 /// Whether a commit went through.
@@ -1486,15 +1724,16 @@ enum Commit {
     Unreadable(AmountParseError),
 }
 
-/// Saves `edit`'s text, trimmed, by sending one edit Command, unless it matches the
-/// saved text or saved amount.
+/// Saves `edit`'s text, trimmed, unless it matches the saved text or saved amount: in
+/// `draft` on the draft row, else by sending one edit Command.
 fn commit(
     edit: &CellEdit,
-    rows: &[RegisterRow],
+    rows: Rows<'_>,
     choices: &FieldChoices,
     commands: &CommandSender,
+    draft: &mut Draft,
 ) -> Commit {
-    let Some(row) = rows.iter().find(|row| row.id() == edit.cell.row) else {
+    let Some(row) = rows.find(edit.cell.row) else {
         return Commit::Done;
     };
     let text = edit.text.trim();
@@ -1512,12 +1751,23 @@ fn commit(
         },
     };
     if let Some(change) = change {
-        commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
-            transaction: row.id(),
-            edit: change,
-        }));
+        save(row.id(), change, commands, draft);
     }
     Commit::Done
+}
+
+/// Saves `edit` in a cell of `row`: in `draft` on the draft row, else by sending one
+/// edit Command.
+fn save(row: RowId, edit: TransactionEdit, commands: &CommandSender, draft: &mut Draft) {
+    match row {
+        RowId::Transaction(transaction) => {
+            commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
+                transaction,
+                edit,
+            }));
+        }
+        RowId::Draft => draft.edit(edit),
+    }
 }
 
 /// The edit that saves `text`, already trimmed, as the amount of `row`, read by
@@ -1528,33 +1778,33 @@ fn amount_edit(
     reader: &AmountReader,
     currency: CurrencyCode,
 ) -> Result<Option<TransactionEdit>, AmountParseError> {
-    if text == row.amount().text() {
+    if text == row.amount_text() {
         return Ok(None);
     }
     let amount = reader.read(text)?.amount();
     let money = Money::new(amount, currency)
         .expect("the reader gives amounts at the currency's decimal places");
-    Ok((money != row.amount().money()).then_some(TransactionEdit::Amount(money)))
+    let saved = row.amount().map(FormattedAmount::money);
+    Ok((saved != Some(money)).then_some(TransactionEdit::Amount(money)))
 }
 
-/// Saves `edit`'s date by sending one edit Command, unless it matches the saved date.
-/// A refused date shows the format message and sends nothing.
+/// Saves `edit`'s date, unless it matches the saved date: in `draft` on the draft
+/// row, else by sending one edit Command. A refused date shows the format message
+/// and saves nothing.
 fn commit_date(
     i18n: &Localizer,
     edit: &mut DateCellEdit,
-    rows: &[RegisterRow],
+    rows: Rows<'_>,
     commands: &CommandSender,
+    draft: &mut Draft,
 ) -> Commit {
-    let Some(row) = rows.iter().find(|row| row.id() == edit.cell.row) else {
+    let Some(row) = rows.find(edit.cell.row) else {
         return Commit::Done;
     };
     match edit.date.commit(i18n) {
         date_field::Commit::Unchanged => Commit::Done,
         date_field::Commit::Changed(date) => {
-            commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
-                transaction: row.id(),
-                edit: TransactionEdit::Date(date),
-            }));
+            save(row.id(), TransactionEdit::Date(date), commands, draft);
             Commit::Done
         }
         date_field::Commit::Rejected => Commit::Refused,
@@ -1759,7 +2009,13 @@ fn bubble(ui: &egui::Ui, i18n: &Localizer, edit: &CellEdit, cell: Rect) {
         (None, Some(preview)) => (preview.text(i18n), ui.visuals().text_color()),
         (None, None) => return,
     };
-    Area::new(edit.editor_id().with("bubble"))
+    floating_bubble(ui, edit.editor_id().with("bubble"), cell, text, colour);
+}
+
+/// Shows `text` in `colour`, in a bubble with `id` floating below the cell at `cell`,
+/// so the rows below never move.
+fn floating_bubble(ui: &egui::Ui, id: Id, cell: Rect, text: String, colour: egui::Color32) {
+    Area::new(id)
         .order(Order::Tooltip)
         .fixed_pos(cell.left_bottom() + vec2(0.0, ui.spacing().item_spacing.y))
         .interactable(false)
@@ -1933,7 +2189,9 @@ impl Cell<'_> {
             RegisterColumn::Payee => row.payee().into(),
             RegisterColumn::Category => row.category().into(),
             RegisterColumn::Memo => row.memo().into(),
-            RegisterColumn::Amount => row.amount().styled(theme).into(),
+            RegisterColumn::Amount => row
+                .amount()
+                .map_or_else(WidgetText::default, |amount| amount.styled(theme).into()),
             RegisterColumn::Balance => row
                 .balance()
                 .map_or_else(WidgetText::default, |balance| balance.styled(theme).into()),
@@ -1950,7 +2208,9 @@ impl Cell<'_> {
                     .is_some_and(|pointer| band.contains(pointer) && viewport.contains(pointer));
                 let open = Popup::is_id_open(ui.ctx(), Popup::default_response_id(&response));
                 let mut action = None;
-                if selected || hovered || open {
+                // The draft row is no transaction yet, so it has no commands.
+                let draft = row.id() == RowId::Draft;
+                if (selected || hovered || open) && !draft {
                     action = actions_menu(ui, i18n, &response, access);
                 } else {
                     // Hidden, the menu leaves an empty cell that selects the row.

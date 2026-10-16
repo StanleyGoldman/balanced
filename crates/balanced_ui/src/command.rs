@@ -28,6 +28,9 @@ pub(crate) enum AppCommand {
     Navigate(Route),
     /// Show the split lines of a split transaction.
     OpenSplitView(TransactionId),
+    /// Put the cell cursor on the current Register's draft row, showing the Register,
+    /// unless its account is closed.
+    GoToDraftRow,
     /// Close the current Register tab.
     CloseRegisterTab,
     /// Make the Register tab right of the current one current, wrapping to the first.

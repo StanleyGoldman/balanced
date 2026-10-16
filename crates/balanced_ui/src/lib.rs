@@ -9,6 +9,7 @@ mod combobox;
 mod command;
 mod date_field;
 mod dialog;
+mod draft_row;
 mod formatted_amount;
 mod i18n;
 mod keymap;

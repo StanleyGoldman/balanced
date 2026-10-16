@@ -337,6 +337,12 @@ impl Theme {
         Stroke::new(1.0, self.palette.accent)
     }
 
+    /// The outline of the draft row cell a refused row still needs: the cell cursor's
+    /// outline, in the colour of errors.
+    pub(crate) fn missing_cell_stroke(&self) -> Stroke {
+        Stroke::new(1.0, self.palette.negative)
+    }
+
     /// Whether the Register stripes alternate rows: pass it to `TableBuilder::striped`.
     /// Only the Register stripes, so the style leaves `Visuals::striped` off.
     pub(crate) fn alternating_rows(&self) -> bool {

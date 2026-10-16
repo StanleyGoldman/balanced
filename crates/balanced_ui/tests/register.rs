@@ -296,6 +296,8 @@ fn clicking_payee_sorts_by_payee() {
             "Opening Balance",
             "Shell",
             "Trattoria Roma",
+            // The draft row stays at the bottom under any sort.
+            "",
         ]
     );
 }
@@ -307,7 +309,8 @@ fn sorting_by_payee_blanks_the_balance() {
 
     sort_by(&mut harness, "Payee");
 
-    assert_eq!(column(&harness, "Balance"), [""; 10]);
+    // Ten transactions, then the draft row, which has no balance.
+    assert_eq!(column(&harness, "Balance"), [""; 11]);
 }
 
 #[test]
@@ -348,10 +351,12 @@ fn clicking_payee_again_reverses_the_sort_but_not_its_ties() {
             "Bean There",
             "Acme Corp",
             "Acme Corp",
+            // The draft row stays at the bottom whichever way the sort runs.
+            "",
         ]
     );
     // The two Acme Corp salaries tie, so they stay oldest first.
-    assert_eq!(dates[8..], ["9/1/2026", "9/18/2026"]);
+    assert_eq!(dates[8..10], ["9/1/2026", "9/18/2026"]);
 }
 
 #[test]
@@ -366,7 +371,8 @@ fn sorting_by_date_again_brings_the_balances_back() {
         column(&harness, "Balance"),
         [
             "1,200.00", "4,400.00", "2,950.00", "2,863.58", "2,858.83", "2,766.73", "2,560.46",
-            "2,512.26", "5,712.26", "5,647.46",
+            "2,512.26", "5,712.26", "5,647.46", // The draft row, which has no balance.
+            "",
         ]
     );
 }
@@ -414,12 +420,24 @@ fn a_sortable_header_shows_a_pointing_hand() {
 fn the_selected_row_stays_centred_after_a_sort() {
     let mut harness = app();
     open(&mut harness, "Household Checking");
-    harness
-        .get_by_role_and_label(Role::Cell, "Opening Balance")
-        .click();
-    harness.run();
+    // The account opens on its draft row, below the last of its 20,001 rows.
+    for _ in 0..20 {
+        press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+    }
+    let payee = harness
+        .get_by_role_and_label(Role::ColumnHeader, "Payee")
+        .rect()
+        .x_range();
+    let selected_payee = harness
+        .query_all_by_role(Role::Cell)
+        .find(|cell| {
+            payee.contains(cell.rect().center().x)
+                && cell.accesskit_node().toggled() == Some(Toggled::True)
+        })
+        .and_then(|cell| cell.accesskit_node().label())
+        .expect("a row is selected");
 
-    // Of 20,001 rows, the opening balance sorts thousands of rows down by payee.
+    // Thousands of rows share each payee, so the selected row sorts far from the end.
     sort_by(&mut harness, "Payee");
 
     let header = harness
@@ -431,7 +449,11 @@ fn the_selected_row_stays_centred_after_a_sort() {
         .fold(header.bottom(), f32::max);
     let middle = header.bottom().midpoint(bottom);
     let selected = harness
-        .query_by_role_and_label(Role::Cell, "Opening Balance")
+        .query_all_by_role(Role::Cell)
+        .find(|cell| {
+            cell.accesskit_node().toggled() == Some(Toggled::True)
+                && cell.accesskit_node().label().as_deref() == Some(selected_payee.as_str())
+        })
         .map(|cell| cell.rect().center().y);
     assert!(
         selected.is_some_and(|y| (y - middle).abs() <= header.height()),
@@ -440,19 +462,23 @@ fn the_selected_row_stays_centred_after_a_sort() {
 }
 
 #[test]
-fn selecting_a_row_after_a_sort_with_nothing_selected_leaves_the_rows_still() {
+fn selecting_a_row_after_a_sort_leaves_the_rows_still() {
     let mut harness = app();
     open(&mut harness, "Household Checking");
     sort_by(&mut harness, "Payee");
     // A row in the lower half of the Register, which centring would move up.
+    let header = harness
+        .get_by_role_and_label(Role::ColumnHeader, "Payee")
+        .rect()
+        .x_range();
     let payees: Vec<_> = harness
         .query_all_by_role(Role::Cell)
-        .filter(|cell| cell.accesskit_node().label().as_deref() == Some("Acme Corp"))
+        .filter(|cell| header.contains(cell.rect().center().x))
         .collect();
-    let acme = &payees[payees.len() * 3 / 4];
-    let clicked = acme.rect();
+    let payee = &payees[payees.len() * 3 / 4];
+    let clicked = payee.rect();
 
-    acme.click();
+    payee.click();
     harness.run();
 
     let selected = harness
@@ -626,19 +652,18 @@ fn a_closed_accounts_cells_do_not_open_for_editing() {
 }
 
 #[test]
-fn moving_the_cursor_below_the_view_scrolls_to_it_in_the_same_frame() {
+fn moving_the_cursor_above_the_view_scrolls_to_it_in_the_same_frame() {
     let mut harness = app();
+    // The account opens on its draft row, below the last of its 20,001 rows.
     open(&mut harness, "Household Checking");
-    click_cell(&mut harness, "Opening Balance");
-    let net_worth = harness.get_by_role_and_label(Role::Label, "Net Worth");
-    // The Account bar's footer ends where the Register's body does.
-    let bottom = net_worth.accesskit_node().bounding_box().unwrap().y1;
+    let header = harness.get_by_role_and_label(Role::ColumnHeader, "Payee");
+    let top = header.accesskit_node().bounding_box().unwrap().y1;
 
     for _ in 0..60 {
         send(
             &mut harness,
             Event::Key {
-                key: Key::ArrowDown,
+                key: Key::ArrowUp,
                 physical_key: None,
                 pressed: true,
                 repeat: false,
@@ -649,11 +674,8 @@ fn moving_the_cursor_below_the_view_scrolls_to_it_in_the_same_frame() {
             .query_all_by_role(Role::Cell)
             .find(|cell| cell.accesskit_node().is_selected() == Some(true))
             .expect("the cursor's row is laid out in the frame the cursor moves");
-        let cell_bottom = cell.accesskit_node().bounding_box().unwrap().y1;
-        assert!(
-            cell_bottom <= bottom + 8.0,
-            "{cell_bottom} is below {bottom}"
-        );
+        let cell_top = cell.accesskit_node().bounding_box().unwrap().y0;
+        assert!(cell_top >= top - 8.0, "{cell_top} is above {top}");
     }
 }
 
@@ -673,16 +695,38 @@ fn an_edit_starts_with_the_text_cursor_at_the_end() {
 }
 
 #[test]
-fn tab_on_the_last_editable_cell_commits_and_closes_it() {
+fn tab_on_the_last_transactions_last_cell_commits_and_edits_the_draft_rows_date() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    // Trattoria Roma's amount, the last row's last cell.
+    // Trattoria Roma's amount, the last transaction's last cell.
     click_cell(&mut harness, "-64.80");
     type_text(&mut harness, "-70");
 
     press(&mut harness, Modifiers::NONE, Key::Tab);
 
     assert_eq!(amount_of(&harness, "Trattoria Roma"), "-70.00");
+    assert_eq!(editor(&harness, "Date").as_deref(), Some(""));
+}
+
+#[test]
+fn tab_on_the_draft_rows_last_cell_commits_and_closes_it() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    for _ in 0..5 {
+        press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+    }
+    type_text(&mut harness, "-70");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(cells(&harness).last().map(String::as_str), Some(""));
+    assert!(
+        cells(&harness)
+            .iter()
+            .rev()
+            .take(8)
+            .any(|cell| cell == "-70.00")
+    );
     assert!(harness.query_by_role(Role::TextInput).is_none());
 }
 

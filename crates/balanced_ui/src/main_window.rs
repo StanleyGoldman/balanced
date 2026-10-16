@@ -15,6 +15,7 @@ use crate::layout::Layout;
 use crate::menu_nav::{DrawnMenus, MenuNav};
 use crate::new_account::{self, NewAccountForm, WizardOutcome};
 use crate::register::ColumnWidths;
+use crate::register_model::RegisterRow;
 use crate::register_tabs::RegisterTabs;
 use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
@@ -158,6 +159,27 @@ impl MainWindow {
         }
     }
 
+    /// Shows the current Register and puts its cell cursor on the draft row, with the
+    /// keyboard, unless no Register is open or its account in `view` is closed.
+    pub(crate) fn go_to_draft_row(&mut self, ctx: &egui::Context, view: &LedgerView) {
+        let open = self
+            .registers
+            .current_account()
+            .and_then(|account| view.account(account))
+            .is_some_and(|summary| !summary.account().is_closed());
+        let Some(register) = self.registers.current_register_mut().filter(|_| open) else {
+            return;
+        };
+        self.tab = TopLevelTab::Accounts;
+        register.go_to_draft_row();
+        // The Register takes keys with no widget focused.
+        ctx.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+    }
+
     /// Shows `message` in the Status bar.
     pub(crate) fn show_status(&mut self, message: StatusMessage) {
         self.status = Some(message);
@@ -196,16 +218,15 @@ impl MainWindow {
                 if summary.account().is_closed() {
                     return;
                 }
-                let Some(row) = self
+                let Some(transaction) = self
                     .registers
                     .current_register()
                     .and_then(|register| register.selected_row(summary.account().id()))
+                    .and_then(RegisterRow::transaction)
                 else {
                     return;
                 };
-                let form = DeleteTransactionForm {
-                    transaction: row.id(),
-                };
+                let form = DeleteTransactionForm { transaction };
                 self.delete_transaction = Some(OpenDialog::new(ctx, form));
             }
             DialogKind::NewAccount => {
@@ -386,7 +407,7 @@ impl MainWindow {
                     "dialog-delete-transaction-message",
                     payee = row.payee(),
                     date = row.date(),
-                    amount = row.amount().text()
+                    amount = row.amount_text()
                 )
             })
             .expect("the Register shows the transaction the confirm asks about");
@@ -442,8 +463,7 @@ impl MainWindow {
                 ui.label(balance.styled(theme).heading());
                 let add = Button::new(fl!(i18n, "register-new-transaction"));
                 if ui.add_enabled(!closed, add).clicked() {
-                    // TODO(#93): go to the draft row.
-                    commands.send(AppCommand::ShowStatus(StatusMessage::NotAvailableYet));
+                    commands.send(AppCommand::GoToDraftRow);
                 }
             },
         );

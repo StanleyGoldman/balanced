@@ -13,11 +13,19 @@ use icu_calendar::{Date, Iso};
 use icu_locale::LanguageIdentifier;
 use icu_locale::Locale;
 
+use crate::draft_row::Draft;
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
 
 /// Separates a category from the one it sits under: `Food & Dining:Groceries`.
 const CATEGORY_SEPARATOR: &str = ":";
+
+/// Which row of the Register a row is: a transaction's, or the draft row below them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum RowId {
+    Transaction(TransactionId),
+    Draft,
+}
 
 /// Where a row's amount went, as far as its Payee and Category cells care.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,28 +34,73 @@ enum RowKind {
     /// The whole amount, in one category.
     Category(CategoryId),
     Split,
+    /// The draft row, with its category once one is typed.
+    Draft(Option<CategoryId>),
 }
 
-/// One transaction's row in the Register, every cell formatted.
+/// One row of the Register, every cell formatted: a transaction's, or the draft row's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisterRow {
-    id: TransactionId,
+    id: RowId,
     /// The row's place in date order, which breaks ties in every sort.
     place: usize,
     kind: RowKind,
-    saved_date: Date<Iso>,
+    /// The date, which only the draft row can be without.
+    saved_date: Option<Date<Iso>>,
     date: String,
     number: String,
     payee: String,
     category: String,
     memo: String,
-    amount: FormattedAmount,
+    currency: CurrencyCode,
+    /// The amount, which only the draft row can be without.
+    amount: Option<FormattedAmount>,
     balance: Option<FormattedAmount>,
 }
 
 impl RegisterRow {
-    pub(crate) fn id(&self) -> TransactionId {
+    /// The draft row of an account in `currency`, showing what `draft` holds, with
+    /// categories named as in `view`.
+    pub(crate) fn draft(
+        draft: &Draft,
+        currency: CurrencyCode,
+        view: &LedgerView,
+        i18n: &Localizer,
+    ) -> Self {
+        Self {
+            id: RowId::Draft,
+            place: usize::MAX,
+            kind: RowKind::Draft(draft.category()),
+            saved_date: draft.date(),
+            date: draft
+                .date()
+                .map(|date| i18n.format_date(date))
+                .unwrap_or_default(),
+            number: draft.number().to_owned(),
+            payee: draft.payee().to_owned(),
+            category: draft
+                .category()
+                .and_then(|id| category_text(view, id))
+                .unwrap_or_default(),
+            memo: draft.memo().to_owned(),
+            currency,
+            amount: draft
+                .amount()
+                .map(|amount| FormattedAmount::new(i18n, amount, AmountStyle::Bare)),
+            balance: None,
+        }
+    }
+
+    pub(crate) fn id(&self) -> RowId {
         self.id
+    }
+
+    /// The transaction the row shows, unless it is the draft row.
+    pub(crate) fn transaction(&self) -> Option<TransactionId> {
+        match self.id {
+            RowId::Transaction(id) => Some(id),
+            RowId::Draft => None,
+        }
     }
 
     /// Whether this is the account's opening balance, whose Payee cell shows a
@@ -57,11 +110,19 @@ impl RegisterRow {
     }
 
     /// The one category the whole amount is in, unless the row is the opening balance
-    /// or split.
+    /// or split, or the draft row before a category is typed.
     pub(crate) fn category_id(&self) -> Option<CategoryId> {
         match self.kind {
-            RowKind::Category(id) => Some(id),
-            RowKind::OpeningBalance | RowKind::Split => None,
+            RowKind::Category(id) | RowKind::Draft(Some(id)) => Some(id),
+            RowKind::OpeningBalance | RowKind::Split | RowKind::Draft(None) => None,
+        }
+    }
+
+    /// Whether the whole amount goes in one category, which the Category cell edits.
+    pub(crate) fn takes_category(&self) -> bool {
+        match self.kind {
+            RowKind::Category(_) | RowKind::Draft(_) => true,
+            RowKind::OpeningBalance | RowKind::Split => false,
         }
     }
 
@@ -70,8 +131,9 @@ impl RegisterRow {
         self.kind == RowKind::Split
     }
 
-    /// The transaction's date, which the Date cell shows formatted.
-    pub(crate) fn saved_date(&self) -> Date<Iso> {
+    /// The transaction's date, which the Date cell shows formatted. Only the draft row
+    /// can be without one.
+    pub(crate) fn saved_date(&self) -> Option<Date<Iso>> {
         self.saved_date
     }
 
@@ -100,12 +162,17 @@ impl RegisterRow {
 
     /// The currency of the transaction's account.
     pub(crate) fn currency(&self) -> CurrencyCode {
-        self.amount.money().currency()
+        self.currency
     }
 
-    /// The amount, as a bare number.
-    pub(crate) fn amount(&self) -> &FormattedAmount {
-        &self.amount
+    /// The amount, as a bare number. Only the draft row can be without one.
+    pub(crate) fn amount(&self) -> Option<&FormattedAmount> {
+        self.amount.as_ref()
+    }
+
+    /// The amount's text, or nothing when the row has no amount.
+    pub(crate) fn amount_text(&self) -> &str {
+        self.amount.as_ref().map_or("", FormattedAmount::text)
     }
 
     /// The running balance after this transaction, as a bare number. Under a sort
@@ -121,11 +188,10 @@ impl RegisterRow {
             SortKey::Payee => i18n.compare_text(&self.payee, &other.payee),
             SortKey::Category => i18n.compare_text(&self.category, &other.category),
             SortKey::Memo => i18n.compare_text(&self.memo, &other.memo),
-            SortKey::Amount => self
-                .amount
-                .money()
-                .amount()
-                .cmp(&other.amount.money().amount()),
+            SortKey::Amount => {
+                let amount = |row: &Self| row.amount.as_ref().map(|amount| amount.money().amount());
+                amount(self).cmp(&amount(other))
+            }
         }
     }
 }
@@ -253,16 +319,21 @@ impl RegisterModel {
                     ),
                 };
                 RegisterRow {
-                    id: transaction.id(),
+                    id: RowId::Transaction(transaction.id()),
                     place,
                     kind,
-                    saved_date: transaction.date(),
+                    saved_date: Some(transaction.date()),
                     date: i18n.format_date(transaction.date()),
                     number: transaction.number().unwrap_or_default().to_owned(),
                     payee,
                     category,
                     memo: transaction.memo().to_owned(),
-                    amount: FormattedAmount::new(i18n, transaction.amount(), AmountStyle::Bare),
+                    currency: transaction.amount().currency(),
+                    amount: Some(FormattedAmount::new(
+                        i18n,
+                        transaction.amount(),
+                        AmountStyle::Bare,
+                    )),
                     balance: shows_balance
                         .then(|| FormattedAmount::new(i18n, entry.balance(), AmountStyle::Bare)),
                 }

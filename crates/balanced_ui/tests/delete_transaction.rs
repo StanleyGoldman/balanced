@@ -4,7 +4,7 @@
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock};
-use eframe::egui::accesskit::Role;
+use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::{Event, Key, Modifiers, Vec2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
@@ -49,6 +49,15 @@ fn press(harness: &mut Harness<'static, App>, modifiers: Modifiers, key: Key) {
 /// Whether the Register lists a transaction with `payee`.
 fn listed(harness: &Harness<'static, App>, payee: &str) -> bool {
     harness.query_by_role_and_label(Role::Cell, payee).is_some()
+}
+
+/// Whether Costco's row is selected.
+fn costco_is_selected(harness: &Harness<'static, App>) -> bool {
+    harness
+        .get_by_role_and_label(Role::Cell, "Costco")
+        .accesskit_node()
+        .toggled()
+        == Some(Toggled::True)
 }
 
 /// Whether the delete confirm is open.
@@ -176,8 +185,8 @@ fn ctrl_n_does_nothing_while_the_confirm_is_open() {
 
     press(&mut harness, Modifiers::COMMAND, Key::N);
 
-    // Outside a Dialog, Ctrl+N answers in the Status bar until the draft row exists.
-    assert!(harness.query_by_label("Not available yet").is_none());
+    // Outside a Dialog, Ctrl+N moves the cell cursor off Costco to the draft row.
+    assert!(costco_is_selected(&harness));
     assert!(confirm_open(&harness));
 }
 
@@ -189,7 +198,7 @@ fn ctrl_n_acts_once_the_confirm_closes() {
 
     press(&mut harness, Modifiers::COMMAND, Key::N);
 
-    assert!(harness.query_by_label("Not available yet").is_some());
+    assert!(!costco_is_selected(&harness));
 }
 
 #[test]
@@ -246,8 +255,9 @@ fn the_delete_key_alone_opens_nothing() {
 }
 
 #[test]
-fn ctrl_d_with_nothing_selected_opens_nothing() {
+fn ctrl_d_on_the_draft_row_opens_nothing() {
     let mut harness = app(vec2(1280.0, 720.0));
+    // Opening the account puts the cell cursor on its draft row.
     harness
         .get_by_role_and_label(Role::Button, "Everyday Checking")
         .click();

@@ -48,11 +48,12 @@ const TITLE_DAYS: f32 = 5.0;
 /// The date field's state while its cell is edited.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DateEdit {
-    /// The cell's saved date, which the edit changes only when committed.
-    saved: Date<Iso>,
+    /// The cell's saved date, which the edit changes only when committed. Only the
+    /// draft row's Date cell can be without one.
+    saved: Option<Date<Iso>>,
     /// The date the field holds while nothing has been typed: the saved date, or where
-    /// a shortcut or the calendar moved it.
-    date: Date<Iso>,
+    /// a shortcut or the calendar moved it. `None` while an empty field is untouched.
+    date: Option<Date<Iso>>,
     /// The segments typed, once anything has been. Shortcuts act only while this is
     /// `None`.
     typed: Option<Typed>,
@@ -268,8 +269,9 @@ pub(crate) enum Commit {
 }
 
 impl DateEdit {
-    /// The field over a cell whose saved date is `saved`, unedited.
-    pub(crate) fn new(saved: Date<Iso>) -> Self {
+    /// The field over a cell whose saved date is `saved`, unedited. A cell with no
+    /// saved date starts empty.
+    pub(crate) fn new(saved: Option<Date<Iso>>) -> Self {
         Self {
             saved,
             date: saved,
@@ -280,11 +282,13 @@ impl DateEdit {
         }
     }
 
-    /// Reads the field's date for saving. A refused date shows the format message.
+    /// Reads the field's date for saving. A refused date shows the format message. An
+    /// empty field left untouched saves nothing.
     pub(crate) fn commit(&mut self, i18n: &Localizer) -> Commit {
         match self.value(i18n) {
             Ok(date) if date == self.saved => Commit::Unchanged,
-            Ok(date) => Commit::Changed(date),
+            Ok(Some(date)) => Commit::Changed(date),
+            Ok(None) => Commit::Unchanged,
             Err(_) => {
                 self.rejected = true;
                 Commit::Rejected
@@ -302,18 +306,21 @@ impl DateEdit {
         self.calendar.take().is_some()
     }
 
-    /// The date the field holds.
-    fn value(&self, i18n: &Localizer) -> Result<Date<Iso>, DateParseError> {
+    /// The date the field holds, or `None` while an empty field is untouched.
+    fn value(&self, i18n: &Localizer) -> Result<Option<Date<Iso>>, DateParseError> {
         match &self.typed {
             None => Ok(self.date),
-            Some(typed) => i18n.parse_date(&typed.segments.join("/")),
+            Some(typed) => i18n.parse_date(&typed.segments.join("/")).map(Some),
         }
     }
 
     /// The field's text, as shown and as a screen reader reads it.
     fn text(&self, i18n: &Localizer) -> String {
         match &self.typed {
-            None => i18n.format_date(self.date),
+            None => self
+                .date
+                .map(|date| i18n.format_date(date))
+                .unwrap_or_default(),
             Some(typed) => typed.segments.join(i18n.date_segments().separator()),
         }
     }
@@ -385,10 +392,10 @@ impl DateEdit {
         }
     }
 
-    /// Moves the field's date by `shortcut`.
+    /// Moves the field's date by `shortcut`. An empty field moves from today.
     fn shortcut(&mut self, shortcut: Shortcut, today: Date<Iso>) {
         self.rejected = false;
-        self.date = shortcut.apply(self.date, today);
+        self.date = Some(shortcut.apply(self.date.unwrap_or(today), today));
     }
 
     /// Types `text`: a whole date typed or pasted at once fills the segments, and
@@ -435,14 +442,14 @@ impl DateEdit {
     /// holds no date, or closes it.
     fn toggle_calendar(&mut self, i18n: &Localizer, today: Date<Iso>) {
         if self.calendar.take().is_none() {
-            let shown = self.value(i18n).unwrap_or(today);
+            let shown = self.value(i18n).ok().flatten().unwrap_or(today);
             self.calendar = Some(first_of_month(shown));
         }
     }
 
     /// Sets the field to `date` picked in the calendar, and closes it.
     fn pick(&mut self, date: Date<Iso>) {
-        self.date = date;
+        self.date = Some(date);
         self.typed = None;
         self.calendar = None;
         self.rejected = false;
@@ -493,7 +500,7 @@ impl DateEdit {
             let shown = Calendar {
                 id: id.with("date_calendar"),
                 month,
-                selected: self.value(i18n).ok(),
+                selected: self.value(i18n).ok().flatten(),
                 today,
                 below: rect,
                 day_size: theme.row_height(),
@@ -538,9 +545,17 @@ impl DateEdit {
             painter.galley(placed.min, galley, colour);
             x = placed.right();
         };
-        match &self.typed {
-            None => place(i18n.format_date(self.date), text_colour, true),
-            Some(typed) => {
+        // An empty field shows each segment's placeholder, as typing into it would.
+        let untouched = Typed::empty();
+        let typed = match (&self.typed, self.date) {
+            (Some(typed), _) => Some(typed),
+            (None, Some(_)) => None,
+            (None, None) => Some(&untouched),
+        };
+        match (typed, self.date) {
+            (None, Some(date)) => place(i18n.format_date(date), text_colour, true),
+            (None, None) => {}
+            (Some(typed), _) => {
                 let layout = i18n.date_segments();
                 let placeholders = placeholders(i18n);
                 for (slot, segment) in typed.segments.iter().enumerate() {

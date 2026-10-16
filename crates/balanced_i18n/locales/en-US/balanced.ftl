@@ -101,6 +101,11 @@ register-category-list = Show all categories
 # The row of the Category list that creates the category typed in the cell.
 register-create-category = Create "{ $name }"…
 register-new-transaction = + Transaction
+# Why the draft row at the bottom of the Register wasn't added, in a bubble below
+# the first empty cell the transaction needs.
+register-draft-date-missing = Date is missing
+register-draft-category-missing = Category is missing
+register-draft-amount-missing = Amount is missing
 # Beside a closed account's name, above its Register.
 register-closed-read-only = Closed — read-only
 register-transaction-count =

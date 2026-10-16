@@ -93,6 +93,9 @@ impl App {
                 }
             }
             AppCommand::Navigate(route) => self.main_window.navigate(route),
+            AppCommand::GoToDraftRow => self
+                .main_window
+                .go_to_draft_row(ctx, &self.ledger.snapshot()),
             AppCommand::OpenSplitView(_) => {
                 self.main_window.show_status(StatusMessage::NotAvailableYet);
             }

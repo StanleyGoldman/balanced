@@ -174,16 +174,16 @@ impl Transaction {
 }
 
 /// How a [`NewTransaction`]'s amount is given.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum NewAllocation {
     OpeningBalance(Money),
     Category(CategoryId, Money),
     Split(Vec<SplitLine>),
 }
 
-/// A transaction to post to a new account in a [`Ledger`](crate::Ledger).
-#[derive(Debug, Clone)]
-pub(crate) struct NewTransaction {
+/// A transaction to post to an account, which gives it its id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewTransaction {
     date: Date<Iso>,
     number: Option<String>,
     payee: String,
@@ -198,7 +198,7 @@ impl NewTransaction {
     }
 
     /// `amount` paid to or received from `payee`, all in `category`.
-    pub(crate) fn new(date: Date<Iso>, payee: &str, category: CategoryId, amount: Money) -> Self {
+    pub fn new(date: Date<Iso>, payee: &str, category: CategoryId, amount: Money) -> Self {
         Self::with_allocation(date, payee, NewAllocation::Category(category, amount))
     }
 
@@ -218,7 +218,8 @@ impl NewTransaction {
     }
 
     /// The same transaction, with a cheque or reference number.
-    pub(crate) fn number(self, number: &str) -> Self {
+    #[must_use]
+    pub fn number(self, number: &str) -> Self {
         Self {
             number: Some(number.to_owned()),
             ..self
@@ -226,7 +227,8 @@ impl NewTransaction {
     }
 
     /// The same transaction, with a memo.
-    pub(crate) fn memo(self, memo: &str) -> Self {
+    #[must_use]
+    pub fn memo(self, memo: &str) -> Self {
         Self {
             memo: memo.to_owned(),
             ..self

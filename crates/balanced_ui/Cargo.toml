@@ -47,6 +47,10 @@ name = "delete_transaction"
 required-features = ["test-support"]
 
 [[test]]
+name = "draft_row"
+required-features = ["test-support"]
+
+[[test]]
 name = "keyboard"
 required-features = ["test-support"]
 
