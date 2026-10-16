@@ -85,6 +85,8 @@ impl StatusMessage {
                     fl!(i18n, "status-not-in-one-category")
                 }
                 DomainError::UnknownCategory { .. } => fl!(i18n, "status-unknown-category"),
+                DomainError::SplitAmount { .. } => fl!(i18n, "status-split-amount"),
+                DomainError::CurrencyMismatch { .. } => fl!(i18n, "status-currency-mismatch"),
             },
         }
     }

@@ -388,10 +388,14 @@ impl Ledger {
         let old = &self.view.accounts[position.account].register[position.entry].transaction;
         let undo = old.undoing(&edit);
         let edited = old.edited(edit)?;
-        // Windows still holding the old snapshot keep it; the ledger moves to a copy.
-        let view = Arc::make_mut(&mut self.view);
-        view.accounts[position.account].register[position.entry].transaction = edited;
-        view.generation = view.generation.next();
+        // The account is rebuilt, since a new amount moves every balance after it.
+        let currency = self.view.net_worth.currency();
+        let (summary, ()) =
+            self.view
+                .edit_register(position.account, currency, |transactions| {
+                    transactions[position.entry] = edited;
+                })?;
+        self.replace_account(position.account, summary)?;
         Ok(DomainCommand::EditTransaction {
             transaction: id,
             edit: undo,
@@ -1136,6 +1140,7 @@ mod tests {
             TransactionEdit::Number(Some("1043".into())),
             TransactionEdit::Payee("Corner Shop".into()),
             TransactionEdit::Memo("Weekly shop".into()),
+            TransactionEdit::Amount(usd(dec!(-40.00))),
         ];
         let inverses: Vec<_> = edits
             .into_iter()
@@ -1534,5 +1539,106 @@ mod tests {
 
         let names: Vec<&str> = view.categories().iter().map(Category::name).collect();
         assert_eq!(names, ["Groceries", "Household"]);
+    }
+
+    #[test]
+    fn editing_an_amount_moves_the_balances_after_it() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+
+        ledger
+            .apply(edit(
+                fresh_market,
+                TransactionEdit::Amount(usd(dec!(-40.00))),
+            ))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        let everyday = &view.accounts()[0];
+        let entry = &everyday.register()[1];
+        assert_eq!(entry.transaction().amount(), usd(dec!(-40.00)));
+        assert_eq!(entry.balance(), usd(dec!(60.00)));
+        assert_eq!(everyday.balance(), usd(dec!(60.00)));
+        assert_eq!(view.net_worth(), usd(dec!(60.00)));
+    }
+
+    #[test]
+    fn editing_the_opening_balance_moves_every_balance_after_it() {
+        let mut ledger = everyday();
+        let opening = transaction_id(&ledger, 0);
+
+        ledger
+            .apply(edit(opening, TransactionEdit::Amount(usd(dec!(200.00)))))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        let balances: Vec<Money> = view.accounts()[0]
+            .register()
+            .iter()
+            .map(RegisterEntry::balance)
+            .collect();
+        assert_eq!(balances, [usd(dec!(200.00)), usd(dec!(169.75))]);
+    }
+
+    #[test]
+    fn a_split_transaction_takes_no_amount() {
+        let groceries = CategoryId::new(0);
+        let mut ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(500.00))).with_transactions([
+                    NewTransaction::split(
+                        date(12),
+                        "Costco",
+                        vec![SplitLine::new(groceries, "Food", usd(dec!(-142.37)))],
+                    ),
+                ]),
+            ],
+        )
+        .unwrap();
+        let before = ledger.snapshot();
+        let costco = transaction_id(&ledger, 1);
+
+        let result = ledger.apply(edit(costco, TransactionEdit::Amount(usd(dec!(-5.00)))));
+
+        assert_eq!(
+            result,
+            Err(DomainError::SplitAmount {
+                transaction: costco
+            })
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn an_amount_in_another_currency_is_rejected() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+        let fresh_market = transaction_id(&ledger, 1);
+        let euros = Money::new(dec!(-5.00), CurrencyCode::new("EUR").unwrap()).unwrap();
+
+        let result = ledger.apply(edit(fresh_market, TransactionEdit::Amount(euros)));
+
+        assert_eq!(
+            result,
+            Err(DomainError::CurrencyMismatch {
+                transaction: fresh_market
+            })
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn an_amount_that_takes_a_balance_out_of_range_is_rejected() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+        let fresh_market = transaction_id(&ledger, 1);
+        let largest = usd(Decimal::MAX.trunc() / dec!(100));
+
+        let result = ledger.apply(edit(fresh_market, TransactionEdit::Amount(largest)));
+
+        assert_eq!(result, Err(DomainError::Money(MoneyError::Overflow)));
+        assert_eq!(ledger.snapshot(), before);
     }
 }

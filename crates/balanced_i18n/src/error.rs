@@ -41,4 +41,7 @@ pub enum AmountParseError {
     /// The amount is too large to hold.
     #[error("amount out of range")]
     OutOfRange,
+    /// Typed arithmetic divides by zero.
+    #[error("division by zero")]
+    DivisionByZero,
 }

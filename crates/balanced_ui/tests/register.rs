@@ -496,6 +496,7 @@ fn enter_on_the_last_cell_of_a_row_wraps_to_the_next_row() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "-86.42");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
@@ -667,13 +668,13 @@ fn an_edit_starts_with_the_text_cursor_at_the_end() {
 fn tab_on_the_last_editable_cell_commits_and_closes_it() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "Anniversary dinner");
-    press(&mut harness, Modifiers::NONE, Key::Enter);
-    type_text(&mut harness, " out");
+    // Trattoria Roma's amount, the last row's last cell.
+    click_cell(&mut harness, "-64.80");
+    type_text(&mut harness, "-70");
 
     press(&mut harness, Modifiers::NONE, Key::Tab);
 
-    harness.get_by_role_and_label(Role::Cell, "Anniversary dinner out");
+    assert_eq!(amount_of(&harness, "Trattoria Roma"), "-70.00");
     assert!(harness.query_by_role(Role::TextInput).is_none());
 }
 
@@ -1051,4 +1052,191 @@ fn moving_the_highlight_past_the_visible_rows_scrolls_the_list() {
     }
 
     assert_eq!(highlighted(&harness).as_deref(), Some("Shopping:Household"));
+}
+
+/// The Amount cell of the row whose Payee is `payee`.
+fn amount_of(harness: &Harness<'static, App>, payee: &str) -> String {
+    let row = column(harness, "Payee")
+        .iter()
+        .position(|cell| cell == payee)
+        .expect("the Register lists the payee");
+    column(harness, "Amount").swap_remove(row)
+}
+
+#[test]
+fn typed_arithmetic_commits_its_result_rounded_to_the_currency_decimal_places() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+    type_text(&mut harness, "100/3");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(amount_of(&harness, "Fresh Market"), "33.33");
+}
+
+#[test]
+fn an_amount_with_excess_decimal_places_stays_in_edit_mode() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+    type_text(&mut harness, "12.345");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(editor(&harness, "Amount").as_deref(), Some("12.345"));
+    assert_eq!(amount_of(&harness, "Fresh Market"), "-86.42");
+}
+
+#[test]
+fn an_amount_with_excess_decimal_places_shows_why_in_a_bubble() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+    type_text(&mut harness, "12.345");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    let bubble = harness.query_by_label("USD amounts have 2 decimal places");
+    assert!(bubble.is_some(), "no error bubble");
+}
+
+#[test]
+fn an_amount_written_with_the_wrong_marks_names_the_locale_marks() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+    type_text(&mut harness, "1,5");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    let message = "Write amounts with “.” as the decimal mark and “,” between thousands.";
+    assert!(harness.query_by_label(message).is_some(), "no error bubble");
+}
+
+#[test]
+fn leaving_a_refused_amount_keeps_the_cell_in_edit_mode() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+    type_text(&mut harness, "12.345");
+
+    click_cell(&mut harness, "Bean There");
+    type_text(&mut harness, "6");
+
+    assert_eq!(editor(&harness, "Amount").as_deref(), Some("12.3456"));
+    assert_eq!(cursor(&harness), "-86.42");
+}
+
+#[test]
+fn an_amount_field_refuses_letters() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    type_text(&mut harness, "1a+b2");
+
+    assert_eq!(editor(&harness, "Amount").as_deref(), Some("-86.421+2"));
+}
+
+#[test]
+fn typing_a_letter_on_an_amount_cell_opens_nothing() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+
+    type_text(&mut harness, "x");
+
+    assert_eq!(editor(&harness, "Amount"), None);
+}
+
+#[test]
+fn a_pasted_amount_loses_its_letters() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    for _ in "-86.42".chars() {
+        press(&mut harness, Modifiers::NONE, Key::Backspace);
+    }
+
+    send(&mut harness, Event::Paste("USD 12.50".to_owned()));
+    harness.run();
+
+    assert_eq!(editor(&harness, "Amount").as_deref(), Some(" 12.50"));
+}
+
+#[test]
+fn typed_arithmetic_previews_its_rounded_result() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+
+    type_text(&mut harness, "100/3");
+
+    assert!(harness.query_by_label("~ $33.33").is_some(), "no preview");
+}
+
+#[test]
+fn typed_arithmetic_with_an_exact_result_previews_it_unmarked() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+
+    type_text(&mut harness, "10+5");
+
+    assert!(harness.query_by_label("= $15.00").is_some(), "no preview");
+}
+
+#[test]
+fn a_plain_amount_has_no_preview() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+
+    type_text(&mut harness, "12");
+
+    assert!(harness.query_by_label("= $12.00").is_none(), "a preview");
+}
+
+#[test]
+fn changing_a_refused_amount_clears_its_error() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+    type_text(&mut harness, "12.345");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    press(&mut harness, Modifiers::NONE, Key::Backspace);
+
+    let bubble = harness.query_by_label("USD amounts have 2 decimal places");
+    assert!(bubble.is_none(), "the error bubble stayed");
+}
+
+#[test]
+fn a_reformatted_amount_reopens_with_the_text_cursor_at_the_end() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+    type_text(&mut harness, "100/3");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    click_cell(&mut harness, "33.33");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    type_text(&mut harness, "1");
+
+    assert_eq!(editor(&harness, "Amount").as_deref(), Some("33.331"));
+}
+
+#[test]
+fn a_split_transactions_amount_does_not_open_for_editing() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    // Costco's amount, the sum of its split lines.
+    click_cell(&mut harness, "-206.27");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(editor(&harness, "Amount"), None);
 }
