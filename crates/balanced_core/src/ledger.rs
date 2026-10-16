@@ -241,6 +241,8 @@ pub struct Ledger {
     next_account: AccountId,
     /// The id the next posted transaction takes. Ids are never reused.
     next_transaction: TransactionId,
+    /// The id the next category created takes. Ids are never reused, so it only grows.
+    next_category: u32,
 }
 
 impl Ledger {
@@ -259,6 +261,8 @@ impl Ledger {
             .zip(categories)
             .map(|(id, new)| new.into_category(CategoryId::new(id)))
             .collect();
+        let next_category =
+            u32::try_from(categories.len()).expect("a ledger holds fewer than 2^32 categories");
         for category in &categories {
             if let Some(parent) = category.parent() {
                 assert!(
@@ -308,6 +312,7 @@ impl Ledger {
             redo_stack: Vec::new(),
             next_account,
             next_transaction: transaction_ids.next().expect("the ids never run out"),
+            next_category,
         })
     }
 
@@ -391,6 +396,11 @@ impl Ledger {
                 account,
                 transaction,
             } => self.restore_transaction(account, transaction)?,
+            DomainCommand::CreateCategory { name, parent } => {
+                self.create_category(&name, parent)?
+            }
+            DomainCommand::DeleteCategory { category } => self.delete_category(category)?,
+            DomainCommand::RestoreCategory { category } => self.restore_category(category),
         };
         Ok(Applied { inverse })
     }
@@ -622,6 +632,84 @@ impl Ledger {
         })?;
         self.replace_account(index, summary)?;
         Ok(inverse)
+    }
+
+    fn create_category(
+        &mut self,
+        name: &str,
+        parent: Option<CategoryId>,
+    ) -> Result<DomainCommand, DomainError> {
+        if name.trim().is_empty() {
+            return Err(DomainError::BlankCategoryName);
+        }
+        if let Some(parent) = parent
+            && self.view.category(parent).is_none()
+        {
+            return Err(DomainError::UnknownCategory { category: parent });
+        }
+        let folded = name.to_lowercase();
+        if self
+            .view
+            .categories
+            .iter()
+            .any(|sibling| sibling.parent() == parent && sibling.name().to_lowercase() == folded)
+        {
+            return Err(DomainError::DuplicateCategory {
+                name: name.to_owned(),
+            });
+        }
+        let id = CategoryId::new(self.next_category);
+        let mut category = NewCategory::new(name);
+        if let Some(parent) = parent {
+            category = category.under(parent);
+        }
+        self.next_category += 1;
+        let view = Arc::make_mut(&mut self.view);
+        // The new id is the highest yet, so the category lands after its parent.
+        view.categories.push(category.into_category(id));
+        view.generation = view.generation.next();
+        Ok(DomainCommand::DeleteCategory { category: id })
+    }
+
+    fn delete_category(&mut self, id: CategoryId) -> Result<DomainCommand, DomainError> {
+        let index = self
+            .view
+            .categories
+            .iter()
+            .position(|category| category.id() == id)
+            .ok_or(DomainError::UnknownCategory { category: id })?;
+        let has_child = self
+            .view
+            .categories
+            .iter()
+            .any(|category| category.parent() == Some(id));
+        let in_a_transaction = self
+            .view
+            .accounts
+            .iter()
+            .flat_map(AccountSummary::register)
+            .any(|entry| entry.transaction.uses_category(id));
+        if has_child || in_a_transaction {
+            return Err(DomainError::CategoryInUse { category: id });
+        }
+        let view = Arc::make_mut(&mut self.view);
+        let category = view.categories.remove(index);
+        view.generation = view.generation.next();
+        Ok(DomainCommand::RestoreCategory { category })
+    }
+
+    fn restore_category(&mut self, category: Category) -> DomainCommand {
+        let id = category.id();
+        let view = Arc::make_mut(&mut self.view);
+        debug_assert!(
+            view.category(id).is_none(),
+            "a restored category's id is not in use"
+        );
+        // Categories stay in id order, which keeps each after the one it sits under.
+        let position = view.categories.partition_point(|other| other.id() < id);
+        view.categories.insert(position, category);
+        view.generation = view.generation.next();
+        DomainCommand::DeleteCategory { category: id }
     }
 
     /// Puts `summary` in place of the account at `index`, recounting Net Worth, and
@@ -1007,6 +1095,184 @@ mod tests {
             ["Food & Dining", "Restaurants", "Coffee Shops"]
         );
         assert_eq!(view.category_path(food).unwrap(), ["Food & Dining"]);
+    }
+
+    /// The id, name and parent of every category in `view`, in its order.
+    fn category_tree(view: &LedgerView) -> Vec<(CategoryId, &str, Option<CategoryId>)> {
+        view.categories()
+            .iter()
+            .map(|category| (category.id(), category.name(), category.parent()))
+            .collect()
+    }
+
+    fn create_category(name: &str, parent: Option<CategoryId>) -> DomainCommand {
+        DomainCommand::CreateCategory {
+            name: name.to_owned(),
+            parent,
+        }
+    }
+
+    #[test]
+    fn a_created_category_takes_the_next_id_under_its_parent() {
+        let mut ledger = everyday();
+        let household = CategoryId::new(1);
+
+        ledger
+            .apply(create_category("Garden", Some(household)))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        assert_eq!(
+            category_tree(&view),
+            [
+                (CategoryId::new(0), "Groceries", None),
+                (household, "Household", None),
+                (CategoryId::new(2), "Garden", Some(household)),
+            ]
+        );
+        assert_eq!(view.generation(), Generation::FIRST.next());
+    }
+
+    #[test]
+    fn a_category_named_as_a_sibling_ignoring_case_is_rejected() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+
+        let result = ledger.apply(create_category("groceries", None));
+
+        assert_eq!(
+            result,
+            Err(DomainError::DuplicateCategory {
+                name: "groceries".to_owned()
+            })
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn a_category_may_share_its_name_with_one_under_another_parent() {
+        let mut ledger = everyday();
+        let household = CategoryId::new(1);
+
+        let result = ledger.apply(create_category("Groceries", Some(household)));
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn a_category_under_an_unknown_parent_is_rejected() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+        let unknown = CategoryId::new(99);
+
+        let result = ledger.apply(create_category("Garden", Some(unknown)));
+
+        assert_eq!(
+            result,
+            Err(DomainError::UnknownCategory { category: unknown })
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn a_blank_category_name_is_rejected() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+
+        let result = ledger.apply(create_category("  ", None));
+
+        assert_eq!(result, Err(DomainError::BlankCategoryName));
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn undo_removes_a_created_category_and_redo_brings_it_back_with_its_id() {
+        let mut ledger = everyday();
+        let household = CategoryId::new(1);
+        let before = category_tree(&ledger.snapshot())
+            .into_iter()
+            .map(|(id, name, parent)| (id, name.to_owned(), parent))
+            .collect::<Vec<_>>();
+        ledger
+            .apply(create_category("Garden", Some(household)))
+            .unwrap();
+
+        ledger.undo().unwrap();
+        let undone = ledger.snapshot();
+        ledger.redo().unwrap();
+        let redone = ledger.snapshot();
+
+        assert_eq!(
+            category_tree(&undone)
+                .into_iter()
+                .map(|(id, name, parent)| (id, name.to_owned(), parent))
+                .collect::<Vec<_>>(),
+            before
+        );
+        assert_eq!(
+            category_tree(&redone),
+            [
+                (CategoryId::new(0), "Groceries", None),
+                (household, "Household", None),
+                (CategoryId::new(2), "Garden", Some(household)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_category_created_after_an_undone_one_takes_a_fresh_id() {
+        let mut ledger = everyday();
+        ledger.apply(create_category("Garden", None)).unwrap();
+        ledger.undo().unwrap();
+
+        ledger.apply(create_category("Pets", None)).unwrap();
+
+        let view = ledger.snapshot();
+        assert_eq!(
+            category_tree(&view).last(),
+            Some(&(CategoryId::new(3), "Pets", None))
+        );
+    }
+
+    #[test]
+    fn a_category_a_transaction_uses_is_not_deleted() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+        let groceries = CategoryId::new(0);
+
+        let result = ledger.apply(DomainCommand::DeleteCategory {
+            category: groceries,
+        });
+
+        assert_eq!(
+            result,
+            Err(DomainError::CategoryInUse {
+                category: groceries
+            })
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn a_category_with_one_under_it_is_not_deleted() {
+        let mut ledger = everyday();
+        let household = CategoryId::new(1);
+        ledger
+            .apply(create_category("Garden", Some(household)))
+            .unwrap();
+        let before = ledger.snapshot();
+
+        let result = ledger.apply(DomainCommand::DeleteCategory {
+            category: household,
+        });
+
+        assert_eq!(
+            result,
+            Err(DomainError::CategoryInUse {
+                category: household
+            })
+        );
+        assert_eq!(ledger.snapshot(), before);
     }
 
     /// A ledger with one checking account: a 100.00 opening balance, then Acme Corp,

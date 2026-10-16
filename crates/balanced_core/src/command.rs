@@ -4,8 +4,8 @@
 use icu_calendar::{Date, Iso};
 
 use crate::{
-    Account, AccountId, AccountKind, CategoryId, Money, MoneyError, NewTransaction, Transaction,
-    TransactionId,
+    Account, AccountId, AccountKind, Category, CategoryId, Money, MoneyError, NewTransaction,
+    Transaction, TransactionId,
 };
 
 /// A change to the ledger. `Ledger::apply` applies it, or rejects it with a
@@ -49,6 +49,17 @@ pub enum DomainCommand {
         account: AccountId,
         transaction: Transaction,
     },
+    /// Add a category named `name` under `parent`, or at the top of the tree. It takes
+    /// the next category id.
+    CreateCategory {
+        name: String,
+        parent: Option<CategoryId>,
+    },
+    /// Delete a category that no transaction and no other category uses.
+    DeleteCategory { category: CategoryId },
+    /// Put a deleted category back, with its id: the inverse of
+    /// [`DomainCommand::DeleteCategory`].
+    RestoreCategory { category: Category },
 }
 
 /// The new value of one field of a transaction.
@@ -109,6 +120,15 @@ pub enum DomainError {
     /// No category has the id, perhaps because it was deleted.
     #[error("no such category: {category:?}")]
     UnknownCategory { category: CategoryId },
+    /// Another category under the same parent has the name, ignoring case.
+    #[error("a category under the same parent is already named {name:?}")]
+    DuplicateCategory { name: String },
+    /// A transaction or another category uses the category, so it can't be deleted.
+    #[error("the category is in use: {category:?}")]
+    CategoryInUse { category: CategoryId },
+    /// The category's name is empty or only spaces.
+    #[error("a category needs a name")]
+    BlankCategoryName,
     /// A balance would no longer fit in an amount.
     #[error(transparent)]
     Money(#[from] MoneyError),
