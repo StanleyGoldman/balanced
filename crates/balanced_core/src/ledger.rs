@@ -107,6 +107,8 @@ pub struct LedgerView {
     accounts: Vec<AccountSummary>,
     categories: Vec<Category>,
     net_worth: Money,
+    can_undo: bool,
+    can_redo: bool,
 }
 
 impl LedgerView {
@@ -186,6 +188,16 @@ impl LedgerView {
     pub fn net_worth(&self) -> Money {
         self.net_worth
     }
+
+    /// Whether there is a change Undo can reverse.
+    pub fn can_undo(&self) -> bool {
+        self.can_undo
+    }
+
+    /// Whether there is an undone change Redo can make again.
+    pub fn can_redo(&self) -> bool {
+        self.can_redo
+    }
 }
 
 /// Where a transaction is in a [`LedgerView`].
@@ -202,6 +214,10 @@ struct TransactionPosition {
 #[derive(Debug)]
 pub struct Ledger {
     view: Arc<LedgerView>,
+    /// The inverses of the changes Undo can reverse, the latest last.
+    undo_stack: Vec<DomainCommand>,
+    /// The inverses of the undone changes Redo can make again, the latest undone last.
+    redo_stack: Vec<DomainCommand>,
 }
 
 impl Ledger {
@@ -260,7 +276,11 @@ impl Ledger {
                 accounts: summaries,
                 categories,
                 net_worth,
+                can_undo: false,
+                can_redo: false,
             }),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         })
     }
 
@@ -269,10 +289,54 @@ impl Ledger {
         Arc::clone(&self.view)
     }
 
-    /// Applies `command`, publishing a new snapshot with the next generation, and
-    /// returns the Command that undoes it. A rejected Command leaves the ledger as it
-    /// was.
+    /// Applies `command`, publishing a new snapshot with the next generation, or
+    /// rejects it and leaves the ledger as it was. An applied change can be undone,
+    /// and nothing undone before it can be redone any more.
     pub fn apply(&mut self, command: DomainCommand) -> Result<Applied, DomainError> {
+        let applied = self.apply_unrecorded(command)?;
+        self.undo_stack.push(applied.inverse().clone());
+        self.redo_stack.clear();
+        self.publish_history();
+        Ok(applied)
+    }
+
+    /// Reverses the latest change not yet undone, publishing a new snapshot. Does
+    /// nothing when there is no change to undo. Fails, leaving the ledger and the
+    /// change to undo as they were, when the ledger refuses the reversal.
+    pub fn undo(&mut self) -> Result<(), DomainError> {
+        let Some(inverse) = self.undo_stack.last().cloned() else {
+            return Ok(());
+        };
+        let applied = self.apply_unrecorded(inverse)?;
+        self.undo_stack.pop();
+        self.redo_stack.push(applied.into_inverse());
+        self.publish_history();
+        Ok(())
+    }
+
+    /// Makes the latest undone change again, publishing a new snapshot. Does nothing
+    /// when there is no undone change to redo. Fails, leaving the ledger and the
+    /// change to redo as they were, when the ledger refuses the change.
+    pub fn redo(&mut self) -> Result<(), DomainError> {
+        let Some(command) = self.redo_stack.last().cloned() else {
+            return Ok(());
+        };
+        let applied = self.apply_unrecorded(command)?;
+        self.redo_stack.pop();
+        self.undo_stack.push(applied.into_inverse());
+        self.publish_history();
+        Ok(())
+    }
+
+    /// Tells the current snapshot whether Undo and Redo can act.
+    fn publish_history(&mut self) {
+        let view = Arc::make_mut(&mut self.view);
+        view.can_undo = !self.undo_stack.is_empty();
+        view.can_redo = !self.redo_stack.is_empty();
+    }
+
+    /// Applies `command` without recording it for Undo.
+    fn apply_unrecorded(&mut self, command: DomainCommand) -> Result<Applied, DomainError> {
         let inverse = match command {
             DomainCommand::EditTransaction { transaction, edit } => {
                 self.edit_transaction(transaction, edit)?
@@ -877,6 +941,39 @@ mod tests {
     }
 
     #[test]
+    fn undo_puts_a_deleted_transaction_back() {
+        let mut ledger = three_payments();
+        let before = register(&ledger);
+        let fresh_market = transaction(&ledger, "Fresh Market");
+        ledger
+            .apply(DomainCommand::DeleteTransaction {
+                transaction: fresh_market,
+            })
+            .unwrap();
+
+        ledger.undo().unwrap();
+
+        assert_eq!(register(&ledger), before);
+    }
+
+    #[test]
+    fn redo_deletes_an_undeleted_transaction_again() {
+        let mut ledger = three_payments();
+        let fresh_market = transaction(&ledger, "Fresh Market");
+        ledger
+            .apply(DomainCommand::DeleteTransaction {
+                transaction: fresh_market,
+            })
+            .unwrap();
+        let deleted = register(&ledger);
+        ledger.undo().unwrap();
+
+        ledger.redo().unwrap();
+
+        assert_eq!(register(&ledger), deleted);
+    }
+
+    #[test]
     fn deleting_a_deleted_transaction_is_rejected_and_changes_nothing() {
         let mut ledger = three_payments();
         let fresh_market = transaction(&ledger, "Fresh Market");
@@ -1177,6 +1274,125 @@ mod tests {
                 transaction: opening
             })
         );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    /// The `index`th transaction in the first account's register.
+    fn nth_transaction(ledger: &Ledger, index: usize) -> Transaction {
+        ledger.snapshot().accounts()[0].register()[index]
+            .transaction()
+            .clone()
+    }
+
+    #[test]
+    fn undo_puts_back_each_field_an_edit_changed() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        let before = nth_transaction(&ledger, 1);
+        for change in [
+            TransactionEdit::Number(None),
+            TransactionEdit::Payee("Corner Shop".into()),
+            TransactionEdit::Memo("Party food".into()),
+        ] {
+            ledger.apply(edit(fresh_market, change)).unwrap();
+        }
+
+        for _ in 0..3 {
+            ledger.undo().unwrap();
+        }
+
+        assert_eq!(nth_transaction(&ledger, 1), before);
+    }
+
+    #[test]
+    fn undo_undoes_the_latest_change_first() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Memo("A".into())))
+            .unwrap();
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Memo("B".into())))
+            .unwrap();
+
+        ledger.undo().unwrap();
+
+        assert_eq!(nth_transaction(&ledger, 1).memo(), "A");
+    }
+
+    #[test]
+    fn redo_makes_each_undone_edit_again() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        for change in [
+            TransactionEdit::Number(None),
+            TransactionEdit::Payee("Corner Shop".into()),
+            TransactionEdit::Memo("Party food".into()),
+        ] {
+            ledger.apply(edit(fresh_market, change)).unwrap();
+        }
+        let edited = nth_transaction(&ledger, 1);
+        for _ in 0..3 {
+            ledger.undo().unwrap();
+        }
+
+        for _ in 0..3 {
+            ledger.redo().unwrap();
+        }
+
+        assert_eq!(nth_transaction(&ledger, 1), edited);
+    }
+
+    #[test]
+    fn a_new_change_leaves_nothing_to_redo() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Memo("A".into())))
+            .unwrap();
+        ledger.undo().unwrap();
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Payee("B".into())))
+            .unwrap();
+        let before = ledger.snapshot();
+
+        ledger.redo().unwrap();
+
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    /// Whether the ledger's latest snapshot says Undo and Redo can act.
+    fn can_undo_and_redo(ledger: &Ledger) -> (bool, bool) {
+        let view = ledger.snapshot();
+        (view.can_undo(), view.can_redo())
+    }
+
+    #[test]
+    fn the_snapshot_says_whether_undo_and_redo_can_act() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        assert_eq!(can_undo_and_redo(&ledger), (false, false));
+
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Memo("A".into())))
+            .unwrap();
+        assert_eq!(can_undo_and_redo(&ledger), (true, false));
+
+        ledger.undo().unwrap();
+        assert_eq!(can_undo_and_redo(&ledger), (false, true));
+
+        ledger.redo().unwrap();
+        assert_eq!(can_undo_and_redo(&ledger), (true, false));
+    }
+
+    #[test]
+    fn undo_and_redo_with_nothing_to_do_leave_the_ledger_as_it_was() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+
+        ledger.undo().unwrap();
+        ledger.redo().unwrap();
+
         assert_eq!(ledger.snapshot(), before);
     }
 
