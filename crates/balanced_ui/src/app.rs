@@ -93,6 +93,9 @@ impl App {
                 }
             }
             AppCommand::Navigate(route) => self.main_window.navigate(route),
+            AppCommand::GoToDraftRow => self
+                .main_window
+                .go_to_draft_row(ctx, &self.ledger.snapshot()),
             AppCommand::OpenSplitView(_) => {
                 self.main_window.show_status(StatusMessage::NotAvailableYet);
             }
@@ -114,6 +117,10 @@ impl App {
                     &self.ledger.snapshot(),
                     self.clock.today(),
                 );
+            }
+            AppCommand::SubmitDialog(command) => {
+                let applied = self.ledger.apply(command).map(drop);
+                self.main_window.dialog_applied(ctx, applied);
             }
             AppCommand::ShowStatus(message) => self.main_window.show_status(message),
             AppCommand::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),

@@ -2,7 +2,8 @@
 //! inside the window and gives focus back when it closes.
 
 use eframe::egui::{
-    self, Button, Frame, Id, Key, Layout, Modal, Modifiers, Response, ScrollArea, TextStyle, Vec2,
+    self, Align2, Area, Button, Color32, Frame, Id, Key, LayerId, Layout, Modal, Modifiers, Order,
+    Popup, Response, ScrollArea, Sense, TextStyle, Vec2, Window,
 };
 
 use crate::theme::Theme;
@@ -94,17 +95,19 @@ pub(crate) struct LightDialog {
     accept: String,
     cancel: String,
     back: Option<String>,
+    backdrop: Color32,
 }
 
 impl LightDialog {
     /// A light Dialog with `id`, whose default button reads `accept` and whose other
-    /// button reads `cancel`.
-    pub(crate) fn new(id: Id, accept: String, cancel: String) -> Self {
+    /// button reads `cancel`, dimming the window in `theme`'s backdrop.
+    pub(crate) fn new(id: Id, accept: String, cancel: String, theme: &Theme) -> Self {
         Self {
             id,
             accept,
             cancel,
             back: None,
+            backdrop: theme.backdrop(),
         }
     }
 
@@ -130,49 +133,31 @@ impl LightDialog {
             accept,
             cancel,
             back,
+            backdrop,
         } = self;
         let room =
             (ctx.content_rect().size() - Vec2::splat(2.0 * Theme::DIALOG_MARGIN)).max(Vec2::ZERO);
         let first_frame = !dialog.shown;
         dialog.shown = true;
         let frame = Frame::popup(&ctx.global_style());
-        let modal = Modal::new(id).frame(frame).show(ctx, |ui| {
+        let modal = Modal::new(id).frame(frame).backdrop_color(backdrop);
+        let layer = modal.area.layer();
+        let modal = modal.show(ctx, |ui| {
             let inner = (room - frame.total_margin().sum()).max(Vec2::ZERO);
             let width = Theme::LIGHT_DIALOG_WIDTH.min(inner.x);
             ui.set_width(width);
-            let spacing = ui.spacing();
-            let button_height = (ui.text_style_height(&TextStyle::Button)
-                + 2.0 * spacing.button_padding.y)
-                .max(spacing.interact_size.y);
-            let body_height = inner.y - button_height - spacing.item_spacing.y;
-            ScrollArea::vertical()
-                .max_height(body_height.max(0.0))
-                .min_scrolled_height(0.0)
-                .auto_shrink([false, true])
-                .show(ui, |ui| body(ui, &mut dialog.form));
-            // Right to left, so the default button sits left of Cancel at the right edge,
-            // and Back left of the default button.
-            let (accept, cancel, back) = ui
-                .with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                    let cancel = ui.add(Button::new(cancel));
-                    let accept = ui.add(Button::new(accept));
-                    let back = back.map(|back| ui.add(Button::new(back)));
-                    (accept, cancel, back)
-                })
-                .inner;
+            body_area(ui, inner.y, |ui| body(ui, &mut dialog.form));
+            let (accept, cancel, back) = buttons(ui, accept, cancel, back);
             if first_frame {
                 accept.request_focus();
             }
             (accept, cancel, back)
         });
+        // A confirm opened from a heavy Dialog draws above it: the heavy Dialog raises
+        // itself every frame, before this.
+        ctx.move_to_top(layer);
         let (accept, cancel, back) = &modal.inner;
-        // Enter presses the default button, unless focus is on Cancel or Back, which
-        // Enter presses instead.
-        let other_button_focused =
-            cancel.has_focus() || back.as_ref().is_some_and(Response::has_focus);
-        let enter = !other_button_focused
-            && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter));
-        if accept.clicked() || enter {
+        if accept.clicked() || (modal.is_top_modal && enter_pressed(ctx, cancel, back.as_ref())) {
             DialogOutcome::Accepted
         } else if back.as_ref().is_some_and(Response::clicked) {
             DialogOutcome::Back
@@ -181,5 +166,240 @@ impl LightDialog {
         } else {
             DialogOutcome::Open
         }
+    }
+}
+
+/// A heavy Dialog: a title bar with ×, moved by its title bar and resized from its
+/// edges, over the dimmed Main window. Its body sits above a row with its default
+/// button and Cancel. It opens centred, and the default button has first focus
+/// unless the body gives it to a field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HeavyDialog {
+    id: Id,
+    title: String,
+    accept: String,
+    cancel: String,
+    backdrop: Color32,
+}
+
+impl HeavyDialog {
+    /// A heavy Dialog with `id`, titled `title`, whose default button reads `accept`
+    /// and whose other button reads `cancel`, dimming the window in `theme`'s backdrop.
+    pub(crate) fn new(
+        id: Id,
+        title: String,
+        accept: String,
+        cancel: String,
+        theme: &Theme,
+    ) -> Self {
+        Self {
+            id,
+            title,
+            accept,
+            cancel,
+            backdrop: theme.backdrop(),
+        }
+    }
+
+    /// Draws the Dialog over the dimmed Main window, with `body` drawn by the caller.
+    /// The Dialog moves and resizes only within the window minus
+    /// [`Theme::DIALOG_MARGIN`] on each side; a body too tall for it scrolls.
+    pub(crate) fn show<F>(
+        self,
+        ctx: &egui::Context,
+        dialog: &mut OpenDialog<F>,
+        body: impl FnOnce(&mut egui::Ui, &mut F),
+    ) -> DialogOutcome {
+        let Self {
+            id,
+            title,
+            accept,
+            cancel,
+            backdrop: tint,
+        } = self;
+        let window = ctx.content_rect();
+        let room = window.shrink(Theme::DIALOG_MARGIN);
+        let first_frame = !dialog.shown;
+        dialog.shown = true;
+        let backdrop_layer = LayerId::new(Order::Foreground, id.with("backdrop"));
+        let dialog_layer = LayerId::new(Order::Foreground, id);
+        // Widgets below the backdrop take no input or focus, as below an `egui::Modal`.
+        let is_top = ctx.memory_mut(|memory| {
+            memory.set_modal_layer(backdrop_layer);
+            memory.top_modal_layer() == Some(backdrop_layer)
+        });
+        let popup_open = Popup::is_any_open(ctx);
+        let backdrop = Area::new(backdrop_layer.id)
+            .order(Order::Foreground)
+            .fixed_pos(window.min)
+            .show(ctx, |ui| {
+                ui.painter().rect_filled(window, 0.0, tint);
+                ui.allocate_rect(window, Sense::click())
+            })
+            .inner;
+        let mut open = true;
+        let mut heavy = Window::new(title)
+            .id(id)
+            .order(Order::Foreground)
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .pivot(Align2::CENTER_CENTER)
+            .default_width(Theme::HEAVY_DIALOG_WIDTH.min(room.width()))
+            .max_size(room.size())
+            .constrain_to(room);
+        if first_frame {
+            heavy = heavy.current_pos(window.center());
+        }
+        let focused_before = ctx.memory(egui::Memory::focused);
+        let shown = heavy.show(ctx, |ui| {
+            let height = ui.available_height();
+            body_area(ui, height, |ui| body(ui, &mut dialog.form));
+            let (accept, cancel, _) = buttons(ui, accept, cancel, None);
+            let body_took_focus = ctx.memory(egui::Memory::focused) != focused_before;
+            if first_frame && !body_took_focus {
+                accept.request_focus();
+            }
+            (accept, cancel)
+        });
+        // Above the backdrop, which is above the Main window.
+        ctx.move_to_top(backdrop_layer);
+        ctx.move_to_top(dialog_layer);
+        let Some((accept, cancel)) = shown.and_then(|shown| shown.inner) else {
+            return DialogOutcome::Open;
+        };
+        // Esc and Enter belong to the top Dialog, such as a confirm opened over this one.
+        let escape = || {
+            is_top
+                && !popup_open
+                && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape))
+        };
+        if accept.clicked() || (is_top && enter_pressed(ctx, &cancel, None)) {
+            DialogOutcome::Accepted
+        } else if cancel.clicked() || !open || backdrop.clicked() || escape() {
+            DialogOutcome::Cancelled
+        } else {
+            DialogOutcome::Open
+        }
+    }
+}
+
+/// Draws a Dialog's `body` in `ui`, scrolling when it is taller than `height` less a
+/// row of buttons below it.
+fn body_area(ui: &mut egui::Ui, height: f32, body: impl FnOnce(&mut egui::Ui)) {
+    let spacing = ui.spacing();
+    let button_height = (ui.text_style_height(&TextStyle::Button) + 2.0 * spacing.button_padding.y)
+        .max(spacing.interact_size.y);
+    let body_height = height - button_height - spacing.item_spacing.y;
+    ScrollArea::vertical()
+        .max_height(body_height.max(0.0))
+        .min_scrolled_height(0.0)
+        .auto_shrink([false, true])
+        .show(ui, body);
+}
+
+/// A Dialog's default button reading `accept`, its Cancel button reading `cancel` and
+/// any Back button reading `back`, at the right edge of `ui`.
+fn buttons(
+    ui: &mut egui::Ui,
+    accept: String,
+    cancel: String,
+    back: Option<String>,
+) -> (Response, Response, Option<Response>) {
+    // Right to left, so the default button sits left of Cancel at the right edge, and
+    // Back left of the default button.
+    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+        let cancel = ui.add(Button::new(cancel));
+        let accept = ui.add(Button::new(accept));
+        let back = back.map(|back| ui.add(Button::new(back)));
+        (accept, cancel, back)
+    })
+    .inner
+}
+
+/// Whether Enter pressed a Dialog's default button: Enter presses it unless focus is
+/// on Cancel or `back`, which Enter presses instead.
+fn enter_pressed(ctx: &egui::Context, cancel: &Response, back: Option<&Response>) -> bool {
+    let other_button_focused = cancel.has_focus() || back.is_some_and(Response::has_focus);
+    !other_button_focused && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter))
+}
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable as _;
+
+    use super::*;
+
+    /// A heavy Dialog with a confirm open over it, and what became of each.
+    struct Stacked {
+        heavy: OpenDialog<()>,
+        confirm: OpenDialog<()>,
+        accepted: bool,
+        confirmed: bool,
+    }
+
+    /// A heavy Dialog with a confirm drawn over it every frame.
+    fn stacked() -> Harness<'static, Stacked> {
+        let ctx = egui::Context::default();
+        let stacked = Stacked {
+            heavy: OpenDialog::new(&ctx, ()),
+            confirm: OpenDialog::new(&ctx, ()),
+            accepted: false,
+            confirmed: false,
+        };
+        let mut harness = Harness::new_ui_state(
+            |ui, stacked: &mut Stacked| {
+                let ctx = ui.ctx().clone();
+                let theme = Theme::default();
+                let heavy = HeavyDialog::new(
+                    Id::new("heavy"),
+                    "Heavy".to_owned(),
+                    "OK".to_owned(),
+                    "Cancel".to_owned(),
+                    &theme,
+                );
+                let outcome = heavy.show(&ctx, &mut stacked.heavy, |ui, ()| {
+                    ui.label("Behind");
+                });
+                stacked.accepted |= outcome == DialogOutcome::Accepted;
+                let confirm = LightDialog::new(
+                    Id::new("confirm"),
+                    "Yes".to_owned(),
+                    "No".to_owned(),
+                    &theme,
+                );
+                let outcome = confirm.show(&ctx, &mut stacked.confirm, |ui, ()| {
+                    ui.label("Sure?");
+                });
+                stacked.confirmed |= outcome == DialogOutcome::Accepted;
+            },
+            stacked,
+        );
+        harness.run();
+        harness
+    }
+
+    #[test]
+    fn a_confirm_opened_from_a_heavy_dialog_draws_above_it() {
+        let mut harness = stacked();
+
+        // Both open centred, so the click on Yes lands where the heavy Dialog is too.
+        harness.get_by_role_and_label(Role::Button, "Yes").click();
+        harness.run();
+
+        assert!(harness.state().confirmed);
+    }
+
+    #[test]
+    fn enter_presses_the_confirm_over_a_heavy_dialog_not_the_dialog() {
+        let mut harness = stacked();
+
+        harness.key_press(Key::Enter);
+        harness.run();
+
+        let state = harness.state();
+        assert_eq!((state.confirmed, state.accepted), (true, false));
     }
 }

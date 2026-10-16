@@ -8,13 +8,15 @@ use icu_calendar::{Date, Iso};
 use crate::account_bar::AccountBar;
 use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
-use crate::dialog::{DialogOutcome, FocusReturn, LightDialog, OpenDialog};
+use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
 use crate::layout::Layout;
 use crate::menu_nav::{DrawnMenus, MenuNav};
 use crate::new_account::{self, NewAccountForm, WizardOutcome};
+use crate::new_category::NewCategoryForm;
 use crate::register::ColumnWidths;
+use crate::register_model::RegisterRow;
 use crate::register_tabs::RegisterTabs;
 use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
@@ -37,6 +39,8 @@ pub(crate) struct MainWindow {
     delete_transaction: Option<OpenDialog<DeleteTransactionForm>>,
     /// The New Account wizard, while it is open.
     new_account: Option<OpenDialog<NewAccountForm>>,
+    /// The New Category Dialog, while it is open.
+    new_category: Option<OpenDialog<NewCategoryForm>>,
     /// Where focus goes now that a Dialog has closed, until a frame restores it.
     focus_return: Option<FocusReturn>,
     menu_nav: MenuNav,
@@ -61,6 +65,7 @@ impl MainWindow {
             column_widths: layout.column_widths(),
             delete_transaction: None,
             new_account: None,
+            new_category: None,
             focus_return: None,
             menu_nav: MenuNav::default(),
         }
@@ -158,6 +163,27 @@ impl MainWindow {
         }
     }
 
+    /// Shows the current Register and puts its cell cursor on the draft row, with the
+    /// keyboard, unless no Register is open or its account in `view` is closed.
+    pub(crate) fn go_to_draft_row(&mut self, ctx: &egui::Context, view: &LedgerView) {
+        let open = self
+            .registers
+            .current_account()
+            .and_then(|account| view.account(account))
+            .is_some_and(|summary| !summary.account().is_closed());
+        let Some(register) = self.registers.current_register_mut().filter(|_| open) else {
+            return;
+        };
+        self.tab = TopLevelTab::Accounts;
+        register.go_to_draft_row();
+        // The Register takes keys with no widget focused.
+        ctx.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+    }
+
     /// Shows `message` in the Status bar.
     pub(crate) fn show_status(&mut self, message: StatusMessage) {
         self.status = Some(message);
@@ -196,25 +222,24 @@ impl MainWindow {
                 if summary.account().is_closed() {
                     return;
                 }
-                let Some(row) = self
+                let Some(transaction) = self
                     .registers
                     .current_register()
                     .and_then(|register| register.selected_row(summary.account().id()))
+                    .and_then(RegisterRow::transaction)
                 else {
                     return;
                 };
-                let form = DeleteTransactionForm {
-                    transaction: row.id(),
-                };
+                let form = DeleteTransactionForm { transaction };
                 self.delete_transaction = Some(OpenDialog::new(ctx, form));
             }
             DialogKind::NewAccount => {
                 let form = NewAccountForm::new(i18n, view.net_worth().currency(), today);
                 self.new_account = Some(OpenDialog::new(ctx, form));
             }
-            DialogKind::NewCategory { .. } => {
-                // TODO(#95): open the New Category Dialog, prefilled with the name.
-                tracing::debug!("the New Category Dialog was asked for");
+            DialogKind::NewCategory { name } => {
+                let form = NewCategoryForm::new(name.clone());
+                self.new_category = Some(OpenDialog::new(ctx, form));
             }
         }
     }
@@ -230,9 +255,32 @@ impl MainWindow {
         }
     }
 
+    /// Hands the open Dialog the ledger's answer to the change its form asked for: it
+    /// closes once the change is `applied`, or shows why the ledger refused it.
+    /// A refusal with no Dialog open to show it goes to the Status bar.
+    pub(crate) fn dialog_applied(&mut self, ctx: &egui::Context, applied: Result<(), DomainError>) {
+        let Some(dialog) = &mut self.new_category else {
+            if let Err(error) = applied {
+                self.show_status(StatusMessage::Rejected(error));
+            }
+            return;
+        };
+        if let Err(error) = applied {
+            dialog.form.rejected(error);
+            return;
+        }
+        let path = dialog.form.take_created_path();
+        self.close_dialog(ctx, |window| &mut window.new_category);
+        if let (Some(path), Some(register)) = (path, self.registers.current_register_mut()) {
+            register.category_created(path);
+        }
+    }
+
     /// Whether a Dialog is open over the Main window.
     fn dialog_open(&self) -> bool {
-        self.delete_transaction.is_some() || self.new_account.is_some()
+        self.delete_transaction.is_some()
+            || self.new_account.is_some()
+            || self.new_category.is_some()
     }
 
     /// The account the Main view shows, if it shows one.
@@ -337,8 +385,9 @@ impl MainWindow {
             }
         });
         self.accounts = Some(accounts);
-        self.delete_transaction_dialog(ui.ctx(), i18n, commands, view);
+        self.delete_transaction_dialog(ui.ctx(), i18n, theme, commands, view);
         self.new_account_dialog(ui.ctx(), i18n, theme, commands, today);
+        self.new_category_dialog(ui.ctx(), i18n, theme, commands, view);
     }
 
     /// The New Account wizard, while it is open.
@@ -359,12 +408,51 @@ impl MainWindow {
         }
     }
 
+    /// The New Category Dialog, while it is open. OK sends the Command creating the
+    /// category, and the Dialog stays open until the ledger answers.
+    fn new_category_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        theme: &Theme,
+        commands: &CommandSender,
+        view: &LedgerView,
+    ) {
+        let Some(dialog) = &mut self.new_category else {
+            return;
+        };
+        let outcome = HeavyDialog::new(
+            Id::new("new_category_dialog"),
+            fl!(i18n, "dialog-new-category-title"),
+            fl!(i18n, "dialog-ok"),
+            fl!(i18n, "dialog-cancel"),
+            theme,
+        )
+        .show(ctx, dialog, |ui, form| form.show(ui, i18n));
+        match outcome {
+            DialogOutcome::Open => {}
+            DialogOutcome::Accepted => {
+                if let Some(command) = dialog.form.submit(view) {
+                    commands.send(AppCommand::SubmitDialog(command));
+                }
+            }
+            DialogOutcome::Back => unreachable!("a heavy Dialog has no Back button"),
+            DialogOutcome::Cancelled => {
+                self.close_dialog(ctx, |window| &mut window.new_category);
+                if let Some(register) = self.registers.current_register_mut() {
+                    register.category_cancelled();
+                }
+            }
+        }
+    }
+
     /// The delete transaction confirm, while it is open. Delete has first focus, so
     /// Enter deletes.
     fn delete_transaction_dialog(
         &mut self,
         ctx: &egui::Context,
         i18n: &Localizer,
+        theme: &Theme,
         commands: &CommandSender,
         view: &LedgerView,
     ) {
@@ -386,7 +474,7 @@ impl MainWindow {
                     "dialog-delete-transaction-message",
                     payee = row.payee(),
                     date = row.date(),
-                    amount = row.amount().text()
+                    amount = row.amount_text()
                 )
             })
             .expect("the Register shows the transaction the confirm asks about");
@@ -397,6 +485,7 @@ impl MainWindow {
             Id::new("delete_transaction_dialog"),
             fl!(i18n, "dialog-delete-transaction-delete"),
             fl!(i18n, "dialog-cancel"),
+            theme,
         )
         .show(ctx, dialog, |ui, _form| {
             ui.label(question);
@@ -442,8 +531,7 @@ impl MainWindow {
                 ui.label(balance.styled(theme).heading());
                 let add = Button::new(fl!(i18n, "register-new-transaction"));
                 if ui.add_enabled(!closed, add).clicked() {
-                    // TODO(#93): go to the draft row.
-                    commands.send(AppCommand::ShowStatus(StatusMessage::NotAvailableYet));
+                    commands.send(AppCommand::GoToDraftRow);
                 }
             },
         );

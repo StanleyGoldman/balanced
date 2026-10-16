@@ -28,6 +28,9 @@ pub(crate) enum AppCommand {
     Navigate(Route),
     /// Show the split lines of a split transaction.
     OpenSplitView(TransactionId),
+    /// Put the cell cursor on the current Register's draft row, showing the Register,
+    /// unless its account is closed.
+    GoToDraftRow,
     /// Close the current Register tab.
     CloseRegisterTab,
     /// Make the Register tab right of the current one current, wrapping to the first.
@@ -39,6 +42,9 @@ pub(crate) enum AppCommand {
     SwitchPane,
     /// Open a Dialog over the Main window.
     OpenDialog(DialogKind),
+    /// Apply a change the open Dialog's form asks for. The Dialog closes once the
+    /// change is applied, or shows inline why the ledger refused it.
+    SubmitDialog(DomainCommand),
     /// Show a message in the Status bar until the next one replaces it.
     ShowStatus(StatusMessage),
     /// Close the Main window, which ends the app.
@@ -93,6 +99,11 @@ impl StatusMessage {
                 DomainError::UnknownCategory { .. } => fl!(i18n, "status-unknown-category"),
                 DomainError::SplitAmount { .. } => fl!(i18n, "status-split-amount"),
                 DomainError::CurrencyMismatch { .. } => fl!(i18n, "status-currency-mismatch"),
+                DomainError::DuplicateCategory { name } => {
+                    fl!(i18n, "status-duplicate-category", name = name.clone())
+                }
+                DomainError::CategoryInUse { .. } => fl!(i18n, "status-category-in-use"),
+                DomainError::BlankCategoryName => fl!(i18n, "status-blank-category-name"),
             },
         }
     }

@@ -8,6 +8,11 @@ impl CategoryId {
     pub(crate) fn new(id: u32) -> Self {
         Self(id)
     }
+
+    /// The id after this one.
+    pub(crate) fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
 }
 
 /// A category: its name, and the category it sits under, if any.

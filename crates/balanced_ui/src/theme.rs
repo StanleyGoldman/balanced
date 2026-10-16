@@ -137,6 +137,8 @@ struct Palette {
     text: Color32,
     /// Negative amounts, when coloured negatives are on.
     negative: Color32,
+    /// The tint over the window behind a Dialog.
+    backdrop: Color32,
 }
 
 impl Palette {
@@ -153,6 +155,7 @@ impl Palette {
                 selection: rgb(200, 218, 240),
                 text: rgb(28, 32, 38),
                 negative: rgb(190, 30, 30),
+                backdrop: Color32::from_black_alpha(100),
             },
             Scheme::Dark => Self {
                 chrome: rgb(30, 36, 46),
@@ -164,6 +167,7 @@ impl Palette {
                 selection: rgb(40, 70, 110),
                 text: rgb(222, 228, 236),
                 negative: rgb(255, 110, 110),
+                backdrop: Color32::from_black_alpha(100),
             },
         }
     }
@@ -218,6 +222,9 @@ impl Theme {
 
     /// The width of a light Dialog's content, in a window wide enough for it.
     pub(crate) const LIGHT_DIALOG_WIDTH: f32 = 360.0;
+
+    /// The width a heavy Dialog opens at, in a window wide enough for it.
+    pub(crate) const HEAVY_DIALOG_WIDTH: f32 = 420.0;
 
     pub(crate) fn new(settings: ThemeSettings) -> Self {
         Self {
@@ -327,6 +334,11 @@ impl Theme {
         self.chrome_frame().inner_margin(FOOTER_MARGIN)
     }
 
+    /// The tint over the window behind a Dialog.
+    pub(crate) fn backdrop(&self) -> Color32 {
+        self.palette.backdrop
+    }
+
     /// The fill of the Register's column header band.
     pub(crate) fn header_fill(&self) -> Color32 {
         self.palette.header
@@ -335,6 +347,12 @@ impl Theme {
     /// The outline around the Register's cell cursor.
     pub(crate) fn cell_cursor_stroke(&self) -> Stroke {
         Stroke::new(1.0, self.palette.accent)
+    }
+
+    /// The outline of the draft row cell a refused row still needs: the cell cursor's
+    /// outline, in the colour of errors.
+    pub(crate) fn missing_cell_stroke(&self) -> Stroke {
+        Stroke::new(1.0, self.palette.negative)
     }
 
     /// Whether the Register stripes alternate rows: pass it to `TableBuilder::striped`.
