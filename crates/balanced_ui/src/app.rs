@@ -78,6 +78,9 @@ impl App {
                 }
             }
             AppCommand::Navigate(route) => self.main_window.navigate(route),
+            AppCommand::OpenSplitView(_) => {
+                self.main_window.show_status(StatusMessage::NotAvailableYet);
+            }
             AppCommand::CloseRegisterTab => self
                 .main_window
                 .change_register_tabs(RegisterTabs::close_current),
@@ -89,7 +92,7 @@ impl App {
                 .change_register_tabs(RegisterTabs::previous),
             AppCommand::OpenDialog(kind) => {
                 self.main_window
-                    .open_dialog(ctx, kind, &self.ledger.snapshot());
+                    .open_dialog(ctx, &kind, &self.ledger.snapshot());
             }
             AppCommand::ShowStatus(message) => self.main_window.show_status(message),
             AppCommand::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),

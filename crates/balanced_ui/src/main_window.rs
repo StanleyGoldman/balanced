@@ -133,7 +133,12 @@ impl MainWindow {
 
     /// Opens the Dialog `kind` over `view`, unless a Dialog is already open or there is
     /// nothing for it to act on.
-    pub(crate) fn open_dialog(&mut self, ctx: &egui::Context, kind: DialogKind, view: &LedgerView) {
+    pub(crate) fn open_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        kind: &DialogKind,
+        view: &LedgerView,
+    ) {
         if self.dialog_open() {
             return;
         }
@@ -156,6 +161,10 @@ impl MainWindow {
                     transaction: row.id(),
                 };
                 self.delete_transaction = Some(OpenDialog::new(ctx, form));
+            }
+            DialogKind::NewCategory { .. } => {
+                // TODO(#95): open the New Category Dialog, prefilled with the name.
+                tracing::debug!("the New Category Dialog was asked for");
             }
         }
     }
