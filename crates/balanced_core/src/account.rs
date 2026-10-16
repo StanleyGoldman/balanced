@@ -54,6 +54,22 @@ impl AccountKind {
     }
 }
 
+/// Whether the Account bar shows an account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Visibility {
+    Shown,
+    /// Left out of the Account bar, but still counted in Net Worth.
+    Hidden,
+}
+
+/// Whether an account's history can change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AccountStatus {
+    Open,
+    /// Kept with its history, read-only.
+    Closed,
+}
+
 /// Identifies an account for as long as it exists. Ids are never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct AccountId(u32);
@@ -109,6 +125,41 @@ impl Account {
     /// Whether the account is closed: its Register is read-only.
     pub fn is_closed(&self) -> bool {
         self.closed
+    }
+
+    pub fn visibility(&self) -> Visibility {
+        if self.hidden {
+            Visibility::Hidden
+        } else {
+            Visibility::Shown
+        }
+    }
+
+    pub fn status(&self) -> AccountStatus {
+        if self.closed {
+            AccountStatus::Closed
+        } else {
+            AccountStatus::Open
+        }
+    }
+
+    /// Shows or hides the account, returning whether it was shown.
+    pub(crate) fn set_visibility(&mut self, visibility: Visibility) -> Visibility {
+        let old = self.visibility();
+        self.hidden = visibility == Visibility::Hidden;
+        old
+    }
+
+    /// Opens or closes the account, returning whether it was open.
+    pub(crate) fn set_status(&mut self, status: AccountStatus) -> AccountStatus {
+        let old = self.status();
+        self.closed = status == AccountStatus::Closed;
+        old
+    }
+
+    /// Renames the account, returning its old name.
+    pub(crate) fn rename(&mut self, name: String) -> String {
+        std::mem::replace(&mut self.name, name)
     }
 }
 

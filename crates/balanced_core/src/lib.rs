@@ -9,9 +9,9 @@ mod money;
 mod stub;
 mod transaction;
 
-pub use account::{Account, AccountGroup, AccountId, AccountKind};
+pub use account::{Account, AccountGroup, AccountId, AccountKind, AccountStatus, Visibility};
 pub use category::{Category, CategoryId};
-pub use command::{Applied, DomainCommand, DomainError, TransactionEdit};
+pub use command::{Applied, DomainCommand, DomainError, MoveDirection, TransactionEdit};
 pub use ledger::{AccountSummary, Generation, Ledger, LedgerView, RegisterEntry};
 pub use money::{CurrencyCode, Money, MoneyError, RoundingPolicy};
 pub use transaction::{Allocation, NewTransaction, SplitLine, Transaction, TransactionId};
