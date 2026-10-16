@@ -14,6 +14,8 @@ pub(crate) enum UserAction {
     CloseRegisterTab,
     NextRegisterTab,
     PreviousRegisterTab,
+    /// Move keyboard focus between the Account bar and the Main view.
+    SwitchPane,
     /// Start a new transaction in the open Register.
     NewTransaction,
     /// Delete the Register's selected transaction, once confirmed.
@@ -31,6 +33,7 @@ impl UserAction {
             Self::CloseRegisterTab => fl!(i18n, "menu-file-close-register-tab"),
             Self::NextRegisterTab => fl!(i18n, "menu-view-next-register-tab"),
             Self::PreviousRegisterTab => fl!(i18n, "menu-view-previous-register-tab"),
+            Self::SwitchPane => fl!(i18n, "menu-view-switch-pane"),
             Self::NewTransaction => fl!(i18n, "menu-new-transaction"),
             Self::DeleteTransaction => fl!(i18n, "menu-delete-transaction"),
             Self::Quit => fl!(i18n, "menu-file-quit"),
@@ -48,6 +51,7 @@ impl UserAction {
             | Self::CloseRegisterTab
             | Self::NextRegisterTab
             | Self::PreviousRegisterTab
+            | Self::SwitchPane
             | Self::Quit
             | Self::About => false,
         }
@@ -61,6 +65,7 @@ impl UserAction {
             Self::CloseRegisterTab => AppCommand::CloseRegisterTab,
             Self::NextRegisterTab => AppCommand::NextRegisterTab,
             Self::PreviousRegisterTab => AppCommand::PreviousRegisterTab,
+            Self::SwitchPane => AppCommand::SwitchPane,
             // TODO(#93): go to the draft row.
             Self::NewTransaction => AppCommand::ShowStatus(StatusMessage::NotAvailableYet),
             Self::DeleteTransaction => AppCommand::OpenDialog(DialogKind::DeleteTransaction),

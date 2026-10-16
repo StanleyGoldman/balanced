@@ -3,6 +3,7 @@
 mod account_bar;
 mod accounts_model;
 mod app;
+mod combobox;
 mod command;
 mod dialog;
 mod formatted_amount;
@@ -10,6 +11,7 @@ mod i18n;
 mod keymap;
 mod layout;
 mod main_window;
+mod menu_nav;
 mod register;
 mod register_model;
 mod register_tabs;
