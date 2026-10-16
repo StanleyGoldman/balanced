@@ -3,6 +3,7 @@
 use balanced_core::{AccountSummary, DomainCommand, LedgerView, TransactionId};
 use balanced_i18n::Localizer;
 use eframe::egui::{self, Button, CentralPanel, Id, Label, MenuBar, Panel, RichText, Sides};
+use icu_calendar::{Date, Iso};
 
 use crate::account_bar::AccountBar;
 use crate::accounts_model::AccountsModel;
@@ -190,6 +191,7 @@ impl MainWindow {
         theme: &Theme,
         commands: &CommandSender,
         view: &LedgerView,
+        today: Date<Iso>,
     ) {
         self.focus_return = self
             .focus_return
@@ -242,6 +244,7 @@ impl MainWindow {
                             summary,
                             view,
                             &mut self.column_widths,
+                            today,
                         );
                     }
                 }

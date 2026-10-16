@@ -2,7 +2,7 @@
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
-use balanced_ui::App;
+use balanced_ui::{App, Clock};
 use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::{Event, Key, Modifiers, vec2};
 use egui_kittest::Harness;
@@ -12,7 +12,7 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 fn app() -> Harness<'static, App> {
     Harness::builder()
         .with_size(vec2(1280.0, 720.0))
-        .build_eframe(|cc| App::new(cc, Localizer::for_tests(), Ledger::stub()))
+        .build_eframe(|cc| App::new(cc, Localizer::for_tests(), Ledger::stub(), Clock::default()))
 }
 
 /// Opens the account named `name` in a new Register tab, from its right-click menu in

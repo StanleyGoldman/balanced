@@ -5,6 +5,7 @@
 //! `docs/practices/i18n.md` describes how to add and use messages.
 
 mod chain;
+mod date;
 mod error;
 mod format;
 mod localizer;
@@ -12,6 +13,7 @@ mod missing;
 mod money;
 mod pseudo;
 
-pub use error::{AmountParseError, I18nError};
+pub use date::{DateSegment, DateSegments};
+pub use error::{AmountParseError, DateParseError, I18nError};
 pub use localizer::Localizer;
 pub use money::{AmountStyle, Currency};

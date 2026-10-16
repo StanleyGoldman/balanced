@@ -7,6 +7,7 @@ use balanced_core::Ledger;
 use balanced_i18n::Localizer;
 use eframe::egui;
 
+use crate::clock::Clock;
 use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::i18n::fl;
 use crate::layout::Layout;
@@ -20,22 +21,31 @@ pub struct App {
     i18n: Localizer,
     ledger: Ledger,
     theme: Theme,
+    clock: Clock,
     commands: CommandSender,
     command_receiver: Receiver<AppCommand>,
     main_window: MainWindow,
 }
 
 impl App {
-    /// The App over `ledger`, showing text through `i18n`.
-    pub fn new(cc: &eframe::CreationContext<'_>, i18n: Localizer, ledger: Ledger) -> Self {
-        Self::with_theme(cc, i18n, ledger, Theme::default())
+    /// The App over `ledger`, showing text through `i18n` and reading today's date
+    /// from `clock`.
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        i18n: Localizer,
+        ledger: Ledger,
+        clock: Clock,
+    ) -> Self {
+        Self::with_theme(cc, i18n, ledger, clock, Theme::default())
     }
 
-    /// The App over `ledger`, showing text through `i18n` in `theme`.
+    /// The App over `ledger`, showing text through `i18n` in `theme`, and reading
+    /// today's date from `clock`.
     pub(crate) fn with_theme(
         cc: &eframe::CreationContext<'_>,
         i18n: Localizer,
         ledger: Ledger,
+        clock: Clock,
         theme: Theme,
     ) -> Self {
         // Balanced's Scheme, not the OS, picks light or dark, so egui's light and dark
@@ -54,6 +64,7 @@ impl App {
             i18n,
             ledger,
             theme,
+            clock,
             commands,
             command_receiver,
             main_window: MainWindow::new(&layout),
@@ -145,8 +156,9 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let view = self.ledger.snapshot();
+        let today = self.clock.today();
         self.main_window
-            .show(ui, &self.i18n, &self.theme, &self.commands, &view);
+            .show(ui, &self.i18n, &self.theme, &self.commands, &view, today);
     }
 }
 
@@ -166,8 +178,9 @@ mod tests {
 
     #[test]
     fn folding_a_group_saves_it_in_the_layout() {
-        let mut harness =
-            Harness::new_eframe(|cc| App::new(cc, Localizer::for_tests(), Ledger::stub()));
+        let mut harness = Harness::new_eframe(|cc| {
+            App::new(cc, Localizer::for_tests(), Ledger::stub(), Clock::default())
+        });
         let mut storage = MemoryStorage::default();
 
         harness

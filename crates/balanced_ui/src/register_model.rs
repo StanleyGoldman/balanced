@@ -8,6 +8,7 @@ use balanced_core::{
     AccountId, AccountSummary, Allocation, CategoryId, Generation, LedgerView, TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
+use icu_calendar::{Date, Iso};
 use icu_locale::LanguageIdentifier;
 use icu_locale::Locale;
 
@@ -24,6 +25,7 @@ pub(crate) struct RegisterRow {
     /// The row's place in date order, which breaks ties in every sort.
     place: usize,
     opening_balance: bool,
+    saved_date: Date<Iso>,
     date: String,
     number: String,
     payee: String,
@@ -42,6 +44,11 @@ impl RegisterRow {
     /// caption rather than a payee.
     pub(crate) fn is_opening_balance(&self) -> bool {
         self.opening_balance
+    }
+
+    /// The transaction's date, which the Date cell shows formatted.
+    pub(crate) fn saved_date(&self) -> Date<Iso> {
+        self.saved_date
     }
 
     pub(crate) fn date(&self) -> &str {
@@ -210,6 +217,7 @@ impl RegisterModel {
                     id: transaction.id(),
                     place,
                     opening_balance: *transaction.allocation() == Allocation::OpeningBalance,
+                    saved_date: transaction.date(),
                     date: i18n.format_date(transaction.date()),
                     number: transaction.number().unwrap_or_default().to_owned(),
                     payee,

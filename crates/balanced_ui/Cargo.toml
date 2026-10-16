@@ -12,6 +12,8 @@ balanced_i18n.workspace = true
 eframe = { workspace = true, features = ["persistence"] }
 egui_extras.workspace = true
 i18n-embed-fl.workspace = true
+icu_calendar.workspace = true
+jiff.workspace = true
 icu_locale.workspace = true
 serde.workspace = true
 egui-wgpu = { workspace = true, optional = true }
@@ -31,6 +33,11 @@ rust_decimal_macros.workspace = true
 
 [[test]]
 name = "snapshots"
+required-features = ["test-support"]
+
+# `Clock::fixed` stops the clock on one day.
+[[test]]
+name = "date_field"
 required-features = ["test-support"]
 
 [lints]

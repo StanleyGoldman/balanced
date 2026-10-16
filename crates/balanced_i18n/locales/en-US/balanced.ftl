@@ -108,6 +108,21 @@ dialog-cancel = Cancel
 dialog-delete-transaction-message = Delete this transaction? { $payee }, { $date }, { $amount }
 dialog-delete-transaction-delete = Delete
 
+## Date field
+
+# The letters standing for each part of a date in a date pattern, such as M/D/YYYY.
+# The day and month letters are doubled where the locale pads them (DD.MM.YYYY), and
+# the year letter is written four times.
+field-date-day-letter = D
+field-date-month-letter = M
+field-date-year-letter = Y
+# $pattern is the date pattern (M/D/YYYY); $example is today's date in that pattern.
+field-date-invalid = Not a date. Expected { $pattern }, for example { $example }.
+field-date-calendar = Calendar
+    .tooltip = Calendar (Alt+Down)
+field-date-previous-month = Previous month
+field-date-next-month = Next month
+
 ## Status bar
 
 status-about = { -brand-name } { $version }

@@ -7,4 +7,5 @@ extend-ignore-re = [
 alikes = "alikes"        # "look-alikes"
 invokable = "invokable"  # quoted from Rerun's source
 jod = "jod"              # ISO 4217 Jordanian dinar
+oktober = "oktober"      # German for October, in locale tests
 pn = "pn"                # the "PN" of "PNGs"

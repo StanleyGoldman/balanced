@@ -42,3 +42,16 @@ pub enum AmountParseError {
     #[error("amount out of range")]
     OutOfRange,
 }
+
+/// Why typed text is not a date. `balanced_ui` shows either as the format message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum DateParseError {
+    /// The text lacks a day, a month or a year: `5`, `3/5`. A missing part is never
+    /// filled in.
+    #[error("the date lacks a day, a month or a year")]
+    Incomplete,
+    /// The text is not a date written the formatting locale's way, or names a day
+    /// the calendar lacks: `2/30/2026`.
+    #[error("not a date")]
+    Invalid,
+}

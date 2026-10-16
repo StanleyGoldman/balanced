@@ -3,7 +3,9 @@
 mod account_bar;
 mod accounts_model;
 mod app;
+mod clock;
 mod command;
+mod date_field;
 mod dialog;
 mod formatted_amount;
 mod i18n;
@@ -20,3 +22,4 @@ mod theme;
 mod user_action;
 
 pub use app::App;
+pub use clock::Clock;
