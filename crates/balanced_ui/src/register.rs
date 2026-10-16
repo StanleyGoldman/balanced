@@ -1372,13 +1372,13 @@ fn commit(
     };
     let text = edit.text.trim();
     let change = match &edit.field {
-        EditField::Text(field) => match field.edit(row, text, choices) {
-            Ok(change) => change,
-            Err(NoSuchCategory) => {
+        EditField::Text(field) => {
+            let Ok(change) = field.edit(row, text, choices) else {
                 commands.send(AppCommand::ShowStatus(StatusMessage::NoSuchCategory));
                 return Commit::Refused;
-            }
-        },
+            };
+            change
+        }
         EditField::Amount { reader, currency } => match amount_edit(row, text, reader, *currency) {
             Ok(change) => change,
             Err(error) => return Commit::Unreadable(error),
