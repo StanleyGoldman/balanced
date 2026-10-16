@@ -5,7 +5,8 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use balanced_core::{
-    AccountId, AccountSummary, Allocation, CategoryId, Generation, LedgerView, TransactionId,
+    AccountId, AccountSummary, Allocation, CategoryId, CurrencyCode, Generation, LedgerView,
+    TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
 use icu_locale::LanguageIdentifier;
@@ -88,6 +89,11 @@ impl RegisterRow {
 
     pub(crate) fn memo(&self) -> &str {
         &self.memo
+    }
+
+    /// The currency of the transaction's account.
+    pub(crate) fn currency(&self) -> CurrencyCode {
+        self.amount.money().currency()
     }
 
     /// The amount, as a bare number.

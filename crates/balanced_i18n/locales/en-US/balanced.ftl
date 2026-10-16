@@ -113,6 +113,23 @@ dialog-cancel = Cancel
 dialog-delete-transaction-message = Delete this transaction? { $payee }, { $date }, { $amount }
 dialog-delete-transaction-delete = Delete
 
+## Amount field
+
+# Committing an Amount cell with nothing in it.
+field-amount-empty = Enter an amount.
+# Typed text that isn't an amount written the formatting locale's way. $decimal is
+# the decimal mark and $group the separator between thousands, such as "." and ",".
+field-amount-invalid = Write amounts with “{ $decimal }” as the decimal mark and “{ $group }” between thousands.
+# $currency is a currency code such as USD.
+field-amount-too-many-decimal-places =
+    { $places ->
+        [0] { $currency } amounts have no decimal places
+        [one] { $currency } amounts have 1 decimal place
+       *[other] { $currency } amounts have { $places } decimal places
+    }
+field-amount-out-of-range = That amount is too large.
+field-amount-division-by-zero = Can't divide by zero.
+
 ## Status bar
 
 status-about = { -brand-name } { $version }

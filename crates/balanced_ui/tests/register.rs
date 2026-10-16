@@ -1052,3 +1052,77 @@ fn moving_the_highlight_past_the_visible_rows_scrolls_the_list() {
 
     assert_eq!(highlighted(&harness).as_deref(), Some("Shopping:Household"));
 }
+
+/// The Amount cell of the row whose Payee is `payee`.
+fn amount_of(harness: &Harness<'static, App>, payee: &str) -> String {
+    let row = column(harness, "Payee")
+        .iter()
+        .position(|cell| cell == payee)
+        .expect("the Register lists the payee");
+    column(harness, "Amount").swap_remove(row)
+}
+
+#[test]
+fn typed_arithmetic_commits_its_result_rounded_to_the_currency_decimal_places() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+    type_text(&mut harness, "100/3");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(amount_of(&harness, "Fresh Market"), "33.33");
+}
+
+#[test]
+fn an_amount_with_excess_decimal_places_stays_in_edit_mode() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+    type_text(&mut harness, "12.345");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(editor(&harness, "Amount").as_deref(), Some("12.345"));
+    assert_eq!(amount_of(&harness, "Fresh Market"), "-86.42");
+}
+
+#[test]
+fn an_amount_with_excess_decimal_places_shows_why_in_a_bubble() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+    type_text(&mut harness, "12.345");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    let bubble = harness.query_by_label("USD amounts have 2 decimal places");
+    assert!(bubble.is_some(), "no error bubble");
+}
+
+#[test]
+fn an_amount_written_with_the_wrong_marks_names_the_locale_marks() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+    type_text(&mut harness, "1,5");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    let message = "Write amounts with “.” as the decimal mark and “,” between thousands.";
+    assert!(harness.query_by_label(message).is_some(), "no error bubble");
+}
+
+#[test]
+fn leaving_a_refused_amount_keeps_the_cell_in_edit_mode() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "-86.42");
+    type_text(&mut harness, "12.345");
+
+    click_cell(&mut harness, "Bean There");
+    type_text(&mut harness, "6");
+
+    assert_eq!(editor(&harness, "Amount").as_deref(), Some("12.3456"));
+    assert_eq!(cursor(&harness), "-86.42");
+}
