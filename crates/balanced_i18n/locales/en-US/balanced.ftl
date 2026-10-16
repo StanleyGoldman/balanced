@@ -129,6 +129,10 @@ field-amount-too-many-decimal-places =
     }
 field-amount-out-of-range = That amount is too large.
 field-amount-division-by-zero = Can't divide by zero.
+# The result of arithmetic typed in an Amount cell, shown while typing.
+field-amount-preview = = { $amount }
+# The same, when the result was rounded to the currency's decimal places.
+field-amount-preview-rounded = ~ { $amount }
 
 ## Status bar
 

@@ -30,10 +30,12 @@ Amounts are built from text or integers. `clippy.toml` bans `Decimal`'s float co
 
 ## Reading typed amounts
 
-- **Parse on commit** (Enter, Tab or focus loss) with `Localizer::parse_amount(text, decimal_places)`. While editing, the field keeps the raw text; after a successful commit it shows the reformatted amount.
-- **On `Err`, the field stays in edit mode** with an inline error and no Command is sent. Map each `AmountParseError` variant to a Fluent message, naming the currency for `TooManyDecimalPlaces` ("USD amounts have 2 decimal places").
+- **An amount field reads through an `AmountReader`**, made with `Localizer::amount_reader(currency)` when the edit starts. It keeps the marks of the locale the edit started in, so unsaved text is never reread under another locale's marks.
+- **Parse on commit** (Enter, Tab or focus loss) with `AmountReader::read`. While editing, the field keeps the raw text; after a successful commit it shows the reformatted amount.
+- **On `Err`, the field stays in edit mode** with an error bubble, and no Command is sent. Map each `AmountParseError` variant to a Fluent message, naming the currency for `TooManyDecimalPlaces` ("USD amounts have 2 decimal places") and the reader's `decimal_mark` and `group_separator` for `Invalid`.
+- **Refuse characters as they are typed** with `AmountReader::accepts`, which keeps digits, the locale's marks, a minus sign, the currency's symbol, spaces and the calculator's operators.
 - **What the parser accepts:** the locale's decimal mark and group separators in the locale's positions (`1.23` is rejected in `de-DE`), a typed space for a no-break-space separator, a leading or trailing minus, and any currency symbol or code at either end, which it ignores. Extra decimal places are rejected unless they are zeros.
-- Calculator input (`+ - * /` in the field) is left to "Prototype money, date and category input fields".
+- **Arithmetic:** `read` evaluates `+ - * /` over amounts written the locale's way, multiplying and dividing first. A minus with no amount before it is a sign (`-5*-2`). Operands may have any number of decimal places; the result is rounded `HalfAwayFromZero` to the currency's, and `Calculation::rounded` says whether it was, which the field shows as `~` (`~ $33.33`). Text with no operator is a plain amount and goes through `parse_amount`, so it is never rounded.
 
 ## Upgrading `icu_experimental`
 

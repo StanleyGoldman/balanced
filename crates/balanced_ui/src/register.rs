@@ -7,7 +7,7 @@ use balanced_core::{
     Account, AccountId, AccountSummary, CurrencyCode, DomainCommand, DomainError, LedgerView,
     Money, TransactionEdit, TransactionId,
 };
-use balanced_i18n::{AmountParseError, AmountReader, Localizer};
+use balanced_i18n::{AmountParseError, AmountReader, AmountStyle, Calculation, Localizer};
 use eframe::egui::accesskit::{self, Role};
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
@@ -424,6 +424,19 @@ struct CellEdit {
     /// Why the last commit was refused, shown in a bubble below the cell until the
     /// text changes.
     error: Option<AmountParseError>,
+    /// The result of the arithmetic typed so far, for the bubble below the cell, or
+    /// `None` while the text is no arithmetic that can be read.
+    preview: Option<Preview>,
+}
+
+/// The result of typed arithmetic, as the bubble below the cell shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Preview {
+    /// The result, formatted with its currency's symbol.
+    amount: String,
+    /// Whether the result was rounded to the currency's decimal places, which the
+    /// bubble marks with `~`.
+    rounded: bool,
 }
 
 /// The field a cell edit saves its text in.
@@ -902,6 +915,8 @@ impl Register {
         let response = editor(ui, edit, field, heading_id(frame.register_id, column));
         if edit.text != typed {
             edit.open_list(ListScope::Matching, frame.choices);
+            edit.error = None;
+            edit.preview = preview(frame.i18n, edit);
         }
         if list_button.as_ref().is_some_and(Response::clicked) {
             // The click took focus from the editor, which keeps the edit.
@@ -961,6 +976,7 @@ impl Register {
             return None;
         }
         let cursor = self.cursor?;
+        self.refuse_characters(ctx, keys, cursor);
         let tab = (!self.tabs.is_empty()).then(|| self.tabs.remove(0));
         if !self.tabs.is_empty() {
             // Each Tab acts on the cell the one before it opened, so the rest wait.
@@ -1099,6 +1115,40 @@ impl Register {
         None
     }
 
+    /// Removes from this frame's typed and pasted text every character the cell at
+    /// `cursor` refuses, before its editor, or the typing that opens it, sees the text.
+    /// Only an Amount cell refuses characters.
+    fn refuse_characters(&self, ctx: &egui::Context, keys: &KeyContext<'_>, cursor: CellAddress) {
+        let has_text = ctx.input(|input| {
+            input
+                .events
+                .iter()
+                .any(|event| matches!(event, Event::Text(_) | Event::Paste(_)))
+        });
+        if !has_text {
+            return;
+        }
+        let opened;
+        let reader = match self.edit.as_ref().map(|edit| &edit.field) {
+            Some(EditField::Amount { reader, .. }) => reader,
+            Some(EditField::Text(_)) => return,
+            None => {
+                let Some((row, CellField::Amount)) = field_at(keys.rows, cursor) else {
+                    return;
+                };
+                opened = keys.i18n.amount_reader(i18n_currency(row.currency()));
+                &opened
+            }
+        };
+        ctx.input_mut(|input| {
+            for event in &mut input.events {
+                if let Event::Text(text) | Event::Paste(text) = event {
+                    text.retain(|c| reader.accepts(c));
+                }
+            }
+        });
+    }
+
     /// Moves the cell cursor from `cursor` by `step`. Returns `None`, leaving the
     /// cursor where it is, when there is nowhere to go.
     fn move_cursor(
@@ -1194,6 +1244,7 @@ impl Register {
             text,
             list: None,
             error: None,
+            preview: None,
         };
         let id = edit.editor_id();
         // The text cursor starts at the end, wherever an earlier edit left it.
@@ -1542,14 +1593,29 @@ fn list_row(
     response.is_pointer_button_down_on()
 }
 
-/// Shows why `edit`'s last commit was refused, if it was, in a bubble floating below
-/// its cell at `cell`, so the rows below never move.
+/// Shows why `edit`'s last commit was refused, or else the result of the arithmetic
+/// typed so far, in a bubble floating below its cell at `cell`, so the rows below
+/// never move.
 fn bubble(ui: &egui::Ui, i18n: &Localizer, edit: &CellEdit, cell: Rect) {
-    let (Some(error), EditField::Amount { reader, currency }) = (edit.error, &edit.field) else {
+    let EditField::Amount { reader, currency } = &edit.field else {
         return;
     };
-    let text = amount_error(i18n, error, reader, *currency);
-    let colour = ui.visuals().error_fg_color;
+    let (text, colour) = match (edit.error, &edit.preview) {
+        (Some(error), _) => (
+            amount_error(i18n, error, reader, *currency),
+            ui.visuals().error_fg_color,
+        ),
+        (None, Some(Preview { amount, rounded })) => {
+            let amount = amount.clone();
+            let text = if *rounded {
+                fl!(i18n, "field-amount-preview-rounded", amount = amount)
+            } else {
+                fl!(i18n, "field-amount-preview", amount = amount)
+            };
+            (text, ui.visuals().text_color())
+        }
+        (None, None) => return,
+    };
     Area::new(edit.editor_id().with("bubble"))
         .order(Order::Tooltip)
         .fixed_pos(cell.left_bottom() + vec2(0.0, ui.spacing().item_spacing.y))
@@ -1560,6 +1626,27 @@ fn bubble(ui: &egui::Ui, i18n: &Localizer, edit: &CellEdit, cell: Rect) {
                 ui.add(Label::new(egui::RichText::new(text).color(colour)).extend());
             });
         });
+}
+
+/// The result of the arithmetic in `edit`'s text, or `None` when the text is a plain
+/// amount or can't be read.
+fn preview(i18n: &Localizer, edit: &CellEdit) -> Option<Preview> {
+    let EditField::Amount { reader, currency } = &edit.field else {
+        return None;
+    };
+    let calculation = reader
+        .read(edit.text.trim())
+        .ok()
+        .filter(Calculation::is_arithmetic)?;
+    let amount = i18n.format_amount(
+        calculation.amount(),
+        i18n_currency(*currency),
+        AmountStyle::Symbol,
+    );
+    Some(Preview {
+        amount,
+        rounded: calculation.rounded(),
+    })
 }
 
 /// Why typed text is not an amount in `currency`, in words naming what is expected.

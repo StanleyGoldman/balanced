@@ -23,6 +23,7 @@ pub struct AmountReader {
 pub struct Calculation {
     amount: Decimal,
     rounded: bool,
+    arithmetic: bool,
 }
 
 impl Calculation {
@@ -35,6 +36,11 @@ impl Calculation {
     /// amount was rounded half away from zero.
     pub fn rounded(&self) -> bool {
         self.rounded
+    }
+
+    /// Whether the text was arithmetic rather than a plain amount.
+    pub fn is_arithmetic(&self) -> bool {
+        self.arithmetic
     }
 }
 
@@ -88,6 +94,7 @@ impl AmountReader {
             return Ok(Calculation {
                 amount: parse_amount(&self.symbols, self.decimal_places, text)?,
                 rounded: false,
+                arithmetic: false,
             });
         };
         let mut values = operands
@@ -119,6 +126,7 @@ impl AmountReader {
             .round_dp_with_strategy(self.decimal_places, RoundingStrategy::MidpointAwayFromZero);
         Ok(Calculation {
             rounded: amount != exact,
+            arithmetic: true,
             amount: at_scale(amount, self.decimal_places)?,
         })
     }
@@ -374,5 +382,16 @@ mod tests {
 
         assert_eq!((usd().decimal_mark(), usd().group_separator()), (".", ","));
         assert_eq!((de.decimal_mark(), de.group_separator()), (",", "."));
+    }
+
+    #[test]
+    fn says_whether_the_text_was_arithmetic() {
+        let plain = usd().read("-12.30").unwrap();
+        let arithmetic = usd().read("10+5").unwrap();
+
+        assert_eq!(
+            (plain.is_arithmetic(), arithmetic.is_arithmetic()),
+            (false, true)
+        );
     }
 }
