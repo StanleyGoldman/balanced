@@ -127,3 +127,5 @@ status-unknown-account = That account no longer exists.
 status-amount-too-large = That change would make a balance too large to hold.
 status-not-in-one-category = Only a transaction in one category can change its category.
 status-unknown-category = That category no longer exists.
+status-split-amount = A split transaction's amount is the sum of its lines.
+status-currency-mismatch = The amount is in another currency than the account.
