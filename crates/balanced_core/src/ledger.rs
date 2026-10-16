@@ -1290,6 +1290,26 @@ mod tests {
     }
 
     #[test]
+    fn redo_puts_an_account_back_in_its_place_in_a_later_sub_group() {
+        let mut ledger = three_payments();
+        ledger
+            .apply(create(
+                "Store Card",
+                AccountKind::CreditCard,
+                usd(dec!(-5.00)),
+            ))
+            .unwrap();
+        ledger.undo().unwrap();
+
+        ledger.redo().unwrap();
+
+        assert_eq!(
+            names(&ledger.snapshot()),
+            ["Everyday", "Visa", "Store Card"]
+        );
+    }
+
+    #[test]
     fn an_account_with_a_blank_name_is_rejected_and_changes_nothing() {
         let mut ledger = three_payments();
         let before = ledger.snapshot();
