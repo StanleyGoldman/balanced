@@ -130,6 +130,11 @@ impl LedgerView {
             .find(|summary| summary.account.id() == id)
     }
 
+    /// Every category, each after the category it sits under.
+    pub fn categories(&self) -> &[Category] {
+        &self.categories
+    }
+
     /// The category with `id`, or `None` once it has been deleted.
     pub fn category(&self, id: CategoryId) -> Option<&Category> {
         self.categories.iter().find(|category| category.id() == id)
@@ -375,6 +380,11 @@ impl Ledger {
     ) -> Result<DomainCommand, DomainError> {
         let position = self.changeable(id)?;
         // Both indices were just found in this same view.
+        if let TransactionEdit::Category(category) = edit
+            && self.view.category(category).is_none()
+        {
+            return Err(DomainError::UnknownCategory { category });
+        }
         let old = &self.view.accounts[position.account].register[position.entry].transaction;
         let undo = old.undoing(&edit);
         let edited = old.edited(edit)?;
@@ -1082,13 +1092,14 @@ mod tests {
         .ok();
     }
 
-    /// A ledger with one open account, Everyday, holding its opening balance and one
-    /// payment to Fresh Market numbered 1041 with a memo.
+    /// A ledger with the categories Groceries and Household, and one open account,
+    /// Everyday, holding its opening balance and one payment to Fresh Market in
+    /// Groceries, numbered 1041 with a memo.
     fn everyday() -> Ledger {
         let groceries = CategoryId::new(0);
         Ledger::with_accounts(
             usd_code(),
-            [NewCategory::new("Groceries")],
+            [NewCategory::new("Groceries"), NewCategory::new("Household")],
             [
                 account("Everyday", AccountKind::Checking, usd(dec!(100.00))).with_transactions([
                     NewTransaction::new(date(5), "Fresh Market", groceries, usd(dec!(-30.25)))
@@ -1525,5 +1536,118 @@ mod tests {
             view.accounts()[0].register()[0].transaction().memo(),
             "Moved banks"
         );
+    }
+
+    #[test]
+    fn editing_a_category_shows_in_the_next_snapshot() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        let household = CategoryId::new(1);
+
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Category(household)))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        assert_eq!(
+            view.accounts()[0].register()[1].transaction().allocation(),
+            &Allocation::Category(household)
+        );
+    }
+
+    #[test]
+    fn the_opening_balance_takes_no_category() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+        let opening = transaction_id(&ledger, 0);
+
+        let result = ledger.apply(edit(opening, TransactionEdit::Category(CategoryId::new(0))));
+
+        assert_eq!(
+            result,
+            Err(DomainError::NotInOneCategory {
+                transaction: opening
+            })
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn a_split_transaction_takes_no_single_category() {
+        let groceries = CategoryId::new(0);
+        let mut ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(500.00))).with_transactions([
+                    NewTransaction::split(
+                        date(12),
+                        "Costco",
+                        vec![
+                            SplitLine::new(groceries, "Food", usd(dec!(-10.00))),
+                            SplitLine::new(groceries, "Snacks", usd(dec!(-5.00))),
+                        ],
+                    ),
+                ]),
+            ],
+        )
+        .unwrap();
+        let before = ledger.snapshot();
+        let costco = transaction_id(&ledger, 1);
+
+        let result = ledger.apply(edit(costco, TransactionEdit::Category(groceries)));
+
+        assert_eq!(
+            result,
+            Err(DomainError::NotInOneCategory {
+                transaction: costco
+            })
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn editing_to_an_unknown_category_is_rejected() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+        let fresh_market = transaction_id(&ledger, 1);
+        let unknown = CategoryId::new(99);
+
+        let result = ledger.apply(edit(fresh_market, TransactionEdit::Category(unknown)));
+
+        assert_eq!(
+            result,
+            Err(DomainError::UnknownCategory { category: unknown })
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn a_category_edit_is_undone_by_putting_the_old_category_back() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        let groceries = CategoryId::new(0);
+
+        let applied = ledger
+            .apply(edit(
+                fresh_market,
+                TransactionEdit::Category(CategoryId::new(1)),
+            ))
+            .unwrap();
+
+        assert_eq!(
+            applied.inverse(),
+            &edit(fresh_market, TransactionEdit::Category(groceries))
+        );
+    }
+
+    #[test]
+    fn the_categories_are_listed_in_the_order_they_were_added() {
+        let ledger = everyday();
+
+        let view = ledger.snapshot();
+
+        let names: Vec<&str> = view.categories().iter().map(Category::name).collect();
+        assert_eq!(names, ["Groceries", "Household"]);
     }
 }

@@ -16,6 +16,8 @@ icu_calendar.workspace = true
 jiff.workspace = true
 icu_locale.workspace = true
 serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
 egui-wgpu = { workspace = true, optional = true }
 egui_kittest = { workspace = true, optional = true, features = ["snapshot", "wgpu"] }
 
@@ -42,6 +44,10 @@ required-features = ["test-support"]
 
 [[test]]
 name = "delete_transaction"
+required-features = ["test-support"]
+
+[[test]]
+name = "keyboard"
 required-features = ["test-support"]
 
 [[test]]

@@ -3,7 +3,7 @@
 
 use icu_calendar::{Date, Iso};
 
-use crate::{AccountId, MoneyError, Transaction, TransactionId};
+use crate::{AccountId, CategoryId, MoneyError, Transaction, TransactionId};
 
 /// A change to the ledger. `Ledger::apply` applies it, or rejects it with a
 /// [`DomainError`] and leaves the ledger as it was.
@@ -37,6 +37,8 @@ pub enum TransactionEdit {
     Number(Option<String>),
     Payee(String),
     Memo(String),
+    /// The one category the whole amount is in.
+    Category(CategoryId),
 }
 
 /// A [`DomainCommand`] the ledger applied, with the Command that undoes it.
@@ -71,6 +73,13 @@ pub enum DomainError {
     /// The command gave the opening balance a payee. The opening balance has none.
     #[error("the opening balance has no payee: {transaction:?}")]
     OpeningBalancePayee { transaction: TransactionId },
+    /// The command put the whole amount in one category, but the transaction is the
+    /// opening balance, which has no category, or is split between categories.
+    #[error("the transaction isn't in one category: {transaction:?}")]
+    NotInOneCategory { transaction: TransactionId },
+    /// No category has the id, perhaps because it was deleted.
+    #[error("no such category: {category:?}")]
+    UnknownCategory { category: CategoryId },
     /// A balance would no longer fit in an amount.
     #[error(transparent)]
     Money(#[from] MoneyError),

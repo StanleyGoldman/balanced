@@ -40,9 +40,11 @@ egui's own focus handling and widgets read keys and clicks before app code does.
 ### Keys
 
 - **Esc:** give every cell's `TextEdit` `.event_filter(EventFilter { escape: true, ..Default::default() })`. Without it, egui drops the field's focus on Esc before app code sees the key, so the edit can't cancel or revert.
+- **↑ and ↓ in a field with a list:** add `vertical_arrows: true` to the field's `EventFilter`, then consume the arrows in app code to move the list's highlight. Otherwise egui reads a bare ↑ or ↓ at the start of the frame and moves focus to the nearest widget above or below, ending the edit.
 - **Tab in a grid:** a grid that owns Tab takes it out of `RawInput` in `eframe::App::raw_input_hook`. While no widget has focus, egui's focus navigation acts on Tab before `ui()` runs and moves focus to the next widget outside the grid.
 - **Modified keys first:** `consume_key` ignores any Shift or Alt the pattern leaves out, so `consume_key(Modifiers::NONE, Key::Tab)` also eats Shift+Tab. Consume the most specific key first: Shift+Tab before Tab, Alt+↓ before ↓.
 - **Bare-letter keys:** an app key with no modifier acts only while `!ctx.egui_wants_keyboard_input()`. Otherwise the letter also lands in the focused field as text.
+- **Arrow keys:** while any widget has focus, egui moves focus to the nearest focusable widget in the arrow's direction, anywhere in the window and out of a popup. A popup that steps through its own items takes the arrows out of `RawInput` in `raw_input_hook` while it is open, as the Menu bar does.
 
 ### Typing and committing
 
@@ -53,6 +55,7 @@ egui's own focus handling and widgets read keys and clicks before app code does.
 ### Popups and layout
 
 - **Lists in a cell pick on pointer press:** a combobox list or calendar shown under a focused field picks a row on `is_pointer_button_down_on()`, not `clicked()`. The press moves focus off the field, so a popup drawn only while the field has focus is gone before the release.
+- **A scrolling list in a popup:** give the `ScrollArea` the same `max_height` and `min_scrolled_height`. An `Area` sizes itself from last frame's content, so a list that grows (typed text widening to every entry) shows only its old height of rows. Under `show_rows`, a highlighted row moved past the view isn't laid out and can't `scroll_to_me`: keep the offset from the last frame's `ScrollAreaOutput::state` and set `vertical_scroll_offset` when the highlight moves.
 - **One-line bubbles:** a hint or error in an `Area` near the window edge wraps unless its label uses `Label::extend()`.
 - **`TextEdit` in a `Grid`:** a `Grid` sizes each column from last frame's widest cell, so a `TextEdit`'s `desired_width` stays narrow until something widens the column. Call `ui.set_min_width(width)` before adding the field.
 
@@ -89,5 +92,6 @@ egui releases a breaking minor version about every two months, and it removes de
 - egui's default proportional fonts (Ubuntu-Light, NotoEmoji, emoji-icon-font) lack ▸ ▾ ▼ ⋯, the arrows ← → ↑ ↓, braille such as the ⠿ grip, and box-drawing such as ─, and draw a box in their place; ⏵ ⏷ ◀ ▶ render. For a missing glyph, paint the shape with the `Painter` (`Shape::convex_polygon` for a triangle, `circle_filled` dots for a grip, `hline` for a rule). Check a glyph with `fc-query --format='%{charset}' <font>` against the fonts in the `epaint_default_fonts` crate.
 - A heavy Dialog (an `egui::Window` over a backdrop `Area`) that calls `ctx.move_to_top` on its layers every frame, to stay above its backdrop, also lands above any `egui::Modal` it opens, so the confirm draws underneath. Raise the confirm's layer (`LayerId::new(Order::Foreground, <modal id>)`) after raising the Dialog.
 - `egui::MenuBar` takes the whole row. Anything sharing the row (tabs, a search box) goes inside its closure.
+- An egui menu closes on a pointer click only. Enter or Space on a focused menu item clicks it and leaves the menu open, so a menu item calls `ui.close()` when clicked.
 - To pin a footer under a scrolling list in a side panel, nest a `Panel::bottom` and then a `CentralPanel` inside the side panel.
 - On Wayland, winit 0.30 ignores window levels and parent windows, so no second OS window can be kept above the Main window there.

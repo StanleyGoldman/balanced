@@ -117,17 +117,33 @@ impl Transaction {
                 edited.payee = payee;
             }
             TransactionEdit::Memo(memo) => edited.memo = memo,
+            TransactionEdit::Category(category) => {
+                if !matches!(self.allocation, Allocation::Category(_)) {
+                    return Err(DomainError::NotInOneCategory {
+                        transaction: self.id,
+                    });
+                }
+                edited.allocation = Allocation::Category(category);
+            }
         }
         Ok(edited)
     }
 
     /// The edit that undoes `edit`: the same field, with this transaction's value.
+    /// Only meaningful for an edit [`Transaction::edited`] accepts.
     pub(crate) fn undoing(&self, edit: &TransactionEdit) -> TransactionEdit {
         match edit {
             TransactionEdit::Number(_) => TransactionEdit::Number(self.number.clone()),
             TransactionEdit::Payee(_) => TransactionEdit::Payee(self.payee.clone()),
             TransactionEdit::Date(_) => TransactionEdit::Date(self.date),
             TransactionEdit::Memo(_) => TransactionEdit::Memo(self.memo.clone()),
+            TransactionEdit::Category(category) => match self.allocation {
+                Allocation::Category(old) => TransactionEdit::Category(old),
+                // `edited` refuses a category for any other allocation.
+                Allocation::OpeningBalance | Allocation::Split(_) => {
+                    TransactionEdit::Category(*category)
+                }
+            },
         }
     }
 
