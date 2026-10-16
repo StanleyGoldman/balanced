@@ -11,6 +11,7 @@ mod i18n;
 mod keymap;
 mod layout;
 mod main_window;
+mod menu_nav;
 mod register;
 mod register_model;
 mod register_tabs;

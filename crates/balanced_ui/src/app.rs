@@ -90,6 +90,7 @@ impl App {
             AppCommand::PreviousRegisterTab => self
                 .main_window
                 .change_register_tabs(RegisterTabs::previous),
+            AppCommand::SwitchPane => self.main_window.switch_pane(ctx),
             AppCommand::OpenDialog(kind) => {
                 self.main_window
                     .open_dialog(ctx, &kind, &self.ledger.snapshot());
@@ -108,9 +109,11 @@ impl eframe::App for App {
         }
     }
 
-    /// Takes Tab and Shift+Tab away from egui's focus navigation while the Register
-    /// owns the keyboard, and hands them to the Register.
+    /// Takes the arrow keys away from egui's focus navigation while a menu is open, and
+    /// Tab and Shift+Tab while the Register owns the keyboard, and hands them to the
+    /// Menu bar and the Register.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.main_window.take_menu_arrows(ctx, raw_input);
         if self.main_window.register_takes_tab(ctx) {
             raw_input.events.retain(|event| {
                 let egui::Event::Key {

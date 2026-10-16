@@ -11,6 +11,7 @@ use crate::dialog::{DialogOutcome, FocusReturn, LightDialog, OpenDialog};
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
 use crate::layout::Layout;
+use crate::menu_nav::{DrawnMenus, MenuNav};
 use crate::register::ColumnWidths;
 use crate::register_tabs::RegisterTabs;
 use crate::route::{Route, TopLevelTab};
@@ -34,6 +35,7 @@ pub(crate) struct MainWindow {
     delete_transaction: Option<OpenDialog<DeleteTransactionForm>>,
     /// Where focus goes now that a Dialog has closed, until a frame restores it.
     focus_return: Option<FocusReturn>,
+    menu_nav: MenuNav,
 }
 
 /// The delete transaction confirm's form: which transaction it deletes. Its question
@@ -55,6 +57,7 @@ impl MainWindow {
             column_widths: layout.column_widths(),
             delete_transaction: None,
             focus_return: None,
+            menu_nav: MenuNav::default(),
         }
     }
 
@@ -105,7 +108,7 @@ impl MainWindow {
             UserAction::NextRegisterTab | UserAction::PreviousRegisterTab => {
                 self.shows_registers() && self.registers.len() > 1
             }
-            UserAction::Quit | UserAction::About => true,
+            UserAction::SwitchPane | UserAction::Quit | UserAction::About => true,
         }
     }
 
@@ -119,10 +122,31 @@ impl MainWindow {
                 .is_some_and(|register| register.owns_keyboard(ctx))
     }
 
+    /// Takes the arrow keys out of `raw_input` while a menu is open, for the Menu bar's
+    /// keyboard navigation.
+    pub(crate) fn take_menu_arrows(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.menu_nav.take_arrows(ctx, raw_input);
+    }
+
     /// Hands a Tab press, with `modifiers` held, to the current Register.
     pub(crate) fn press_tab(&mut self, modifiers: egui::Modifiers) {
         if let Some(register) = self.registers.current_register_mut() {
             register.press_tab(modifiers);
+        }
+    }
+
+    /// Moves keyboard focus from the Account bar to the Main view, or from anywhere
+    /// else to the Account bar.
+    pub(crate) fn switch_pane(&mut self, ctx: &egui::Context) {
+        if self.account_bar.has_focus() {
+            // The Main view takes keys with no widget focused, as the Register does.
+            ctx.memory_mut(|memory| {
+                if let Some(id) = memory.focused() {
+                    memory.surrender_focus(id);
+                }
+            });
+        } else {
+            self.account_bar.request_focus();
         }
     }
 
@@ -206,7 +230,18 @@ impl MainWindow {
             .and_then(|focus| focus.restore(ui.ctx()));
         // No Main window Shortcut acts behind a Dialog.
         if !self.dialog_open() {
-            for action in keymap::dispatch(ui.ctx(), KEYMAP) {
+            self.menu_nav.keys(ui.ctx());
+            let actions = keymap::dispatch(ui.ctx(), KEYMAP);
+            // A Shortcut closes the open menu, and one pressed mid-edit saves the edit
+            // before it acts.
+            // TODO(#90): a refused commit stops the Shortcut and shows the error bubble.
+            if !actions.is_empty() {
+                self.menu_nav.close(ui.ctx());
+                if let Some(register) = self.registers.current_register_mut() {
+                    register.commit_edit(ui.ctx(), commands);
+                }
+            }
+            for action in actions {
                 commands.send(action.command());
             }
         }
@@ -216,7 +251,10 @@ impl MainWindow {
         };
         Panel::top("menu_bar")
             .frame(theme.chrome_frame())
-            .show(ui, |ui| self.menu_bar(ui, i18n, commands, view));
+            .show(ui, |ui| {
+                let drawn = self.menu_bar(ui, i18n, commands, view);
+                self.menu_nav.drawn(ui.ctx(), drawn);
+            });
         Panel::bottom("status_bar")
             .frame(theme.chrome_frame())
             .show(ui, |ui| {
@@ -354,32 +392,43 @@ impl MainWindow {
         );
     }
 
+    /// Draws the Menu bar, and returns what it drew for the keyboard navigation.
     fn menu_bar(
         &self,
         ui: &mut egui::Ui,
         i18n: &Localizer,
         commands: &CommandSender,
         view: &LedgerView,
-    ) {
-        let item = |ui: &mut egui::Ui, action| self.menu_item(ui, i18n, commands, view, action);
+    ) -> DrawnMenus {
+        let item = |ui: &mut egui::Ui, drawn: &mut DrawnMenus, action| {
+            self.menu_item(ui, i18n, commands, view, drawn, action);
+        };
+        let mut drawn = DrawnMenus::default();
         MenuBar::new().ui(ui, |ui| {
-            ui.menu_button(fl!(i18n, "menu-file"), |ui| {
-                item(ui, UserAction::CloseRegisterTab);
+            let file = ui.menu_button(fl!(i18n, "menu-file"), |ui| {
+                item(ui, &mut drawn, UserAction::CloseRegisterTab);
                 ui.separator();
-                item(ui, UserAction::Quit);
+                item(ui, &mut drawn, UserAction::Quit);
             });
-            ui.menu_button(fl!(i18n, "menu-edit"), |ui| {
-                item(ui, UserAction::Undo);
-                item(ui, UserAction::Redo);
+            drawn.note_menu(&file.response);
+            let edit = ui.menu_button(fl!(i18n, "menu-edit"), |ui| {
+                item(ui, &mut drawn, UserAction::Undo);
+                item(ui, &mut drawn, UserAction::Redo);
             });
-            ui.menu_button(fl!(i18n, "menu-view"), |ui| {
-                item(ui, UserAction::NextRegisterTab);
-                item(ui, UserAction::PreviousRegisterTab);
+            drawn.note_menu(&edit.response);
+            let view_menu = ui.menu_button(fl!(i18n, "menu-view"), |ui| {
+                item(ui, &mut drawn, UserAction::NextRegisterTab);
+                item(ui, &mut drawn, UserAction::PreviousRegisterTab);
+                ui.separator();
+                item(ui, &mut drawn, UserAction::SwitchPane);
             });
-            ui.menu_button(fl!(i18n, "menu-help"), |ui| {
-                item(ui, UserAction::About);
+            drawn.note_menu(&view_menu.response);
+            let help = ui.menu_button(fl!(i18n, "menu-help"), |ui| {
+                item(ui, &mut drawn, UserAction::About);
             });
+            drawn.note_menu(&help.response);
         });
+        drawn
     }
 
     /// The menu item for `action`, with its Shortcut text, disabled while the action
@@ -390,14 +439,19 @@ impl MainWindow {
         i18n: &Localizer,
         commands: &CommandSender,
         view: &LedgerView,
+        drawn: &mut DrawnMenus,
         action: UserAction,
     ) {
         let mut button = egui::Button::new(action.label(i18n));
         if let Some(chord) = keymap::chord(action) {
             button = button.shortcut_text(keymap::shortcut_text(chord, i18n, ui.ctx().os()));
         }
-        if ui.add_enabled(self.can_act(action, view), button).clicked() {
+        let item = ui.add_enabled(self.can_act(action, view), button);
+        drawn.note_item(&item);
+        if item.clicked() {
             commands.send(action.command());
+            // egui closes a menu on a pointer click only, not on Enter.
+            ui.close();
         }
     }
 

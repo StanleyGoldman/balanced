@@ -21,6 +21,7 @@ menu-edit-redo = Redo
 menu-view = View
 menu-view-next-register-tab = Next { -register } Tab
 menu-view-previous-register-tab = Previous { -register } Tab
+menu-view-switch-pane = Switch Pane
 menu-tools = Tools
 menu-help = Help
 menu-help-about = About { -brand-name }
