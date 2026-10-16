@@ -565,8 +565,7 @@ impl Ledger {
         let transaction = transaction.into_transaction(id, currency)?;
         let (summary, ()) = self.view.edit_register(index, currency, |transactions| {
             // The new id is the largest yet, so it goes after the rest of its date.
-            let position = transactions
-                .partition_point(|other| other.register_order() < transaction.register_order());
+            let position = transactions.partition_point(|other| other.date() <= transaction.date());
             transactions.insert(position, transaction);
         })?;
         self.replace_account(index, summary)?;
@@ -2225,5 +2224,42 @@ mod tests {
             result.unwrap_err(),
             DomainError::UnknownCategory { category: unknown }
         );
+    }
+
+    #[test]
+    fn a_transaction_posted_on_a_busy_date_goes_after_the_rest_of_that_date() {
+        let mut ledger = three_payments();
+
+        // Fresh Market and Bean There are on the 10th already.
+        ledger.apply(post(&ledger, 10)).unwrap();
+
+        let payees: Vec<String> = register(&ledger)
+            .into_iter()
+            .map(|(payee, _)| payee)
+            .collect();
+        assert_eq!(
+            payees,
+            ["", "Acme Corp", "Fresh Market", "Bean There", "Corner Cafe"]
+        );
+    }
+
+    #[test]
+    fn every_posted_transaction_takes_an_id_no_other_transaction_has() {
+        let mut ledger = three_payments();
+
+        ledger.apply(post(&ledger, 7)).unwrap();
+        ledger.apply(post(&ledger, 8)).unwrap();
+
+        let view = ledger.snapshot();
+        let mut ids: Vec<TransactionId> = view
+            .accounts()
+            .iter()
+            .flat_map(|summary| summary.register())
+            .map(|entry| entry.transaction().id())
+            .collect();
+        let count = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), count);
     }
 }
