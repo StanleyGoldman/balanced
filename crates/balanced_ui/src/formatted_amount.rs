@@ -29,6 +29,11 @@ impl FormattedAmount {
         self.money
     }
 
+    /// The text, unstyled.
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+
     /// The text, styled by `theme` for the amount's sign.
     pub(crate) fn styled(&self, theme: &Theme) -> RichText {
         theme.amount(&self.money, self.text.clone())

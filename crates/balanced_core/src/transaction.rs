@@ -119,6 +119,21 @@ impl Transaction {
         }
         Ok(edited)
     }
+
+    /// The edit that undoes `edit`: the same field, with this transaction's value.
+    pub(crate) fn undoing(&self, edit: &TransactionEdit) -> TransactionEdit {
+        match edit {
+            TransactionEdit::Number(_) => TransactionEdit::Number(self.number.clone()),
+            TransactionEdit::Payee(_) => TransactionEdit::Payee(self.payee.clone()),
+            TransactionEdit::Memo(_) => TransactionEdit::Memo(self.memo.clone()),
+        }
+    }
+
+    /// Where the transaction sits in its account's register: by date, and on one date in
+    /// the order the transactions were posted, which their ids follow.
+    pub(crate) fn register_order(&self) -> (Date<Iso>, TransactionId) {
+        (self.date, self.id)
+    }
 }
 
 /// How a [`NewTransaction`]'s amount is given.

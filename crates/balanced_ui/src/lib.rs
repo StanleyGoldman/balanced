@@ -4,6 +4,7 @@ mod account_bar;
 mod accounts_model;
 mod app;
 mod command;
+mod dialog;
 mod formatted_amount;
 mod i18n;
 mod keymap;

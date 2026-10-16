@@ -22,6 +22,8 @@ menu-view-previous-register-tab = Previous { -register } Tab
 menu-tools = Tools
 menu-help = Help
 menu-help-about = About { -brand-name }
+menu-new-transaction = New Transaction
+menu-delete-transaction = Delete Transaction
 
 # Modifier key names in a menu item's Shortcut text, such as Ctrl+Q.
 menu-modifier-ctrl = Ctrl
@@ -86,6 +88,8 @@ register-split = [Split]
 register-opening-balance = Opening Balance
 # The menu of commands on a Register row.
 register-actions = Actions
+# The Actions menu item that asks to delete the row's transaction.
+register-actions-delete = Delete…
 register-new-transaction = + Transaction
 # Beside a closed account's name, above its Register.
 register-closed-read-only = Closed — read-only
@@ -95,6 +99,13 @@ register-transaction-count =
        *[other] { $count } transactions
     }
 
+## Dialogs
+
+dialog-cancel = Cancel
+# Asks before deleting the transaction the payee, date and amount describe.
+dialog-delete-transaction-message = Delete this transaction? { $payee }, { $date }, { $amount }
+dialog-delete-transaction-delete = Delete
+
 ## Status bar
 
 status-about = { -brand-name } { $version }
@@ -103,3 +114,6 @@ status-account-closed = This account is closed, so its transactions can't be cha
 # A change to a transaction that no longer exists, such as one just deleted.
 status-unknown-transaction = That transaction no longer exists.
 status-opening-balance-payee = The opening balance has no payee.
+# A change to an account that no longer exists, such as one just deleted.
+status-unknown-account = That account no longer exists.
+status-amount-too-large = That change would make a balance too large to hold.
