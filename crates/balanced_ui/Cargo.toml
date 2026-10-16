@@ -17,14 +17,17 @@ jiff.workspace = true
 icu_locale.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+toml.workspace = true
 tracing.workspace = true
 egui-wgpu = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 egui_kittest = { workspace = true, optional = true, features = ["snapshot", "wgpu"] }
 
 [features]
 # `balanced_ui::testing`, for the image snapshot tests: the App on the lavapipe renderer,
-# and the snapshot check with the project thresholds.
-test-support = ["dep:egui-wgpu", "dep:egui_kittest", "balanced_i18n/test-support"]
+# and the snapshot check with the project thresholds. `PreferencesFile::for_tests`, a
+# preferences file in a temporary directory.
+test-support = ["dep:egui-wgpu", "dep:egui_kittest", "dep:tempfile", "balanced_i18n/test-support"]
 
 [dev-dependencies]
 egui_kittest.workspace = true
@@ -32,6 +35,7 @@ balanced_i18n = { workspace = true, features = ["test-support"] }
 icu_locale.workspace = true
 rust_decimal.workspace = true
 rust_decimal_macros.workspace = true
+tempfile.workspace = true
 
 [[test]]
 name = "snapshots"
@@ -63,6 +67,14 @@ name = "main_window"
 required-features = ["test-support"]
 
 [[test]]
+name = "new_category"
+required-features = ["test-support"]
+
+[[test]]
+name = "preferences"
+required-features = ["test-support"]
+
+[[test]]
 name = "new_account"
 required-features = ["test-support"]
 
@@ -76,7 +88,3 @@ required-features = ["test-support"]
 
 [lints]
 workspace = true
-
-[[test]]
-name = "new_category"
-required-features = ["test-support"]

@@ -7,6 +7,7 @@ use balanced_i18n::Localizer;
 use eframe::egui;
 
 use crate::i18n::fl;
+use crate::preferences::Preferences;
 use crate::route::Route;
 
 /// An app-level action. UI code sends one instead of changing app or domain state
@@ -45,6 +46,9 @@ pub(crate) enum AppCommand {
     /// Apply a change the open Dialog's form asks for. The Dialog closes once the
     /// change is applied, or shows inline why the ledger refused it.
     SubmitDialog(DomainCommand),
+    /// Replace the Preferences with these, show them and write them to the
+    /// preferences file. Preferences are not undoable.
+    SetPreferences(Preferences),
     /// Show a message in the Status bar until the next one replaces it.
     ShowStatus(StatusMessage),
     /// Close the Main window, which ends the app.
@@ -61,6 +65,8 @@ pub(crate) enum DialogKind {
     NewAccount,
     /// Create a category, starting from the name typed in a Category cell.
     NewCategory { name: String },
+    /// The Preferences Dialog, starting from the Preferences in use.
+    Preferences,
 }
 
 /// A Status bar message.
@@ -72,6 +78,11 @@ pub(crate) enum StatusMessage {
     NotAvailableYet,
     /// Why a Category cell refused its typed text: no category has that name.
     NoSuchCategory,
+    /// The preferences file couldn't be read, so the app started from the default
+    /// Preferences and kept the file as `preferences.toml.broken`.
+    PreferencesReset,
+    /// The Preferences apply, but writing them to the preferences file failed.
+    PreferencesNotSaved,
     /// Why the ledger refused a change.
     Rejected(DomainError),
 }
@@ -82,6 +93,8 @@ impl StatusMessage {
             Self::About => fl!(i18n, "status-about", version = env!("CARGO_PKG_VERSION")),
             Self::NotAvailableYet => fl!(i18n, "status-not-available-yet"),
             Self::NoSuchCategory => fl!(i18n, "status-no-such-category"),
+            Self::PreferencesReset => fl!(i18n, "status-preferences-reset"),
+            Self::PreferencesNotSaved => fl!(i18n, "status-preferences-not-saved"),
             Self::Rejected(error) => match error {
                 DomainError::AccountClosed { .. } => fl!(i18n, "status-account-closed"),
                 DomainError::UnknownTransaction { .. } => {

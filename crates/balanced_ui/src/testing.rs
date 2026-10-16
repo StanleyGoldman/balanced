@@ -11,8 +11,8 @@ use egui_wgpu::{WgpuSetup, WgpuSetupCreateNew, wgpu};
 
 use icu_calendar::Date;
 
-use crate::theme::{Scheme, Theme, ThemeSettings};
-use crate::{App, Clock};
+use crate::preferences::{Preferences, Scheme};
+use crate::{App, Clock, PreferencesFile};
 
 /// How much one pixel may differ before it counts as failing: kittest's weighted squared
 /// YIQ distance.
@@ -21,27 +21,34 @@ const THRESHOLD: f32 = 0.6;
 /// How many pixels may fail before the snapshot fails: none.
 const MAX_FAILED_PIXELS: usize = 0;
 
-/// The App on stub data in the test locale and in `scheme`, wide enough to show every
+/// The App on stub data in the test locale and in `scheme`, with a preferences file
+/// saying so, wide enough to show every
 /// Register column, drawn by lavapipe.
 ///
 /// # Panics
 ///
 /// When the first snapshot renders, if lavapipe isn't installed.
 pub fn app(scheme: egui::Theme) -> Harness<'static, App> {
-    let theme = Theme::new(ThemeSettings {
+    let preferences_file = PreferencesFile::for_tests();
+    let preferences = Preferences {
         scheme: match scheme {
             egui::Theme::Light => Scheme::Light,
             egui::Theme::Dark => Scheme::Dark,
         },
-        ..ThemeSettings::default()
-    });
+        ..Preferences::default()
+    };
+    preferences_file
+        .save(&preferences)
+        .expect("the test machine can write to a temporary directory");
     Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         // kittest switches egui's theme after the App is built, as an OS theme change
         // does. The Scheme alone must decide the look.
         .with_theme(scheme)
         .wgpu_setup(lavapipe())
-        .build_eframe(move |cc| App::with_theme(cc, Localizer::for_tests(), Ledger::stub(), clock(), theme))
+        .build_eframe(move |cc| {
+            App::new(cc, Localizer::for_tests(), Ledger::stub(), clock(), preferences_file)
+        })
 }
 
 /// A clock stopped on 14 October 2026.

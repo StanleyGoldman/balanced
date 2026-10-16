@@ -3,7 +3,7 @@
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
-use balanced_ui::{App, Clock};
+use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::App as _;
 use eframe::egui::accesskit::Role;
 use eframe::egui::{Event, Key, Modifiers, PointerButton, vec2};
@@ -18,7 +18,15 @@ fn app_in(i18n: Localizer) -> Harness<'static, App> {
     let today = Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date");
     Harness::builder()
         .with_size(vec2(1280.0, 720.0))
-        .build_eframe(move |cc| App::new(cc, i18n, Ledger::stub(), Clock::fixed(today)))
+        .build_eframe(move |cc| {
+            App::new(
+                cc,
+                i18n,
+                Ledger::stub(),
+                Clock::fixed(today),
+                PreferencesFile::for_tests(),
+            )
+        })
 }
 
 /// The App in the test locale, `en-US`.

@@ -6,40 +6,23 @@
     reason = "the theme module defines the palette"
 )]
 
+use std::sync::Arc;
+
 use balanced_core::Money;
 use eframe::egui;
 use egui::{
-    Color32, CornerRadius, FontFamily, FontId, Frame, Margin, Rangef, Rect, RichText, Shape,
-    Stroke, TextStyle, Vec2, vec2,
+    Color32, CornerRadius, FontData, FontFamily, FontId, Frame, Margin, Rangef, Rect, RichText,
+    Shape, Stroke, TextStyle, Vec2, vec2,
 };
 
-/// Light or dark colours.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum Scheme {
-    #[default]
-    Light,
-    #[cfg_attr(
-        not(any(test, feature = "test-support")),
-        expect(
-            dead_code,
-            reason = "the Preferences dialog (#99) is the first to choose it"
-        )
-    )]
-    Dark,
-}
+pub(crate) use crate::preferences::Scheme;
+use crate::preferences::{FontFace, Preferences};
 
 /// How tightly rows and controls are packed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum Density {
     #[default]
     Normal,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the Preferences dialog (#99) is the first to choose it"
-        )
-    )]
     Dense,
 }
 
@@ -76,12 +59,12 @@ pub(crate) enum Gridlines {
     Both,
 }
 
-/// The Preferences that shape the look.
-// TODO(#48): read these from the stored Preferences, and add the font face once the
-// faces on offer are decided.
+/// The Preferences that shape the look, as the theme reads them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ThemeSettings {
     pub(crate) scheme: Scheme,
+    /// The face body text is drawn in.
+    pub(crate) font_face: FontFace,
     pub(crate) density: Density,
     pub(crate) gridlines: Gridlines,
     /// Fill every other Register row with the stripe colour.
@@ -94,13 +77,25 @@ pub(crate) struct ThemeSettings {
 
 impl Default for ThemeSettings {
     fn default() -> Self {
+        Self::from(&Preferences::default())
+    }
+}
+
+impl From<&Preferences> for ThemeSettings {
+    fn from(preferences: &Preferences) -> Self {
         Self {
-            scheme: Scheme::default(),
-            density: Density::default(),
+            scheme: preferences.scheme,
+            font_face: preferences.font_face,
+            density: if preferences.dense_rows {
+                Density::Dense
+            } else {
+                Density::Normal
+            },
+            // TODO(#100): read the Register Preferences.
             gridlines: Gridlines::default(),
             alternating_rows: true,
-            monospace_money: false,
-            coloured_negatives: true,
+            monospace_money: preferences.monospace_money,
+            coloured_negatives: preferences.coloured_negatives,
         }
     }
 }
@@ -318,6 +313,29 @@ impl Theme {
         style
     }
 
+    /// The fonts for every window: the chosen face for body text, with egui's own fonts
+    /// behind it for the glyphs it lacks.
+    pub(crate) fn fonts(&self) -> egui::FontDefinitions {
+        let mut fonts = egui::FontDefinitions::default();
+        let (name, data): (&str, &'static [u8]) = match self.settings.font_face {
+            FontFace::Egui => return fonts,
+            FontFace::NotoSans => ("Noto Sans", include_bytes!("../fonts/NotoSans-Regular.ttf")),
+            FontFace::LiberationSans => (
+                "Liberation Sans",
+                include_bytes!("../fonts/LiberationSans-Regular.ttf"),
+            ),
+        };
+        fonts
+            .font_data
+            .insert(name.to_owned(), Arc::new(FontData::from_static(data)));
+        fonts
+            .families
+            .entry(FontFamily::Proportional)
+            .or_default()
+            .insert(0, name.to_owned());
+        fonts
+    }
+
     /// The height of a Register row or Account bar row, and of a button or text field.
     pub(crate) fn row_height(&self) -> f32 {
         self.sizes.row
@@ -502,6 +520,60 @@ mod tests {
 
     fn usd(amount: Decimal) -> Money {
         Money::new(amount, CurrencyCode::new("USD").unwrap()).unwrap()
+    }
+
+    #[test]
+    fn settings_follow_the_preferences() {
+        let preferences = Preferences {
+            scheme: Scheme::Dark,
+            font_face: FontFace::NotoSans,
+            dense_rows: true,
+            monospace_money: true,
+            coloured_negatives: false,
+        };
+
+        let settings = ThemeSettings::from(&preferences);
+
+        let expected = ThemeSettings {
+            scheme: Scheme::Dark,
+            font_face: FontFace::NotoSans,
+            density: Density::Dense,
+            gridlines: Gridlines::Off,
+            alternating_rows: true,
+            monospace_money: true,
+            coloured_negatives: false,
+        };
+        assert_eq!(settings, expected);
+    }
+
+    #[test]
+    fn a_chosen_face_draws_body_text_with_eguis_fonts_behind_it() {
+        let theme = Theme::new(ThemeSettings {
+            font_face: FontFace::LiberationSans,
+            ..ThemeSettings::default()
+        });
+
+        let fonts = theme.fonts();
+
+        assert_eq!(
+            fonts.families[&FontFamily::Proportional],
+            [
+                "Liberation Sans",
+                "Ubuntu-Light",
+                "NotoEmoji-Regular",
+                "emoji-icon-font"
+            ]
+        );
+        assert!(fonts.font_data.contains_key("Liberation Sans"));
+    }
+
+    #[test]
+    fn eguis_face_keeps_eguis_fonts() {
+        let theme = Theme::default();
+
+        let fonts = theme.fonts();
+
+        assert_eq!(fonts, egui::FontDefinitions::default());
     }
 
     #[test]

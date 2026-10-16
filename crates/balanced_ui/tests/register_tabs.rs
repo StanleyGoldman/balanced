@@ -2,7 +2,7 @@
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
-use balanced_ui::{App, Clock};
+use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::{Event, Key, Modifiers, vec2};
 use egui_kittest::Harness;
@@ -19,6 +19,7 @@ fn app() -> Harness<'static, App> {
                 Localizer::for_tests(),
                 Ledger::stub(),
                 Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
+                PreferencesFile::for_tests(),
             )
         })
 }

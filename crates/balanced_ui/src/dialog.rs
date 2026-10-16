@@ -221,8 +221,10 @@ impl HeavyDialog {
         let room = window.shrink(Theme::DIALOG_MARGIN);
         let first_frame = !dialog.shown;
         dialog.shown = true;
-        let backdrop_layer = LayerId::new(Order::Foreground, id.with("backdrop"));
-        let dialog_layer = LayerId::new(Order::Foreground, id);
+        // Windows' order: above the Main window's panels, and below popups and light
+        // Dialogs, so a list or confirm the Dialog opens draws over it.
+        let backdrop_layer = LayerId::new(Order::Middle, id.with("backdrop"));
+        let dialog_layer = LayerId::new(Order::Middle, id);
         // Widgets below the backdrop take no input or focus, as below an `egui::Modal`.
         let is_top = ctx.memory_mut(|memory| {
             memory.set_modal_layer(backdrop_layer);
@@ -230,7 +232,7 @@ impl HeavyDialog {
         });
         let popup_open = Popup::is_any_open(ctx);
         let backdrop = Area::new(backdrop_layer.id)
-            .order(Order::Foreground)
+            .order(Order::Middle)
             .fixed_pos(window.min)
             .show(ctx, |ui| {
                 ui.painter().rect_filled(window, 0.0, tint);
@@ -240,7 +242,7 @@ impl HeavyDialog {
         let mut open = true;
         let mut heavy = Window::new(title)
             .id(id)
-            .order(Order::Foreground)
+            .order(Order::Middle)
             .open(&mut open)
             .collapsible(false)
             .resizable(true)

@@ -23,6 +23,8 @@ pub(crate) enum UserAction {
     /// Open the New Account wizard.
     NewAccount,
     Quit,
+    /// Open the Preferences Dialog.
+    Preferences,
     About,
 }
 
@@ -40,6 +42,7 @@ impl UserAction {
             Self::DeleteTransaction => fl!(i18n, "menu-delete-transaction"),
             Self::NewAccount => fl!(i18n, "menu-file-new-account"),
             Self::Quit => fl!(i18n, "menu-file-quit"),
+            Self::Preferences => fl!(i18n, "menu-tools-preferences"),
             Self::About => fl!(i18n, "menu-help-about"),
         }
     }
@@ -57,6 +60,7 @@ impl UserAction {
             | Self::SwitchPane
             | Self::NewAccount
             | Self::Quit
+            | Self::Preferences
             | Self::About => false,
         }
     }
@@ -74,6 +78,7 @@ impl UserAction {
             Self::DeleteTransaction => AppCommand::OpenDialog(DialogKind::DeleteTransaction),
             Self::NewAccount => AppCommand::OpenDialog(DialogKind::NewAccount),
             Self::Quit => AppCommand::Quit,
+            Self::Preferences => AppCommand::OpenDialog(DialogKind::Preferences),
             Self::About => AppCommand::ShowStatus(StatusMessage::About),
         }
     }
