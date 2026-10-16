@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use balanced_core::{
-    AccountId, AccountSummary, DomainCommand, DomainError, LedgerView, TransactionEdit,
+    Account, AccountId, AccountSummary, DomainCommand, DomainError, LedgerView, TransactionEdit,
     TransactionId,
 };
 use balanced_i18n::Localizer;
@@ -12,13 +12,13 @@ use eframe::egui::accesskit::{self, Role};
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
 use eframe::egui::{
-    self, Align, CursorIcon, Event, EventFilter, Id, Key, Layout, Margin, Modifiers, Popup, Rect,
-    Response, ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode,
-    WidgetInfo, WidgetText, WidgetType, pos2, vec2,
+    self, Align, Button, CursorIcon, Event, EventFilter, Id, Key, Layout, Margin, Modifiers, Popup,
+    Rect, Response, ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle,
+    TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, TableBody, TableBuilder};
 
-use crate::command::{AppCommand, CommandSender, StatusMessage};
+use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::i18n::fl;
 use crate::register_model::{RegisterModel, RegisterRow, RegisterSort, SortDirection, SortKey};
 use crate::theme::Theme;
@@ -411,10 +411,11 @@ pub(crate) struct Register {
 }
 
 impl Register {
-    /// Whether keys go to the Register: the cell cursor is in it, and nothing holds
-    /// keyboard focus but the Register's own cell editor.
+    /// Whether keys go to the Register: the cell cursor is in it, no Dialog is open
+    /// over it, and nothing holds keyboard focus but the Register's own cell editor.
     pub(crate) fn owns_keyboard(&self, ctx: &egui::Context) -> bool {
         self.cursor.is_some()
+            && ctx.memory(|memory| memory.top_modal_layer().is_none())
             && ctx.memory(|memory| match memory.focused() {
                 None => true,
                 Some(focused) => self
@@ -422,6 +423,31 @@ impl Register {
                     .as_ref()
                     .is_some_and(|edit| edit.editor_id() == focused),
             })
+    }
+
+    /// The selected transaction's row, while `account`'s Register shows it.
+    pub(crate) fn selected_row(&self, account: AccountId) -> Option<&RegisterRow> {
+        self.row(account, self.cursor?.row)
+    }
+
+    /// Transaction `id`'s row, while `account`'s Register shows it.
+    pub(crate) fn row(&self, account: AccountId, id: TransactionId) -> Option<&RegisterRow> {
+        let model = self
+            .model
+            .as_ref()
+            .filter(|model| model.account() == account)?;
+        model.rows().iter().find(|row| row.id() == id)
+    }
+
+    /// Carries out `action`, picked from transaction `id`'s Actions menu.
+    fn act(&mut self, id: TransactionId, action: RowAction, commands: &CommandSender) {
+        match action {
+            RowAction::Delete => {
+                // The confirm asks about the selected row.
+                self.place_cursor(id, RegisterColumn::Actions);
+                commands.send(AppCommand::OpenDialog(DialogKind::DeleteTransaction));
+            }
+        }
     }
 
     /// Queues a Tab press, with `modifiers` held, for the next frame.
@@ -523,6 +549,7 @@ impl Register {
                             commands,
                             rows: model.rows(),
                             register_id,
+                            access: Access::of(summary.account()),
                             viewport: Rect::NOTHING,
                         };
                         self.body(body, frame, row_height, pitch);
@@ -576,6 +603,7 @@ impl Register {
             commands,
             rows,
             register_id,
+            access,
             viewport,
         } = *frame;
         let address = CellAddress {
@@ -588,10 +616,15 @@ impl Register {
             column,
             selected: self.cursor.is_some_and(|cursor| cursor.row == row.id()),
             cursor: self.cursor == Some(address),
+            access,
             viewport,
         };
-        if cell.show(ui, i18n, theme).clicked() {
+        let (response, action) = cell.show(ui, i18n, theme);
+        if response.clicked() {
             self.place_cursor(row.id(), column);
+        }
+        if let Some(action) = action {
+            self.act(row.id(), action, commands);
         }
         if let Some(edit) = self.edit.as_mut().filter(|edit| edit.cell == address)
             && editor(ui, edit, heading_id(register_id, column)).lost_focus()
@@ -832,8 +865,33 @@ struct BodyFrame<'a> {
     commands: &'a CommandSender,
     rows: &'a [RegisterRow],
     register_id: Id,
+    access: Access,
     /// The visible part of the Register's body.
     viewport: Rect,
+}
+
+/// Whether a Register's rows can change: a closed account's are read-only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Access {
+    Editable,
+    ReadOnly,
+}
+
+impl Access {
+    /// How `account`'s Register rows can be changed.
+    fn of(account: &Account) -> Self {
+        if account.is_closed() {
+            Self::ReadOnly
+        } else {
+            Self::Editable
+        }
+    }
+}
+
+/// A command picked from a row's Actions menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowAction {
+    Delete,
 }
 
 /// Whether `rect` lies wholly within `viewport` from top to bottom, give or take half a
@@ -1013,19 +1071,27 @@ struct Cell<'a> {
     selected: bool,
     /// Whether the cell cursor is on this cell.
     cursor: bool,
+    access: Access,
     /// The visible part of the Register's body.
     viewport: Rect,
 }
 
 impl Cell<'_> {
-    /// Draws the cell, the whole of which is one click target.
-    fn show(&self, ui: &egui::Ui, i18n: &Localizer, theme: &Theme) -> Response {
+    /// Draws the cell, the whole of which is one click target, and returns the command
+    /// picked from its Actions menu, if it has one.
+    fn show(
+        &self,
+        ui: &egui::Ui,
+        i18n: &Localizer,
+        theme: &Theme,
+    ) -> (Response, Option<RowAction>) {
         let Self {
             register_id,
             row,
             column,
             selected,
             cursor,
+            access,
             viewport,
         } = *self;
         let rect = ui.max_rect();
@@ -1053,13 +1119,14 @@ impl Cell<'_> {
                     .pointer_hover_pos()
                     .is_some_and(|pointer| band.contains(pointer) && viewport.contains(pointer));
                 let open = Popup::is_id_open(ui.ctx(), Popup::default_response_id(&response));
+                let mut action = None;
                 if selected || hovered || open {
-                    actions_menu(ui, i18n, &response);
+                    action = actions_menu(ui, i18n, &response, access);
                 } else {
                     // Hidden, the menu leaves an empty cell that selects the row.
                     cell_info(ui, &response, selected, "");
                 }
-                return response;
+                return (response, action);
             }
         };
         let label = text.text().to_owned();
@@ -1082,7 +1149,7 @@ impl Cell<'_> {
             ui.painter()
                 .rect_stroke(rect, 0.0, theme.cell_cursor_stroke(), StrokeKind::Inside);
         }
-        response
+        (response, None)
     }
 }
 
@@ -1127,8 +1194,14 @@ fn paint_text(ui: &egui::Ui, rect: Rect, column: RegisterColumn, text: WidgetTex
 }
 
 /// The row's Actions menu: a ⋯ button on the right of the Actions cell, which opens
-/// the menu below it. The default fonts lack ⋯, so its dots are painted.
-fn actions_menu(ui: &egui::Ui, i18n: &Localizer, response: &Response) {
+/// the menu below it. The default fonts lack ⋯, so its dots are painted. Returns the
+/// command picked from the menu. A read-only row's commands are disabled.
+fn actions_menu(
+    ui: &egui::Ui,
+    i18n: &Localizer,
+    response: &Response,
+    access: Access,
+) -> Option<RowAction> {
     let label = fl!(i18n, "register-actions");
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
     let rect = response.rect;
@@ -1153,8 +1226,14 @@ fn actions_menu(ui: &egui::Ui, i18n: &Localizer, response: &Response) {
             );
         }
     }
-    // TODO(#94): add the row's commands, starting with Delete….
-    Popup::menu(response).show(|_ui| {});
+    Popup::menu(response)
+        .show(|ui| {
+            let delete = Button::new(fl!(i18n, "register-actions-delete"));
+            ui.add_enabled(access == Access::Editable, delete)
+                .clicked()
+                .then_some(RowAction::Delete)
+        })
+        .and_then(|menu| menu.inner)
 }
 
 #[cfg(test)]

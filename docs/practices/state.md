@@ -22,6 +22,6 @@ The decision and the options that were rejected are in `docs/adr/0001-command-an
 - **Commands are applied in one place,** the drain loop in `App::logic`. Validation, undo recording and (later) persistence all happen there.
 - **Edits that undo together are one Command.** If a user action needs two domain changes that must undo as one step, add a compound `DomainCommand` rather than sending two.
 - **Only domain Commands are undoable.** Navigation history belongs to Back/Forward.
-- **Rejected Commands come back as a `DomainError`.** The Dialog that sent the Command shows the error inline. Anything else goes to the Status bar.
+- **Rejected Commands come back as a `DomainError`.** A Dialog with a form stays open until its Command is applied, and shows the error inline. A confirm closes as its Command is sent, so its error goes to the Status bar, like any other.
 - **Derived values come from the snapshot.** Running balances and account totals are computed in `balanced_core`. View models format and sort those values but never recompute them.
 - **Rebuild caches only when the generation changes.** A view model rebuilds when the snapshot's `generation`, the window's sort or filter, or the locale changes. Nothing is sorted or formatted for every row on every frame.

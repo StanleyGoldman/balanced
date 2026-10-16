@@ -17,7 +17,11 @@ This doc applies to egui 0.36. Tutorials and examples written before 0.34 use AP
 
 ## Dialogs and Detached windows
 
-- A Dialog is an `egui::Modal` in the window that opened it, wrapped in the project's modal helper. Its form state is an `Option` on the host window and exists only while the Dialog is open. Escape and a backdrop click close it the same way Cancel does.
+- A Dialog is an `egui::Modal` in the window that opened it, wrapped in the project's modal helper (`balanced_ui`'s `dialog` module). Its form state is an `Option<OpenDialog<Form>>` on the host window and exists only while the Dialog is open. Escape and a backdrop click close it the same way Cancel does.
+- A light Dialog is a `LightDialog`: no title bar, a fixed width, the body above its default button and Cancel. The helper gives the default button first focus, presses it on Enter unless Cancel has focus, and keeps the Dialog inside the window minus `Theme::DIALOG_MARGIN`, scrolling the body.
+- While any Dialog is open, the host skips the keymap dispatcher, so no Main window Shortcut acts behind it.
+- Closing returns a `FocusReturn`. Keep it on the host and call `restore` at the start of each frame until it returns `None`. egui keeps a closed modal's layer on top for one more frame and takes focus from any widget drawn below it, so focus given back in the closing frame is lost.
+- A `ScrollArea` is at least 64 points tall (`min_scrolled_height`) unless told otherwise. Set it to 0 in anything that must fit a small window.
 - A modal blocks input only within its own viewport. Write Dialog code so that nothing outside that window needs to be blocked.
 - File open and save use `rfd`, which shows native dialogs.
 - A Detached window is an egui viewport. Write its UI as a closure that can also run embedded (`ViewportClass::EmbeddedWindow`), so it can fall back to an in-window `egui::Window` while multi-viewport bugs remain open. It can't rely on staying above, or minimising with, the Main window.

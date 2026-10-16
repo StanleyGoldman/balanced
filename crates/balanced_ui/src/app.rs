@@ -62,11 +62,11 @@ impl App {
 
     fn apply(&mut self, ctx: &egui::Context, command: AppCommand) {
         match command {
-            AppCommand::Domain(command) => {
-                if let Err(error) = self.ledger.apply(command) {
-                    self.main_window.show_status(StatusMessage::Rejected(error));
-                }
-            }
+            AppCommand::Domain(command) => match self.ledger.apply(command) {
+                // TODO(#89): keep the inverse on the undo stack.
+                Ok(_applied) => {}
+                Err(error) => self.main_window.show_status(StatusMessage::Rejected(error)),
+            },
             AppCommand::Navigate(route) => self.main_window.navigate(route),
             AppCommand::CloseRegisterTab => self
                 .main_window
@@ -77,6 +77,10 @@ impl App {
             AppCommand::PreviousRegisterTab => self
                 .main_window
                 .change_register_tabs(RegisterTabs::previous),
+            AppCommand::OpenDialog(kind) => {
+                self.main_window
+                    .open_dialog(ctx, kind, &self.ledger.snapshot());
+            }
             AppCommand::ShowStatus(message) => self.main_window.show_status(message),
             AppCommand::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }

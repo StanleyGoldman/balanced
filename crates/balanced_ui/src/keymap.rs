@@ -65,6 +65,8 @@ pub(crate) const KEYMAP: &[Binding] = &[
         Key::Tab,
         UserAction::PreviousRegisterTab,
     ),
+    Binding::new(Modifiers::COMMAND, Key::N, UserAction::NewTransaction),
+    Binding::new(Modifiers::COMMAND, Key::D, UserAction::DeleteTransaction),
     Binding::new(Modifiers::COMMAND, Key::Q, UserAction::Quit),
 ];
 
