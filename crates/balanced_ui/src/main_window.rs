@@ -19,6 +19,7 @@ use crate::new_category::NewCategoryForm;
 use crate::preferences::Preferences;
 use crate::preferences_dialog::PreferencesForm;
 use crate::register::ColumnWidths;
+use crate::register_columns::RegisterColumns;
 use crate::register_model::RegisterRow;
 use crate::register_tabs::RegisterTabs;
 use crate::route::{Route, TopLevelTab};
@@ -329,7 +330,11 @@ impl MainWindow {
     }
 
     /// Draws the Main window's panels from `view`, outer ones first and the Main view
-    /// last.
+    /// last, with every Register showing `register_columns`.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the Register columns are a Preference, which the App owns and lends here beside the look, the snapshot and today's date"
+    )]
     pub(crate) fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -337,6 +342,7 @@ impl MainWindow {
         theme: &Theme,
         commands: &CommandSender,
         view: &LedgerView,
+        register_columns: &RegisterColumns,
         today: Date<Iso>,
     ) {
         self.focus_return = self
@@ -404,6 +410,7 @@ impl MainWindow {
                             summary,
                             view,
                             &mut self.column_widths,
+                            register_columns,
                             today,
                         );
                     }

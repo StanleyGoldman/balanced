@@ -78,7 +78,9 @@ fn dark_then_ok_applies_the_dark_theme_and_writes_the_file() {
          font_face = \"egui\"\n\
          dense_rows = false\n\
          monospace_money = false\n\
-         coloured_negatives = true\n"
+         coloured_negatives = true\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+         hidden_register_columns = []\n"
     );
 }
 
@@ -164,7 +166,9 @@ fn the_other_display_preferences_apply_and_are_saved_on_ok() {
          font_face = \"noto_sans\"\n\
          dense_rows = true\n\
          monospace_money = true\n\
-         coloured_negatives = false\n"
+         coloured_negatives = false\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+         hidden_register_columns = []\n"
     );
 }
 
