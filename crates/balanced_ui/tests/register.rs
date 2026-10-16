@@ -5,7 +5,7 @@ use balanced_i18n::Localizer;
 use balanced_ui::App;
 use eframe::App as _;
 use eframe::egui::accesskit::{Action, Role, SortDirection, Toggled};
-use eframe::egui::{CursorIcon, Event, Key, Modifiers, vec2};
+use eframe::egui::{CursorIcon, Event, Key, Modifiers, PointerButton, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
@@ -513,8 +513,10 @@ fn tab_commits_and_edits_the_next_editable_cell() {
     press(&mut harness, Modifiers::NONE, Key::Tab);
 
     harness.get_by_role_and_label(Role::Cell, "Corner Shop");
-    // Category isn't edited as text, so Tab passes it.
-    assert_eq!(editor(&harness, "Memo").as_deref(), Some(""));
+    assert_eq!(
+        editor(&harness, "Category").as_deref(),
+        Some("Food & Dining:Groceries")
+    );
     assert_eq!(editor(&harness, "Payee"), None);
 }
 
@@ -527,10 +529,7 @@ fn shift_tab_commits_and_edits_the_previous_editable_cell() {
 
     press(&mut harness, Modifiers::SHIFT, Key::Tab);
 
-    assert_eq!(
-        editor(&harness, "Payee").as_deref(),
-        Some("Maple Property Management")
-    );
+    assert_eq!(editor(&harness, "Category").as_deref(), Some("Home"));
     assert_eq!(editor(&harness, "Memo"), None);
 }
 
@@ -699,4 +698,357 @@ fn the_register_leaves_ctrl_tab_to_the_rest_of_the_app() {
     harness.state_mut().raw_input_hook(&ctx, &mut input);
 
     assert_eq!(input.events, [ctrl_tab]);
+}
+
+/// Renames Fresh Market to Corner Shop through its Payee cell.
+fn rename_fresh_market(harness: &mut Harness<'static, App>) {
+    click_cell(harness, "Fresh Market");
+    type_text(harness, "Corner Shop");
+    press(harness, Modifiers::NONE, Key::Enter);
+}
+
+#[test]
+fn ctrl_z_undoes_a_cell_edit() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    rename_fresh_market(&mut harness);
+
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
+
+    harness.get_by_role_and_label(Role::Cell, "Fresh Market");
+}
+
+#[test]
+fn ctrl_y_redoes_an_undone_cell_edit() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    rename_fresh_market(&mut harness);
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
+
+    press(&mut harness, Modifiers::COMMAND, Key::Y);
+
+    harness.get_by_role_and_label(Role::Cell, "Corner Shop");
+}
+
+#[test]
+fn ctrl_shift_z_redoes_an_undone_cell_edit() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    rename_fresh_market(&mut harness);
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
+
+    press(&mut harness, Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+
+    harness.get_by_role_and_label(Role::Cell, "Corner Shop");
+}
+
+#[test]
+fn ctrl_z_during_a_cell_edit_undoes_typing_not_the_ledger() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    rename_fresh_market(&mut harness);
+    click_cell(&mut harness, "Corner Shop");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    type_text(&mut harness, " Downtown");
+
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
+
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Corner Shop"));
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+    harness.get_by_role_and_label(Role::Cell, "Corner Shop");
+}
+
+/// Whether the Edit menu's Undo and Redo items are disabled, opening the menu to
+/// look and closing it again.
+fn undo_redo_disabled(harness: &mut Harness<'static, App>) -> (bool, bool) {
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    let disabled = |label| {
+        harness
+            .get_by_role_and_label(Role::Button, label)
+            .accesskit_node()
+            .is_disabled()
+    };
+    let items = (disabled("Undo Ctrl+Z"), disabled("Redo Ctrl+Y"));
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    items
+}
+
+#[test]
+fn the_edit_menu_enables_undo_and_redo_only_when_they_can_act() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    assert_eq!(undo_redo_disabled(&mut harness), (true, true));
+
+    rename_fresh_market(&mut harness);
+    assert_eq!(undo_redo_disabled(&mut harness), (false, true));
+
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Undo Ctrl+Z")
+        .click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Cell, "Fresh Market");
+    assert_eq!(undo_redo_disabled(&mut harness), (true, false));
+}
+
+#[test]
+fn typing_in_a_category_lists_matches_anywhere_and_enter_takes_the_top_one() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Auto & Transport:Fuel");
+    type_text(&mut harness, "roc");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    let payee = column(&harness, "Payee")
+        .iter()
+        .position(|payee| payee == "Shell")
+        .expect("the Register lists Shell");
+    assert_eq!(
+        column(&harness, "Category")[payee],
+        "Food & Dining:Groceries"
+    );
+}
+
+#[test]
+fn up_past_the_top_match_then_enter_keeps_the_typed_payee() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Shell");
+    type_text(&mut harness, "Fresh");
+    press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    let payees = column(&harness, "Payee");
+    assert_eq!(payees.iter().filter(|payee| *payee == "Fresh").count(), 1);
+    assert_eq!(
+        payees
+            .iter()
+            .filter(|payee| *payee == "Fresh Market")
+            .count(),
+        1
+    );
+}
+
+/// The labels of the rows of the open combobox list, top first.
+fn list_rows(harness: &Harness<'static, App>) -> Vec<String> {
+    harness
+        .query_all_by_role(Role::ListBoxOption)
+        .map(|row| row.accesskit_node().label().unwrap_or_default())
+        .collect()
+}
+
+#[test]
+fn the_first_esc_closes_the_list_and_the_second_ends_the_edit() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Auto & Transport:Fuel");
+    type_text(&mut harness, "roc");
+
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+    let after_first = (editor(&harness, "Category"), list_rows(&harness));
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+
+    assert_eq!(after_first, (Some("roc".to_owned()), Vec::new()));
+    assert_eq!(editor(&harness, "Category"), None);
+    harness.get_by_role_and_label(Role::Cell, "Auto & Transport:Fuel");
+}
+
+/// The label of the highlighted row of the open combobox list, if any.
+fn highlighted(harness: &Harness<'static, App>) -> Option<String> {
+    harness
+        .query_all_by_role(Role::ListBoxOption)
+        .find(|row| row.accesskit_node().is_selected() == Some(true))
+        .map(|row| row.accesskit_node().label().unwrap_or_default())
+}
+
+#[test]
+fn typing_an_unknown_category_lists_its_matches_then_a_create_row() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Auto & Transport:Fuel");
+
+    type_text(&mut harness, "insur");
+
+    assert_eq!(
+        list_rows(&harness),
+        [
+            "Auto & Transport:Insurance",
+            "Home:Insurance",
+            "Create \"insur\"…",
+        ]
+    );
+    assert_eq!(
+        highlighted(&harness).as_deref(),
+        Some("Auto & Transport:Insurance")
+    );
+}
+
+#[test]
+fn a_list_row_is_taken_on_the_press_before_any_release() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Auto & Transport:Fuel");
+    type_text(&mut harness, "insur");
+    let home = harness
+        .get_by_role_and_label(Role::ListBoxOption, "Home:Insurance")
+        .rect()
+        .center();
+
+    harness.event(Event::PointerMoved(home));
+    harness.event(Event::PointerButton {
+        pos: home,
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    harness.run();
+
+    harness.get_by_role_and_label(Role::Cell, "Home:Insurance");
+    assert_eq!(editor(&harness, "Category"), None);
+}
+
+#[test]
+fn the_list_button_shows_only_while_a_category_is_edited() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Auto & Transport:Fuel");
+    let before = harness
+        .query_by_role_and_label(Role::Button, "Show all categories")
+        .is_some();
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    harness.get_by_role_and_label(Role::Button, "Show all categories");
+    assert!(!before);
+}
+
+#[test]
+fn the_list_button_lists_every_category_and_keeps_the_edit() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Auto & Transport:Fuel");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    harness
+        .get_by_role_and_label(Role::Button, "Show all categories")
+        .click();
+    harness.run();
+
+    // The list scrolls, so only its top rows are laid out.
+    assert_eq!(
+        list_rows(&harness)[..4],
+        [
+            "Auto & Transport",
+            "Auto & Transport:Fuel",
+            "Auto & Transport:Insurance",
+            "Food & Dining",
+        ]
+    );
+    assert_eq!(
+        editor(&harness, "Category").as_deref(),
+        Some("Auto & Transport:Fuel")
+    );
+}
+
+#[test]
+fn alt_down_lists_every_category() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Auto & Transport:Fuel");
+    type_text(&mut harness, "roc");
+
+    press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+
+    // The list scrolls, so only its top rows are laid out.
+    assert_eq!(
+        list_rows(&harness)[..4],
+        [
+            "Auto & Transport",
+            "Auto & Transport:Fuel",
+            "Auto & Transport:Insurance",
+            "Food & Dining",
+        ]
+    );
+}
+
+#[test]
+fn clicking_split_says_the_split_view_is_not_available_yet() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+
+    click_cell(&mut harness, "[Split]");
+
+    harness.get_by_label("Not available yet");
+}
+
+#[test]
+fn enter_on_split_says_the_split_view_is_not_available_yet() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Costco");
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    harness.get_by_label("Not available yet");
+}
+
+#[test]
+fn enter_on_an_unknown_category_without_a_highlight_keeps_editing_and_says_why() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Auto & Transport:Fuel");
+    type_text(&mut harness, "Pets");
+    press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(editor(&harness, "Category").as_deref(), Some("Pets"));
+    harness.get_by_label("No category has that name. Pick one from the list, or create it.");
+}
+
+#[test]
+fn typing_a_payee_lists_every_accounts_matching_payees_alphabetically() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Shell");
+
+    type_text(&mut harness, "ar");
+
+    assert_eq!(list_rows(&harness), ["Fresh Market", "Hardware Barn"]);
+}
+
+#[test]
+fn listing_every_category_highlights_the_cells_own() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Auto & Transport:Fuel");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+
+    assert_eq!(
+        highlighted(&harness).as_deref(),
+        Some("Auto & Transport:Fuel")
+    );
+}
+
+#[test]
+fn moving_the_highlight_past_the_visible_rows_scrolls_the_list() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Auto & Transport:Fuel");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+
+    for _ in 0..14 {
+        press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+    }
+
+    assert_eq!(highlighted(&harness).as_deref(), Some("Shopping:Household"));
 }

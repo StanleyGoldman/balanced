@@ -19,7 +19,7 @@ The decision and the options that were rejected are in `docs/adr/0001-command-an
 - **A domain change is a `DomainCommand`.** UI code sends `AppCommand::Domain(..)` through the `CommandSender`. It never calls a mutating method on domain data.
 - **App-level actions are `AppCommand`s:** navigation (`Navigate(Route)`), `OpenDialog`, `OpenDetached`, `Undo`, `Redo` and `Quit`. The Menu bar and keyboard shortcuts go through the user-action list, which emits these Commands. They don't act directly.
 - **Read from the snapshot.** A window reads `Arc<LedgerView>` and never holds a borrow of the `Ledger`. A Detached window, a deferred viewport or a worker thread gets its own clone of the `Arc` and of the `CommandSender`.
-- **Commands are applied in one place,** the drain loop in `App::logic`. Validation, undo recording and (later) persistence all happen there.
+- **Commands are applied in one place,** the drain loop in `App::logic`. It hands each `DomainCommand` to the `Ledger`, which validates it and records its inverse for Undo. Persistence will happen there too.
 - **Edits that undo together are one Command.** If a user action needs two domain changes that must undo as one step, add a compound `DomainCommand` rather than sending two.
 - **Only domain Commands are undoable.** Navigation history belongs to Back/Forward.
 - **Rejected Commands come back as a `DomainError`.** A Dialog with a form stays open until its Command is applied, and shows the error inline. A confirm closes as its Command is sent, so its error goes to the Status bar, like any other.

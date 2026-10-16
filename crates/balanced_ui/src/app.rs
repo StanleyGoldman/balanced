@@ -62,12 +62,25 @@ impl App {
 
     fn apply(&mut self, ctx: &egui::Context, command: AppCommand) {
         match command {
-            AppCommand::Domain(command) => match self.ledger.apply(command) {
-                // TODO(#89): keep the inverse on the undo stack.
-                Ok(_applied) => {}
-                Err(error) => self.main_window.show_status(StatusMessage::Rejected(error)),
-            },
+            AppCommand::Domain(command) => {
+                if let Err(error) = self.ledger.apply(command) {
+                    self.main_window.show_status(StatusMessage::Rejected(error));
+                }
+            }
+            AppCommand::Undo => {
+                if let Err(error) = self.ledger.undo() {
+                    self.main_window.show_status(StatusMessage::Rejected(error));
+                }
+            }
+            AppCommand::Redo => {
+                if let Err(error) = self.ledger.redo() {
+                    self.main_window.show_status(StatusMessage::Rejected(error));
+                }
+            }
             AppCommand::Navigate(route) => self.main_window.navigate(route),
+            AppCommand::OpenSplitView(_) => {
+                self.main_window.show_status(StatusMessage::NotAvailableYet);
+            }
             AppCommand::CloseRegisterTab => self
                 .main_window
                 .change_register_tabs(RegisterTabs::close_current),
@@ -80,7 +93,7 @@ impl App {
             AppCommand::SwitchPane => self.main_window.switch_pane(ctx),
             AppCommand::OpenDialog(kind) => {
                 self.main_window
-                    .open_dialog(ctx, kind, &self.ledger.snapshot());
+                    .open_dialog(ctx, &kind, &self.ledger.snapshot());
             }
             AppCommand::ShowStatus(message) => self.main_window.show_status(message),
             AppCommand::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),

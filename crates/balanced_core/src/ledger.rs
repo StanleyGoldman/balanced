@@ -107,6 +107,8 @@ pub struct LedgerView {
     accounts: Vec<AccountSummary>,
     categories: Vec<Category>,
     net_worth: Money,
+    can_undo: bool,
+    can_redo: bool,
 }
 
 impl LedgerView {
@@ -126,6 +128,11 @@ impl LedgerView {
         self.accounts
             .iter()
             .find(|summary| summary.account.id() == id)
+    }
+
+    /// Every category, each after the category it sits under.
+    pub fn categories(&self) -> &[Category] {
+        &self.categories
     }
 
     /// The category with `id`, or `None` once it has been deleted.
@@ -186,6 +193,16 @@ impl LedgerView {
     pub fn net_worth(&self) -> Money {
         self.net_worth
     }
+
+    /// Whether there is a change Undo can reverse.
+    pub fn can_undo(&self) -> bool {
+        self.can_undo
+    }
+
+    /// Whether there is an undone change Redo can make again.
+    pub fn can_redo(&self) -> bool {
+        self.can_redo
+    }
 }
 
 /// Where a transaction is in a [`LedgerView`].
@@ -202,6 +219,10 @@ struct TransactionPosition {
 #[derive(Debug)]
 pub struct Ledger {
     view: Arc<LedgerView>,
+    /// The inverses of the changes Undo can reverse, the latest last.
+    undo_stack: Vec<DomainCommand>,
+    /// The inverses of the undone changes Redo can make again, the latest undone last.
+    redo_stack: Vec<DomainCommand>,
 }
 
 impl Ledger {
@@ -260,7 +281,11 @@ impl Ledger {
                 accounts: summaries,
                 categories,
                 net_worth,
+                can_undo: false,
+                can_redo: false,
             }),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         })
     }
 
@@ -269,10 +294,54 @@ impl Ledger {
         Arc::clone(&self.view)
     }
 
-    /// Applies `command`, publishing a new snapshot with the next generation, and
-    /// returns the Command that undoes it. A rejected Command leaves the ledger as it
-    /// was.
+    /// Applies `command`, publishing a new snapshot with the next generation, or
+    /// rejects it and leaves the ledger as it was. An applied change can be undone,
+    /// and nothing undone before it can be redone any more.
     pub fn apply(&mut self, command: DomainCommand) -> Result<Applied, DomainError> {
+        let applied = self.apply_unrecorded(command)?;
+        self.undo_stack.push(applied.inverse().clone());
+        self.redo_stack.clear();
+        self.publish_history();
+        Ok(applied)
+    }
+
+    /// Reverses the latest change not yet undone, publishing a new snapshot. Does
+    /// nothing when there is no change to undo. Fails, leaving the ledger and the
+    /// change to undo as they were, when the ledger refuses the reversal.
+    pub fn undo(&mut self) -> Result<(), DomainError> {
+        let Some(inverse) = self.undo_stack.last().cloned() else {
+            return Ok(());
+        };
+        let applied = self.apply_unrecorded(inverse)?;
+        self.undo_stack.pop();
+        self.redo_stack.push(applied.into_inverse());
+        self.publish_history();
+        Ok(())
+    }
+
+    /// Makes the latest undone change again, publishing a new snapshot. Does nothing
+    /// when there is no undone change to redo. Fails, leaving the ledger and the
+    /// change to redo as they were, when the ledger refuses the change.
+    pub fn redo(&mut self) -> Result<(), DomainError> {
+        let Some(command) = self.redo_stack.last().cloned() else {
+            return Ok(());
+        };
+        let applied = self.apply_unrecorded(command)?;
+        self.redo_stack.pop();
+        self.undo_stack.push(applied.into_inverse());
+        self.publish_history();
+        Ok(())
+    }
+
+    /// Tells the current snapshot whether Undo and Redo can act.
+    fn publish_history(&mut self) {
+        let view = Arc::make_mut(&mut self.view);
+        view.can_undo = !self.undo_stack.is_empty();
+        view.can_redo = !self.redo_stack.is_empty();
+    }
+
+    /// Applies `command` without recording it for Undo.
+    fn apply_unrecorded(&mut self, command: DomainCommand) -> Result<Applied, DomainError> {
         let inverse = match command {
             DomainCommand::EditTransaction { transaction, edit } => {
                 self.edit_transaction(transaction, edit)?
@@ -311,6 +380,11 @@ impl Ledger {
     ) -> Result<DomainCommand, DomainError> {
         let position = self.changeable(id)?;
         // Both indices were just found in this same view.
+        if let TransactionEdit::Category(category) = edit
+            && self.view.category(category).is_none()
+        {
+            return Err(DomainError::UnknownCategory { category });
+        }
         let old = &self.view.accounts[position.account].register[position.entry].transaction;
         let undo = old.undoing(&edit);
         let edited = old.edited(edit)?;
@@ -877,6 +951,39 @@ mod tests {
     }
 
     #[test]
+    fn undo_puts_a_deleted_transaction_back() {
+        let mut ledger = three_payments();
+        let before = register(&ledger);
+        let fresh_market = transaction(&ledger, "Fresh Market");
+        ledger
+            .apply(DomainCommand::DeleteTransaction {
+                transaction: fresh_market,
+            })
+            .unwrap();
+
+        ledger.undo().unwrap();
+
+        assert_eq!(register(&ledger), before);
+    }
+
+    #[test]
+    fn redo_deletes_an_undeleted_transaction_again() {
+        let mut ledger = three_payments();
+        let fresh_market = transaction(&ledger, "Fresh Market");
+        ledger
+            .apply(DomainCommand::DeleteTransaction {
+                transaction: fresh_market,
+            })
+            .unwrap();
+        let deleted = register(&ledger);
+        ledger.undo().unwrap();
+
+        ledger.redo().unwrap();
+
+        assert_eq!(register(&ledger), deleted);
+    }
+
+    #[test]
     fn deleting_a_deleted_transaction_is_rejected_and_changes_nothing() {
         let mut ledger = three_payments();
         let fresh_market = transaction(&ledger, "Fresh Market");
@@ -972,13 +1079,14 @@ mod tests {
         .ok();
     }
 
-    /// A ledger with one open account, Everyday, holding its opening balance and one
-    /// payment to Fresh Market numbered 1041 with a memo.
+    /// A ledger with the categories Groceries and Household, and one open account,
+    /// Everyday, holding its opening balance and one payment to Fresh Market in
+    /// Groceries, numbered 1041 with a memo.
     fn everyday() -> Ledger {
         let groceries = CategoryId::new(0);
         Ledger::with_accounts(
             usd_code(),
-            [NewCategory::new("Groceries")],
+            [NewCategory::new("Groceries"), NewCategory::new("Household")],
             [
                 account("Everyday", AccountKind::Checking, usd(dec!(100.00))).with_transactions([
                     NewTransaction::new(date(5), "Fresh Market", groceries, usd(dec!(-30.25)))
@@ -1180,6 +1288,125 @@ mod tests {
         assert_eq!(ledger.snapshot(), before);
     }
 
+    /// The `index`th transaction in the first account's register.
+    fn nth_transaction(ledger: &Ledger, index: usize) -> Transaction {
+        ledger.snapshot().accounts()[0].register()[index]
+            .transaction()
+            .clone()
+    }
+
+    #[test]
+    fn undo_puts_back_each_field_an_edit_changed() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        let before = nth_transaction(&ledger, 1);
+        for change in [
+            TransactionEdit::Number(None),
+            TransactionEdit::Payee("Corner Shop".into()),
+            TransactionEdit::Memo("Party food".into()),
+        ] {
+            ledger.apply(edit(fresh_market, change)).unwrap();
+        }
+
+        for _ in 0..3 {
+            ledger.undo().unwrap();
+        }
+
+        assert_eq!(nth_transaction(&ledger, 1), before);
+    }
+
+    #[test]
+    fn undo_undoes_the_latest_change_first() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Memo("A".into())))
+            .unwrap();
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Memo("B".into())))
+            .unwrap();
+
+        ledger.undo().unwrap();
+
+        assert_eq!(nth_transaction(&ledger, 1).memo(), "A");
+    }
+
+    #[test]
+    fn redo_makes_each_undone_edit_again() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        for change in [
+            TransactionEdit::Number(None),
+            TransactionEdit::Payee("Corner Shop".into()),
+            TransactionEdit::Memo("Party food".into()),
+        ] {
+            ledger.apply(edit(fresh_market, change)).unwrap();
+        }
+        let edited = nth_transaction(&ledger, 1);
+        for _ in 0..3 {
+            ledger.undo().unwrap();
+        }
+
+        for _ in 0..3 {
+            ledger.redo().unwrap();
+        }
+
+        assert_eq!(nth_transaction(&ledger, 1), edited);
+    }
+
+    #[test]
+    fn a_new_change_leaves_nothing_to_redo() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Memo("A".into())))
+            .unwrap();
+        ledger.undo().unwrap();
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Payee("B".into())))
+            .unwrap();
+        let before = ledger.snapshot();
+
+        ledger.redo().unwrap();
+
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    /// Whether the ledger's latest snapshot says Undo and Redo can act.
+    fn can_undo_and_redo(ledger: &Ledger) -> (bool, bool) {
+        let view = ledger.snapshot();
+        (view.can_undo(), view.can_redo())
+    }
+
+    #[test]
+    fn the_snapshot_says_whether_undo_and_redo_can_act() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        assert_eq!(can_undo_and_redo(&ledger), (false, false));
+
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Memo("A".into())))
+            .unwrap();
+        assert_eq!(can_undo_and_redo(&ledger), (true, false));
+
+        ledger.undo().unwrap();
+        assert_eq!(can_undo_and_redo(&ledger), (false, true));
+
+        ledger.redo().unwrap();
+        assert_eq!(can_undo_and_redo(&ledger), (true, false));
+    }
+
+    #[test]
+    fn undo_and_redo_with_nothing_to_do_leave_the_ledger_as_it_was() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+
+        ledger.undo().unwrap();
+        ledger.redo().unwrap();
+
+        assert_eq!(ledger.snapshot(), before);
+    }
+
     #[test]
     fn the_opening_balance_takes_a_memo() {
         let mut ledger = everyday();
@@ -1194,5 +1421,118 @@ mod tests {
             view.accounts()[0].register()[0].transaction().memo(),
             "Moved banks"
         );
+    }
+
+    #[test]
+    fn editing_a_category_shows_in_the_next_snapshot() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        let household = CategoryId::new(1);
+
+        ledger
+            .apply(edit(fresh_market, TransactionEdit::Category(household)))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        assert_eq!(
+            view.accounts()[0].register()[1].transaction().allocation(),
+            &Allocation::Category(household)
+        );
+    }
+
+    #[test]
+    fn the_opening_balance_takes_no_category() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+        let opening = transaction_id(&ledger, 0);
+
+        let result = ledger.apply(edit(opening, TransactionEdit::Category(CategoryId::new(0))));
+
+        assert_eq!(
+            result,
+            Err(DomainError::NotInOneCategory {
+                transaction: opening
+            })
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn a_split_transaction_takes_no_single_category() {
+        let groceries = CategoryId::new(0);
+        let mut ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(500.00))).with_transactions([
+                    NewTransaction::split(
+                        date(12),
+                        "Costco",
+                        vec![
+                            SplitLine::new(groceries, "Food", usd(dec!(-10.00))),
+                            SplitLine::new(groceries, "Snacks", usd(dec!(-5.00))),
+                        ],
+                    ),
+                ]),
+            ],
+        )
+        .unwrap();
+        let before = ledger.snapshot();
+        let costco = transaction_id(&ledger, 1);
+
+        let result = ledger.apply(edit(costco, TransactionEdit::Category(groceries)));
+
+        assert_eq!(
+            result,
+            Err(DomainError::NotInOneCategory {
+                transaction: costco
+            })
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn editing_to_an_unknown_category_is_rejected() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+        let fresh_market = transaction_id(&ledger, 1);
+        let unknown = CategoryId::new(99);
+
+        let result = ledger.apply(edit(fresh_market, TransactionEdit::Category(unknown)));
+
+        assert_eq!(
+            result,
+            Err(DomainError::UnknownCategory { category: unknown })
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn a_category_edit_is_undone_by_putting_the_old_category_back() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        let groceries = CategoryId::new(0);
+
+        let applied = ledger
+            .apply(edit(
+                fresh_market,
+                TransactionEdit::Category(CategoryId::new(1)),
+            ))
+            .unwrap();
+
+        assert_eq!(
+            applied.inverse(),
+            &edit(fresh_market, TransactionEdit::Category(groceries))
+        );
+    }
+
+    #[test]
+    fn the_categories_are_listed_in_the_order_they_were_added() {
+        let ledger = everyday();
+
+        let view = ledger.snapshot();
+
+        let names: Vec<&str> = view.categories().iter().map(Category::name).collect();
+        assert_eq!(names, ["Groceries", "Household"]);
     }
 }

@@ -166,12 +166,13 @@ fn left_and_right_move_between_menus_and_wrap() {
     press(&mut harness, Modifiers::NONE, Key::F10);
 
     let mut seen = Vec::new();
-    for key in [Key::ArrowRight, Key::ArrowLeft, Key::ArrowLeft] {
+    for key in [Key::ArrowLeft, Key::ArrowRight] {
         press(&mut harness, Modifiers::NONE, key);
         seen.push(focused(&harness).unwrap_or_default());
     }
 
-    assert_eq!(seen, ["Switch Pane F6", "Quit Ctrl+Q", "About Balanced"]);
+    // Left from File wraps to Help, and Right from Help wraps back to File.
+    assert_eq!(seen, ["About Balanced", "Quit Ctrl+Q"]);
 }
 
 #[test]

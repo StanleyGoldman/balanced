@@ -96,9 +96,12 @@ impl MainWindow {
         self.tab == TopLevelTab::Accounts && self.registers.len() > 0
     }
 
-    /// Whether `action` can act now. Its menu item is disabled while it can't.
-    fn can_act(&self, action: UserAction) -> bool {
+    /// Whether `action` can act now on `view`. Its menu item is disabled while it
+    /// can't.
+    fn can_act(&self, action: UserAction, view: &LedgerView) -> bool {
         match action {
+            UserAction::Undo => view.can_undo(),
+            UserAction::Redo => view.can_redo(),
             UserAction::CloseRegisterTab
             | UserAction::NewTransaction
             | UserAction::DeleteTransaction => self.shows_registers(),
@@ -154,7 +157,12 @@ impl MainWindow {
 
     /// Opens the Dialog `kind` over `view`, unless a Dialog is already open or there is
     /// nothing for it to act on.
-    pub(crate) fn open_dialog(&mut self, ctx: &egui::Context, kind: DialogKind, view: &LedgerView) {
+    pub(crate) fn open_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        kind: &DialogKind,
+        view: &LedgerView,
+    ) {
         if self.dialog_open() {
             return;
         }
@@ -177,6 +185,10 @@ impl MainWindow {
                     transaction: row.id(),
                 };
                 self.delete_transaction = Some(OpenDialog::new(ctx, form));
+            }
+            DialogKind::NewCategory { .. } => {
+                // TODO(#95): open the New Category Dialog, prefilled with the name.
+                tracing::debug!("the New Category Dialog was asked for");
             }
         }
     }
@@ -240,7 +252,7 @@ impl MainWindow {
         Panel::top("menu_bar")
             .frame(theme.chrome_frame())
             .show(ui, |ui| {
-                let drawn = self.menu_bar(ui, i18n, commands);
+                let drawn = self.menu_bar(ui, i18n, commands, view);
                 self.menu_nav.drawn(ui.ctx(), drawn);
             });
         Panel::bottom("status_bar")
@@ -386,30 +398,33 @@ impl MainWindow {
         ui: &mut egui::Ui,
         i18n: &Localizer,
         commands: &CommandSender,
+        view: &LedgerView,
     ) -> DrawnMenus {
+        let item = |ui: &mut egui::Ui, drawn: &mut DrawnMenus, action| {
+            self.menu_item(ui, i18n, commands, view, drawn, action);
+        };
         let mut drawn = DrawnMenus::default();
         MenuBar::new().ui(ui, |ui| {
             let file = ui.menu_button(fl!(i18n, "menu-file"), |ui| {
-                self.menu_item(ui, i18n, commands, &mut drawn, UserAction::CloseRegisterTab);
+                item(ui, &mut drawn, UserAction::CloseRegisterTab);
                 ui.separator();
-                self.menu_item(ui, i18n, commands, &mut drawn, UserAction::Quit);
+                item(ui, &mut drawn, UserAction::Quit);
             });
             drawn.note_menu(&file.response);
-            let view = ui.menu_button(fl!(i18n, "menu-view"), |ui| {
-                self.menu_item(ui, i18n, commands, &mut drawn, UserAction::NextRegisterTab);
-                self.menu_item(
-                    ui,
-                    i18n,
-                    commands,
-                    &mut drawn,
-                    UserAction::PreviousRegisterTab,
-                );
-                ui.separator();
-                self.menu_item(ui, i18n, commands, &mut drawn, UserAction::SwitchPane);
+            let edit = ui.menu_button(fl!(i18n, "menu-edit"), |ui| {
+                item(ui, &mut drawn, UserAction::Undo);
+                item(ui, &mut drawn, UserAction::Redo);
             });
-            drawn.note_menu(&view.response);
+            drawn.note_menu(&edit.response);
+            let view_menu = ui.menu_button(fl!(i18n, "menu-view"), |ui| {
+                item(ui, &mut drawn, UserAction::NextRegisterTab);
+                item(ui, &mut drawn, UserAction::PreviousRegisterTab);
+                ui.separator();
+                item(ui, &mut drawn, UserAction::SwitchPane);
+            });
+            drawn.note_menu(&view_menu.response);
             let help = ui.menu_button(fl!(i18n, "menu-help"), |ui| {
-                self.menu_item(ui, i18n, commands, &mut drawn, UserAction::About);
+                item(ui, &mut drawn, UserAction::About);
             });
             drawn.note_menu(&help.response);
         });
@@ -417,12 +432,13 @@ impl MainWindow {
     }
 
     /// The menu item for `action`, with its Shortcut text, disabled while the action
-    /// can't act.
+    /// can't act on `view`.
     fn menu_item(
         &self,
         ui: &mut egui::Ui,
         i18n: &Localizer,
         commands: &CommandSender,
+        view: &LedgerView,
         drawn: &mut DrawnMenus,
         action: UserAction,
     ) {
@@ -430,7 +446,7 @@ impl MainWindow {
         if let Some(chord) = keymap::chord(action) {
             button = button.shortcut_text(keymap::shortcut_text(chord, i18n, ui.ctx().os()));
         }
-        let item = ui.add_enabled(self.can_act(action), button);
+        let item = ui.add_enabled(self.can_act(action, view), button);
         drawn.note_item(&item);
         if item.clicked() {
             commands.send(action.command());

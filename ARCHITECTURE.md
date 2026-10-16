@@ -31,7 +31,7 @@ A persistence crate, `balanced_store`, comes later, below `balanced_core`.
 - **`balanced_core` and `balanced_i18n` don't depend on egui or eframe.** `deny.toml` bans both crates, and lists in `wrappers` the only crates allowed to depend on them directly.
 - **`balanced_core` and `balanced_i18n` are siblings.** Neither depends on the other. `balanced_ui` formats core values through `balanced_i18n`.
 - **Dependencies point down only:** `balanced` → `balanced_ui` → {`balanced_core`, `balanced_i18n`}. When a second layer rule appears (for example, for `balanced_store`), add an `xtask` layer check over `cargo metadata`.
-- **The domain changes only inside `Ledger::apply`.** No UI code holds `&mut` access to domain data.
+- **The domain changes only inside `Ledger::apply`, `Ledger::undo` and `Ledger::redo`.** No UI code holds `&mut` access to domain data.
 - **`balanced_prototype_harness` stays out of the app.** Only `examples/` take it, as a dev-dependency. No crate lists it under `[dependencies]`.
 - **Only the binary installs a tracing subscriber.** `anyhow` appears only in `balanced` and `xtask`.
 - **Colours are built only in the theme module.**

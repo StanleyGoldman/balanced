@@ -3,6 +3,7 @@
 mod account_bar;
 mod accounts_model;
 mod app;
+mod combobox;
 mod command;
 mod dialog;
 mod formatted_amount;

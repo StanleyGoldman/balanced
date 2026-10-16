@@ -16,6 +16,8 @@ menu-file = File
 menu-file-close-register-tab = Close { -register } Tab
 menu-file-quit = Quit
 menu-edit = Edit
+menu-edit-undo = Undo
+menu-edit-redo = Redo
 menu-view = View
 menu-view-next-register-tab = Next { -register } Tab
 menu-view-previous-register-tab = Previous { -register } Tab
@@ -91,6 +93,10 @@ register-opening-balance = Opening Balance
 register-actions = Actions
 # The Actions menu item that asks to delete the row's transaction.
 register-actions-delete = Delete…
+# The ⏷ button beside the Category cell being edited, which lists every category.
+register-category-list = Show all categories
+# The row of the Category list that creates the category typed in the cell.
+register-create-category = Create "{ $name }"…
 register-new-transaction = + Transaction
 # Beside a closed account's name, above its Register.
 register-closed-read-only = Closed — read-only
@@ -111,6 +117,7 @@ dialog-delete-transaction-delete = Delete
 
 status-about = { -brand-name } { $version }
 status-not-available-yet = Not available yet
+status-no-such-category = No category has that name. Pick one from the list, or create it.
 status-account-closed = This account is closed, so its transactions can't be changed.
 # A change to a transaction that no longer exists, such as one just deleted.
 status-unknown-transaction = That transaction no longer exists.
@@ -118,3 +125,5 @@ status-opening-balance-payee = The opening balance has no payee.
 # A change to an account that no longer exists, such as one just deleted.
 status-unknown-account = That account no longer exists.
 status-amount-too-large = That change would make a balance too large to hold.
+status-not-in-one-category = Only a transaction in one category can change its category.
+status-unknown-category = That category no longer exists.

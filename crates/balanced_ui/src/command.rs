@@ -2,7 +2,7 @@
 
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use balanced_core::{DomainCommand, DomainError};
+use balanced_core::{DomainCommand, DomainError, TransactionId};
 use balanced_i18n::Localizer;
 use eframe::egui;
 
@@ -15,8 +15,16 @@ use crate::route::Route;
 pub(crate) enum AppCommand {
     /// Apply a change to the ledger. A rejected change shows in the Status bar.
     Domain(DomainCommand),
+    /// Reverse the latest ledger change not yet undone. A refused reversal shows in
+    /// the Status bar.
+    Undo,
+    /// Make the latest undone ledger change again. A refused change shows in the
+    /// Status bar.
+    Redo,
     /// Show `Route` in the Main view.
     Navigate(Route),
+    /// Show the split lines of a split transaction.
+    OpenSplitView(TransactionId),
     /// Close the current Register tab.
     CloseRegisterTab,
     /// Make the Register tab right of the current one current, wrapping to the first.
@@ -34,12 +42,14 @@ pub(crate) enum AppCommand {
     Quit,
 }
 
-/// A Dialog the Main window can open.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A Dialog the Main window can open, with what it opens prefilled with.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DialogKind {
     /// The confirm for deleting the Register's selected transaction. Nothing opens
     /// while no transaction is selected, or while its account is closed.
     DeleteTransaction,
+    /// Create a category, starting from the name typed in a Category cell.
+    NewCategory { name: String },
 }
 
 /// A Status bar message.
@@ -49,6 +59,8 @@ pub(crate) enum StatusMessage {
     About,
     /// The answer to a command whose feature isn't built yet.
     NotAvailableYet,
+    /// Why a Category cell refused its typed text: no category has that name.
+    NoSuchCategory,
     /// Why the ledger refused a change.
     Rejected(DomainError),
 }
@@ -58,6 +70,7 @@ impl StatusMessage {
         match self {
             Self::About => fl!(i18n, "status-about", version = env!("CARGO_PKG_VERSION")),
             Self::NotAvailableYet => fl!(i18n, "status-not-available-yet"),
+            Self::NoSuchCategory => fl!(i18n, "status-no-such-category"),
             Self::Rejected(error) => match error {
                 DomainError::AccountClosed { .. } => fl!(i18n, "status-account-closed"),
                 DomainError::UnknownTransaction { .. } => {
@@ -68,6 +81,10 @@ impl StatusMessage {
                 }
                 DomainError::UnknownAccount { .. } => fl!(i18n, "status-unknown-account"),
                 DomainError::Money(_) => fl!(i18n, "status-amount-too-large"),
+                DomainError::NotInOneCategory { .. } => {
+                    fl!(i18n, "status-not-in-one-category")
+                }
+                DomainError::UnknownCategory { .. } => fl!(i18n, "status-unknown-category"),
             },
         }
     }

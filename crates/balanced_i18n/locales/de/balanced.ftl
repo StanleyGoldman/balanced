@@ -9,6 +9,8 @@
 
 menu-file = Datei
 menu-edit = Bearbeiten
+menu-edit-undo = Rückgängig
+menu-edit-redo = Wiederherstellen
 menu-view = Ansicht
 menu-tools = Extras
 menu-help = Hilfe
