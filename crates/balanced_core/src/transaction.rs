@@ -101,6 +101,15 @@ impl Transaction {
         self.amount
     }
 
+    /// The edit that puts back the field `edit` changes, as it is now.
+    pub(crate) fn undoing(&self, edit: &TransactionEdit) -> TransactionEdit {
+        match edit {
+            TransactionEdit::Number(_) => TransactionEdit::Number(self.number.clone()),
+            TransactionEdit::Payee(_) => TransactionEdit::Payee(self.payee.clone()),
+            TransactionEdit::Memo(_) => TransactionEdit::Memo(self.memo.clone()),
+        }
+    }
+
     /// The transaction with `edit` made. Fails when the edit gives the opening balance
     /// a payee.
     pub(crate) fn edited(&self, edit: TransactionEdit) -> Result<Self, DomainError> {

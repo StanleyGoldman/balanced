@@ -700,3 +700,88 @@ fn the_register_leaves_ctrl_tab_to_the_rest_of_the_app() {
 
     assert_eq!(input.events, [ctrl_tab]);
 }
+
+#[test]
+fn ctrl_z_undoes_a_cell_edit_and_ctrl_y_redoes_it() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
+    harness.get_by_role_and_label(Role::Cell, "Fresh Market");
+
+    press(&mut harness, Modifiers::COMMAND, Key::Y);
+    harness.get_by_role_and_label(Role::Cell, "Corner Shop");
+}
+
+#[test]
+fn ctrl_shift_z_redoes_too() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
+
+    press(&mut harness, Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+
+    harness.get_by_role_and_label(Role::Cell, "Corner Shop");
+}
+
+#[test]
+fn ctrl_z_during_a_cell_edit_undoes_typing_not_the_ledger() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    click_cell(&mut harness, "Corner Shop");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    type_text(&mut harness, " Downtown");
+
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
+
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Corner Shop"));
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+    harness.get_by_role_and_label(Role::Cell, "Corner Shop");
+}
+
+/// Whether the Edit menu's Undo and Redo items are disabled, opening the menu to
+/// look and closing it again.
+fn undo_redo_disabled(harness: &mut Harness<'static, App>) -> (bool, bool) {
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    let disabled = |label| {
+        harness
+            .get_by_role_and_label(Role::Button, label)
+            .accesskit_node()
+            .is_disabled()
+    };
+    let items = (disabled("Undo Ctrl+Z"), disabled("Redo Ctrl+Y"));
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    items
+}
+
+#[test]
+fn the_edit_menu_enables_undo_and_redo_only_when_they_can_act() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    assert_eq!(undo_redo_disabled(&mut harness), (true, true));
+
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    assert_eq!(undo_redo_disabled(&mut harness), (false, true));
+
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Undo Ctrl+Z")
+        .click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Cell, "Fresh Market");
+    assert_eq!(undo_redo_disabled(&mut harness), (true, false));
+}

@@ -15,6 +15,12 @@ use crate::route::Route;
 pub(crate) enum AppCommand {
     /// Apply a change to the ledger. A rejected change shows in the Status bar.
     Domain(DomainCommand),
+    /// Reverse the latest ledger change not yet undone. A refused reversal shows in
+    /// the Status bar.
+    Undo,
+    /// Make the latest undone ledger change again. A refused change shows in the
+    /// Status bar.
+    Redo,
     /// Show `Route` in the Main view.
     Navigate(Route),
     /// Close the current Register tab.

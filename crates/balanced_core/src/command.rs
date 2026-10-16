@@ -14,6 +14,28 @@ pub enum DomainCommand {
     },
 }
 
+/// What [`Ledger::apply`](crate::Ledger::apply) did: the change it made, told by the
+/// Command that reverses it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Applied {
+    inverse: DomainCommand,
+}
+
+impl Applied {
+    pub(crate) fn new(inverse: DomainCommand) -> Self {
+        Self { inverse }
+    }
+
+    /// The Command that puts the ledger back as it was before the change.
+    pub fn inverse(&self) -> &DomainCommand {
+        &self.inverse
+    }
+
+    pub(crate) fn into_inverse(self) -> DomainCommand {
+        self.inverse
+    }
+}
+
 /// The new value of one field of a transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransactionEdit {

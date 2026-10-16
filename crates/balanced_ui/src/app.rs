@@ -65,6 +65,16 @@ impl App {
                     self.main_window.show_status(StatusMessage::Rejected(error));
                 }
             }
+            AppCommand::Undo => {
+                if let Err(error) = self.ledger.undo() {
+                    self.main_window.show_status(StatusMessage::Rejected(error));
+                }
+            }
+            AppCommand::Redo => {
+                if let Err(error) = self.ledger.redo() {
+                    self.main_window.show_status(StatusMessage::Rejected(error));
+                }
+            }
             AppCommand::Navigate(route) => self.main_window.navigate(route),
             AppCommand::CloseRegisterTab => self
                 .main_window
