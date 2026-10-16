@@ -176,3 +176,38 @@ fn hidden_accounts_are_left_out_but_count_in_net_worth() {
     // The stub's Net Worth with the hidden Holiday Fund's $800.00 in it.
     harness.get_by_role_and_label(Role::Label, "$288,497.71");
 }
+
+/// The text of every `Label` on screen, which holds a tooltip's text as its value.
+fn label_values(harness: &Harness<'static, App>) -> Vec<String> {
+    harness
+        .query_all_by_role(Role::Label)
+        .filter_map(|label| label.accesskit_node().value())
+        .collect()
+}
+
+#[test]
+fn hovering_an_account_whose_name_is_cut_short_shows_the_whole_name() {
+    let mut harness = app();
+
+    // "Household Checking" doesn't fit beside its balance in the default width.
+    harness
+        .get_by_role_and_label(Role::Button, "Household Checking")
+        .hover();
+    harness.run();
+
+    assert!(
+        label_values(&harness).contains(&"Household Checking".to_owned()),
+        "{:?}",
+        label_values(&harness)
+    );
+}
+
+#[test]
+fn hovering_an_account_whose_name_fits_shows_no_tooltip() {
+    let mut harness = app();
+
+    harness.get_by_role_and_label(Role::Button, "Car").hover();
+    harness.run();
+
+    assert!(!label_values(&harness).contains(&"Car".to_owned()));
+}

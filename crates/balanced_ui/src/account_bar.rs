@@ -494,7 +494,8 @@ fn paint_centred(ui: &egui::Ui, galley: Arc<Galley>, left: f32, row: Rect, color
 
 /// A section heading: a fold triangle and the section's name, the full width of the
 /// Account bar, with the section's `total` at its right when there is one. AccessKit
-/// reads the total as the heading's value.
+/// reads the total as the heading's value. A name cut short to fit shows whole in a
+/// tooltip.
 fn heading(
     ui: &mut egui::Ui,
     theme: &Theme,
@@ -517,6 +518,7 @@ fn heading(
             .accesskit_node_builder(response.id, |node| node.set_value(total.text()));
     }
     let rect = response.rect;
+    let mut elided = false;
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact(&response);
         if response.hovered() {
@@ -544,15 +546,20 @@ fn heading(
             paint_centred(ui, total_galley, total_left, rect, visuals.text_color());
             text_right = total_left - gap;
         }
-        let galley = WidgetText::from(RichText::new(label).strong()).into_galley(
+        let galley = WidgetText::from(RichText::new(&label).strong()).into_galley(
             ui,
             Some(TextWrapMode::Truncate),
             (text_right - text_left).max(0.0),
             TextStyle::Body,
         );
+        elided = galley.elided;
         paint_centred(ui, galley, text_left, rect, visuals.text_color());
     }
-    response
+    if elided {
+        response.on_hover_text(label)
+    } else {
+        response
+    }
 }
 
 /// ▾ when the section is open and ▸ when it is folded, filling `icon`. The default
@@ -566,7 +573,8 @@ fn fold_triangle(icon: Rect, fold: Fold, color: Color32) -> Shape {
 }
 
 /// An account row: the name on the left and the balance on the right, indented under
-/// its heading. The whole row is one click target, and its text can't be selected.
+/// its heading. The whole row is one click target, and its text can't be selected. A
+/// name cut short to fit shows whole in a tooltip.
 fn account_row(
     ui: &mut egui::Ui,
     theme: &Theme,
@@ -612,7 +620,12 @@ fn account_row(
         (balance_left - gap.x - indent).max(0.0),
         TextStyle::Body,
     );
+    let elided = name_galley.elided;
     paint_centred(ui, name_galley, indent, rect, text_color);
     paint_centred(ui, balance_galley, balance_left, rect, text_color);
-    response
+    if elided {
+        response.on_hover_text(row.name())
+    } else {
+        response
+    }
 }

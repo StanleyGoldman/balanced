@@ -154,3 +154,36 @@ fn the_draft_row_reads_a_date_and_an_amount_typed_the_german_way() {
         ]
     );
 }
+
+#[test]
+fn hovering_a_heading_cut_short_beside_its_total_shows_the_whole_heading() {
+    let mut harness = app();
+    // The Account bar's Preferences fall back to en-US text, with its terms.
+    for (role, label) in [
+        (Role::Button, "Extras"),
+        (Role::Button, "Einstellungen …"),
+        (Role::Tab, "Account bar"),
+        (Role::CheckBox, "Show group totals"),
+        (Role::Button, "OK"),
+    ] {
+        harness.get_by_role_and_label(role, label).click();
+        harness.run();
+    }
+
+    // The tab of the same name has no value; the heading holds its total.
+    harness
+        .query_all_by_label("Anlagen & Verbindlichkeiten")
+        .find(|node| node.accesskit_node().value().is_some())
+        .expect("the Account bar shows the Property & Debt heading with its total")
+        .hover();
+    harness.run();
+
+    let labels: Vec<String> = harness
+        .query_all_by_role(Role::Label)
+        .filter_map(|label| label.accesskit_node().value())
+        .collect();
+    assert!(
+        labels.contains(&"Anlagen & Verbindlichkeiten".to_owned()),
+        "{labels:?}"
+    );
+}
