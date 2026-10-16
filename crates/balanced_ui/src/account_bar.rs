@@ -7,37 +7,68 @@ use std::sync::Arc;
 use balanced_core::AccountId;
 use balanced_i18n::Localizer;
 use eframe::egui::{
-    self, CentralPanel, Color32, Frame, Galley, Panel, Rect, Response, RichText, ScrollArea, Sense,
-    Shape, Stroke, TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
+    self, CentralPanel, Color32, Frame, Galley, Id, Panel, PanelState, Rect, Response, RichText,
+    ScrollArea, Sense, Shape, Stroke, TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType,
+    pos2, vec2,
 };
 
 use crate::accounts_model::{AccountRow, AccountsModel, Section};
 use crate::command::{AppCommand, CommandSender};
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
+use crate::layout::Layout;
 use crate::route::{OpenIn, Route};
 use crate::theme::Theme;
 
-/// Which Account bar sections are folded. None of it outlives the run yet: every run
-/// starts with only Closed folded.
-// TODO(#102): remember the folded sections between runs.
+/// Whether the Account bar shows its accounts or is folded to a narrow rail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AccountBarFold {
+    Open,
+    Rail,
+}
+
+/// The Account bar's width, whether it is folded to a rail, and which of its sections
+/// are folded. The saved [`Layout`] carries all three between runs.
 #[derive(Debug)]
 pub(crate) struct AccountBar {
+    width: f32,
+    fold: AccountBarFold,
     folded: HashSet<Section>,
 }
 
-impl Default for AccountBar {
-    fn default() -> Self {
+impl AccountBar {
+    /// The Account bar's width on a first run, and the narrowest and widest it gets.
+    pub(crate) const DEFAULT_WIDTH: f32 = 200.0;
+    pub(crate) const MIN_WIDTH: f32 = 140.0;
+    pub(crate) const MAX_WIDTH: f32 = 480.0;
+
+    /// The Account bar as `layout` left it.
+    pub(crate) fn new(layout: &Layout) -> Self {
         Self {
-            folded: HashSet::from([Section::Closed]),
+            width: layout.account_bar_width(),
+            fold: layout.account_bar_fold(),
+            folded: layout.folded_sections(),
         }
     }
-}
 
-impl AccountBar {
-    /// Draws the Account bar from `model`, highlighting `selected`. Clicking an
-    /// account opens it in the current Register, and right-clicking it offers its
-    /// commands. Clicking a heading folds or unfolds its section.
+    /// The Account bar's width while open, which it keeps while folded to a rail.
+    pub(crate) fn width(&self) -> f32 {
+        self.width
+    }
+
+    pub(crate) fn fold(&self) -> AccountBarFold {
+        self.fold
+    }
+
+    /// The sections whose headings are folded.
+    pub(crate) fn folded_sections(&self) -> &HashSet<Section> {
+        &self.folded
+    }
+
+    /// Draws the Account bar from `model`, highlighting `selected`, or the rail it
+    /// folds to. Clicking an account opens it in the current Register, and
+    /// right-clicking it offers its commands. Clicking a heading folds or unfolds its
+    /// section. Dragging the Account bar's edge resizes it.
     pub(crate) fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -47,18 +78,77 @@ impl AccountBar {
         model: &AccountsModel,
         selected: Option<AccountId>,
     ) {
-        Panel::left("account_bar")
+        let id = Id::new("account_bar");
+        let rail = Panel::left("account_bar_rail")
             .frame(theme.chrome_frame())
+            .resizable(false)
+            .exact_size(RAIL_WIDTH);
+        let bar = Panel::left(id)
+            .frame(theme.chrome_frame())
+            .default_size(self.width)
+            .size_range(Self::MIN_WIDTH..=Self::MAX_WIDTH);
+        let mut open = self.fold == AccountBarFold::Open;
+        let mut fold_clicked = false;
+        Panel::show_switched(ui, &mut open, rail, bar, |ui, expanded| {
+            fold_clicked = if expanded {
+                self.open_bar(ui, i18n, theme, commands, model, selected)
+            } else {
+                Self::rail(ui, i18n)
+            };
+        });
+        if fold_clicked {
+            open = !open;
+        }
+        self.fold = if open {
+            AccountBarFold::Open
+        } else {
+            AccountBarFold::Rail
+        };
+        // The panel keeps its width before a drag until the drag ends.
+        if let Some(state) = PanelState::load(ui.ctx(), id) {
+            self.width = state.size().x;
+        }
+    }
+
+    /// The open Account bar: the fold button, the sections and the Net Worth footer.
+    /// Returns whether the fold button was clicked.
+    fn open_bar(
+        &mut self,
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        theme: &Theme,
+        commands: &CommandSender,
+        model: &AccountsModel,
+        selected: Option<AccountId>,
+    ) -> bool {
+        let fold = Panel::top("account_bar_header")
+            .frame(Frame::NONE)
+            .show_separator_line(false)
             .show(ui, |ui| {
-                Panel::bottom("net_worth")
-                    .frame(theme.footer_frame())
-                    .show(ui, |ui| Self::net_worth(ui, i18n, theme, model.net_worth()));
-                CentralPanel::default().frame(Frame::NONE).show(ui, |ui| {
-                    ScrollArea::vertical().show(ui, |ui| {
-                        self.sections(ui, i18n, theme, commands, model, selected);
-                    });
-                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    rail_button(ui, fl!(i18n, "account-bar-fold"), Direction::Left).clicked()
+                })
+                .inner
+            })
+            .inner;
+        Panel::bottom("net_worth")
+            .frame(theme.footer_frame())
+            .show(ui, |ui| Self::net_worth(ui, i18n, theme, model.net_worth()));
+        CentralPanel::default().frame(Frame::NONE).show(ui, |ui| {
+            ScrollArea::vertical().show(ui, |ui| {
+                self.sections(ui, i18n, theme, commands, model, selected);
             });
+        });
+        fold
+    }
+
+    /// The rail the Account bar folds to: only the button that opens it again.
+    /// Returns whether that button was clicked.
+    fn rail(ui: &mut egui::Ui, i18n: &Localizer) -> bool {
+        ui.vertical_centered(|ui| {
+            rail_button(ui, fl!(i18n, "account-bar-unfold"), Direction::Right).clicked()
+        })
+        .inner
     }
 
     fn sections(
@@ -128,6 +218,42 @@ fn account_menu(ui: &mut egui::Ui, i18n: &Localizer, commands: &CommandSender, a
     {
         open(commands, account, OpenIn::NewTab);
     }
+}
+
+/// The width of the rail the Account bar folds to.
+const RAIL_WIDTH: f32 = 28.0;
+
+/// Which way a rail button's triangle points.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Direction {
+    Left,
+    Right,
+}
+
+/// A square button labelled `label` for AccessKit, showing a triangle pointing
+/// `direction`. The triangle is painted, as the fold triangles are.
+fn rail_button(ui: &mut egui::Ui, label: String, direction: Direction) -> Response {
+    let size = ui.spacing().interact_size.y;
+    let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::click());
+    let enabled = ui.is_enabled();
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, &label));
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&response);
+        if response.hovered() || response.is_pointer_button_down_on() {
+            ui.painter().rect_filled(rect, 0.0, visuals.weak_bg_fill);
+        }
+        let icon = Rect::from_center_size(rect.center(), vec2(size / 3.0, size / 2.0));
+        let points = match direction {
+            Direction::Left => vec![icon.right_top(), icon.left_center(), icon.right_bottom()],
+            Direction::Right => vec![icon.left_top(), icon.right_center(), icon.left_bottom()],
+        };
+        ui.painter().add(Shape::convex_polygon(
+            points,
+            visuals.text_color(),
+            Stroke::NONE,
+        ));
+    }
+    response.on_hover_text(label)
 }
 
 /// Whether a section shows its accounts.

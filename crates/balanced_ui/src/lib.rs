@@ -7,6 +7,7 @@ mod command;
 mod formatted_amount;
 mod i18n;
 mod keymap;
+mod layout;
 mod main_window;
 mod register;
 mod register_model;
