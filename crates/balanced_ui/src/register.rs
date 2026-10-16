@@ -4,16 +4,16 @@
 use std::collections::{BTreeMap, HashMap};
 
 use balanced_core::{
-    Account, AccountId, AccountSummary, DomainCommand, DomainError, LedgerView, TransactionEdit,
-    TransactionId,
+    Account, AccountId, AccountSummary, CurrencyCode, DomainCommand, DomainError, LedgerView,
+    Money, TransactionEdit, TransactionId,
 };
-use balanced_i18n::Localizer;
+use balanced_i18n::{AmountParseError, AmountReader, AmountStyle, Calculation, Localizer};
 use eframe::egui::accesskit::{self, Role};
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
 use eframe::egui::{
-    self, Align, Area, Button, CursorIcon, Event, EventFilter, Frame, Id, Key, Layout, Margin,
-    Modifiers, Order, Popup, Rect, Response, ScrollArea, Sense, Shape, Stroke, StrokeKind,
+    self, Align, Area, Button, CursorIcon, Event, EventFilter, Frame, Id, Key, Label, Layout,
+    Margin, Modifiers, Order, Popup, Rect, Response, ScrollArea, Sense, Shape, Stroke, StrokeKind,
     TextEdit, TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, TableBody, TableBuilder};
@@ -22,6 +22,7 @@ use icu_calendar::{Date, Iso};
 use crate::combobox::{FieldChoices, ListRow};
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::date_field::{self, DateEdit};
+use crate::formatted_amount::i18n_currency;
 use crate::i18n::fl;
 use crate::register_model::{RegisterModel, RegisterRow, RegisterSort, SortDirection, SortKey};
 use crate::theme::Theme;
@@ -164,38 +165,20 @@ impl RegisterColumn {
         }
     }
 
-    /// The field the column's cell on `row` edits as text, or `None` when the cell
-    /// can't be edited as text. The opening balance's Payee cell shows a caption, not a
-    /// payee, and only a row in one category edits its Category cell.
-    fn text_field(self, row: &RegisterRow) -> Option<TextField> {
-        match self {
-            Self::Number => Some(TextField::Number),
-            Self::Payee if !row.is_opening_balance() => Some(TextField::Payee),
-            Self::Category if row.category_id().is_some() => Some(TextField::Category),
-            Self::Memo => Some(TextField::Memo),
-            // The Date cell edits in the segmented date field: see `field`.
-            // TODO(#90): edit Amount in the amount field.
-            Self::Payee
-            | Self::Date
-            | Self::Category
-            | Self::Amount
-            | Self::Balance
-            | Self::Actions => None,
-        }
-    }
-
     /// The field the column's cell on `row` edits, or `None` when the cell can't be
-    /// edited.
-    fn field(self, row: &RegisterRow) -> Option<Field> {
+    /// edited. The opening balance's Payee cell shows a caption, not a payee, only a
+    /// row in one category edits its Category cell, and a split transaction's amount
+    /// is the sum of its lines.
+    fn field(self, row: &RegisterRow) -> Option<CellField> {
+        let text = |field| Some(CellField::Text(field));
         match self {
-            Self::Date => Some(Field::Date),
-            Self::Number
-            | Self::Payee
-            | Self::Category
-            | Self::Memo
-            | Self::Amount
-            | Self::Balance
-            | Self::Actions => self.text_field(row).map(Field::Text),
+            Self::Date => Some(CellField::Date),
+            Self::Number => text(TextField::Number),
+            Self::Payee if !row.is_opening_balance() => text(TextField::Payee),
+            Self::Category if row.category_id().is_some() => text(TextField::Category),
+            Self::Memo => text(TextField::Memo),
+            Self::Amount if !row.is_split() => Some(CellField::Amount),
+            Self::Payee | Self::Category | Self::Amount | Self::Balance | Self::Actions => None,
         }
     }
 
@@ -322,10 +305,13 @@ struct Insets {
 
 /// A transaction field a Register cell edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Field {
+enum CellField {
     /// The date, in the segmented date field.
     Date,
+    /// Plain text, or text naming an entry.
     Text(TextField),
+    /// The amount, typed as written or as arithmetic.
+    Amount,
 }
 
 /// A transaction field a Register cell edits as text.
@@ -418,16 +404,54 @@ enum Move {
 
 /// The cell being edited, the field it edits, its unsaved text, and its combobox list
 /// while that is open.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 struct CellEdit {
     cell: CellAddress,
-    field: TextField,
+    field: EditField,
     text: String,
     list: Option<ListState>,
+    /// Why the last commit was refused, shown in a bubble below the cell until the
+    /// text changes.
+    error: Option<AmountParseError>,
+    /// The result of the arithmetic typed so far, for the bubble below the cell, or
+    /// `None` while the text is no arithmetic that can be read.
+    preview: Option<Preview>,
+}
+
+/// The result of typed arithmetic, as the bubble below the cell shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Preview {
+    /// The result, formatted with its currency's symbol.
+    amount: String,
+    /// Whether the result was rounded to the currency's decimal places, which the
+    /// bubble marks with `~`.
+    rounded: bool,
+}
+
+/// The field a cell edit saves its text in.
+#[derive(Debug, Clone)]
+enum EditField {
+    Text(TextField),
+    /// The amount, in the transaction's currency, read with the formatting locale the
+    /// edit started in.
+    Amount {
+        reader: AmountReader,
+        currency: CurrencyCode,
+    },
+}
+
+impl EditField {
+    /// Whether the field offers a combobox list of entries as you type.
+    fn offers_list(&self) -> bool {
+        match self {
+            Self::Text(field) => field.offers_list(),
+            Self::Amount { .. } => false,
+        }
+    }
 }
 
 /// The cell being edited, in the editor its field takes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 enum Edit {
     Text(CellEdit),
     Date(DateCellEdit),
@@ -468,6 +492,15 @@ struct DateCellEdit {
 }
 
 impl CellEdit {
+    /// The edit after a commit refused by `error`, which it shows until the text
+    /// changes.
+    fn refused(self, error: AmountParseError) -> Self {
+        Self {
+            error: Some(error),
+            ..self
+        }
+    }
+
     /// The id of the cell's `TextEdit`.
     fn editor_id(&self) -> Id {
         editor_id(self.cell)
@@ -506,15 +539,17 @@ impl CellEdit {
             ListScope::Matching => self.text.as_str(),
             ListScope::All => "",
         };
-        match self.field {
-            TextField::Payee => choices.payees().list(text),
-            TextField::Category => {
+        match &self.field {
+            EditField::Text(TextField::Payee) => choices.payees().list(text),
+            EditField::Text(TextField::Category) => {
                 let categories = choices.categories();
                 let mut rows = categories.list(text);
                 rows.extend(categories.create_row(text));
                 rows
             }
-            TextField::Number | TextField::Memo => Vec::new(),
+            EditField::Text(TextField::Number | TextField::Memo) | EditField::Amount { .. } => {
+                Vec::new()
+            }
         }
     }
 
@@ -635,6 +670,8 @@ pub(crate) struct Register {
     /// Register since the last frame.
     tabs: Vec<Modifiers>,
     rows_in_view: Option<RowsInView>,
+    /// Whether the edit refused to let the keyboard leave its cell this frame.
+    refused_leave: bool,
 }
 
 impl Register {
@@ -812,6 +849,11 @@ impl Register {
                         self.body(body, frame, row_height, pitch);
                     });
             });
+        if std::mem::take(&mut self.refused_leave)
+            && let Some(edit) = &self.edit
+        {
+            self.cursor = Some(edit.cell());
+        }
         self.model = Some(model);
         self.choices = Some(choices);
     }
@@ -909,7 +951,7 @@ impl Register {
         };
         let cell = ui.max_rect();
         let mut field = cell;
-        let list_button = (edit.field == TextField::Category).then(|| {
+        let list_button = matches!(edit.field, EditField::Text(TextField::Category)).then(|| {
             let button =
                 Rect::from_x_y_ranges(cell.right() - cell.height()..=cell.right(), cell.y_range());
             field.max.x = button.left();
@@ -919,6 +961,8 @@ impl Register {
         let response = editor(ui, edit, field, heading_id(frame.register_id, column));
         if edit.text != typed {
             edit.open_list(ListScope::Matching, frame.choices);
+            edit.error = None;
+            edit.preview = preview(frame.i18n, edit);
         }
         if list_button.as_ref().is_some_and(Response::clicked) {
             // The click took focus from the editor, which keeps the edit.
@@ -930,12 +974,25 @@ impl Register {
             ui.memory_mut(|memory| memory.request_focus(edit.editor_id()));
         } else if response.lost_focus() {
             let edit = self.edit.take().expect("the edit was just shown");
-            // A refused category leaves nothing to save; the Status bar says why.
-            if let Edit::Text(edit) = edit {
-                let _refused = commit(&edit, frame.rows, frame.choices, frame.commands);
+            let Edit::Text(edit) = edit else {
+                return;
+            };
+            match commit(&edit, frame.rows, frame.choices, frame.commands) {
+                // A refused category leaves nothing to save; the Status bar says why.
+                Commit::Done | Commit::Refused => {}
+                Commit::Unreadable(error) => {
+                    // Leaving the cell is refused too: the edit keeps the keyboard, and
+                    // the cell cursor comes back to it once the rows are laid out.
+                    ui.memory_mut(|memory| memory.request_focus(edit.editor_id()));
+                    self.refused_leave = true;
+                    let edit = edit.refused(error);
+                    bubble(ui, frame.i18n, &edit, cell);
+                    self.edit = Some(Edit::Text(edit));
+                }
             }
             return;
         }
+        bubble(ui, frame.i18n, edit, cell);
         let pressed = list(ui, frame, edit, cell);
         if let Some(row) = pressed
             && let Some(Edit::Text(mut edit)) = self.edit.take()
@@ -1001,6 +1058,7 @@ impl Register {
             return None;
         }
         let cursor = self.cursor?;
+        self.refuse_characters(ctx, keys, cursor);
         let tab = (!self.tabs.is_empty()).then(|| self.tabs.remove(0));
         if !self.tabs.is_empty() {
             // Each Tab acts on the cell the one before it opened, so the rest wait.
@@ -1115,10 +1173,17 @@ impl Register {
                 ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
                 return None;
             }
-            if commit(&edit, keys.rows, keys.choices, keys.commands) == Commit::Refused {
-                edit.list = None;
-                self.edit = Some(Edit::Text(edit));
-                return None;
+            match commit(&edit, keys.rows, keys.choices, keys.commands) {
+                Commit::Done => {}
+                Commit::Refused => {
+                    edit.list = None;
+                    self.edit = Some(Edit::Text(edit));
+                    return None;
+                }
+                Commit::Unreadable(error) => {
+                    self.edit = Some(Edit::Text(edit.refused(error)));
+                    return None;
+                }
             }
             ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
             let step = if enter { Move::Next } else { tab? };
@@ -1176,6 +1241,43 @@ impl Register {
         }
         self.edit = Some(Edit::Date(edit));
         None
+    }
+
+    /// Removes from this frame's typed and pasted text every character the cell at
+    /// `cursor` refuses, before its editor, or the typing that opens it, sees the text.
+    /// Only an Amount cell refuses characters.
+    fn refuse_characters(&self, ctx: &egui::Context, keys: &KeyContext<'_>, cursor: CellAddress) {
+        let has_text = ctx.input(|input| {
+            input
+                .events
+                .iter()
+                .any(|event| matches!(event, Event::Text(_) | Event::Paste(_)))
+        });
+        if !has_text {
+            return;
+        }
+        let opened;
+        let reader = match &self.edit {
+            Some(Edit::Text(CellEdit {
+                field: EditField::Amount { reader, .. },
+                ..
+            })) => reader,
+            Some(Edit::Text(_) | Edit::Date(_)) => return,
+            None => {
+                let Some((row, CellField::Amount)) = field_at(keys.rows, cursor) else {
+                    return;
+                };
+                opened = keys.i18n.amount_reader(i18n_currency(row.currency()));
+                &opened
+            }
+        };
+        ctx.input_mut(|input| {
+            for event in &mut input.events {
+                if let Event::Text(text) | Event::Paste(text) = event {
+                    text.retain(|c| reader.accepts(c));
+                }
+            }
+        });
     }
 
     /// Moves the cell cursor from `cursor` by `step`. Returns `None`, leaving the
@@ -1253,9 +1355,8 @@ impl Register {
                 .send(AppCommand::ShowStatus(StatusMessage::Rejected(error)));
             return;
         }
-        let field = match field {
-            Field::Text(field) => field,
-            Field::Date => {
+        let (saved, field) = match field {
+            CellField::Date => {
                 // Typing goes to the date field, which starts the date over or acts on
                 // a shortcut, so it opens on the saved date however the edit starts.
                 ctx.memory_mut(|memory| memory.request_focus(editor_id(cursor)));
@@ -1265,9 +1366,15 @@ impl Register {
                 }));
                 return;
             }
+            CellField::Text(field) => (field.saved(row), EditField::Text(field)),
+            CellField::Amount => {
+                let currency = row.currency();
+                let reader = keys.i18n.amount_reader(i18n_currency(currency));
+                (row.amount().text(), EditField::Amount { reader, currency })
+            }
         };
         let text = match start {
-            EditStart::Saved => field.saved(row).to_owned(),
+            EditStart::Saved => saved.to_owned(),
             EditStart::Empty => String::new(),
         };
         let edit = CellEdit {
@@ -1275,6 +1382,8 @@ impl Register {
             field,
             text,
             list: None,
+            error: None,
+            preview: None,
         };
         let id = edit.editor_id();
         // The text cursor starts at the end, wherever an earlier edit left it.
@@ -1299,7 +1408,7 @@ struct Moved {
 
 /// The row of `cell` and the field it edits, or `None` when its row is gone or it
 /// can't be edited.
-fn field_at(rows: &[RegisterRow], cell: CellAddress) -> Option<(&RegisterRow, Field)> {
+fn field_at(rows: &[RegisterRow], cell: CellAddress) -> Option<(&RegisterRow, CellField)> {
     let row = rows.iter().find(|row| row.id() == cell.row)?;
     Some((row, cell.column.field(row)?))
 }
@@ -1388,10 +1497,12 @@ enum Commit {
     /// The value can't be saved, so nothing was sent: a category no category is named
     /// (the Status bar says so), or a refused date (its bubble says so).
     Refused,
+    /// The amount's text can't be read, for this reason, so nothing was sent.
+    Unreadable(AmountParseError),
 }
 
 /// Saves `edit`'s text, trimmed, by sending one edit Command, unless it matches the
-/// saved text.
+/// saved text or saved amount.
 fn commit(
     edit: &CellEdit,
     rows: &[RegisterRow],
@@ -1401,20 +1512,44 @@ fn commit(
     let Some(row) = rows.iter().find(|row| row.id() == edit.cell.row) else {
         return Commit::Done;
     };
-    match edit.field.edit(row, edit.text.trim(), choices) {
-        Ok(Some(change)) => {
-            commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
-                transaction: row.id(),
-                edit: change,
-            }));
-            Commit::Done
+    let text = edit.text.trim();
+    let change = match &edit.field {
+        EditField::Text(field) => {
+            let Ok(change) = field.edit(row, text, choices) else {
+                commands.send(AppCommand::ShowStatus(StatusMessage::NoSuchCategory));
+                return Commit::Refused;
+            };
+            change
         }
-        Ok(None) => Commit::Done,
-        Err(NoSuchCategory) => {
-            commands.send(AppCommand::ShowStatus(StatusMessage::NoSuchCategory));
-            Commit::Refused
-        }
+        EditField::Amount { reader, currency } => match amount_edit(row, text, reader, *currency) {
+            Ok(change) => change,
+            Err(error) => return Commit::Unreadable(error),
+        },
+    };
+    if let Some(change) = change {
+        commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
+            transaction: row.id(),
+            edit: change,
+        }));
     }
+    Commit::Done
+}
+
+/// The edit that saves `text`, already trimmed, as the amount of `row`, read by
+/// `reader` in `currency`, or `None` when it matches the saved amount.
+fn amount_edit(
+    row: &RegisterRow,
+    text: &str,
+    reader: &AmountReader,
+    currency: CurrencyCode,
+) -> Result<Option<TransactionEdit>, AmountParseError> {
+    if text == row.amount().text() {
+        return Ok(None);
+    }
+    let amount = reader.read(text)?.amount();
+    let money = Money::new(amount, currency)
+        .expect("the reader gives amounts at the currency's decimal places");
+    Ok((money != row.amount().money()).then_some(TransactionEdit::Amount(money)))
 }
 
 /// Saves `edit`'s date by sending one edit Command, unless it matches the saved date.
@@ -1622,6 +1757,88 @@ fn list_row(
     ui.painter()
         .galley(pos2(rect.left(), top), galley, text_color);
     response.is_pointer_button_down_on()
+}
+
+/// Shows why `edit`'s last commit was refused, or else the result of the arithmetic
+/// typed so far, in a bubble floating below its cell at `cell`, so the rows below
+/// never move.
+fn bubble(ui: &egui::Ui, i18n: &Localizer, edit: &CellEdit, cell: Rect) {
+    let EditField::Amount { reader, currency } = &edit.field else {
+        return;
+    };
+    let (text, colour) = match (edit.error, &edit.preview) {
+        (Some(error), _) => (
+            amount_error(i18n, error, reader, *currency),
+            ui.visuals().error_fg_color,
+        ),
+        (None, Some(Preview { amount, rounded })) => {
+            let amount = amount.clone();
+            let text = if *rounded {
+                fl!(i18n, "field-amount-preview-rounded", amount = amount)
+            } else {
+                fl!(i18n, "field-amount-preview", amount = amount)
+            };
+            (text, ui.visuals().text_color())
+        }
+        (None, None) => return,
+    };
+    Area::new(edit.editor_id().with("bubble"))
+        .order(Order::Tooltip)
+        .fixed_pos(cell.left_bottom() + vec2(0.0, ui.spacing().item_spacing.y))
+        .interactable(false)
+        .show(ui.ctx(), |ui| {
+            Frame::popup(ui.style()).show(ui, |ui| {
+                // `extend` keeps the bubble on one line near the window's edge.
+                ui.add(Label::new(egui::RichText::new(text).color(colour)).extend());
+            });
+        });
+}
+
+/// The result of the arithmetic in `edit`'s text, or `None` when the text is a plain
+/// amount or can't be read.
+fn preview(i18n: &Localizer, edit: &CellEdit) -> Option<Preview> {
+    let EditField::Amount { reader, currency } = &edit.field else {
+        return None;
+    };
+    let calculation = reader
+        .read(edit.text.trim())
+        .ok()
+        .filter(Calculation::is_arithmetic)?;
+    let amount = i18n.format_amount(
+        calculation.amount(),
+        i18n_currency(*currency),
+        AmountStyle::Symbol,
+    );
+    Some(Preview {
+        amount,
+        rounded: calculation.rounded(),
+    })
+}
+
+/// Why typed text is not an amount in `currency`, in words naming what is expected.
+fn amount_error(
+    i18n: &Localizer,
+    error: AmountParseError,
+    reader: &AmountReader,
+    currency: CurrencyCode,
+) -> String {
+    match error {
+        AmountParseError::Empty => fl!(i18n, "field-amount-empty"),
+        AmountParseError::Invalid => fl!(
+            i18n,
+            "field-amount-invalid",
+            decimal = reader.decimal_mark(),
+            group = reader.group_separator()
+        ),
+        AmountParseError::TooManyDecimalPlaces { decimal_places } => fl!(
+            i18n,
+            "field-amount-too-many-decimal-places",
+            currency = currency.as_str(),
+            places = decimal_places
+        ),
+        AmountParseError::OutOfRange => fl!(i18n, "field-amount-out-of-range"),
+        AmountParseError::DivisionByZero => fl!(i18n, "field-amount-division-by-zero"),
+    }
 }
 
 /// The scroll offset that puts row `index` in the middle of a Register filling `ui`,
@@ -2071,5 +2288,29 @@ mod tests {
                 name: "Pets".to_owned()
             })]
         );
+    }
+
+    #[test]
+    fn a_refused_amount_sends_nothing() {
+        let (mut harness, receiver) = register();
+        click_cell(&mut harness, "-86.42");
+        harness.event(Event::Text("12.345".to_owned()));
+        harness.run();
+
+        press(&mut harness, Key::Enter);
+
+        assert_eq!(receiver.try_iter().collect::<Vec<_>>(), []);
+    }
+
+    #[test]
+    fn an_amount_typed_as_the_saved_one_sends_nothing() {
+        let (mut harness, receiver) = register();
+        click_cell(&mut harness, "-86.42");
+        harness.event(Event::Text("-86.420".to_owned()));
+        harness.run();
+
+        press(&mut harness, Key::Enter);
+
+        assert_eq!(receiver.try_iter().collect::<Vec<_>>(), []);
     }
 }

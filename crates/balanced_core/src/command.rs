@@ -3,7 +3,7 @@
 
 use icu_calendar::{Date, Iso};
 
-use crate::{AccountId, CategoryId, MoneyError, Transaction, TransactionId};
+use crate::{AccountId, CategoryId, Money, MoneyError, Transaction, TransactionId};
 
 /// A change to the ledger. `Ledger::apply` applies it, or rejects it with a
 /// [`DomainError`] and leaves the ledger as it was.
@@ -39,6 +39,9 @@ pub enum TransactionEdit {
     Memo(String),
     /// The one category the whole amount is in.
     Category(CategoryId),
+    /// The whole amount, in the account's currency. A split transaction's amount is
+    /// the sum of its lines, so it can't be edited here.
+    Amount(Money),
 }
 
 /// A [`DomainCommand`] the ledger applied, with the Command that undoes it.
@@ -83,4 +86,11 @@ pub enum DomainError {
     /// A balance would no longer fit in an amount.
     #[error(transparent)]
     Money(#[from] MoneyError),
+    /// The command gave a split transaction an amount. Its amount is the sum of its
+    /// lines.
+    #[error("a split transaction's amount is the sum of its lines: {transaction:?}")]
+    SplitAmount { transaction: TransactionId },
+    /// The command gave a transaction an amount in another currency than its account's.
+    #[error("the amount is in another currency than the account: {transaction:?}")]
+    CurrencyMismatch { transaction: TransactionId },
 }

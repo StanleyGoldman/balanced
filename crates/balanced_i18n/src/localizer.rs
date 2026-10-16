@@ -16,7 +16,7 @@ use crate::format::{Formatters, format_fluent_value};
 use crate::missing::log_missing_messages;
 use crate::money::{self, AmountStyle, Currency};
 use crate::pseudo::{self, PSEUDO_LANGUAGE};
-use crate::{AmountParseError, DateParseError, I18nError};
+use crate::{AmountParseError, AmountReader, DateParseError, I18nError};
 
 /// The `.ftl` files, one folder per shipped language.
 #[derive(Embed)]
@@ -196,6 +196,19 @@ impl Localizer {
         decimal_places: u32,
     ) -> Result<Decimal, AmountParseError> {
         money::parse_amount(self.formatters.symbols(), decimal_places, text)
+    }
+
+    /// A reader for amounts in `currency` typed in the current formatting locale: a
+    /// plain amount, which goes through [`Self::parse_amount`], or arithmetic over
+    /// amounts. The reader keeps this locale's marks if the formatting locale changes
+    /// later.
+    pub fn amount_reader(&self, currency: Currency) -> AmountReader {
+        let formatted = self.format_amount(Decimal::ONE, currency, AmountStyle::Symbol);
+        AmountReader::new(
+            self.formatters.symbols().clone(),
+            currency.decimal_places(),
+            &formatted,
+        )
     }
 
     /// Formats a date as the formatting locale writes a short date with a

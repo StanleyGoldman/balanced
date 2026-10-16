@@ -46,6 +46,10 @@ impl Currency {
             decimal_places: u8::try_from(decimal_places).map_err(|_| invalid())?,
         })
     }
+
+    pub(crate) fn decimal_places(self) -> u32 {
+        u32::from(self.decimal_places)
+    }
 }
 
 /// Whether a formatted amount shows its currency.
@@ -229,6 +233,32 @@ impl NumberSymbols {
         char::from_digit(u32::try_from(n).ok()?, 10)
     }
 
+    /// The decimal mark: `.` in `en-US`, `,` in `de-DE`.
+    pub(crate) fn decimal(&self) -> &str {
+        &self.decimal
+    }
+
+    /// The group separator: `,` in `en-US`, `.` in `de-DE`.
+    pub(crate) fn group(&self) -> &str {
+        &self.group
+    }
+
+    /// Whether `c` can be part of a number written with these symbols: a digit, the
+    /// decimal mark, the group separator or a minus sign, the locale's own or a typed
+    /// `-` or `−`.
+    pub(crate) fn writes(&self, c: char) -> bool {
+        self.digit(c).is_some()
+            || [
+                &self.decimal,
+                &self.group,
+                &self.minus_prefix,
+                &self.minus_suffix,
+            ]
+            .iter()
+            .any(|symbol| symbol.contains(c))
+            || matches!(c, '-' | MINUS_SIGN)
+    }
+
     /// The group separator, if `rest` starts with one. A typed space stands in for
     /// a no-break space.
     fn group_len(&self, rest: &str) -> Option<usize> {
@@ -252,6 +282,10 @@ fn take_separator_run(runs: &mut Vec<(bool, String)>, index: usize) -> String {
     }
 }
 
+/// U+2212, the typographic minus sign, which users may type for `-`.
+pub(crate) const MINUS_SIGN: char = '\u{2212}';
+const MINUS_SIGN_STR: &str = "\u{2212}";
+
 /// Parses an amount typed in the locale `symbols` describe, for a currency with
 /// `decimal_places` decimal places. See [`crate::Localizer::parse_amount`].
 pub(crate) fn parse_amount(
@@ -259,15 +293,11 @@ pub(crate) fn parse_amount(
     decimal_places: u32,
     text: &str,
 ) -> Result<Decimal, AmountParseError> {
-    let text: String = text.chars().filter(|&c| !is_bidi_mark(c)).collect();
-    let text = strip_affixes(&text);
-    if text.is_empty() {
-        return Err(AmountParseError::Empty);
-    }
-    let (negative, text) = strip_minus(symbols, text);
-    let text = strip_affixes(text);
-
-    let (integer, fraction) = split_number(symbols, text)?;
+    let Digits {
+        negative,
+        integer,
+        fraction,
+    } = read_digits(symbols, text)?;
     let places = usize::try_from(decimal_places).expect("decimal places fit in usize");
     let fraction = match fraction.get(places..) {
         Some(excess) if !excess.bytes().all(|b| b == b'0') => {
@@ -277,17 +307,30 @@ pub(crate) fn parse_amount(
         Some(_) => &fraction[..places],
         None => fraction.as_str(),
     };
+    let amount = to_decimal(negative, &integer, fraction)?;
+    at_scale(amount, decimal_places)
+}
 
-    let sign = if negative { "-" } else { "" };
-    let integer = if integer.is_empty() { "0" } else { &integer };
-    let digits = if fraction.is_empty() {
-        format!("{sign}{integer}")
-    } else {
-        format!("{sign}{integer}.{fraction}")
-    };
-    // `digits` is ASCII digits with at most one `.`, so the only failure is a value
-    // with more digits than a `Decimal` holds.
-    let mut amount = Decimal::from_str_exact(&digits).map_err(|_| AmountParseError::OutOfRange)?;
+/// Parses a number typed in the locale `symbols` describe, as [`parse_amount`] does,
+/// but keeping every decimal place it has.
+pub(crate) fn parse_number(
+    symbols: &NumberSymbols,
+    text: &str,
+) -> Result<Decimal, AmountParseError> {
+    let Digits {
+        negative,
+        integer,
+        fraction,
+    } = read_digits(symbols, text)?;
+    to_decimal(negative, &integer, &fraction)
+}
+
+/// `amount`, which has no more significant decimal places than `decimal_places`,
+/// padded to exactly that many. Zero loses any minus sign.
+pub(crate) fn at_scale(
+    mut amount: Decimal,
+    decimal_places: u32,
+) -> Result<Decimal, AmountParseError> {
     // Padding never rounds; a short scale means the mantissa ran out of room.
     amount.rescale(decimal_places);
     if amount.scale() != decimal_places {
@@ -297,6 +340,45 @@ pub(crate) fn parse_amount(
         amount.set_sign_positive(true);
     }
     Ok(amount)
+}
+
+/// A typed number's sign and ASCII digits.
+struct Digits {
+    negative: bool,
+    integer: String,
+    fraction: String,
+}
+
+/// Reads the sign and digits of a number typed in the locale `symbols` describe,
+/// ignoring direction marks and a currency symbol or code at either end.
+fn read_digits(symbols: &NumberSymbols, text: &str) -> Result<Digits, AmountParseError> {
+    let text: String = text.chars().filter(|&c| !is_bidi_mark(c)).collect();
+    let text = strip_affixes(&text);
+    if text.is_empty() {
+        return Err(AmountParseError::Empty);
+    }
+    let (negative, text) = strip_minus(symbols, text);
+    let text = strip_affixes(text);
+    let (integer, fraction) = split_number(symbols, text)?;
+    Ok(Digits {
+        negative,
+        integer,
+        fraction,
+    })
+}
+
+/// The number with sign `negative`, ASCII `integer` digits and `fraction` digits.
+fn to_decimal(negative: bool, integer: &str, fraction: &str) -> Result<Decimal, AmountParseError> {
+    let sign = if negative { "-" } else { "" };
+    let integer = if integer.is_empty() { "0" } else { integer };
+    let digits = if fraction.is_empty() {
+        format!("{sign}{integer}")
+    } else {
+        format!("{sign}{integer}.{fraction}")
+    };
+    // `digits` is ASCII digits with at most one `.`, so the only failure is a value
+    // with more digits than a `Decimal` holds.
+    Decimal::from_str_exact(&digits).map_err(|_| AmountParseError::OutOfRange)
 }
 
 /// Splits `text` into its integer digits and fraction digits, as ASCII, checking
@@ -369,7 +451,7 @@ fn groups_fit(symbols: &NumberSymbols, groups: &[String]) -> bool {
 
 /// Strips a minus sign from either end: the locale's own, or a typed `-` or `−`.
 fn strip_minus<'a>(symbols: &NumberSymbols, text: &'a str) -> (bool, &'a str) {
-    const TYPED: [&str; 2] = ["-", "\u{2212}"];
+    const TYPED: [&str; 2] = ["-", MINUS_SIGN_STR];
     let prefixes = std::iter::once(symbols.minus_prefix.as_str()).chain(TYPED);
     for prefix in prefixes.filter(|p| !p.is_empty()) {
         if let Some(rest) = text.strip_prefix(prefix) {
@@ -387,7 +469,7 @@ fn strip_minus<'a>(symbols: &NumberSymbols, text: &'a str) -> (bool, &'a str) {
 
 /// Strips a currency symbol or code, and spaces, from both ends: `US$ 5`, `5 €`,
 /// `5,00 kr.`, `S/ 5`, `B/.5`. The symbol is not checked against the currency.
-fn strip_affixes(text: &str) -> &str {
+pub(crate) fn strip_affixes(text: &str) -> &str {
     let mut start = 0;
     let mut previous: Option<char> = None;
     for (i, c) in text.char_indices() {

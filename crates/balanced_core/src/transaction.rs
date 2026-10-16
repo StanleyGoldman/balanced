@@ -102,7 +102,7 @@ impl Transaction {
     }
 
     /// The transaction with `edit` made. Fails when the edit gives the opening balance
-    /// a payee.
+    /// a payee, or gives a split transaction or an amount in another currency.
     pub(crate) fn edited(&self, edit: TransactionEdit) -> Result<Self, DomainError> {
         let mut edited = self.clone();
         match edit {
@@ -125,6 +125,19 @@ impl Transaction {
                 }
                 edited.allocation = Allocation::Category(category);
             }
+            TransactionEdit::Amount(amount) => {
+                if matches!(self.allocation, Allocation::Split(_)) {
+                    return Err(DomainError::SplitAmount {
+                        transaction: self.id,
+                    });
+                }
+                if amount.currency() != self.amount.currency() {
+                    return Err(DomainError::CurrencyMismatch {
+                        transaction: self.id,
+                    });
+                }
+                edited.amount = amount;
+            }
         }
         Ok(edited)
     }
@@ -144,6 +157,7 @@ impl Transaction {
                     TransactionEdit::Category(*category)
                 }
             },
+            TransactionEdit::Amount(_) => TransactionEdit::Amount(self.amount),
         }
     }
 
