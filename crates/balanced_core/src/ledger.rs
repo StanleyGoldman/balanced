@@ -1525,4 +1525,14 @@ mod tests {
             &edit(fresh_market, TransactionEdit::Category(groceries))
         );
     }
+
+    #[test]
+    fn the_categories_are_listed_in_the_order_they_were_added() {
+        let ledger = everyday();
+
+        let view = ledger.snapshot();
+
+        let names: Vec<&str> = view.categories().iter().map(Category::name).collect();
+        assert_eq!(names, ["Groceries", "Household"]);
+    }
 }
