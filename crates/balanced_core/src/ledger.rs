@@ -242,7 +242,7 @@ pub struct Ledger {
     /// The id the next posted transaction takes. Ids are never reused.
     next_transaction: TransactionId,
     /// The id the next category created takes. Ids are never reused, so it only grows.
-    next_category: u32,
+    next_category: CategoryId,
 }
 
 impl Ledger {
@@ -261,8 +261,9 @@ impl Ledger {
             .zip(categories)
             .map(|(id, new)| new.into_category(CategoryId::new(id)))
             .collect();
-        let next_category =
-            u32::try_from(categories.len()).expect("a ledger holds fewer than 2^32 categories");
+        let next_category = CategoryId::new(
+            u32::try_from(categories.len()).expect("a ledger holds fewer than 2^32 categories"),
+        );
         for category in &categories {
             if let Some(parent) = category.parent() {
                 assert!(
@@ -639,7 +640,8 @@ impl Ledger {
         name: &str,
         parent: Option<CategoryId>,
     ) -> Result<DomainCommand, DomainError> {
-        if name.trim().is_empty() {
+        let name = name.trim();
+        if name.is_empty() {
             return Err(DomainError::BlankCategoryName);
         }
         if let Some(parent) = parent
@@ -658,12 +660,12 @@ impl Ledger {
                 name: name.to_owned(),
             });
         }
-        let id = CategoryId::new(self.next_category);
+        let id = self.next_category;
         let mut category = NewCategory::new(name);
         if let Some(parent) = parent {
             category = category.under(parent);
         }
-        self.next_category += 1;
+        self.next_category = id.next();
         let view = Arc::make_mut(&mut self.view);
         // The new id is the highest yet, so the category lands after its parent.
         view.categories.push(category.into_category(id));
@@ -1145,6 +1147,25 @@ mod tests {
             })
         );
         assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn a_category_name_is_trimmed_before_it_is_compared_and_saved() {
+        let mut ledger = everyday();
+
+        let duplicate = ledger.apply(create_category(" Groceries ", None));
+        ledger.apply(create_category(" Garden ", None)).unwrap();
+
+        assert_eq!(
+            duplicate,
+            Err(DomainError::DuplicateCategory {
+                name: "Groceries".to_owned()
+            })
+        );
+        assert_eq!(
+            category_tree(&ledger.snapshot()).last(),
+            Some(&(CategoryId::new(2), "Garden", None))
+        );
     }
 
     #[test]

@@ -257,8 +257,12 @@ impl MainWindow {
 
     /// Hands the open Dialog the ledger's answer to the change its form asked for: it
     /// closes once the change is `applied`, or shows why the ledger refused it.
+    /// A refusal with no Dialog open to show it goes to the Status bar.
     pub(crate) fn dialog_applied(&mut self, ctx: &egui::Context, applied: Result<(), DomainError>) {
         let Some(dialog) = &mut self.new_category else {
+            if let Err(error) = applied {
+                self.show_status(StatusMessage::Rejected(error));
+            }
             return;
         };
         if let Err(error) = applied {
@@ -381,9 +385,9 @@ impl MainWindow {
             }
         });
         self.accounts = Some(accounts);
-        self.delete_transaction_dialog(ui.ctx(), i18n, commands, view);
+        self.delete_transaction_dialog(ui.ctx(), i18n, theme, commands, view);
         self.new_account_dialog(ui.ctx(), i18n, theme, commands, today);
-        self.new_category_dialog(ui.ctx(), i18n, commands, view);
+        self.new_category_dialog(ui.ctx(), i18n, theme, commands, view);
     }
 
     /// The New Account wizard, while it is open.
@@ -410,6 +414,7 @@ impl MainWindow {
         &mut self,
         ctx: &egui::Context,
         i18n: &Localizer,
+        theme: &Theme,
         commands: &CommandSender,
         view: &LedgerView,
     ) {
@@ -421,6 +426,7 @@ impl MainWindow {
             fl!(i18n, "dialog-new-category-title"),
             fl!(i18n, "dialog-ok"),
             fl!(i18n, "dialog-cancel"),
+            theme,
         )
         .show(ctx, dialog, |ui, form| form.show(ui, i18n));
         match outcome {
@@ -446,6 +452,7 @@ impl MainWindow {
         &mut self,
         ctx: &egui::Context,
         i18n: &Localizer,
+        theme: &Theme,
         commands: &CommandSender,
         view: &LedgerView,
     ) {
@@ -478,6 +485,7 @@ impl MainWindow {
             Id::new("delete_transaction_dialog"),
             fl!(i18n, "dialog-delete-transaction-delete"),
             fl!(i18n, "dialog-cancel"),
+            theme,
         )
         .show(ctx, dialog, |ui, _form| {
             ui.label(question);

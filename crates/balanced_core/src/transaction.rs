@@ -166,8 +166,6 @@ impl Transaction {
         }
     }
 
-    /// Where the transaction sits in its account's register: by date, and on one date in
-    /// the order the transactions were posted, which their ids follow.
     /// Whether any of the transaction's amount is in `category`.
     pub(crate) fn uses_category(&self, category: CategoryId) -> bool {
         match &self.allocation {
@@ -177,6 +175,8 @@ impl Transaction {
         }
     }
 
+    /// Where the transaction sits in its account's register: by date, and on one date in
+    /// the order the transactions were posted, which their ids follow.
     pub(crate) fn register_order(&self) -> (Date<Iso>, TransactionId) {
         (self.date, self.id)
     }

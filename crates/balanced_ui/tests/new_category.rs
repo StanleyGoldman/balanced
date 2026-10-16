@@ -72,14 +72,18 @@ fn typed_in_category(typed: &str) -> Harness<'static, App> {
     harness
 }
 
+/// Moves the open list's highlight down to its last row, the Create row.
+fn highlight_create_row(harness: &mut Harness<'static, App>) {
+    let rows = harness.query_all_by_role(Role::ListBoxOption).count();
+    for _ in 1..rows {
+        press(harness, Modifiers::NONE, Key::ArrowDown);
+    }
+}
+
 /// The App with New Category open from the Create row for `typed`, taken with Enter.
 fn new_category_for(typed: &str) -> Harness<'static, App> {
     let mut harness = typed_in_category(typed);
-    // The Create row is last; ↑ from the top highlight clears it, so step down to it.
-    let rows = harness.query_all_by_role(Role::ListBoxOption).count();
-    for _ in 1..rows {
-        press(&mut harness, Modifiers::NONE, Key::ArrowDown);
-    }
+    highlight_create_row(&mut harness);
     press(&mut harness, Modifiers::NONE, Key::Enter);
     harness
 }
@@ -170,21 +174,8 @@ fn the_new_category_is_offered_by_every_category_cell_after() {
 #[test]
 fn tab_on_the_create_row_opens_the_next_cell_once_created() {
     let mut harness = typed_in_category("Pets");
-    let rows = harness.query_all_by_role(Role::ListBoxOption).count();
-    for _ in 1..rows {
-        press(&mut harness, Modifiers::NONE, Key::ArrowDown);
-    }
-    send(
-        &mut harness,
-        Event::Key {
-            key: Key::Tab,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: Modifiers::NONE,
-        },
-    );
-    harness.run();
+    highlight_create_row(&mut harness);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
@@ -327,10 +318,7 @@ fn the_dialog_keeps_inside_a_small_window() {
     let small = vec2(300.0, 160.0);
     harness.set_size(small);
     harness.run();
-    let rows = harness.query_all_by_role(Role::ListBoxOption).count();
-    for _ in 1..rows {
-        press(&mut harness, Modifiers::NONE, Key::ArrowDown);
-    }
+    highlight_create_row(&mut harness);
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
     // The Dialog keeps a 24-point margin to each edge of the window.
@@ -354,15 +342,22 @@ fn dragging_the_title_bar_moves_the_dialog() {
         .left_center()
         - vec2(60.0, 0.0);
 
-    harness.event(Event::PointerMoved(title));
+    drag(&mut harness, title, title + vec2(-100.0, -50.0));
+
+    let after = harness.get_by_role_and_label(Role::Button, "OK").rect();
+    assert_eq!(after.min - before.min, vec2(-100.0, -50.0));
+}
+
+/// Drags the pointer from `from` to `to` with the primary button held.
+fn drag(harness: &mut Harness<'static, App>, from: eframe::egui::Pos2, to: eframe::egui::Pos2) {
+    harness.event(Event::PointerMoved(from));
     harness.event(Event::PointerButton {
-        pos: title,
+        pos: from,
         button: eframe::egui::PointerButton::Primary,
         pressed: true,
         modifiers: Modifiers::NONE,
     });
     harness.step();
-    let to = title + vec2(-100.0, -50.0);
     harness.event(Event::PointerMoved(to));
     harness.step();
     harness.event(Event::PointerButton {
@@ -372,9 +367,24 @@ fn dragging_the_title_bar_moves_the_dialog() {
         modifiers: Modifiers::NONE,
     });
     harness.run();
+}
 
-    let after = harness.get_by_role_and_label(Role::Button, "OK").rect();
-    assert_eq!(after.min - before.min, vec2(-100.0, -50.0));
+#[test]
+fn dragging_the_bottom_right_corner_resizes_the_dialog() {
+    let mut harness = new_category_for("Pets");
+    let name = harness
+        .get_by_role_and_label(Role::TextInput, "Name")
+        .rect();
+    let ok = harness.get_by_role_and_label(Role::Button, "OK").rect();
+    // The resize grip sits just inside the Dialog's frame, below and right of OK.
+    let corner = eframe::egui::pos2(name.right() + 4.0, ok.bottom() + 4.0);
+
+    drag(&mut harness, corner, corner + vec2(80.0, 0.0));
+
+    let wider = harness
+        .get_by_role_and_label(Role::TextInput, "Name")
+        .rect();
+    assert_eq!(wider.width() - name.width(), 80.0);
 }
 
 #[test]

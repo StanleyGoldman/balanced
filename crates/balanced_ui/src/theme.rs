@@ -137,6 +137,8 @@ struct Palette {
     text: Color32,
     /// Negative amounts, when coloured negatives are on.
     negative: Color32,
+    /// The tint over the window behind a Dialog.
+    backdrop: Color32,
 }
 
 impl Palette {
@@ -153,6 +155,7 @@ impl Palette {
                 selection: rgb(200, 218, 240),
                 text: rgb(28, 32, 38),
                 negative: rgb(190, 30, 30),
+                backdrop: Color32::from_black_alpha(100),
             },
             Scheme::Dark => Self {
                 chrome: rgb(30, 36, 46),
@@ -164,6 +167,7 @@ impl Palette {
                 selection: rgb(40, 70, 110),
                 text: rgb(222, 228, 236),
                 negative: rgb(255, 110, 110),
+                backdrop: Color32::from_black_alpha(100),
             },
         }
     }
@@ -221,10 +225,6 @@ impl Theme {
 
     /// The width a heavy Dialog opens at, in a window wide enough for it.
     pub(crate) const HEAVY_DIALOG_WIDTH: f32 = 420.0;
-
-    /// The tint over the window behind a Dialog, in either scheme: the dim of
-    /// `egui::Modal`.
-    pub(crate) const BACKDROP: Color32 = Color32::from_black_alpha(100);
 
     pub(crate) fn new(settings: ThemeSettings) -> Self {
         Self {
@@ -332,6 +332,11 @@ impl Theme {
     /// The Net Worth footer under the Account bar: chrome, with room around its text.
     pub(crate) fn footer_frame(&self) -> Frame {
         self.chrome_frame().inner_margin(FOOTER_MARGIN)
+    }
+
+    /// The tint over the window behind a Dialog.
+    pub(crate) fn backdrop(&self) -> Color32 {
+        self.palette.backdrop
     }
 
     /// The fill of the Register's column header band.
