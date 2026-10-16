@@ -9,6 +9,7 @@ use eframe::egui;
 
 use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::i18n::fl;
+use crate::layout::Layout;
 use crate::main_window::MainWindow;
 use crate::register_tabs::RegisterTabs;
 use crate::theme::Theme;
@@ -48,13 +49,14 @@ impl App {
                 "main-window-title"
             )));
         let (commands, command_receiver) = CommandSender::new(cc.egui_ctx.clone());
+        let layout = Layout::load(cc.storage);
         Self {
             i18n,
             ledger,
             theme,
             commands,
             command_receiver,
-            main_window: MainWindow::default(),
+            main_window: MainWindow::new(&layout),
         }
     }
 
@@ -85,6 +87,10 @@ impl App {
             AppCommand::PreviousRegisterTab => self
                 .main_window
                 .change_register_tabs(RegisterTabs::previous),
+            AppCommand::OpenDialog(kind) => {
+                self.main_window
+                    .open_dialog(ctx, kind, &self.ledger.snapshot());
+            }
             AppCommand::ShowStatus(message) => self.main_window.show_status(message),
             AppCommand::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }
@@ -125,9 +131,55 @@ impl eframe::App for App {
         }
     }
 
+    /// Saves the Main window's layout. eframe saves the window's size and position
+    /// itself.
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        self.main_window.layout().save(storage);
+    }
+
+    /// egui's memory (scroll offsets, focus, panel sizes) stays out of storage: the
+    /// [`Layout`] holds everything that outlives the run.
+    fn persist_egui_memory(&self) -> bool {
+        false
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let view = self.ledger.snapshot();
         self.main_window
             .show(ui, &self.i18n, &self.theme, &self.commands, &view);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use balanced_core::AccountGroup;
+    use eframe::App as _;
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable as _;
+
+    use super::*;
+    use crate::accounts_model::Section;
+    use crate::layout::MemoryStorage;
+
+    #[test]
+    fn folding_a_group_saves_it_in_the_layout() {
+        let mut harness =
+            Harness::new_eframe(|cc| App::new(cc, Localizer::for_tests(), Ledger::stub()));
+        let mut storage = MemoryStorage::default();
+
+        harness
+            .get_by_role_and_label(Role::Button, "Banking")
+            .click();
+        harness.run();
+        harness.state_mut().save(&mut storage);
+
+        let layout = Layout::load(Some(&storage));
+        assert_eq!(
+            layout.folded_sections(),
+            HashSet::from([Section::Group(AccountGroup::Banking), Section::Closed])
+        );
     }
 }

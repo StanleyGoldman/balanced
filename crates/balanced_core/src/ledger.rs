@@ -52,6 +52,37 @@ pub struct AccountSummary {
 }
 
 impl AccountSummary {
+    /// `account` holding `transactions`, which are in register order, with their running
+    /// balances in `currency`. Fails when a balance overflows.
+    fn new(
+        account: Account,
+        transactions: Vec<Transaction>,
+        currency: CurrencyCode,
+    ) -> Result<Self, MoneyError> {
+        let mut register = Vec::with_capacity(transactions.len());
+        let mut balance = Money::zero(currency);
+        for transaction in transactions {
+            balance = balance.checked_add(transaction.amount())?;
+            register.push(RegisterEntry {
+                transaction,
+                balance,
+            });
+        }
+        Ok(Self {
+            account,
+            register,
+            balance,
+        })
+    }
+
+    /// A copy of the account's transactions, in register order.
+    fn transactions(&self) -> Vec<Transaction> {
+        self.register
+            .iter()
+            .map(|entry| entry.transaction.clone())
+            .collect()
+    }
+
     pub fn account(&self) -> &Account {
         &self.account
     }
@@ -122,6 +153,37 @@ impl LedgerView {
         Some(names)
     }
 
+    /// Where transaction `id` is, or `None` when no account holds it.
+    fn find_transaction(&self, id: TransactionId) -> Option<TransactionPosition> {
+        self.accounts
+            .iter()
+            .enumerate()
+            .find_map(|(account, summary)| {
+                summary
+                    .register
+                    .iter()
+                    .position(|entry| entry.transaction.id() == id)
+                    .map(|entry| TransactionPosition { account, entry })
+            })
+    }
+
+    /// The account at `index` in [`Self::accounts`], rebuilt in `currency` after `edit`
+    /// changes its transactions, with what `edit` returned. Fails when a balance
+    /// overflows.
+    fn edit_register<T>(
+        &self,
+        index: usize,
+        currency: CurrencyCode,
+        edit: impl FnOnce(&mut Vec<Transaction>) -> T,
+    ) -> Result<(AccountSummary, T), MoneyError> {
+        // Callers take `index` from a lookup in `self.accounts`.
+        let summary = &self.accounts[index];
+        let mut transactions = summary.transactions();
+        let edited = edit(&mut transactions);
+        let summary = AccountSummary::new(summary.account.clone(), transactions, currency)?;
+        Ok((summary, edited))
+    }
+
     /// The sum of every account's balance, hidden and closed accounts included.
     pub fn net_worth(&self) -> Money {
         self.net_worth
@@ -136,6 +198,15 @@ impl LedgerView {
     pub fn can_redo(&self) -> bool {
         self.can_redo
     }
+}
+
+/// Where a transaction is in a [`LedgerView`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TransactionPosition {
+    /// Its account's index in [`LedgerView::accounts`].
+    account: usize,
+    /// Its index in that account's register.
+    entry: usize,
 }
 
 /// The financial data. It changes only by applying a `DomainCommand`, and windows
@@ -191,28 +262,13 @@ impl Ledger {
                 let id = transaction_ids.next().expect("the ids never run out");
                 posted.push(new.into_transaction(id, currency)?);
             }
-            // A stable sort, so transactions on one date keep the order they were posted in.
-            posted.sort_by_key(Transaction::date);
-            let mut register = Vec::with_capacity(posted.len());
-            let mut balance = Money::zero(currency);
-            for transaction in posted {
-                balance = balance.checked_add(transaction.amount())?;
-                register.push(RegisterEntry {
-                    transaction,
-                    balance,
-                });
-            }
-            net_worth = net_worth.checked_add(balance)?;
+            // Ids follow posting order, so this keeps a date's transactions in that order.
+            posted.sort_by_key(Transaction::register_order);
+            let summary = AccountSummary::new(account, posted, currency)?;
+            net_worth = net_worth.checked_add(summary.balance)?;
             // Last in its sub-group: after every account of its kind or an earlier one.
             let position = summaries.partition_point(|summary| summary.account.kind() <= kind);
-            summaries.insert(
-                position,
-                AccountSummary {
-                    account,
-                    register,
-                    balance,
-                },
-            );
+            summaries.insert(position, summary);
         }
         Ok(Self {
             view: Arc::new(LedgerView {
@@ -281,49 +337,134 @@ impl Ledger {
 
     /// Applies `command` without recording it for Undo.
     fn apply_unrecorded(&mut self, command: DomainCommand) -> Result<Applied, DomainError> {
-        match command {
+        let inverse = match command {
             DomainCommand::EditTransaction { transaction, edit } => {
-                self.edit_transaction(transaction, edit)
+                self.edit_transaction(transaction, edit)?
             }
+            DomainCommand::DeleteTransaction { transaction } => {
+                self.delete_transaction(transaction)?
+            }
+            DomainCommand::RestoreTransaction {
+                account,
+                transaction,
+            } => self.restore_transaction(account, transaction)?,
+        };
+        Ok(Applied { inverse })
+    }
+
+    /// Where transaction `id` is, when its account is open to changes.
+    fn changeable(&self, id: TransactionId) -> Result<TransactionPosition, DomainError> {
+        let position = self
+            .view
+            .find_transaction(id)
+            .ok_or(DomainError::UnknownTransaction { transaction: id })?;
+        // `find_transaction` returns the index of an account in the view.
+        let account = &self.view.accounts[position.account].account;
+        if account.is_closed() {
+            return Err(DomainError::AccountClosed {
+                account: account.id(),
+            });
         }
+        Ok(position)
     }
 
     fn edit_transaction(
         &mut self,
         id: TransactionId,
         edit: TransactionEdit,
-    ) -> Result<Applied, DomainError> {
-        let (account, entry) = self
+    ) -> Result<DomainCommand, DomainError> {
+        let position = self.changeable(id)?;
+        // Both indices were just found in this same view.
+        let old = &self.view.accounts[position.account].register[position.entry].transaction;
+        let undo = old.undoing(&edit);
+        let edited = old.edited(edit)?;
+        // Windows still holding the old snapshot keep it; the ledger moves to a copy.
+        let view = Arc::make_mut(&mut self.view);
+        view.accounts[position.account].register[position.entry].transaction = edited;
+        view.generation = view.generation.next();
+        Ok(DomainCommand::EditTransaction {
+            transaction: id,
+            edit: undo,
+        })
+    }
+
+    fn delete_transaction(&mut self, id: TransactionId) -> Result<DomainCommand, DomainError> {
+        let position = self.changeable(id)?;
+        let currency = self.view.net_worth.currency();
+        let (summary, transaction) =
+            self.view
+                .edit_register(position.account, currency, |transactions| {
+                    transactions.remove(position.entry)
+                })?;
+        let account = summary.account.id();
+        self.replace_account(position.account, summary)?;
+        Ok(DomainCommand::RestoreTransaction {
+            account,
+            transaction,
+        })
+    }
+
+    fn restore_transaction(
+        &mut self,
+        account: AccountId,
+        transaction: Transaction,
+    ) -> Result<DomainCommand, DomainError> {
+        debug_assert!(
+            self.view.find_transaction(transaction.id()).is_none(),
+            "a restored transaction's id is not in use"
+        );
+        let index = self
+            .view
+            .accounts
+            .iter()
+            .position(|summary| summary.account.id() == account)
+            .ok_or(DomainError::UnknownAccount { account })?;
+        let currency = self.view.net_worth.currency();
+        let inverse = DomainCommand::DeleteTransaction {
+            transaction: transaction.id(),
+        };
+        let (summary, ()) = self.view.edit_register(index, currency, |transactions| {
+            let key = transaction.register_order();
+            let Err(position) =
+                transactions.binary_search_by_key(&key, Transaction::register_order)
+            else {
+                panic!(
+                    "restored {:?}, which its account still holds",
+                    transaction.id()
+                );
+            };
+            transactions.insert(position, transaction);
+        })?;
+        self.replace_account(index, summary)?;
+        Ok(inverse)
+    }
+
+    /// Puts `summary` in place of the account at `index`, recounting Net Worth, and
+    /// moves to the next generation. Fails, changing nothing, when Net Worth overflows.
+    fn replace_account(&mut self, index: usize, summary: AccountSummary) -> Result<(), MoneyError> {
+        let net_worth = self
             .view
             .accounts
             .iter()
             .enumerate()
-            .find_map(|(account, summary)| {
-                let entry = summary
-                    .register
-                    .iter()
-                    .position(|entry| entry.transaction.id() == id)?;
-                Some((account, entry))
+            .map(|(other, unchanged)| {
+                if other == index {
+                    summary.balance
+                } else {
+                    unchanged.balance
+                }
             })
-            .ok_or(DomainError::UnknownTransaction { transaction: id })?;
-        // Both indices were just found in this same view.
-        let summary = &self.view.accounts[account];
-        if summary.account.is_closed() {
-            return Err(DomainError::AccountClosed {
-                account: summary.account.id(),
-            });
-        }
-        let transaction = &summary.register[entry].transaction;
-        let inverse = DomainCommand::EditTransaction {
-            transaction: id,
-            edit: transaction.undoing(&edit),
-        };
-        let edited = transaction.edited(edit)?;
+            .try_fold(
+                Money::zero(self.view.net_worth.currency()),
+                Money::checked_add,
+            )?;
         // Windows still holding the old snapshot keep it; the ledger moves to a copy.
         let view = Arc::make_mut(&mut self.view);
-        view.accounts[account].register[entry].transaction = edited;
+        // Callers take `index` from a lookup in this same list of accounts.
+        view.accounts[index] = summary;
+        view.net_worth = net_worth;
         view.generation = view.generation.next();
-        Ok(Applied::new(inverse))
+        Ok(())
     }
 }
 
@@ -683,6 +824,237 @@ mod tests {
         assert_eq!(view.category_path(food).unwrap(), ["Food & Dining"]);
     }
 
+    /// A ledger with one checking account: a 100.00 opening balance, then Acme Corp,
+    /// Fresh Market and Bean There, in that order.
+    fn three_payments() -> Ledger {
+        let groceries = CategoryId::new(0);
+        Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(100.00))).with_transactions([
+                    NewTransaction::new(date(5), "Acme Corp", groceries, usd(dec!(500.00))),
+                    NewTransaction::new(date(10), "Fresh Market", groceries, usd(dec!(-30.25))),
+                    NewTransaction::new(date(10), "Bean There", groceries, usd(dec!(-4.75))),
+                ]),
+                account("Visa", AccountKind::CreditCard, usd(dec!(-50.00))),
+            ],
+        )
+        .unwrap()
+    }
+
+    /// The id of the transaction with `payee` in the ledger's first account.
+    fn transaction(ledger: &Ledger, payee: &str) -> TransactionId {
+        ledger.snapshot().accounts()[0]
+            .register()
+            .iter()
+            .map(RegisterEntry::transaction)
+            .find(|transaction| transaction.payee() == payee)
+            .unwrap()
+            .id()
+    }
+
+    /// Each transaction of the ledger's first account, by payee, with its running balance.
+    fn register(ledger: &Ledger) -> Vec<(String, Money)> {
+        ledger.snapshot().accounts()[0]
+            .register()
+            .iter()
+            .map(|entry| (entry.transaction().payee().to_owned(), entry.balance()))
+            .collect()
+    }
+
+    #[test]
+    fn deleting_a_transaction_takes_it_out_of_the_running_balances() {
+        let mut ledger = three_payments();
+        let fresh_market = transaction(&ledger, "Fresh Market");
+
+        ledger
+            .apply(DomainCommand::DeleteTransaction {
+                transaction: fresh_market,
+            })
+            .unwrap();
+
+        let view = ledger.snapshot();
+        assert_eq!(
+            register(&ledger),
+            [
+                (String::new(), usd(dec!(100.00))),
+                ("Acme Corp".to_owned(), usd(dec!(600.00))),
+                ("Bean There".to_owned(), usd(dec!(595.25))),
+            ]
+        );
+        assert_eq!(view.accounts()[0].balance(), usd(dec!(595.25)));
+        assert_eq!(view.net_worth(), usd(dec!(545.25)));
+    }
+
+    #[test]
+    fn deleting_a_transaction_advances_the_generation() {
+        let mut ledger = three_payments();
+        let before = ledger.snapshot().generation();
+        let fresh_market = transaction(&ledger, "Fresh Market");
+
+        ledger
+            .apply(DomainCommand::DeleteTransaction {
+                transaction: fresh_market,
+            })
+            .unwrap();
+
+        assert!(ledger.snapshot().generation() > before);
+    }
+
+    #[test]
+    fn undoing_a_delete_puts_the_transaction_back_where_it_was() {
+        let mut ledger = three_payments();
+        let before = ledger.snapshot();
+        let fresh_market = transaction(&ledger, "Fresh Market");
+        let applied = ledger
+            .apply(DomainCommand::DeleteTransaction {
+                transaction: fresh_market,
+            })
+            .unwrap();
+
+        ledger.apply(applied.into_inverse()).unwrap();
+
+        let after = ledger.snapshot();
+        assert_eq!(after.accounts(), before.accounts());
+        assert_eq!(after.net_worth(), before.net_worth());
+    }
+
+    #[test]
+    fn the_inverse_of_undoing_a_delete_deletes_again() {
+        let mut ledger = three_payments();
+        let fresh_market = transaction(&ledger, "Fresh Market");
+        let deleted = ledger
+            .apply(DomainCommand::DeleteTransaction {
+                transaction: fresh_market,
+            })
+            .unwrap();
+
+        let restored = ledger.apply(deleted.into_inverse()).unwrap();
+
+        assert_eq!(
+            restored.inverse(),
+            &DomainCommand::DeleteTransaction {
+                transaction: fresh_market
+            }
+        );
+    }
+
+    #[test]
+    fn undo_puts_a_deleted_transaction_back() {
+        let mut ledger = three_payments();
+        let before = register(&ledger);
+        let fresh_market = transaction(&ledger, "Fresh Market");
+        ledger
+            .apply(DomainCommand::DeleteTransaction {
+                transaction: fresh_market,
+            })
+            .unwrap();
+
+        ledger.undo().unwrap();
+
+        assert_eq!(register(&ledger), before);
+    }
+
+    #[test]
+    fn redo_deletes_an_undeleted_transaction_again() {
+        let mut ledger = three_payments();
+        let fresh_market = transaction(&ledger, "Fresh Market");
+        ledger
+            .apply(DomainCommand::DeleteTransaction {
+                transaction: fresh_market,
+            })
+            .unwrap();
+        let deleted = register(&ledger);
+        ledger.undo().unwrap();
+
+        ledger.redo().unwrap();
+
+        assert_eq!(register(&ledger), deleted);
+    }
+
+    #[test]
+    fn deleting_a_deleted_transaction_is_rejected_and_changes_nothing() {
+        let mut ledger = three_payments();
+        let fresh_market = transaction(&ledger, "Fresh Market");
+        ledger
+            .apply(DomainCommand::DeleteTransaction {
+                transaction: fresh_market,
+            })
+            .unwrap();
+        let before = ledger.snapshot();
+
+        let result = ledger.apply(DomainCommand::DeleteTransaction {
+            transaction: fresh_market,
+        });
+
+        assert_eq!(
+            result.unwrap_err(),
+            DomainError::UnknownTransaction {
+                transaction: fresh_market
+            }
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn deleting_from_a_closed_account_is_rejected() {
+        let groceries = CategoryId::new(0);
+        let mut ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [account("Old Checking", AccountKind::Checking, usd(dec!(1)))
+                .closed()
+                .with_transactions([NewTransaction::new(
+                    date(2),
+                    "Fresh Market",
+                    groceries,
+                    usd(dec!(-1)),
+                )])],
+        )
+        .unwrap();
+        let before = ledger.snapshot();
+        let fresh_market = transaction(&ledger, "Fresh Market");
+
+        let result = ledger.apply(DomainCommand::DeleteTransaction {
+            transaction: fresh_market,
+        });
+
+        let old_checking = before.accounts()[0].account().id();
+        assert_eq!(
+            result.unwrap_err(),
+            DomainError::AccountClosed {
+                account: old_checking
+            }
+        );
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn restoring_into_an_unknown_account_is_rejected() {
+        let mut ledger = three_payments();
+        let fresh_market = transaction(&ledger, "Fresh Market");
+        let applied = ledger
+            .apply(DomainCommand::DeleteTransaction {
+                transaction: fresh_market,
+            })
+            .unwrap();
+        let DomainCommand::RestoreTransaction { transaction, .. } = applied.into_inverse() else {
+            panic!("a delete's inverse restores the transaction");
+        };
+        let unknown = AccountId::new(9);
+
+        let result = ledger.apply(DomainCommand::RestoreTransaction {
+            account: unknown,
+            transaction,
+        });
+
+        assert_eq!(
+            result.unwrap_err(),
+            DomainError::UnknownAccount { account: unknown }
+        );
+    }
+
     #[test]
     #[should_panic(expected = "sits under a later category")]
     fn a_category_under_a_later_one_is_a_bug() {
@@ -742,6 +1114,33 @@ mod tests {
         let transaction = view.accounts()[0].register()[1].transaction();
         assert_eq!(transaction.payee(), "Corner Shop");
         assert_ne!(view.generation(), Generation::FIRST);
+    }
+
+    #[test]
+    fn undoing_an_edit_puts_back_each_field() {
+        let mut ledger = everyday();
+        let before = ledger.snapshot();
+        let fresh_market = transaction_id(&ledger, 1);
+        let edits = [
+            TransactionEdit::Number(Some("1043".into())),
+            TransactionEdit::Payee("Corner Shop".into()),
+            TransactionEdit::Memo("Weekly shop".into()),
+        ];
+        let inverses: Vec<_> = edits
+            .into_iter()
+            .map(|change| {
+                ledger
+                    .apply(edit(fresh_market, change))
+                    .unwrap()
+                    .into_inverse()
+            })
+            .collect();
+
+        for inverse in inverses.into_iter().rev() {
+            ledger.apply(inverse).unwrap();
+        }
+
+        assert_eq!(ledger.snapshot().accounts(), before.accounts());
     }
 
     #[test]
@@ -878,26 +1277,8 @@ mod tests {
         assert_eq!(ledger.snapshot(), before);
     }
 
-    #[test]
-    fn applying_an_edit_returns_the_edit_that_puts_the_old_value_back() {
-        let mut ledger = everyday();
-        let fresh_market = transaction_id(&ledger, 1);
-
-        let applied = ledger
-            .apply(edit(
-                fresh_market,
-                TransactionEdit::Payee("Corner Shop".into()),
-            ))
-            .unwrap();
-
-        assert_eq!(
-            applied.inverse(),
-            &edit(fresh_market, TransactionEdit::Payee("Fresh Market".into()))
-        );
-    }
-
     /// The `index`th transaction in the first account's register.
-    fn transaction(ledger: &Ledger, index: usize) -> Transaction {
+    fn nth_transaction(ledger: &Ledger, index: usize) -> Transaction {
         ledger.snapshot().accounts()[0].register()[index]
             .transaction()
             .clone()
@@ -907,7 +1288,7 @@ mod tests {
     fn undo_puts_back_each_field_an_edit_changed() {
         let mut ledger = everyday();
         let fresh_market = transaction_id(&ledger, 1);
-        let before = transaction(&ledger, 1);
+        let before = nth_transaction(&ledger, 1);
         for change in [
             TransactionEdit::Number(None),
             TransactionEdit::Payee("Corner Shop".into()),
@@ -920,7 +1301,7 @@ mod tests {
             ledger.undo().unwrap();
         }
 
-        assert_eq!(transaction(&ledger, 1), before);
+        assert_eq!(nth_transaction(&ledger, 1), before);
     }
 
     #[test]
@@ -936,7 +1317,7 @@ mod tests {
 
         ledger.undo().unwrap();
 
-        assert_eq!(transaction(&ledger, 1).memo(), "A");
+        assert_eq!(nth_transaction(&ledger, 1).memo(), "A");
     }
 
     #[test]
@@ -950,7 +1331,7 @@ mod tests {
         ] {
             ledger.apply(edit(fresh_market, change)).unwrap();
         }
-        let edited = transaction(&ledger, 1);
+        let edited = nth_transaction(&ledger, 1);
         for _ in 0..3 {
             ledger.undo().unwrap();
         }
@@ -959,7 +1340,7 @@ mod tests {
             ledger.redo().unwrap();
         }
 
-        assert_eq!(transaction(&ledger, 1), edited);
+        assert_eq!(nth_transaction(&ledger, 1), edited);
     }
 
     #[test]

@@ -10,7 +10,8 @@ The decision and the options that were rejected are in `docs/adr/0001-command-an
 | What a window shows (route, selection, sort, filter) | That window's struct | In place, during `ui()` |
 | Dialog form fields | `Option<FormState>` on the host window | In place while open. OK sends a Command, Cancel sets it to `None` |
 | Edit buffer of the Register row being edited | The Register view | In place. Enter sends a Command |
-| Scroll, hover, focus, collapsed sections | egui `Memory` | egui handles them |
+| Scroll, hover, focus | egui `Memory`, kept for the run only (`persist_egui_memory` is off) | egui handles them |
+| Window layout: Account bar width and fold, folded sections, Register column widths | `Layout` in eframe storage, built from the Main window by `App::save` | In place on the Main window; saved on eframe's timer and on exit |
 | View models (sorted row indices, formatted strings) | The window, cached | Rebuilt when `(generation, sort/filter, locale)` changes |
 
 ## Rules
@@ -21,6 +22,6 @@ The decision and the options that were rejected are in `docs/adr/0001-command-an
 - **Commands are applied in one place,** the drain loop in `App::logic`. It hands each `DomainCommand` to the `Ledger`, which validates it and records its inverse for Undo. Persistence will happen there too.
 - **Edits that undo together are one Command.** If a user action needs two domain changes that must undo as one step, add a compound `DomainCommand` rather than sending two.
 - **Only domain Commands are undoable.** Navigation history belongs to Back/Forward.
-- **Rejected Commands come back as a `DomainError`.** The Dialog that sent the Command shows the error inline. Anything else goes to the Status bar.
+- **Rejected Commands come back as a `DomainError`.** A Dialog with a form stays open until its Command is applied, and shows the error inline. A confirm closes as its Command is sent, so its error goes to the Status bar, like any other.
 - **Derived values come from the snapshot.** Running balances and account totals are computed in `balanced_core`. View models format and sort those values but never recompute them.
 - **Rebuild caches only when the generation changes.** A view model rebuilds when the snapshot's `generation`, the window's sort or filter, or the locale changes. Nothing is sorted or formatted for every row on every frame.

@@ -213,6 +213,12 @@ impl Theme {
     /// Space between the Register's edge and the text in its first and last columns.
     pub(crate) const EDGE_INSET: f32 = 6.0;
 
+    /// The least space between a Dialog and each edge of the window.
+    pub(crate) const DIALOG_MARGIN: f32 = 24.0;
+
+    /// The width of a light Dialog's content, in a window wide enough for it.
+    pub(crate) const LIGHT_DIALOG_WIDTH: f32 = 360.0;
+
     pub(crate) fn new(settings: ThemeSettings) -> Self {
         Self {
             settings,

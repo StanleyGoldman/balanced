@@ -29,14 +29,24 @@ pub(crate) enum AppCommand {
     NextRegisterTab,
     /// Make the Register tab left of the current one current, wrapping to the last.
     PreviousRegisterTab,
+    /// Open a Dialog over the Main window.
+    OpenDialog(DialogKind),
     /// Show a message in the Status bar until the next one replaces it.
     ShowStatus(StatusMessage),
     /// Close the Main window, which ends the app.
     Quit,
 }
 
-/// A Status bar message.
+/// A Dialog the Main window can open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DialogKind {
+    /// The confirm for deleting the Register's selected transaction. Nothing opens
+    /// while no transaction is selected, or while its account is closed.
+    DeleteTransaction,
+}
+
+/// A Status bar message.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum StatusMessage {
     /// Balanced's name and version, in answer to Help → About.
     About,
@@ -47,7 +57,7 @@ pub(crate) enum StatusMessage {
 }
 
 impl StatusMessage {
-    pub(crate) fn text(self, i18n: &Localizer) -> String {
+    pub(crate) fn text(&self, i18n: &Localizer) -> String {
         match self {
             Self::About => fl!(i18n, "status-about", version = env!("CARGO_PKG_VERSION")),
             Self::NotAvailableYet => fl!(i18n, "status-not-available-yet"),
@@ -59,6 +69,8 @@ impl StatusMessage {
                 DomainError::OpeningBalancePayee { .. } => {
                     fl!(i18n, "status-opening-balance-payee")
                 }
+                DomainError::UnknownAccount { .. } => fl!(i18n, "status-unknown-account"),
+                DomainError::Money(_) => fl!(i18n, "status-amount-too-large"),
             },
         }
     }

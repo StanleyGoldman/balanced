@@ -3,7 +3,7 @@
 
 use balanced_i18n::Localizer;
 
-use crate::command::{AppCommand, StatusMessage};
+use crate::command::{AppCommand, DialogKind, StatusMessage};
 use crate::i18n::fl;
 
 /// Something the user can do from the Menu bar or with a Shortcut.
@@ -14,6 +14,10 @@ pub(crate) enum UserAction {
     CloseRegisterTab,
     NextRegisterTab,
     PreviousRegisterTab,
+    /// Start a new transaction in the open Register.
+    NewTransaction,
+    /// Delete the Register's selected transaction, once confirmed.
+    DeleteTransaction,
     Quit,
     About,
 }
@@ -27,6 +31,8 @@ impl UserAction {
             Self::CloseRegisterTab => fl!(i18n, "menu-file-close-register-tab"),
             Self::NextRegisterTab => fl!(i18n, "menu-view-next-register-tab"),
             Self::PreviousRegisterTab => fl!(i18n, "menu-view-previous-register-tab"),
+            Self::NewTransaction => fl!(i18n, "menu-new-transaction"),
+            Self::DeleteTransaction => fl!(i18n, "menu-delete-transaction"),
             Self::Quit => fl!(i18n, "menu-file-quit"),
             Self::About => fl!(i18n, "menu-help-about"),
         }
@@ -37,7 +43,9 @@ impl UserAction {
     pub(crate) fn text_field_does_it(self) -> bool {
         match self {
             Self::Undo | Self::Redo => true,
-            Self::CloseRegisterTab
+            Self::NewTransaction
+            | Self::DeleteTransaction
+            | Self::CloseRegisterTab
             | Self::NextRegisterTab
             | Self::PreviousRegisterTab
             | Self::Quit
@@ -53,6 +61,9 @@ impl UserAction {
             Self::CloseRegisterTab => AppCommand::CloseRegisterTab,
             Self::NextRegisterTab => AppCommand::NextRegisterTab,
             Self::PreviousRegisterTab => AppCommand::PreviousRegisterTab,
+            // TODO(#93): go to the draft row.
+            Self::NewTransaction => AppCommand::ShowStatus(StatusMessage::NotAvailableYet),
+            Self::DeleteTransaction => AppCommand::OpenDialog(DialogKind::DeleteTransaction),
             Self::Quit => AppCommand::Quit,
             Self::About => AppCommand::ShowStatus(StatusMessage::About),
         }

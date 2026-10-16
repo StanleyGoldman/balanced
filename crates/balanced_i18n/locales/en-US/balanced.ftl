@@ -24,6 +24,8 @@ menu-view-previous-register-tab = Previous { -register } Tab
 menu-tools = Tools
 menu-help = Help
 menu-help-about = About { -brand-name }
+menu-new-transaction = New Transaction
+menu-delete-transaction = Delete Transaction
 
 # Modifier key names in a menu item's Shortcut text, such as Ctrl+Q.
 menu-modifier-ctrl = Ctrl
@@ -63,6 +65,9 @@ account-bar-group-investing = Investing
 account-bar-group-property-debt = Property & Debt
 account-bar-group-closed = Closed
 account-bar-net-worth = Net Worth
+# The buttons that fold the Account bar to a narrow rail and open it again.
+account-bar-fold = Fold the { -account-bar }
+account-bar-unfold = Unfold the { -account-bar }
 # An account's right-click menu.
 account-bar-open-register = Open { -register }
 account-bar-open-in-new-tab = Open in New Tab
@@ -77,12 +82,16 @@ register-column-category = Category
 register-column-memo = Memo
 register-column-amount = Amount
 register-column-balance = Balance
+# The handle on a column heading's right edge that resizes the column.
+register-resize-column = Resize { $column }
 # The Category cell of a transaction divided between several categories.
 register-split = [Split]
 # The Payee cell of an account's first transaction, its starting balance.
 register-opening-balance = Opening Balance
 # The menu of commands on a Register row.
 register-actions = Actions
+# The Actions menu item that asks to delete the row's transaction.
+register-actions-delete = Delete…
 register-new-transaction = + Transaction
 # Beside a closed account's name, above its Register.
 register-closed-read-only = Closed — read-only
@@ -92,6 +101,13 @@ register-transaction-count =
        *[other] { $count } transactions
     }
 
+## Dialogs
+
+dialog-cancel = Cancel
+# Asks before deleting the transaction the payee, date and amount describe.
+dialog-delete-transaction-message = Delete this transaction? { $payee }, { $date }, { $amount }
+dialog-delete-transaction-delete = Delete
+
 ## Status bar
 
 status-about = { -brand-name } { $version }
@@ -100,3 +116,6 @@ status-account-closed = This account is closed, so its transactions can't be cha
 # A change to a transaction that no longer exists, such as one just deleted.
 status-unknown-transaction = That transaction no longer exists.
 status-opening-balance-payee = The opening balance has no payee.
+# A change to an account that no longer exists, such as one just deleted.
+status-unknown-account = That account no longer exists.
+status-amount-too-large = That change would make a balance too large to hold.

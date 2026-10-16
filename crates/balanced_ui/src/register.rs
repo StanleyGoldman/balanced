@@ -1,8 +1,10 @@
 //! The Register: one account's transactions in a table, one row each, with the running
 //! balance after each.
 
+use std::collections::{BTreeMap, HashMap};
+
 use balanced_core::{
-    AccountId, AccountSummary, DomainCommand, DomainError, LedgerView, TransactionEdit,
+    Account, AccountId, AccountSummary, DomainCommand, DomainError, LedgerView, TransactionEdit,
     TransactionId,
 };
 use balanced_i18n::Localizer;
@@ -10,19 +12,25 @@ use eframe::egui::accesskit::{self, Role};
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
 use eframe::egui::{
-    self, Align, CursorIcon, Event, EventFilter, Id, Key, Layout, Margin, Modifiers, Popup, Rect,
-    Response, ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode,
-    WidgetInfo, WidgetText, WidgetType, pos2, vec2,
+    self, Align, Button, CursorIcon, Event, EventFilter, Id, Key, Layout, Margin, Modifiers, Popup,
+    Rect, Response, ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle,
+    TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, TableBody, TableBuilder};
 
-use crate::command::{AppCommand, CommandSender, StatusMessage};
+use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::i18n::fl;
 use crate::register_model::{RegisterModel, RegisterRow, RegisterSort, SortDirection, SortKey};
 use crate::theme::Theme;
 
 /// The narrowest Payee and Category get before the Register scrolls sideways.
 const MIN_FLEX_WIDTH: f32 = 120.0;
+
+/// The narrowest a resized column gets.
+const MIN_COLUMN_WIDTH: f32 = 24.0;
+
+/// The width of the handle inside a heading's right edge that resizes its column.
+const RESIZE_HANDLE_WIDTH: f32 = 8.0;
 
 /// The radius of each dot of the Actions menu's ⋯, and the space between their centres.
 const ACTION_DOT_RADIUS: f32 = 1.5;
@@ -62,6 +70,34 @@ impl RegisterColumn {
         Self::Actions,
     ];
 
+    /// The column's stable id, which the saved layout names it by.
+    fn id(self) -> &'static str {
+        match self {
+            Self::Date => "date",
+            Self::Number => "num",
+            Self::Payee => "payee",
+            Self::Category => "category",
+            Self::Memo => "memo",
+            Self::Amount => "amount",
+            Self::Balance => "balance",
+            Self::Actions => "actions",
+        }
+    }
+
+    /// The column's width before the user resizes it, for a column that resizes.
+    /// Payee and Category share the width the others leave, and the Actions column
+    /// fits its button, so neither resizes.
+    fn default_width(self) -> Option<f32> {
+        match self {
+            Self::Date => Some(80.0),
+            Self::Number => Some(48.0),
+            Self::Memo => Some(140.0),
+            Self::Amount => Some(90.0),
+            Self::Balance => Some(100.0),
+            Self::Payee | Self::Category | Self::Actions => None,
+        }
+    }
+
     /// The column's heading. The Actions column has none.
     fn title(self, i18n: &Localizer) -> String {
         match self {
@@ -89,18 +125,18 @@ impl RegisterColumn {
         }
     }
 
-    /// How wide the column is. Payee and Category share the width the others leave,
-    /// down to [`MIN_FLEX_WIDTH`]; below that the Register scrolls sideways.
-    // TODO(#101): take the widths from the column chooser's saved layout.
-    fn width(self, theme: &Theme) -> Column {
+    /// How wide the column is: as `widths` says for a column that resizes. Payee and
+    /// Category share the width the others leave, down to [`MIN_FLEX_WIDTH`]; below
+    /// that the Register scrolls sideways.
+    fn width(self, theme: &Theme, widths: &ColumnWidths) -> Column {
         let column = match self {
-            Self::Date => Column::exact(80.0),
-            Self::Number => Column::exact(48.0),
             Self::Payee | Self::Category => Column::remainder().at_least(MIN_FLEX_WIDTH),
-            Self::Memo => Column::exact(140.0),
-            Self::Amount => Column::exact(90.0),
-            Self::Balance => Column::exact(100.0),
             Self::Actions => Column::exact(theme.row_height() + Theme::EDGE_INSET),
+            Self::Date | Self::Number | Self::Memo | Self::Amount | Self::Balance => Column::exact(
+                widths
+                    .width(self)
+                    .expect("every column that resizes has a width"),
+            ),
         };
         column.clip(true)
     }
@@ -174,6 +210,81 @@ impl RegisterColumn {
                 left: 0.0,
                 right: 0.0,
             },
+        }
+    }
+}
+
+/// The widths of the Register columns that resize, one set shared by every Register.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ColumnWidths {
+    widths: HashMap<RegisterColumn, f32>,
+}
+
+impl Default for ColumnWidths {
+    fn default() -> Self {
+        Self::from_saved(&BTreeMap::new())
+    }
+}
+
+impl ColumnWidths {
+    /// The widths `saved` holds under column ids, raised to [`MIN_COLUMN_WIDTH`]. A
+    /// column `saved` leaves out takes its default width, and an unknown id is ignored.
+    pub(crate) fn from_saved(saved: &BTreeMap<String, f32>) -> Self {
+        let widths = RegisterColumn::ALL
+            .into_iter()
+            .filter_map(|column| {
+                let default = column.default_width()?;
+                let width = saved
+                    .get(column.id())
+                    .copied()
+                    .filter(|width| width.is_finite())
+                    .map_or(default, |width| width.max(MIN_COLUMN_WIDTH));
+                Some((column, width))
+            })
+            .collect();
+        Self { widths }
+    }
+
+    /// Every width under its column's id, for saving.
+    pub(crate) fn to_saved(&self) -> BTreeMap<String, f32> {
+        self.widths
+            .iter()
+            .map(|(column, width)| (column.id().to_owned(), *width))
+            .collect()
+    }
+
+    /// The width of `column`, unless it doesn't resize.
+    fn width(&self, column: RegisterColumn) -> Option<f32> {
+        self.widths.get(&column).copied()
+    }
+
+    /// The handle on the right edge of `column`'s heading, in the heading cell `ui`,
+    /// for a column that resizes. Dragging it resizes the column from the next frame.
+    fn resize_handle(&mut self, ui: &egui::Ui, i18n: &Localizer, column: RegisterColumn) {
+        let Some(width) = self.widths.get_mut(&column) else {
+            return;
+        };
+        // The cell clips what it holds, so the handle stays inside its right edge.
+        let cell = ui.max_rect();
+        let edge = cell.right();
+        let handle = Rect::from_x_y_ranges(edge - RESIZE_HANDLE_WIDTH..=edge, cell.y_range());
+        let id = ui.id().with("register_resize");
+        let response = ui
+            .interact(handle, id, Sense::drag())
+            .on_hover_cursor(CursorIcon::ResizeColumn);
+        let label = fl!(i18n, "register-resize-column", column = column.title(i18n));
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), &label));
+        ui.ctx()
+            .accesskit_node_builder(response.id, |node| node.set_role(Role::Splitter));
+        if response.dragged() {
+            *width = (*width + response.drag_delta().x).max(MIN_COLUMN_WIDTH);
+            ui.ctx().request_repaint();
+        }
+        if response.hovered() || response.dragged() {
+            let stroke = ui.style().interact(&response).fg_stroke;
+            ui.ctx()
+                .layer_painter(ui.layer_id())
+                .vline(edge, cell.y_range(), stroke);
         }
     }
 }
@@ -300,10 +411,11 @@ pub(crate) struct Register {
 }
 
 impl Register {
-    /// Whether keys go to the Register: the cell cursor is in it, and nothing holds
-    /// keyboard focus but the Register's own cell editor.
+    /// Whether keys go to the Register: the cell cursor is in it, no Dialog is open
+    /// over it, and nothing holds keyboard focus but the Register's own cell editor.
     pub(crate) fn owns_keyboard(&self, ctx: &egui::Context) -> bool {
         self.cursor.is_some()
+            && ctx.memory(|memory| memory.top_modal_layer().is_none())
             && ctx.memory(|memory| match memory.focused() {
                 None => true,
                 Some(focused) => self
@@ -313,6 +425,31 @@ impl Register {
             })
     }
 
+    /// The selected transaction's row, while `account`'s Register shows it.
+    pub(crate) fn selected_row(&self, account: AccountId) -> Option<&RegisterRow> {
+        self.row(account, self.cursor?.row)
+    }
+
+    /// Transaction `id`'s row, while `account`'s Register shows it.
+    pub(crate) fn row(&self, account: AccountId, id: TransactionId) -> Option<&RegisterRow> {
+        let model = self
+            .model
+            .as_ref()
+            .filter(|model| model.account() == account)?;
+        model.rows().iter().find(|row| row.id() == id)
+    }
+
+    /// Carries out `action`, picked from transaction `id`'s Actions menu.
+    fn act(&mut self, id: TransactionId, action: RowAction, commands: &CommandSender) {
+        match action {
+            RowAction::Delete => {
+                // The confirm asks about the selected row.
+                self.place_cursor(id, RegisterColumn::Actions);
+                commands.send(AppCommand::OpenDialog(DialogKind::DeleteTransaction));
+            }
+        }
+    }
+
     /// Queues a Tab press, with `modifiers` held, for the next frame.
     pub(crate) fn press_tab(&mut self, modifiers: Modifiers) {
         self.tabs.push(modifiers);
@@ -320,6 +457,10 @@ impl Register {
 
     /// Draws the Register of `summary`, an account in `view`, filling the space left in
     /// `ui`. Only the rows in view are laid out.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the column widths are shared by every Register, so the Main window owns them and lends them here beside the account and its snapshot"
+    )]
     pub(crate) fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -328,6 +469,7 @@ impl Register {
         commands: &CommandSender,
         summary: &AccountSummary,
         view: &LedgerView,
+        widths: &mut ColumnWidths,
     ) {
         let account = summary.account().id();
         if self
@@ -375,7 +517,7 @@ impl Register {
                     .auto_shrink(false)
                     .max_scroll_height(f32::INFINITY);
                 for column in RegisterColumn::ALL {
-                    table = table.column(column.width(theme));
+                    table = table.column(column.width(theme, widths));
                 }
                 if let Some(offset) = scroll_offset {
                     table = table.vertical_scroll_offset(offset);
@@ -396,6 +538,7 @@ impl Register {
                                     // The rows sort and scroll on the next frame.
                                     ui.ctx().request_repaint();
                                 }
+                                widths.resize_handle(ui, i18n, column);
                             });
                         }
                     })
@@ -406,6 +549,7 @@ impl Register {
                             commands,
                             rows: model.rows(),
                             register_id,
+                            access: Access::of(summary.account()),
                             viewport: Rect::NOTHING,
                         };
                         self.body(body, frame, row_height, pitch);
@@ -459,6 +603,7 @@ impl Register {
             commands,
             rows,
             register_id,
+            access,
             viewport,
         } = *frame;
         let address = CellAddress {
@@ -471,10 +616,15 @@ impl Register {
             column,
             selected: self.cursor.is_some_and(|cursor| cursor.row == row.id()),
             cursor: self.cursor == Some(address),
+            access,
             viewport,
         };
-        if cell.show(ui, i18n, theme).clicked() {
+        let (response, action) = cell.show(ui, i18n, theme);
+        if response.clicked() {
             self.place_cursor(row.id(), column);
+        }
+        if let Some(action) = action {
+            self.act(row.id(), action, commands);
         }
         if let Some(edit) = self.edit.as_mut().filter(|edit| edit.cell == address)
             && editor(ui, edit, heading_id(register_id, column)).lost_focus()
@@ -715,8 +865,33 @@ struct BodyFrame<'a> {
     commands: &'a CommandSender,
     rows: &'a [RegisterRow],
     register_id: Id,
+    access: Access,
     /// The visible part of the Register's body.
     viewport: Rect,
+}
+
+/// Whether a Register's rows can change: a closed account's are read-only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Access {
+    Editable,
+    ReadOnly,
+}
+
+impl Access {
+    /// How `account`'s Register rows can be changed.
+    fn of(account: &Account) -> Self {
+        if account.is_closed() {
+            Self::ReadOnly
+        } else {
+            Self::Editable
+        }
+    }
+}
+
+/// A command picked from a row's Actions menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowAction {
+    Delete,
 }
 
 /// Whether `rect` lies wholly within `viewport` from top to bottom, give or take half a
@@ -896,19 +1071,27 @@ struct Cell<'a> {
     selected: bool,
     /// Whether the cell cursor is on this cell.
     cursor: bool,
+    access: Access,
     /// The visible part of the Register's body.
     viewport: Rect,
 }
 
 impl Cell<'_> {
-    /// Draws the cell, the whole of which is one click target.
-    fn show(&self, ui: &egui::Ui, i18n: &Localizer, theme: &Theme) -> Response {
+    /// Draws the cell, the whole of which is one click target, and returns the command
+    /// picked from its Actions menu, if it has one.
+    fn show(
+        &self,
+        ui: &egui::Ui,
+        i18n: &Localizer,
+        theme: &Theme,
+    ) -> (Response, Option<RowAction>) {
         let Self {
             register_id,
             row,
             column,
             selected,
             cursor,
+            access,
             viewport,
         } = *self;
         let rect = ui.max_rect();
@@ -936,13 +1119,14 @@ impl Cell<'_> {
                     .pointer_hover_pos()
                     .is_some_and(|pointer| band.contains(pointer) && viewport.contains(pointer));
                 let open = Popup::is_id_open(ui.ctx(), Popup::default_response_id(&response));
+                let mut action = None;
                 if selected || hovered || open {
-                    actions_menu(ui, i18n, &response);
+                    action = actions_menu(ui, i18n, &response, access);
                 } else {
                     // Hidden, the menu leaves an empty cell that selects the row.
                     cell_info(ui, &response, selected, "");
                 }
-                return response;
+                return (response, action);
             }
         };
         let label = text.text().to_owned();
@@ -965,7 +1149,7 @@ impl Cell<'_> {
             ui.painter()
                 .rect_stroke(rect, 0.0, theme.cell_cursor_stroke(), StrokeKind::Inside);
         }
-        response
+        (response, None)
     }
 }
 
@@ -1010,8 +1194,14 @@ fn paint_text(ui: &egui::Ui, rect: Rect, column: RegisterColumn, text: WidgetTex
 }
 
 /// The row's Actions menu: a ⋯ button on the right of the Actions cell, which opens
-/// the menu below it. The default fonts lack ⋯, so its dots are painted.
-fn actions_menu(ui: &egui::Ui, i18n: &Localizer, response: &Response) {
+/// the menu below it. The default fonts lack ⋯, so its dots are painted. Returns the
+/// command picked from the menu. A read-only row's commands are disabled.
+fn actions_menu(
+    ui: &egui::Ui,
+    i18n: &Localizer,
+    response: &Response,
+    access: Access,
+) -> Option<RowAction> {
     let label = fl!(i18n, "register-actions");
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
     let rect = response.rect;
@@ -1036,8 +1226,14 @@ fn actions_menu(ui: &egui::Ui, i18n: &Localizer, response: &Response) {
             );
         }
     }
-    // TODO(#94): add the row's commands, starting with Delete….
-    Popup::menu(response).show(|_ui| {});
+    Popup::menu(response)
+        .show(|ui| {
+            let delete = Button::new(fl!(i18n, "register-actions-delete"));
+            ui.add_enabled(access == Access::Editable, delete)
+                .clicked()
+                .then_some(RowAction::Delete)
+        })
+        .and_then(|menu| menu.inner)
 }
 
 #[cfg(test)]
@@ -1058,6 +1254,7 @@ mod tests {
         theme: Theme,
         commands: CommandSender,
         view: Arc<LedgerView>,
+        widths: ColumnWidths,
     }
 
     impl Shown {
@@ -1089,6 +1286,7 @@ mod tests {
             theme: Theme::default(),
             commands,
             view: Ledger::stub().snapshot(),
+            widths: ColumnWidths::default(),
         };
         let harness = Harness::builder()
             .with_size(vec2(1000.0, 400.0))
@@ -1100,13 +1298,14 @@ mod tests {
                         theme,
                         commands,
                         view,
+                        widths,
                     } = shown;
                     let summary = view
                         .accounts()
                         .iter()
                         .find(|summary| summary.account().name() == "Everyday Checking")
                         .expect("the stub has Everyday Checking");
-                    register.show(ui, i18n, theme, commands, summary, view);
+                    register.show(ui, i18n, theme, commands, summary, view, widths);
                 },
                 shown,
             );
