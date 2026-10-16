@@ -140,22 +140,20 @@ impl LightDialog {
         let first_frame = !dialog.shown;
         dialog.shown = true;
         let frame = Frame::popup(&ctx.global_style());
-        let modal = Modal::new(id).frame(frame).backdrop_color(backdrop);
-        let layer = modal.area.layer();
-        let modal = modal.show(ctx, |ui| {
-            let inner = (room - frame.total_margin().sum()).max(Vec2::ZERO);
-            let width = Theme::LIGHT_DIALOG_WIDTH.min(inner.x);
-            ui.set_width(width);
-            body_area(ui, inner.y, |ui| body(ui, &mut dialog.form));
-            let (accept, cancel, back) = buttons(ui, accept, cancel, back);
-            if first_frame {
-                accept.request_focus();
-            }
-            (accept, cancel, back)
-        });
-        // A confirm opened from a heavy Dialog draws above it: the heavy Dialog raises
-        // itself every frame, before this.
-        ctx.move_to_top(layer);
+        let modal = Modal::new(id)
+            .frame(frame)
+            .backdrop_color(backdrop)
+            .show(ctx, |ui| {
+                let inner = (room - frame.total_margin().sum()).max(Vec2::ZERO);
+                let width = Theme::LIGHT_DIALOG_WIDTH.min(inner.x);
+                ui.set_width(width);
+                body_area(ui, inner.y, |ui| body(ui, &mut dialog.form));
+                let (accept, cancel, back) = buttons(ui, accept, cancel, back);
+                if first_frame {
+                    accept.request_focus();
+                }
+                (accept, cancel, back)
+            });
         let (accept, cancel, back) = &modal.inner;
         if accept.clicked() || (modal.is_top_modal && enter_pressed(ctx, cancel, back.as_ref())) {
             DialogOutcome::Accepted

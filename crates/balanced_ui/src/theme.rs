@@ -229,6 +229,11 @@ impl Theme {
         }
     }
 
+    /// The settings the look is built from.
+    pub(crate) fn settings(&self) -> ThemeSettings {
+        self.settings
+    }
+
     /// The egui style for every window.
     pub(crate) fn style(&self) -> egui::Style {
         let Self {

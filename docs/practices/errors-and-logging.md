@@ -9,7 +9,7 @@
 - Put sensitive data last in an error message, after the description. That covers paths, URLs, account names and amounts.
 - Keep the source error. Wrap it in a variant (`#[from]` or `#[source]`) rather than `.map_err(|e| e.to_string())`, and never discard it with `.map_err(|_| …)`.
 - Display an `anyhow` error with `{:#}`, which prints the whole chain.
-- Invalid configuration or input is an error. Report it rather than falling back to a default.
+- Invalid configuration or input is an error. Report it rather than falling back to a default. `preferences.toml` is the exception, so that upgrades need no action: a missing key takes its default, an unknown key is ignored, and an unknown font face id reads as egui's face. A file that can't be read at all is still an error, which the App reports in the Status bar.
 - When an operation partly succeeds, as an import with skipped rows does, take a `&mut` warnings collector parameter and push structured warnings into it. The extra parameter makes the warnings hard to ignore.
 
 ## Handle each error once

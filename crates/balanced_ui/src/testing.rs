@@ -21,9 +21,8 @@ const THRESHOLD: f32 = 0.6;
 /// How many pixels may fail before the snapshot fails: none.
 const MAX_FAILED_PIXELS: usize = 0;
 
-/// The App on stub data in the test locale and in `scheme`, with a preferences file
-/// saying so, wide enough to show every
-/// Register column, drawn by lavapipe.
+/// The App on stub data in the test locale, with a preferences file choosing `scheme`,
+/// wide enough to show every Register column, drawn by lavapipe.
 ///
 /// # Panics
 ///

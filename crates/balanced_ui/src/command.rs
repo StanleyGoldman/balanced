@@ -81,6 +81,9 @@ pub(crate) enum StatusMessage {
     /// The preferences file couldn't be read, so the app started from the default
     /// Preferences and kept the file as `preferences.toml.broken`.
     PreferencesReset,
+    /// The preferences file couldn't be read, so the app started from the default
+    /// Preferences, and the file couldn't be kept aside either.
+    PreferencesUnreadable,
     /// The Preferences apply, but writing them to the preferences file failed.
     PreferencesNotSaved,
     /// Why the ledger refused a change.
@@ -94,6 +97,7 @@ impl StatusMessage {
             Self::NotAvailableYet => fl!(i18n, "status-not-available-yet"),
             Self::NoSuchCategory => fl!(i18n, "status-no-such-category"),
             Self::PreferencesReset => fl!(i18n, "status-preferences-reset"),
+            Self::PreferencesUnreadable => fl!(i18n, "status-preferences-unreadable"),
             Self::PreferencesNotSaved => fl!(i18n, "status-preferences-not-saved"),
             Self::Rejected(error) => match error {
                 DomainError::AccountClosed { .. } => fl!(i18n, "status-account-closed"),

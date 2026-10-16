@@ -195,3 +195,24 @@ fn a_refused_finish_shows_why_and_keeps_the_wizard_open() {
         "That change would make a balance too large to hold."
     ));
 }
+
+#[test]
+fn a_day_picked_from_the_calendar_dates_the_opening_balance() {
+    let mut harness = wizard();
+    press(&mut harness, Key::Enter);
+    type_into(&mut harness, "Name", "Rainy Day");
+    press(&mut harness, Key::Enter);
+    type_into(&mut harness, "Opening balance", "10.00");
+    harness
+        .get_by_role_and_label(Role::Button, "Calendar")
+        .click();
+    harness.run();
+
+    harness
+        .get_by_role_and_label(Role::Button, "10/24/2026")
+        .click();
+    harness.run();
+    press(&mut harness, Key::Enter);
+
+    assert!(shows(&harness, "Opening balance: $10.00 as of 10/24/2026"));
+}

@@ -24,9 +24,8 @@ pub struct App {
     preferences_file: PreferencesFile,
     /// The Preferences in use.
     preferences: Preferences,
-    /// The Preferences the look is built from: the open Preferences Dialog's draft, or
-    /// else the Preferences in use.
-    shown: Preferences,
+    /// The look, built from the open Preferences Dialog's draft, or else from the
+    /// Preferences in use.
     theme: Theme,
     clock: Clock,
     commands: CommandSender,
@@ -47,20 +46,24 @@ impl App {
         clock: Clock,
         preferences_file: PreferencesFile,
     ) -> Self {
-        let (preferences, reset) = match preferences_file.load() {
-            Ok(preferences) => (preferences, false),
+        let (preferences, problem) = match preferences_file.load() {
+            Ok(preferences) => (preferences, None),
             Err(error) => {
                 tracing::warn!(
                     ?error,
                     "the preferences file can't be read; using the defaults"
                 );
-                if let Err(error) = preferences_file.set_aside() {
-                    tracing::warn!(
-                        ?error,
-                        "setting the unreadable preferences file aside failed"
-                    );
-                }
-                (Preferences::default(), true)
+                let message = match preferences_file.set_aside() {
+                    Ok(()) => StatusMessage::PreferencesReset,
+                    Err(error) => {
+                        tracing::warn!(
+                            ?error,
+                            "setting the unreadable preferences file aside failed"
+                        );
+                        StatusMessage::PreferencesUnreadable
+                    }
+                };
+                (Preferences::default(), Some(message))
             }
         };
         let theme = Theme::new(ThemeSettings::from(&preferences));
@@ -73,14 +76,13 @@ impl App {
         let (commands, command_receiver) = CommandSender::new(cc.egui_ctx.clone());
         let layout = Layout::load(cc.storage);
         let mut main_window = MainWindow::new(&layout);
-        if reset {
-            main_window.show_status(StatusMessage::PreferencesReset);
+        if let Some(message) = problem {
+            main_window.show_status(message);
         }
         Self {
             i18n,
             ledger,
             preferences_file,
-            shown: preferences.clone(),
             preferences,
             theme,
             clock,
@@ -92,12 +94,12 @@ impl App {
 
     /// Builds the look from `preferences`, unless it is already built from them.
     fn show_preferences(&mut self, ctx: &egui::Context, preferences: &Preferences) {
-        if *preferences == self.shown {
+        let settings = ThemeSettings::from(preferences);
+        if settings == self.theme.settings() {
             return;
         }
-        self.theme = Theme::new(ThemeSettings::from(preferences));
+        self.theme = Theme::new(settings);
         apply_theme(ctx, &self.theme);
-        self.shown = preferences.clone();
     }
 
     fn apply(&mut self, ctx: &egui::Context, command: AppCommand) {

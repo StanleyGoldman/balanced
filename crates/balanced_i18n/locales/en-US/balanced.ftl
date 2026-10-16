@@ -230,4 +230,5 @@ status-duplicate-category = A category named “{ $name }” is already there.
 status-category-in-use = That category is still in use, so it can't be deleted.
 status-blank-category-name = Enter a name for the category.
 status-preferences-reset = Your preferences couldn't be read, so the defaults are in use. The old file is kept as preferences.toml.broken.
+status-preferences-unreadable = Your preferences couldn't be read, so the defaults are in use.
 status-preferences-not-saved = Your preferences couldn't be saved, so they last only until you quit.

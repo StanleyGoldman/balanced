@@ -197,7 +197,7 @@ pub(crate) enum LoadError {
 /// Why the preferences file couldn't be written.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum SaveError {
-    #[error("the Preferences can't be written as TOML")]
+    #[error("the preferences can't be written as TOML")]
     Serialize(#[from] toml::ser::Error),
     #[error("writing the preferences file failed")]
     Write(#[from] std::io::Error),
@@ -291,6 +291,20 @@ mod tests {
         let loaded = file.load().unwrap();
 
         assert_eq!(loaded, Preferences::default());
+    }
+
+    #[test]
+    fn a_file_without_a_version_reads_as_version_1() {
+        let (dir, file) = file();
+        std::fs::write(dir.path().join("preferences.toml"), "dense_rows = true\n").unwrap();
+
+        let loaded = file.load().unwrap();
+
+        let expected = Preferences {
+            dense_rows: true,
+            ..Preferences::default()
+        };
+        assert_eq!(loaded, expected);
     }
 
     #[test]
