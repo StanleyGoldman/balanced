@@ -7,7 +7,7 @@ use balanced_core::Ledger;
 use balanced_i18n::Localizer;
 use eframe::egui;
 
-use crate::command::{AppCommand, CommandSender};
+use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::i18n::fl;
 use crate::main_window::MainWindow;
 use crate::register_tabs::RegisterTabs;
@@ -60,6 +60,11 @@ impl App {
 
     fn apply(&mut self, ctx: &egui::Context, command: AppCommand) {
         match command {
+            AppCommand::Domain(command) => {
+                if let Err(error) = self.ledger.apply(command) {
+                    self.main_window.show_status(StatusMessage::Rejected(error));
+                }
+            }
             AppCommand::Navigate(route) => self.main_window.navigate(route),
             AppCommand::CloseRegisterTab => self
                 .main_window
@@ -81,6 +86,32 @@ impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         while let Ok(command) = self.command_receiver.try_recv() {
             self.apply(ctx, command);
+        }
+    }
+
+    /// Takes Tab and Shift+Tab away from egui's focus navigation while the Register
+    /// owns the keyboard, and hands them to the Register.
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        if self.main_window.register_takes_tab(ctx) {
+            raw_input.events.retain(|event| {
+                let egui::Event::Key {
+                    key: egui::Key::Tab,
+                    pressed,
+                    modifiers,
+                    ..
+                } = event
+                else {
+                    return true;
+                };
+                // Ctrl+Tab and other chords stay with the rest of the app.
+                if !(modifiers.is_none() || modifiers.shift_only()) {
+                    return true;
+                }
+                if *pressed {
+                    self.main_window.press_tab(*modifiers);
+                }
+                false
+            });
         }
     }
 

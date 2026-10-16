@@ -94,3 +94,7 @@ register-transaction-count =
 
 status-about = { -brand-name } { $version }
 status-not-available-yet = Not available yet
+status-account-closed = This account is closed, so its transactions can't be changed.
+# A change to a transaction that no longer exists, such as one just deleted.
+status-unknown-transaction = That transaction no longer exists.
+status-opening-balance-payee = The opening balance has no payee.

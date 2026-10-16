@@ -23,6 +23,7 @@ pub(crate) struct RegisterRow {
     id: TransactionId,
     /// The row's place in date order, which breaks ties in every sort.
     place: usize,
+    opening_balance: bool,
     date: String,
     number: String,
     payee: String,
@@ -35,6 +36,12 @@ pub(crate) struct RegisterRow {
 impl RegisterRow {
     pub(crate) fn id(&self) -> TransactionId {
         self.id
+    }
+
+    /// Whether this is the account's opening balance, whose Payee cell shows a
+    /// caption rather than a payee.
+    pub(crate) fn is_opening_balance(&self) -> bool {
+        self.opening_balance
     }
 
     pub(crate) fn date(&self) -> &str {
@@ -202,6 +209,7 @@ impl RegisterModel {
                 RegisterRow {
                     id: transaction.id(),
                     place,
+                    opening_balance: *transaction.allocation() == Allocation::OpeningBalance,
                     date: i18n.format_date(transaction.date()),
                     number: transaction.number().unwrap_or_default().to_owned(),
                     payee,

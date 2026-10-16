@@ -326,6 +326,11 @@ impl Theme {
         self.palette.header
     }
 
+    /// The outline around the Register's cell cursor.
+    pub(crate) fn cell_cursor_stroke(&self) -> Stroke {
+        Stroke::new(1.0, self.palette.accent)
+    }
+
     /// Whether the Register stripes alternate rows: pass it to `TableBuilder::striped`.
     /// Only the Register stripes, so the style leaves `Visuals::striped` off.
     pub(crate) fn alternating_rows(&self) -> bool {

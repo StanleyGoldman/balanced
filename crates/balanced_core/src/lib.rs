@@ -3,6 +3,7 @@
 
 mod account;
 mod category;
+mod command;
 mod ledger;
 mod money;
 mod stub;
@@ -10,6 +11,7 @@ mod transaction;
 
 pub use account::{Account, AccountGroup, AccountId, AccountKind};
 pub use category::{Category, CategoryId};
+pub use command::{DomainCommand, DomainError, TransactionEdit};
 pub use ledger::{AccountSummary, Generation, Ledger, LedgerView, RegisterEntry};
 pub use money::{CurrencyCode, Money, MoneyError, RoundingPolicy};
 pub use transaction::{Allocation, SplitLine, Transaction, TransactionId};

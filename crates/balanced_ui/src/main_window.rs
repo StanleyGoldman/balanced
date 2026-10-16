@@ -62,6 +62,23 @@ impl MainWindow {
         }
     }
 
+    /// Whether the current Register takes Tab this frame: it is shown and owns the
+    /// keyboard.
+    pub(crate) fn register_takes_tab(&self, ctx: &egui::Context) -> bool {
+        self.tab == TopLevelTab::Accounts
+            && self
+                .registers
+                .current_register()
+                .is_some_and(|register| register.owns_keyboard(ctx))
+    }
+
+    /// Hands a Tab press, with `modifiers` held, to the current Register.
+    pub(crate) fn press_tab(&mut self, modifiers: egui::Modifiers) {
+        if let Some(register) = self.registers.current_register_mut() {
+            register.press_tab(modifiers);
+        }
+    }
+
     /// Shows `message` in the Status bar.
     pub(crate) fn show_status(&mut self, message: StatusMessage) {
         self.status = Some(message);
@@ -124,7 +141,7 @@ impl MainWindow {
                 Some(summary) => {
                     Self::context_header(ui, i18n, theme, commands, summary, &accounts);
                     if let Some(register) = self.registers.current_register_mut() {
-                        register.show(ui, i18n, theme, summary, view);
+                        register.show(ui, i18n, theme, commands, summary, view);
                     }
                 }
                 None => {
