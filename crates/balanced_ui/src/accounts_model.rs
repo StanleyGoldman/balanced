@@ -200,3 +200,16 @@ impl AccountsModel {
         &self.net_worth
     }
 }
+
+/// The name of `kind`, as the New Account wizard and Manage Accounts show it.
+pub(crate) fn kind_label(i18n: &Localizer, kind: AccountKind) -> String {
+    match kind {
+        AccountKind::Checking => fl!(i18n, "account-kind-checking"),
+        AccountKind::Savings => fl!(i18n, "account-kind-savings"),
+        AccountKind::CreditCard => fl!(i18n, "account-kind-credit-card"),
+        AccountKind::Investment => fl!(i18n, "account-kind-investment"),
+        AccountKind::Retirement => fl!(i18n, "account-kind-retirement"),
+        AccountKind::Asset => fl!(i18n, "account-kind-asset"),
+        AccountKind::Liability => fl!(i18n, "account-kind-liability"),
+    }
+}

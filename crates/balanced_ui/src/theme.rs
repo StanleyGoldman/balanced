@@ -139,6 +139,8 @@ struct Palette {
     negative: Color32,
     /// The tint over the window behind a Dialog.
     backdrop: Color32,
+    /// The *closed* tag beside a closed account's type.
+    closed: Color32,
 }
 
 impl Palette {
@@ -156,6 +158,7 @@ impl Palette {
                 text: rgb(28, 32, 38),
                 negative: rgb(190, 30, 30),
                 backdrop: Color32::from_black_alpha(100),
+                closed: rgb(180, 85, 0),
             },
             Scheme::Dark => Self {
                 chrome: rgb(30, 36, 46),
@@ -168,6 +171,7 @@ impl Palette {
                 text: rgb(222, 228, 236),
                 negative: rgb(255, 110, 110),
                 backdrop: Color32::from_black_alpha(100),
+                closed: rgb(255, 170, 70),
             },
         }
     }
@@ -225,6 +229,10 @@ impl Theme {
 
     /// The width a heavy Dialog opens at, in a window wide enough for it.
     pub(crate) const HEAVY_DIALOG_WIDTH: f32 = 420.0;
+
+    /// The size Manage Accounts opens at: wide enough for its whole table, and tall
+    /// enough for a dozen accounts.
+    pub(crate) const MANAGE_ACCOUNTS_SIZE: Vec2 = vec2(760.0, 560.0);
 
     pub(crate) fn new(settings: ThemeSettings) -> Self {
         Self {
@@ -337,6 +345,11 @@ impl Theme {
     /// The tint over the window behind a Dialog.
     pub(crate) fn backdrop(&self) -> Color32 {
         self.palette.backdrop
+    }
+
+    /// The orange of the *closed* tag beside a closed account's type.
+    pub(crate) fn closed_tag(&self) -> Color32 {
+        self.palette.closed
     }
 
     /// The fill of the Register's column header band.

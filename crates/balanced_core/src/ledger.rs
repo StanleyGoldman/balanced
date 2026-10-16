@@ -3009,7 +3009,10 @@ mod tests {
             name: name.to_owned(),
         };
         ledger
-            .apply(DomainCommand::Compound(vec![rename("First"), rename("Second")]))
+            .apply(DomainCommand::Compound(vec![
+                rename("First"),
+                rename("Second"),
+            ]))
             .unwrap();
 
         ledger.undo().unwrap();
