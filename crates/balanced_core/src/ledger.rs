@@ -701,12 +701,10 @@ impl Ledger {
     fn restore_category(&mut self, category: Category) -> DomainCommand {
         let id = category.id();
         let view = Arc::make_mut(&mut self.view);
-        debug_assert!(
-            view.category(id).is_none(),
-            "a restored category's id is not in use"
-        );
         // Categories stay in id order, which keeps each after the one it sits under.
-        let position = view.categories.partition_point(|other| other.id() < id);
+        let Err(position) = view.categories.binary_search_by_key(&id, Category::id) else {
+            panic!("restored {id:?}, which the ledger still holds");
+        };
         view.categories.insert(position, category);
         view.generation = view.generation.next();
         DomainCommand::DeleteCategory { category: id }
@@ -1251,6 +1249,44 @@ mod tests {
             })
         );
         assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn only_a_category_a_split_line_uses_is_kept_from_deletion() {
+        let groceries = CategoryId::new(0);
+        let household = CategoryId::new(1);
+        let mut ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries"), NewCategory::new("Household")],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(500.00))).with_transactions([
+                    NewTransaction::split(
+                        date(12),
+                        "Costco",
+                        vec![
+                            SplitLine::new(groceries, "Food", usd(dec!(-10.00))),
+                            SplitLine::new(groceries, "Snacks", usd(dec!(-5.00))),
+                        ],
+                    ),
+                ]),
+            ],
+        )
+        .unwrap();
+
+        let used = ledger.apply(DomainCommand::DeleteCategory {
+            category: groceries,
+        });
+        let unused = ledger.apply(DomainCommand::DeleteCategory {
+            category: household,
+        });
+
+        assert_eq!(
+            used,
+            Err(DomainError::CategoryInUse {
+                category: groceries
+            })
+        );
+        assert!(unused.is_ok());
     }
 
     #[test]
