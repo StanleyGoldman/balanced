@@ -159,17 +159,6 @@ impl RegisterColumn {
             | Self::Actions => Align::Min,
         }
     }
-
-    /// Space between the cell's edges and its text: [`Theme::EDGE_INSET`] on the
-    /// Register's outer edges, none elsewhere. `first` says whether the column is the
-    /// first shown; the Actions column is always the last.
-    fn insets(self, first: bool) -> Insets {
-        let edge = Theme::EDGE_INSET;
-        Insets {
-            left: if first { edge } else { 0.0 },
-            right: if self == Self::Actions { edge } else { 0.0 },
-        }
-    }
 }
 
 /// The widths of the Register columns that resize, one set shared by every Register.
@@ -818,13 +807,34 @@ impl Register {
     }
 
     /// Shows `columns`, left to right. A cell cursor in a column that is no longer shown
-    /// moves to the Date column.
+    /// moves to the Date column, and a sort by such a column becomes a sort by date.
     fn show_columns(&mut self, columns: &RegisterColumns) {
         self.shown = columns.shown();
+        let sorted_shown = self
+            .shown
+            .iter()
+            .any(|column| column.sort_key() == Some(self.sort.key()));
+        if !sorted_shown {
+            self.sort = RegisterSort::default();
+            self.centre_pending = true;
+        }
         if let Some(cursor) = self.cursor.as_mut()
             && !self.shown.contains(&cursor.column)
         {
             cursor.column = RegisterColumn::Date;
+        }
+    }
+
+    /// Space between `column`'s cell edges and its text: [`Theme::EDGE_INSET`] on the
+    /// Register's outer edges, which are the first column shown and the Actions
+    /// column, and none elsewhere.
+    fn insets(&self, column: RegisterColumn) -> Insets {
+        let edge = Theme::EDGE_INSET;
+        let left = self.shown.first() == Some(&column);
+        let right = column == RegisterColumn::Actions;
+        Insets {
+            left: if left { edge } else { 0.0 },
+            right: if right { edge } else { 0.0 },
         }
     }
 
@@ -965,12 +975,12 @@ impl Register {
                             columns,
                         };
                         let shown = self.shown.clone();
-                        for (index, column) in shown.into_iter().enumerate() {
+                        for column in shown {
                             header.col(|ui| {
                                 let heading = Heading {
                                     register_id,
                                     column,
-                                    first: index == 0,
+                                    insets: self.insets(column),
                                     sort: self.sort,
                                     viewport,
                                 };
@@ -1085,7 +1095,7 @@ impl Register {
             register_id,
             row,
             column,
-            first: column_index == 0,
+            insets: self.insets(column),
             selected: self.cursor.is_some_and(|cursor| cursor.row == row.id()),
             cursor: self.cursor == Some(address),
             access,
@@ -1133,6 +1143,7 @@ impl Register {
     /// its list when it has them, and acts on what they report: losing focus commits
     /// the edit, and pressing a list row takes it.
     fn edit_cell(&mut self, ui: &mut egui::Ui, frame: &BodyFrame<'_>, column: RegisterColumn) {
+        let insets = self.insets(column);
         let Some(Edit::Text(edit)) = self.edit.as_mut() else {
             return;
         };
@@ -1145,7 +1156,6 @@ impl Register {
             list_button(ui, frame.i18n, button, edit.editor_id())
         });
         let typed = edit.text.clone();
-        let insets = column.insets(self.shown.first() == Some(&column));
         let response = editor(
             ui,
             edit,
@@ -1223,11 +1233,11 @@ impl Register {
     /// commits the date; a refused date keeps its edit and the cell cursor, unfocused,
     /// until it is fixed or cancelled. Focus stays where the click put it.
     fn edit_date_cell(&mut self, ui: &egui::Ui, frame: &BodyFrame<'_>, column: RegisterColumn) {
+        let Insets { left, right } = self.insets(column);
         let Some(Edit::Date(edit)) = self.edit.as_mut() else {
             return;
         };
         let rect = ui.max_rect();
-        let Insets { left, right } = column.insets(self.shown.first() == Some(&column));
         let inner =
             Rect::from_x_y_ranges(rect.left() + left..=rect.right() - right, rect.y_range());
         let response = edit
@@ -2288,8 +2298,8 @@ struct Heading {
     /// The Register's id, which the heading's id derives from.
     register_id: Id,
     column: RegisterColumn,
-    /// Whether the column is the first shown.
-    first: bool,
+    /// Space between the cell's edges and its text.
+    insets: Insets,
     /// The Register's sort, which puts an arrow on the sorted column's heading.
     sort: RegisterSort,
     /// The visible part of the Register.
@@ -2304,7 +2314,7 @@ impl Heading {
         let Self {
             register_id,
             column,
-            first,
+            insets,
             sort,
             viewport,
         } = *self;
@@ -2342,7 +2352,7 @@ impl Heading {
             ui,
             rect,
             column,
-            column.insets(first),
+            insets,
             WidgetText::from(egui::RichText::new(title).strong()),
         );
         if let (Some(direction), Some(text)) = (direction, text) {
@@ -2391,8 +2401,8 @@ struct Cell<'a> {
     register_id: Id,
     row: &'a RegisterRow,
     column: RegisterColumn,
-    /// Whether the column is the first shown.
-    first: bool,
+    /// Space between the cell's edges and its text.
+    insets: Insets,
     selected: bool,
     /// Whether the cell cursor is on this cell.
     cursor: bool,
@@ -2414,7 +2424,7 @@ impl Cell<'_> {
             register_id,
             row,
             column,
-            first,
+            insets,
             selected,
             cursor,
             access,
@@ -2474,7 +2484,7 @@ impl Cell<'_> {
                 node.set_selected(true);
             }
         });
-        paint_text(ui, rect, column, column.insets(first), text);
+        paint_text(ui, rect, column, insets, text);
         if cursor {
             ui.painter()
                 .rect_stroke(rect, 0.0, theme.cell_cursor_stroke(), StrokeKind::Inside);
@@ -2628,7 +2638,7 @@ fn column_chooser(
                     }
                     let mut ticked = shown;
                     let checkbox = Checkbox::new(&mut ticked, title);
-                    if ui.add_enabled(column.hides(), checkbox).changed() {
+                    if ui.add_enabled(column.can_hide(), checkbox).changed() {
                         changed.set_shown(column, ticked);
                     }
                 });

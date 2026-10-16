@@ -54,7 +54,7 @@ impl RegisterColumn {
     /// Whether the column chooser can hide the column. A new transaction needs a date,
     /// a category and an amount, so those columns stay, and the Actions column stays
     /// last.
-    pub(crate) fn hides(self) -> bool {
+    pub(crate) fn can_hide(self) -> bool {
         match self {
             Self::Number | Self::Payee | Self::Memo | Self::Balance => true,
             Self::Date | Self::Category | Self::Amount | Self::Actions => false,
@@ -62,7 +62,7 @@ impl RegisterColumn {
     }
 
     /// Whether the column chooser can move the column. The Actions column stays last.
-    fn moves(self) -> bool {
+    fn can_move(self) -> bool {
         self != Self::Actions
     }
 }
@@ -99,14 +99,11 @@ impl From<Vec<String>> for ColumnOrder {
     /// column are dropped, and a column `ids` leaves out, such as one new in this
     /// release, is appended.
     fn from(ids: Vec<String>) -> Self {
-        let mut order: Vec<RegisterColumn> = Vec::new();
         let named = ids.iter().filter_map(|id| RegisterColumn::from_id(id));
-        for column in named.chain(RegisterColumn::ALL) {
-            if column.moves() && !order.contains(&column) {
-                order.push(column);
-            }
-        }
-        Self(order)
+        Self(distinct(
+            named.chain(RegisterColumn::ALL),
+            RegisterColumn::can_move,
+        ))
     }
 }
 
@@ -125,14 +122,23 @@ impl From<Vec<String>> for HiddenColumns {
     /// The columns `ids` names that can be hidden. An unknown id and a repeat are
     /// dropped.
     fn from(ids: Vec<String>) -> Self {
-        let mut hidden: Vec<RegisterColumn> = Vec::new();
-        for column in ids.iter().filter_map(|id| RegisterColumn::from_id(id)) {
-            if column.hides() && !hidden.contains(&column) {
-                hidden.push(column);
-            }
-        }
-        Self(hidden)
+        let named = ids.iter().filter_map(|id| RegisterColumn::from_id(id));
+        Self(distinct(named, RegisterColumn::can_hide))
     }
+}
+
+/// The columns of `columns` that `keep` accepts, each once, in their first places.
+fn distinct(
+    columns: impl Iterator<Item = RegisterColumn>,
+    keep: fn(RegisterColumn) -> bool,
+) -> Vec<RegisterColumn> {
+    let mut kept: Vec<RegisterColumn> = Vec::new();
+    for column in columns {
+        if keep(column) && !kept.contains(&column) {
+            kept.push(column);
+        }
+    }
+    kept
 }
 
 impl From<HiddenColumns> for Vec<&'static str> {
@@ -164,7 +170,7 @@ impl RegisterColumns {
 
     /// Shows or hides `column`, if it can be hidden.
     pub(crate) fn set_shown(&mut self, column: RegisterColumn, shown: bool) {
-        if !column.hides() {
+        if !column.can_hide() {
             return;
         }
         self.hidden.0.retain(|&hidden| hidden != column);

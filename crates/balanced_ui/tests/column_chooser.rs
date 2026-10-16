@@ -6,7 +6,7 @@ use std::path::Path;
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
-use eframe::egui::accesskit::Role;
+use eframe::egui::accesskit::{Role, SortDirection};
 use eframe::egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
@@ -167,5 +167,22 @@ fn the_chooser_stays_open_after_hiding_a_column() {
     assert_eq!(
         headings(&harness),
         ["Date", "Payee", "Num", "Category", "Amount", "Balance", ""]
+    );
+}
+
+#[test]
+fn hiding_the_sorted_column_sorts_by_date() {
+    let dir = config_dir();
+    let mut harness = app_in(dir.path());
+    open(&mut harness, "Everyday Checking");
+    click(&mut harness, Role::ColumnHeader, "Payee");
+    open_chooser(&mut harness);
+
+    click(&mut harness, Role::CheckBox, "Payee");
+
+    let date = harness.get_by_role_and_label(Role::ColumnHeader, "Date");
+    assert_eq!(
+        date.accesskit_node().sort_direction(),
+        Some(SortDirection::Ascending)
     );
 }
