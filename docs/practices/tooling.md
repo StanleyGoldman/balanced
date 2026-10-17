@@ -21,7 +21,7 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 - `cargo xtask mutants [<base>]` is the advisory mutation check (see [testing](testing.md#mutation-testing)).
 - The external tools need a one-time install: `cargo install --locked cargo-deny typos-cli cargo-mutants`.
 - Warnings are allowed while you iterate. `cargo xtask clippy` denies them.
-- A new check is written as a new `xtask` task and added to `ci`, never as CI-provider config.
+- A new check is written as a new `xtask` task and added to `ci`, never as CI-provider config. Each task is its own module in `xtask/src/` with a `TASK` constant, listed once in `TASKS` in `main.rs`. Running programs goes through `process.rs`.
 
 One check is still to come: a periodic full mutants run. It arrives when there is code for it to check.
 
