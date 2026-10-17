@@ -31,11 +31,6 @@ when:
 labels:
   location: oldhermit
 
-variables:
-  # Built by `ci-image` from .woodpecker/Dockerfile; see
-  # docs/adr/0004-ci-image-matches-the-snapshot-machine.md.
-  - &ci_image balanced-ci:latest
-
 steps:
   # Builds the CI image on the Docker daemon the oldhermit agents share,
   # reached through the socket proxy every step container can see, so no
@@ -53,21 +48,20 @@ steps:
     image: docker:27-cli
     environment:
       DOCKER_HOST: tcp://socket-proxy:2375
-      # With BuildKit on, `docker build` hands off to buildx's
-      # `docker-container` driver, which runs its own BuildKit that can't see
-      # the daemon's cached layers. It re-pulls the base image every run and
-      # hits Docker Hub's anonymous rate limit. The classic builder uses the
-      # daemon's cache directly.
+      # The classic builder. With BuildKit on, quicken_clone's identical step
+      # on these agents re-pulled the base image every run, past the daemon's
+      # cached layers, and hit Docker Hub's anonymous rate limit. The classic
+      # builder is deprecated, so recheck this after a Docker Engine upgrade.
       DOCKER_BUILDKIT: "0"
     commands:
       # The build context is the two files the Dockerfile reads, not the
       # checkout, which a local `woodpecker-cli exec` would send whole,
-      # `target/` included. A YAML alias only expands as a whole node, so the
-      # tag is spelled out rather than taken from *ci_image.
+      # `target/` included.
       - tar -c .woodpecker/Dockerfile rust-toolchain.toml | docker build -t balanced-ci:latest -f .woodpecker/Dockerfile -
 
+  # Built by `ci-image` above, from .woodpecker/Dockerfile (ADR 0004).
   - name: ci
-    image: *ci_image
+    image: balanced-ci:latest
     depends_on: [ci-image]
     environment:
       CARGO_TERM_COLOR: always

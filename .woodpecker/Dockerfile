@@ -1,4 +1,4 @@
-# Everything `cargo xtask ci` needs, baked in once instead of reinstalled by
+# CI's tools, baked in once instead of reinstalled by
 # every step. The `ci-image` step in ci.yml beside this file builds it on the
 # daemon the agents share; there is no registry. See
 # docs/adr/0004-ci-image-matches-the-snapshot-machine.md.
@@ -28,8 +28,7 @@ RUN apt-get update -qq && \
 # fails. Each container lives for one step and checks out one repository.
 RUN git config --system --add safe.directory '*'
 
-# The layout the official `rust:` images use, so a later CARGO_HOME pointing
-# at a cache volume still finds the rustup proxies on PATH.
+# The layout the official `rust:` images use.
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
@@ -54,7 +53,7 @@ RUN mkdir -p "$CARGO_HOME/bin" && cd "$CARGO_HOME/bin" && \
 
 # rustup with no toolchain of its own, then the one rust-toolchain.toml names
 # (its components included), so the version is written in one place. The
-# `ci-image` step sends that file as the whole build context.
+# `ci-image` step sends only that file and this one as the build context.
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
 COPY rust-toolchain.toml /toolchain/rust-toolchain.toml
 RUN cd /toolchain && rustup toolchain install && rustc --version && cargo clippy --version && cargo fmt --version
