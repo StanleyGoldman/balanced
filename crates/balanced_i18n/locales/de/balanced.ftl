@@ -92,6 +92,7 @@ register-transaction-count =
 ## Dialogs
 
 dialog-cancel = Abbrechen
+dialog-close = Dialog schließen
 dialog-ok = OK
 dialog-delete-transaction-delete = Löschen
 dialog-close-account-close = Schließen

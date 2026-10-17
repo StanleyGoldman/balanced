@@ -2,8 +2,9 @@
 //! inside the window and gives focus back when it closes.
 
 use eframe::egui::{
-    self, Align2, Area, Button, Color32, Frame, Id, Key, LayerId, Layout, Modal, Modifiers, Order,
-    Popup, Response, ScrollArea, Sense, TextStyle, Vec2, Window,
+    self, Align2, Area, Atom, Button, Color32, Frame, Id, Key, LayerId, Layout, Modal, Modifiers,
+    Order, Popup, Rect, Response, ScrollArea, Sense, TextStyle, UiBuilder, Vec2, WidgetInfo,
+    WidgetType, Window,
 };
 
 use crate::theme::Theme;
@@ -191,6 +192,7 @@ pub(crate) struct HeavyDialog {
     title: String,
     accept: String,
     cancel: String,
+    close: String,
     backdrop: Color32,
     /// The size it opens at, when not [`Theme::HEAVY_DIALOG_WIDTH`] wide and as tall
     /// as its body.
@@ -198,13 +200,15 @@ pub(crate) struct HeavyDialog {
 }
 
 impl HeavyDialog {
-    /// A heavy Dialog with `id`, titled `title`, whose default button reads `accept`
-    /// and whose other button reads `cancel`, dimming the window in `theme`'s backdrop.
+    /// A heavy Dialog with `id`, titled `title`, whose default button reads `accept`,
+    /// whose other button reads `cancel` and whose × a screen reader reads as `close`,
+    /// dimming the window in `theme`'s backdrop.
     pub(crate) fn new(
         id: Id,
         title: String,
         accept: String,
         cancel: String,
+        close: String,
         theme: &Theme,
     ) -> Self {
         Self {
@@ -212,6 +216,7 @@ impl HeavyDialog {
             title,
             accept,
             cancel,
+            close,
             backdrop: theme.backdrop(),
             size: None,
         }
@@ -239,6 +244,7 @@ impl HeavyDialog {
             title,
             accept,
             cancel,
+            close,
             backdrop: tint,
             size,
         } = self;
@@ -264,11 +270,19 @@ impl HeavyDialog {
                 ui.allocate_rect(window, Sense::click())
             })
             .inner;
-        let mut open = true;
-        let mut heavy = Window::new(title)
+        // egui labels its own × "Close window" in every language, so the Dialog draws
+        // its own × instead. A gap as wide as egui's × follows the title, which keeps
+        // the title where egui centres it beside its ×. The × sits in a slot as wide
+        // as that gap and as tall as the title row.
+        let heading = TextStyle::Heading.resolve(&ctx.global_style());
+        let (gap, close_slot) = ctx.fonts_mut(|fonts| {
+            let gap = Vec2::splat(fonts.row_height(&heading));
+            let title = fonts.layout_no_wrap(title.clone(), heading, Color32::PLACEHOLDER);
+            (gap, Vec2::new(gap.x, title.size().y.max(gap.y)))
+        });
+        let mut heavy = Window::new((title, Atom::custom(id.with("close_gap"), gap)))
             .id(id)
             .order(Order::Middle)
-            .open(&mut open)
             .collapsible(false)
             .resizable(true)
             .pivot(Align2::CENTER_CENTER)
@@ -295,7 +309,19 @@ impl HeavyDialog {
         // Above the backdrop, which is above the Main window.
         ctx.move_to_top(backdrop_layer);
         ctx.move_to_top(dialog_layer);
-        let Some((accept, cancel)) = shown.and_then(|shown| shown.inner) else {
+        let Some(shown) = shown else {
+            return DialogOutcome::Open;
+        };
+        let closed = close_button(
+            ctx,
+            id,
+            dialog_layer,
+            shown.response.rect,
+            close_slot,
+            &close,
+        )
+        .clicked();
+        let Some((accept, cancel)) = shown.inner else {
             return DialogOutcome::Open;
         };
         // Esc and Enter belong to the top Dialog, such as a confirm opened over this one.
@@ -306,12 +332,53 @@ impl HeavyDialog {
         };
         if accept.clicked() || (is_top && enter_pressed(ctx, &cancel, None)) {
             DialogOutcome::Accepted
-        } else if cancel.clicked() || !open || backdrop.clicked() || escape() {
+        } else if cancel.clicked() || closed || backdrop.clicked() || escape() {
             DialogOutcome::Cancelled
         } else {
             DialogOutcome::Open
         }
     }
+}
+
+/// The × at the right of the title bar of the heavy Dialog with id `heavy`, drawn on
+/// its `layer` where egui draws its own: centred in a `slot` at the top right corner
+/// inside the frame of the window at `window`. A screen reader reads it as `label`.
+fn close_button(
+    ctx: &egui::Context,
+    heavy: Id,
+    layer: LayerId,
+    window: Rect,
+    slot: Vec2,
+    label: &str,
+) -> Response {
+    let style = ctx.global_style();
+    let frame = Frame::window(&style);
+    let inset = frame.stroke.width;
+    let corner = egui::pos2(
+        window.right() - inset - f32::from(frame.inner_margin.right),
+        window.top() + inset + f32::from(frame.inner_margin.top),
+    );
+    let slot = Rect::from_min_size(corner - Vec2::new(slot.x, 0.0), slot);
+    let rect = Rect::from_center_size(slot.center(), Vec2::splat(style.spacing.icon_width));
+    let ui = egui::Ui::new(
+        ctx.clone(),
+        heavy.with("close_ui"),
+        UiBuilder::new()
+            .layer_id(layer)
+            .max_rect(rect)
+            .accessibility_parent(heavy),
+    );
+    let response = ui.interact(rect, heavy.with("close"), Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, label));
+    // Two strokes in the widget's foreground colour, as egui paints its ×.
+    let visuals = ui.style().interact(&response);
+    let cross = rect.shrink(2.0).expand(visuals.expansion);
+    let stroke = visuals.fg_stroke;
+    ui.painter()
+        .line_segment([cross.left_top(), cross.right_bottom()], stroke);
+    ui.painter()
+        .line_segment([cross.right_top(), cross.left_bottom()], stroke);
+    response
 }
 
 /// The layer of the backdrop behind the heavy Dialog with id `heavy`, which is its
@@ -394,6 +461,7 @@ mod tests {
                     "Heavy".to_owned(),
                     "OK".to_owned(),
                     "Cancel".to_owned(),
+                    "Close dialog".to_owned(),
                     &theme,
                 );
                 let outcome = heavy.show(&ctx, &mut stacked.heavy, |ui, ()| {

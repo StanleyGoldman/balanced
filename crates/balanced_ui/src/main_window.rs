@@ -510,6 +510,7 @@ impl MainWindow {
             fl!(i18n, "dialog-preferences-title"),
             fl!(i18n, "dialog-ok"),
             fl!(i18n, "dialog-cancel"),
+            fl!(i18n, "dialog-close"),
             theme,
         )
         .show(ctx, dialog, |ui, form| form.show(ui, i18n));
@@ -542,6 +543,7 @@ impl MainWindow {
             fl!(i18n, "dialog-new-category-title"),
             fl!(i18n, "dialog-ok"),
             fl!(i18n, "dialog-cancel"),
+            fl!(i18n, "dialog-close"),
             theme,
         )
         .show(ctx, dialog, |ui, form| form.show(ui, i18n));

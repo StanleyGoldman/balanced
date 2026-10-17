@@ -139,6 +139,8 @@ register-transaction-count =
 ## Dialogs
 
 dialog-cancel = Cancel
+# The screen reader's name for the × at the right of a heavy Dialog's title bar.
+dialog-close = Close dialog
 # Asks before deleting the transaction the payee, date and amount describe.
 dialog-delete-transaction-message = Delete this transaction? { $payee }, { $date }, { $amount }
 dialog-delete-transaction-delete = Delete

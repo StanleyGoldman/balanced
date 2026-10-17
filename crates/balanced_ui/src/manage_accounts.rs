@@ -454,6 +454,7 @@ pub(crate) fn show(
         fl!(i18n, "dialog-manage-accounts-title"),
         fl!(i18n, "dialog-ok"),
         fl!(i18n, "dialog-cancel"),
+        fl!(i18n, "dialog-close"),
         theme,
     )
     .with_size(Theme::MANAGE_ACCOUNTS_SIZE)

@@ -76,6 +76,10 @@ name = "locale_de"
 required-features = ["test-support"]
 
 [[test]]
+name = "locale_pseudo"
+required-features = ["test-support"]
+
+[[test]]
 name = "manage_accounts"
 required-features = ["test-support"]
 
