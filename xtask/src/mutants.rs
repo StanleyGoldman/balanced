@@ -52,12 +52,15 @@ impl<'a> Scope<'a> {
     }
 }
 
-/// cargo-mutants' arguments for `scope`, reading the diff from `diff_path`.
-fn cargo_mutants_args(scope: &Scope<'_>, diff_path: &str) -> Vec<String> {
+/// Where a by-hand run writes the diff that `--in-diff` reads.
+const DIFF_PATH: &str = "target/mutants.diff";
+
+/// cargo-mutants' arguments for `scope`.
+fn cargo_mutants_args(scope: &Scope<'_>) -> Vec<String> {
     let mut args = vec!["mutants", "--no-shuffle", "--cargo-arg=--locked"];
     let re = match *scope {
         Scope::ChangedSince { re, .. } => {
-            args.extend(["--in-diff", diff_path]);
+            args.extend(["--in-diff", DIFF_PATH]);
             re
         }
         Scope::Matching(re) => Some(re),
@@ -69,13 +72,12 @@ fn cargo_mutants_args(scope: &Scope<'_>, diff_path: &str) -> Vec<String> {
 }
 
 fn run(scope: Scope<'_>) -> Result<()> {
-    let diff_path = "target/mutants.diff";
     if let Scope::ChangedSince { base, .. } = scope {
         let diff = process::output("git", &["diff", &format!("{base}...")])?;
         std::fs::create_dir_all("target").context("creating target/")?;
-        std::fs::write(diff_path, diff).with_context(|| format!("writing {diff_path}"))?;
+        std::fs::write(DIFF_PATH, diff).with_context(|| format!("writing {DIFF_PATH}"))?;
     }
-    let args = cargo_mutants_args(&scope, diff_path);
+    let args = cargo_mutants_args(&scope);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut command = process::memory_capped("cargo", &args);
     let status = command
@@ -121,7 +123,7 @@ mod tests {
     use super::{MutantsOutcome, Scope, cargo_mutants_args};
 
     fn argv(task_args: &[&str]) -> Option<Vec<String>> {
-        Scope::parse(task_args).map(|scope| cargo_mutants_args(&scope, "target/mutants.diff"))
+        Scope::parse(task_args).map(|scope| cargo_mutants_args(&scope))
     }
 
     #[test]

@@ -3,6 +3,7 @@
 //! GitHub client only carries the actions out. See ADR 0002.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 
 use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
@@ -69,7 +70,9 @@ pub(crate) struct NewIssue {
 }
 
 /// Decides the run's actions. `outcomes` is cargo-mutants' `outcomes.json`, and `list`
-/// is `cargo mutants --list --json` at the tested commit.
+/// is `cargo mutants --list --json` at the tested commit. Opens, comments and closes
+/// for tested mutants come in the order the run tested them, then the closes for
+/// mutants no longer generated, in the order of `issues`.
 pub(crate) fn plan(
     outcomes: &str,
     list: &str,
@@ -78,39 +81,37 @@ pub(crate) fn plan(
 ) -> Result<Vec<Action>> {
     let listed: Vec<ListedMutant> =
         serde_json::from_str(list).context("reading the mutant list")?;
-    let listed = keyed(listed)?;
-    let index_by_name: HashMap<&str, usize> = listed
+    let listed = KeyedMutant::key_all(listed)?;
+    let by_name: HashMap<&str, &KeyedMutant> = listed
         .iter()
-        .enumerate()
-        .map(|(index, (mutant, _))| (mutant.name.as_str(), index))
+        .map(|keyed| (keyed.mutant.name.as_str(), keyed))
         .collect();
     let outcomes: Outcomes = serde_json::from_str(outcomes).context("reading outcomes.json")?;
-    let issue_by_key: HashMap<MutantKey, u64> = issues
-        .iter()
-        .rev()
-        .filter_map(|issue| Some((MutantKey::parse(&issue.body)?, issue.number)))
-        .collect();
+    let issues = KeyedIssue::key_all(issues)?;
+    // Where two open issues share a key, the oldest is the mutant's issue.
+    let mut issue_by_key: HashMap<&MutantKey, u64> = HashMap::new();
+    for issue in &issues {
+        let number = issue_by_key.entry(&issue.key).or_insert(issue.number);
+        *number = (*number).min(issue.number);
+    }
     let mut actions = Vec::new();
     for outcome in outcomes.outcomes {
         let Scenario::Mutant(tested) = outcome.scenario else {
             continue;
         };
-        let Some(&index) = index_by_name.get(tested.name.as_str()) else {
+        let Some(keyed) = by_name.get(tested.name.as_str()) else {
             bail!("tested mutant missing from the full list: {}", tested.name);
         };
-        let (mutant, key) = &listed[index];
+        let issue = issue_by_key.get(&keyed.key).copied();
         let survival = match outcome.summary {
             Summary::MissedMutant => Survival::Missed,
             Summary::Timeout => Survival::TimedOut,
             Summary::CaughtMutant => {
-                if let Some(&issue) = issue_by_key.get(key) {
+                if let Some(issue) = issue {
                     actions.push(Action::Close {
                         issue,
                         reason: CloseReason::Caught,
-                        comment: format!(
-                            "Caught by {} at commit {}, so closing.",
-                            run.found_by, run.commit
-                        ),
+                        comment: format!("Caught by {run}, so closing."),
                     });
                 }
                 continue;
@@ -124,60 +125,171 @@ pub(crate) fn plan(
                 )
             }
         };
-        actions.push(match issue_by_key.get(key) {
-            None => Action::Open(new_issue(mutant, key, survival, run)),
-            Some(&issue) => Action::Comment {
+        actions.push(match issue {
+            None => Action::Open(keyed.new_issue(survival, run)),
+            Some(issue) => Action::Comment {
                 issue,
-                body: format!("Found again by {} at commit {}.", run.found_by, run.commit),
+                body: format!("Found again by {run}."),
             },
         });
     }
-    let generated: HashSet<&MutantKey> = listed.iter().map(|(_, key)| key).collect();
-    for issue in issues {
-        let Some(key) = MutantKey::parse(&issue.body) else {
-            continue;
-        };
-        if !generated.contains(&key) {
-            actions.push(Action::Close {
-                issue: issue.number,
-                reason: CloseReason::NoLongerGenerated,
-                comment: format!(
-                    "No longer generated at commit {}, as seen by {}: its code was deleted, \
-                     renamed or excluded, so closing.",
-                    run.commit, run.found_by
-                ),
-            });
-        }
+    let generated: HashSet<&MutantKey> = listed.iter().map(|keyed| &keyed.key).collect();
+    for issue in issues
+        .iter()
+        .filter(|issue| !generated.contains(&issue.key))
+    {
+        actions.push(Action::Close {
+            issue: issue.number,
+            reason: CloseReason::NoLongerGenerated,
+            comment: format!(
+                "No longer generated, as seen by {run}: its code was deleted, renamed or \
+                 excluded, so closing."
+            ),
+        });
     }
     Ok(actions)
 }
 
-/// Pairs each mutant with its key. Identical mutations in one function are numbered
-/// in source order.
-fn keyed(mut listed: Vec<ListedMutant>) -> Result<Vec<(ListedMutant, MutantKey)>> {
-    listed.sort_by(|a, b| (&a.file, a.span.start).cmp(&(&b.file, b.span.start)));
-    let mut seen: HashMap<(String, String, String), usize> = HashMap::new();
-    listed
-        .into_iter()
-        .map(|mutant| {
-            let mutation = mutant.mutation()?.to_owned();
-            let identity = (
-                mutant.file.clone(),
-                mutant.function.function_name.clone(),
-                mutation,
-            );
-            let occurrence = seen.entry(identity.clone()).or_default();
-            let (file, function, mutation) = identity;
-            let key = MutantKey {
-                file,
-                function,
-                mutation,
-                occurrence: *occurrence,
+impl fmt::Display for Run {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.found_by {
+            FoundBy::PullRequest(number) => {
+                write!(f, "the post-merge run of pull request #{number}")?;
+            }
+            FoundBy::Shard { index, count } => {
+                write!(f, "the nightly run of shard {index}/{count}")?;
+            }
+        }
+        write!(f, " at commit {}", self.commit)
+    }
+}
+
+/// An open issue with the key its body names.
+#[derive(Debug)]
+struct KeyedIssue {
+    number: u64,
+    key: MutantKey,
+}
+
+impl KeyedIssue {
+    /// The issues whose bodies hold a key marker; a corrupt marker is an error.
+    fn key_all(issues: &[OpenIssue]) -> Result<Vec<Self>> {
+        let mut keyed = Vec::new();
+        for issue in issues {
+            let key = MutantKey::parse(&issue.body)
+                .with_context(|| format!("reading the mutant key of issue #{}", issue.number))?;
+            if let Some(key) = key {
+                keyed.push(Self {
+                    number: issue.number,
+                    key,
+                });
+            }
+        }
+        Ok(keyed)
+    }
+}
+
+/// A listed mutant with its key.
+#[derive(Debug)]
+struct KeyedMutant {
+    mutant: ListedMutant,
+    key: MutantKey,
+    /// Whether another mutant in its function makes the same mutation.
+    has_siblings: bool,
+}
+
+impl KeyedMutant {
+    /// Keys every mutant. Identical mutations in one function are numbered in source
+    /// order.
+    fn key_all(mut listed: Vec<ListedMutant>) -> Result<Vec<Self>> {
+        listed.sort_by(|a, b| (&a.file, a.span.start).cmp(&(&b.file, b.span.start)));
+        // Counted under the key with occurrence 0, which names the whole sibling group.
+        let mut group_sizes: HashMap<MutantKey, usize> = HashMap::new();
+        let mut keyed = Vec::with_capacity(listed.len());
+        for mutant in listed {
+            let first = MutantKey {
+                file: mutant.file.clone(),
+                function: mutant.function.function_name.clone(),
+                mutation: mutant.mutation()?.to_owned(),
+                occurrence: 0,
             };
-            *occurrence += 1;
-            Ok((mutant, key))
-        })
-        .collect()
+            let size = group_sizes.entry(first.clone()).or_default();
+            let key = MutantKey {
+                occurrence: *size,
+                ..first
+            };
+            *size += 1;
+            keyed.push(Self {
+                mutant,
+                key,
+                has_siblings: false,
+            });
+        }
+        for keyed in &mut keyed {
+            let first = MutantKey {
+                occurrence: 0,
+                ..keyed.key.clone()
+            };
+            keyed.has_siblings = group_sizes.get(&first).is_some_and(|&size| size > 1);
+        }
+        Ok(keyed)
+    }
+
+    /// The issue for this mutant, which survived `run`.
+    fn new_issue(&self, survival: Survival, run: &Run) -> NewIssue {
+        let ListedMutant {
+            file,
+            function,
+            span,
+            replacement,
+            diff,
+            ..
+        } = &self.mutant;
+        let function = &function.function_name;
+        let line = span.start.line;
+        let commit = &run.commit;
+        let reproduce = self.reproduce_command();
+        let SurvivalText {
+            kind,
+            outcome,
+            labels,
+        } = survival.text();
+        let body = format!(
+            "{marker}\n\n\
+             cargo-mutants made this change in `{function}` and {outcome}: \
+             [{file}:{line}]({REPO_URL}/blob/{commit}/{file}#L{line})\n\n\
+             ```diff\n{diff}```\n\n\
+             Found by {run}.\n\n\
+             Reproduce it:\n\n\
+             ```sh\n{reproduce}\n```\n\n\
+             Kill it with a test, or exclude it with a reason.\n",
+            marker = self.key.render(),
+        );
+        NewIssue {
+            title: format!("{kind} mutant: {replacement} in {function}"),
+            body,
+            labels: labels.to_vec(),
+        }
+    }
+
+    /// The by-hand command that runs this mutant alone. Its name is matched without
+    /// the line and column, so the command keeps working after edits elsewhere in the
+    /// file. A mutant with identical siblings is told apart only by where it was
+    /// tested, so its pattern holds that line and column.
+    fn reproduce_command(&self) -> String {
+        let location = if self.has_siblings {
+            let start = self.mutant.span.start;
+            format!("{}:{}", start.line, start.column)
+        } else {
+            r"\d+:\d+".to_owned()
+        };
+        let pattern = format!(
+            "^{}:{location}: {}$",
+            regex_escape(&self.key.file),
+            regex_escape(&self.key.mutation)
+        );
+        format!("cargo xtask mutants --re {}", shell_quote(&pattern))
+    }
 }
 
 /// How a mutant survived the tests.
@@ -189,60 +301,31 @@ enum Survival {
     TimedOut,
 }
 
-/// The issue for a surviving mutant.
-fn new_issue(mutant: &ListedMutant, key: &MutantKey, survival: Survival, run: &Run) -> NewIssue {
-    let ListedMutant {
-        file,
-        function,
-        span,
-        replacement,
-        diff,
-        ..
-    } = mutant;
-    let function = &function.function_name;
-    let line = span.start.line;
-    let commit = &run.commit;
-    let found_by = run.found_by;
-    let reproduce = reproduce_command(key);
-    let (kind, outcome, labels) = match survival {
-        Survival::Missed => (
-            "Missed",
-            "no test failed",
-            vec!["mutant", "ready-for-agent"],
-        ),
-        Survival::TimedOut => (
-            "Timed-out",
-            "the tests ran past the timeout",
-            vec!["mutant", "ready-for-agent", "mutant-timeout"],
-        ),
-    };
-    let body = format!(
-        "{marker}\n\n\
-         cargo-mutants made this change in `{function}` and {outcome}: \
-         [{file}:{line}]({REPO_URL}/blob/{commit}/{file}#L{line})\n\n\
-         ```diff\n{diff}```\n\n\
-         Found by {found_by} at commit {commit}.\n\n\
-         Reproduce it:\n\n\
-         ```sh\n{reproduce}\n```\n\n\
-         Kill it with a test, or exclude it with a reason.\n",
-        marker = key.render(),
-    );
-    NewIssue {
-        title: format!("{kind} mutant: {replacement} in {function}"),
-        body,
-        labels,
-    }
+/// The words and labels an issue uses for a [`Survival`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SurvivalText {
+    /// The title's first word.
+    kind: &'static str,
+    /// What happened to the tests, as the body says it.
+    outcome: &'static str,
+    labels: &'static [&'static str],
 }
 
-/// The by-hand command that runs this mutant, matched by its name without the line
-/// and column.
-fn reproduce_command(key: &MutantKey) -> String {
-    let pattern = format!(
-        "^{}:\\d+:\\d+: {}$",
-        regex_escape(&key.file),
-        regex_escape(&key.mutation)
-    );
-    format!("cargo xtask mutants --re {}", shell_quote(&pattern))
+impl Survival {
+    fn text(self) -> SurvivalText {
+        match self {
+            Self::Missed => SurvivalText {
+                kind: "Missed",
+                outcome: "no test failed",
+                labels: &["mutant", "ready-for-agent"],
+            },
+            Self::TimedOut => SurvivalText {
+                kind: "Timed-out",
+                outcome: "the tests ran past the timeout",
+                labels: &["mutant", "ready-for-agent", "mutant-timeout"],
+            },
+        }
+    }
 }
 
 /// `text` with every regex metacharacter escaped.
@@ -262,16 +345,7 @@ fn shell_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
-impl std::fmt::Display for FoundBy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::PullRequest(number) => write!(f, "the post-merge run of pull request #{number}"),
-            Self::Shard { index, count } => write!(f, "the nightly run of shard {index}/{count}"),
-        }
-    }
-}
-
-/// An entry of `cargo mutants --list --json`, or the mutant in an outcome.
+/// An entry of `cargo mutants --list --json`.
 #[derive(Debug, Deserialize)]
 struct ListedMutant {
     name: String,
@@ -554,8 +628,8 @@ mod tests {
                 issue: 31,
                 reason: CloseReason::NoLongerGenerated,
                 comment: format!(
-                    "No longer generated at commit {COMMIT}, as seen by the nightly run of \
-                     shard 3/7: its code was deleted, renamed or excluded, so closing."
+                    "No longer generated, as seen by the nightly run of shard 3/7 at commit \
+                     {COMMIT}: its code was deleted, renamed or excluded, so closing."
                 ),
             }]
         );
@@ -660,8 +734,50 @@ mod tests {
             panic!("expected an Open for the first and a comment on #12, got {actions:?}");
         };
         assert_eq!(
-            MutantKey::parse(&opened.body).map(|key| key.occurrence),
+            MutantKey::parse(&opened.body)
+                .unwrap()
+                .map(|key| key.occurrence),
             Some(0)
+        );
+    }
+
+    #[test]
+    fn a_mutant_with_identical_siblings_reproduces_by_its_tested_location() {
+        let first = mutant(
+            "crates/balanced_core/src/ledger.rs",
+            "Ledger::create_category",
+            827,
+            45,
+            "replace == with != in Ledger::create_category",
+        );
+        let second = mutant(
+            "crates/balanced_core/src/ledger.rs",
+            "Ledger::create_category",
+            827,
+            88,
+            "replace == with != in Ledger::create_category",
+        );
+
+        let actions = plan(
+            &outcomes(&[(&second, "MissedMutant")]),
+            &list(&[&first, &second]),
+            &[],
+            &shard_run(),
+        )
+        .unwrap();
+
+        let [Action::Open(opened)] = actions.as_slice() else {
+            panic!("expected one Open, got {actions:?}");
+        };
+        let reproduce = opened
+            .body
+            .lines()
+            .find(|line| line.starts_with("cargo xtask"));
+        assert_eq!(
+            reproduce,
+            Some(
+                r"cargo xtask mutants --re '^crates/balanced_core/src/ledger\.rs:827:88: replace == with != in Ledger::create_category$'"
+            )
         );
     }
 

@@ -1,5 +1,6 @@
 //! A mutant's identity across runs, stored in its issue's body.
 
+use anyhow::{Context as _, Result, bail};
 use serde::{Deserialize, Serialize};
 
 /// A mutant's file, function, mutation text (original to replacement, as
@@ -25,14 +26,23 @@ impl MutantKey {
         format!("{MARKER_START}{json}{MARKER_END}")
     }
 
-    /// The key in an issue body's marker, or `None` when the body has no marker.
-    pub(crate) fn parse(body: &str) -> Option<Self> {
-        let (_, rest) = body.split_once(MARKER_START)?;
+    /// The key in an issue body's marker, or `None` when the body has no marker. A
+    /// marker that doesn't hold a key is an error, since the issue would otherwise
+    /// look keyless and its mutant would get a second issue.
+    pub(crate) fn parse(body: &str) -> Result<Option<Self>> {
+        let Some((_, rest)) = body.split_once(MARKER_START) else {
+            return Ok(None);
+        };
         let mut values = serde_json::Deserializer::from_str(rest).into_iter::<Self>();
-        let key = values.next()?.ok()?;
-        rest[values.byte_offset()..]
-            .starts_with(MARKER_END)
-            .then_some(key)
+        let key = values
+            .next()
+            .context("the mutant-key marker is empty")?
+            .context("reading the mutant-key marker")?;
+        // The deserializer stops at the end of a JSON value, a char boundary in `rest`.
+        if !rest[values.byte_offset()..].starts_with(MARKER_END) {
+            bail!("the mutant-key marker doesn't end with {MARKER_END:?}");
+        }
+        Ok(Some(key))
     }
 }
 
@@ -54,19 +64,37 @@ mod tests {
         let key = key("replace == with != in Ledger::create_category");
         let body = format!("Intro.\n\n{}\n\nMore text.\n", key.render());
 
-        assert_eq!(MutantKey::parse(&body), Some(key));
+        assert_eq!(MutantKey::parse(&body).unwrap(), Some(key));
     }
 
     #[test]
     fn a_mutation_holding_the_marker_end_survives_the_round_trip() {
         let key = key("replace a --> b with \"x\" in f");
 
-        assert_eq!(MutantKey::parse(&key.render()), Some(key));
+        assert_eq!(MutantKey::parse(&key.render()).unwrap(), Some(key));
     }
 
     #[test]
     fn a_body_with_no_marker_has_no_key() {
-        assert_eq!(MutantKey::parse("Missed mutant, filed by hand.\n"), None);
-        assert_eq!(MutantKey::parse("<!-- mutant-key/v2: {} -->"), None);
+        assert_eq!(
+            MutantKey::parse("Missed mutant, filed by hand.\n").unwrap(),
+            None
+        );
+        assert_eq!(
+            MutantKey::parse("<!-- mutant-key/v2: {} -->").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_marker_that_holds_no_key_is_an_error() {
+        assert!(MutantKey::parse("<!-- mutant-key/v1: {\"file\": -->").is_err());
+        assert!(
+            MutantKey::parse(&format!(
+                "{} trailing",
+                key("m").render().trim_end_matches(" -->")
+            ))
+            .is_err()
+        );
     }
 }
