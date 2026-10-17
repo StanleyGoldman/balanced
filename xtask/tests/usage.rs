@@ -15,7 +15,7 @@ fn no_task_prints_the_usage_and_fails() {
 usage: cargo xtask <task>
 
 tasks:
-  ci                                 run fmt, clippy, test, snapshots, locales, deny, typos and todo, stopping at the first failure
+  ci                                 run fmt, clippy, test, snapshots, locales, deny, typos, todo and adrs, stopping at the first failure
   fmt                                check formatting
   clippy                             lint with warnings denied
   test                               run every test except the image snapshots
@@ -24,6 +24,7 @@ tasks:
   deny                               check licences, advisories, duplicate versions and layer bans
   typos                              spell-check the repo
   todo                               require every TODO and FIXME to name an issue, as TODO(#123)
+  adrs [--against <ref>]             require every decision record to have its own number
   mutants [<base>] [--re <pattern>]  mutation-test code changed since <base> (default origin/main), or with --re alone every mutant it matches; advisory
 "
     );

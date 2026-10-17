@@ -18,11 +18,21 @@ pub(crate) fn run(program: &str, args: &[&str]) -> Result<()> {
 
 /// Runs `program` with `args` and returns what it printed on stdout.
 pub(crate) fn output(program: &str, args: &[&str]) -> Result<String> {
+    output_accepting(program, args, &[0])
+}
+
+/// Runs `program` with `args` and returns what it printed on stdout, failing unless
+/// it exits with one of `success`.
+pub(crate) fn output_accepting(program: &str, args: &[&str], success: &[i32]) -> Result<String> {
     let out = Command::new(program)
         .args(args)
         .output()
         .with_context(|| format!("running {program}"))?;
-    if !out.status.success() {
+    if !out
+        .status
+        .code()
+        .is_some_and(|code| success.contains(&code))
+    {
         bail!(
             "{program} {} exited with {}: {}",
             args.join(" "),
