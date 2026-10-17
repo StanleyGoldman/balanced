@@ -17,12 +17,6 @@ fn pseudo() -> Localizer {
         .expect("the embedded en-US messages and de-DE formatting data load")
 }
 
-/// The text the App shows for the message `id` in `en-XA`.
-fn text(id: &str) -> String {
-    let i18n = pseudo();
-    i18n.finish(i18n.loader().get(id))
-}
-
 /// The App on stub data in `en-XA`.
 fn app() -> Harness<'static, App> {
     let mut harness = Harness::builder()
@@ -40,11 +34,9 @@ fn app() -> Harness<'static, App> {
     harness
 }
 
-/// Clicks the button that reads the message `id`, then lets the App settle.
-fn click(harness: &mut Harness<'static, App>, id: &str) {
-    harness
-        .get_by_role_and_label(Role::Button, &text(id))
-        .click();
+/// Clicks the button labelled `label`, then lets the App settle.
+fn click(harness: &mut Harness<'static, App>, label: &str) {
+    harness.get_by_role_and_label(Role::Button, label).click();
     harness.run();
 }
 
@@ -52,8 +44,9 @@ fn click(harness: &mut Harness<'static, App>, id: &str) {
 fn a_heavy_dialogs_close_button_reads_the_pseudo_locale() {
     let mut harness = app();
 
-    click(&mut harness, "menu-tools");
-    click(&mut harness, "menu-tools-preferences");
+    // Tools → Preferences…
+    click(&mut harness, "[Ťööööĺš]");
+    click(&mut harness, "[Ƥřééƒééřééñçééš…]");
 
     // "Close dialog", accented, with doubled vowels and bracketed.
     harness.get_by_role_and_label(Role::Button, "[Çĺööšéé ďîîååĺööğ]");

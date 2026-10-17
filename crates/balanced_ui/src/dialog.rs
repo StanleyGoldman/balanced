@@ -270,10 +270,10 @@ impl HeavyDialog {
                 ui.allocate_rect(window, Sense::click())
             })
             .inner;
-        // egui labels its own × "Close window" in every language, so the Dialog draws
-        // its own × instead. A gap as wide as egui's × follows the title, which keeps
-        // the title where egui centres it beside its ×. The × sits in a slot as wide
-        // as that gap and as tall as the title row.
+        // The Dialog draws its own ×, labelled through `fl!`, where egui would draw
+        // one. A gap as wide as egui's × follows the title, which keeps the title where
+        // egui centres it beside its ×. The × sits in a slot as wide as that gap and as
+        // tall as the title row.
         let heading = TextStyle::Heading.resolve(&ctx.global_style());
         let (gap, close_slot) = ctx.fonts_mut(|fonts| {
             let gap = Vec2::splat(fonts.row_height(&heading));
@@ -368,8 +368,10 @@ fn close_button(
             .max_rect(rect)
             .accessibility_parent(heavy),
     );
-    let response = ui.interact(rect, heavy.with("close"), Sense::click());
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, label));
+    // It takes drags as well as clicks, so a drag that starts on it doesn't move the
+    // Dialog by the title bar beneath it.
+    let response = ui.interact(rect, heavy.with("close"), Sense::click_and_drag());
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
     // Two strokes in the widget's foreground colour, as egui paints its ×.
     let visuals = ui.style().interact(&response);
     let cross = rect.shrink(2.0).expand(visuals.expansion);

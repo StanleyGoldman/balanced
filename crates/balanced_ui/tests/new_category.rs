@@ -370,6 +370,21 @@ fn dragging_inside_the_body_leaves_the_dialog_in_place() {
     assert_eq!(after.min, before.min);
 }
 
+#[test]
+fn dragging_from_the_close_button_leaves_the_dialog_in_place() {
+    let mut harness = new_category_for("Pets");
+    let before = harness.get_by_role_and_label(Role::Button, "OK").rect();
+    let close = harness
+        .get_by_role_and_label(Role::Button, "Close dialog")
+        .rect()
+        .center();
+
+    drag(&mut harness, close, close + vec2(-100.0, -50.0));
+
+    let after = harness.get_by_role_and_label(Role::Button, "OK").rect();
+    assert_eq!(after.min, before.min);
+}
+
 /// Drags the pointer from `from` to `to` with the primary button held.
 fn drag(harness: &mut Harness<'static, App>, from: eframe::egui::Pos2, to: eframe::egui::Pos2) {
     harness.event(Event::PointerMoved(from));
