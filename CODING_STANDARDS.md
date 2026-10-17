@@ -6,7 +6,7 @@ Tools enforce whatever they can: lint levels in `[workspace.lints]` (`Cargo.toml
 
 ## Cross-cutting rules
 
-- **`cargo xtask ci` passes before you push.** It runs fmt, clippy with `-D warnings`, the tests, `cargo deny check`, typos and the TODO check (see [tooling](docs/practices/tooling.md)).
+- **`cargo xtask ci` passes before you push.** It runs fmt, clippy with `-D warnings`, the tests, `cargo deny check`, typos, the TODO check and the ADR numbering check (see [tooling](docs/practices/tooling.md)).
 - **Silence a lint with `#[expect(lint, reason = "…")]`**, at the narrowest scope that works. The reason says why this case is the exception. An empty or generic reason fails review.
 - **Respect the layers.** Nothing below `balanced_ui` knows about egui, and `balanced_core` and `balanced_i18n` don't depend on each other. See [ARCHITECTURE.md](ARCHITECTURE.md).
 - **Domain changes travel as Commands.** UI code sends a `DomainCommand` or `AppCommand` and reads a snapshot back. It never mutates the domain in place. See [state](docs/practices/state.md).

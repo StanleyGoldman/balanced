@@ -18,6 +18,8 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
   - `deny`, which is `cargo deny check`
   - `typos`
   - `todo`: every `TODO` or `FIXME` in a `.rs` or `.toml` file is written `TODO(#123)`
+  - `adrs`: no two records in `docs/adr/` share a number, and every file there is named `<four digits>-<slug>.md`. Gaps in the numbering are fine.
+- `cargo xtask adrs --against <ref>` runs the same check on this branch merged with `<ref>`, without touching the checkout. It catches a record that landed on `<ref>` with the same number after this branch was cut. Both branches merge clean, because the file names differ.
 - `cargo xtask mutants [<base>]` is the advisory mutation check (see [testing](testing.md#mutation-testing)).
 - The external tools need a one-time install: `cargo install --locked cargo-deny typos-cli cargo-mutants`.
 - Warnings are allowed while you iterate. `cargo xtask clippy` denies them.
