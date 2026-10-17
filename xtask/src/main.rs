@@ -8,6 +8,7 @@
     reason = "xtask reports progress and failures on the terminal"
 )]
 
+mod adrs;
 mod ci;
 mod clippy;
 mod deny;
@@ -48,6 +49,7 @@ const TASKS: &[Task] = &[
     deny::TASK,
     typos::TASK,
     todo::TASK,
+    adrs::TASK,
     mutants::TASK,
 ];
 

@@ -1,11 +1,11 @@
 use anyhow::{Context as _, Result};
 
-use crate::{Task, clippy, deny, fmt, locales, snapshots, test, todo, typos};
+use crate::{Task, adrs, clippy, deny, fmt, locales, snapshots, test, todo, typos};
 
 pub(crate) const TASK: Task = Task {
     name: "ci",
     args: "",
-    summary: "run fmt, clippy, test, snapshots, locales, deny, typos and todo, stopping at the first failure",
+    summary: "run fmt, clippy, test, snapshots, locales, deny, typos, todo and adrs, stopping at the first failure",
     run: |args| args.is_empty().then(run),
 };
 
@@ -21,6 +21,7 @@ fn run() -> Result<()> {
         (deny::TASK.name, deny::run),
         (typos::TASK.name, typos::run),
         (todo::TASK.name, todo::run),
+        (adrs::TASK.name, || adrs::run(None)),
     ];
     for &(name, task) in tasks {
         eprintln!("==> {name}");
