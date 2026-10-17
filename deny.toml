@@ -10,7 +10,14 @@ targets = [
 all-features = true
 
 [advisories]
-ignore = []
+# Unmaintained, not vulnerable: zbus 6 absorbed these crates. They arrive only through eframe's
+# accesskit_unix → atspi → zbus 5, with no upgrade until an eframe release moves to zbus 6.
+# Remove all three then (#178).
+ignore = [
+  { id = "RUSTSEC-2026-0370", reason = "zvariant: merged into zbus 6; via eframe's accesskit (#178)" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names: merged into zbus 6; via eframe's accesskit (#178)" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: merged into zbus 6; via eframe's accesskit (#178)" },
+]
 
 [licenses]
 allow = [
