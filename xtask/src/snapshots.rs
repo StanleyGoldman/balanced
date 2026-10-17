@@ -19,15 +19,16 @@ pub(crate) fn run() -> Result<()> {
     process::run(
         "cargo",
         &[
-            "test",
+            "nextest",
+            "run",
             "--locked",
             "--package",
             "balanced_ui",
             "--all-features",
             "--test",
             "snapshots",
-            "--",
-            "--ignored",
+            "--run-ignored",
+            "only",
         ],
     )
 }

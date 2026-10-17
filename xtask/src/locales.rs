@@ -15,16 +15,16 @@ pub(crate) fn run() -> Result<()> {
     process::run(
         "cargo",
         &[
-            "test",
+            "nextest",
+            "run",
             "--locked",
             "--all-features",
             "--package",
             "balanced_i18n",
             "--test",
             "locales",
-            "--quiet",
-            "--",
-            "--nocapture",
+            "--cargo-quiet",
+            "--no-capture",
         ],
     )
 }
