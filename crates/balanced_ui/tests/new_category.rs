@@ -249,7 +249,7 @@ fn the_close_button_cancels() {
     let mut harness = new_category_for("Pets");
 
     harness
-        .get_by_role_and_label(Role::Button, "Close window")
+        .get_by_role_and_label(Role::Button, "Close dialog")
         .click();
     harness.run();
 
@@ -330,7 +330,7 @@ fn the_dialog_keeps_inside_a_small_window() {
         eframe::egui::pos2(24.0, 24.0),
         (small - vec2(24.0, 24.0)).to_pos2(),
     );
-    for button in ["OK", "Cancel", "Close window"] {
+    for button in ["OK", "Cancel", "Close dialog"] {
         let rect = harness.get_by_role_and_label(Role::Button, button).rect();
         assert!(inside.contains_rect(rect), "{button} at {rect:?}");
     }
@@ -341,7 +341,7 @@ fn dragging_the_title_bar_moves_the_dialog() {
     let mut harness = new_category_for("Pets");
     let before = harness.get_by_role_and_label(Role::Button, "OK").rect();
     let title = harness
-        .get_by_role_and_label(Role::Button, "Close window")
+        .get_by_role_and_label(Role::Button, "Close dialog")
         .rect()
         .left_center()
         - vec2(60.0, 0.0);
@@ -350,6 +350,39 @@ fn dragging_the_title_bar_moves_the_dialog() {
 
     let after = harness.get_by_role_and_label(Role::Button, "OK").rect();
     assert_eq!(after.min - before.min, vec2(-100.0, -50.0));
+}
+
+#[test]
+fn dragging_inside_the_body_leaves_the_dialog_in_place() {
+    let mut harness = new_category_for("Pets");
+    let before = harness.get_by_role_and_label(Role::Button, "OK").rect();
+    let name = harness
+        .get_by_role_and_label(Role::TextInput, "Name")
+        .rect()
+        .center();
+    // Empty space in the button row, left of OK.
+    let blank = before.left_center() - vec2(100.0, 0.0);
+
+    drag(&mut harness, name, name + vec2(-100.0, -50.0));
+    drag(&mut harness, blank, blank + vec2(-100.0, -50.0));
+
+    let after = harness.get_by_role_and_label(Role::Button, "OK").rect();
+    assert_eq!(after.min, before.min);
+}
+
+#[test]
+fn dragging_from_the_close_button_leaves_the_dialog_in_place() {
+    let mut harness = new_category_for("Pets");
+    let before = harness.get_by_role_and_label(Role::Button, "OK").rect();
+    let close = harness
+        .get_by_role_and_label(Role::Button, "Close dialog")
+        .rect()
+        .center();
+
+    drag(&mut harness, close, close + vec2(-100.0, -50.0));
+
+    let after = harness.get_by_role_and_label(Role::Button, "OK").rect();
+    assert_eq!(after.min, before.min);
 }
 
 /// Drags the pointer from `from` to `to` with the primary button held.

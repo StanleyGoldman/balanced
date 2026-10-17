@@ -101,3 +101,15 @@ fn register_gridlines_dark() {
 
     check_snapshot(&mut harness, "register_gridlines_dark");
 }
+
+#[test]
+#[ignore = "image snapshot: run with `cargo xtask snapshots`"]
+fn preferences_light() {
+    let mut harness = app(Theme::Light);
+
+    click(&mut harness, Role::Button, "Tools");
+    click(&mut harness, Role::Button, "Preferences…");
+    pointer_gone(&mut harness);
+
+    check_snapshot(&mut harness, "preferences_light");
+}

@@ -218,3 +218,13 @@ fn the_new_account_wizard_reads_and_shows_german_amounts_and_dates_in_english_te
 
     harness.get_by_value("Opening balance: 1.234,56\u{a0}$ as of 14.10.2026");
 }
+
+#[test]
+fn a_heavy_dialogs_close_button_reads_german() {
+    let mut harness = app();
+
+    open(&mut harness, "Extras");
+    open(&mut harness, "Einstellungen …");
+
+    harness.get_by_role_and_label(Role::Button, "Dialog schließen");
+}
