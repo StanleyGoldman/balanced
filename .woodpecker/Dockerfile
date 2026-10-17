@@ -22,6 +22,12 @@ RUN apt-get update -qq && \
       libxi-dev libxkbcommon-dev libxrandr-dev mesa-vulkan-drivers && \
     rm -rf /var/lib/apt/lists/*
 
+# Steps run as root, and the checkout belongs to whoever cloned it (the clone
+# step, or the user's own UID under `woodpecker-cli exec`). Without this, git
+# refuses the checkout with "detected dubious ownership" and `cargo xtask todo`
+# fails. Each container lives for one step and checks out one repository.
+RUN git config --system --add safe.directory '*'
+
 # The layout the official `rust:` images use, so a later CARGO_HOME pointing
 # at a cache volume still finds the rustup proxies on PATH.
 ENV RUSTUP_HOME=/usr/local/rustup \
