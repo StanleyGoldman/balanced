@@ -48,10 +48,14 @@ steps:
     image: docker:27-cli
     environment:
       DOCKER_HOST: tcp://socket-proxy:2375
-      # The classic builder. With BuildKit on, quicken_clone's identical step
-      # on these agents re-pulled the base image every run, past the daemon's
-      # cached layers, and hit Docker Hub's anonymous rate limit. The classic
-      # builder is deprecated, so recheck this after a Docker Engine upgrade.
+      # The classic builder, which builds inside the daemon and keeps its
+      # layers there. With BuildKit on, buildx reaches a `tcp://` daemon
+      # through its `docker-container` driver: it starts its own BuildKit
+      # container with a separate cache, which the socket proxy then refuses
+      # ("unable to upgrade to tcp, received 403"), and even when it ran,
+      # quicken_clone's copy re-pulled the base image every run and hit Docker
+      # Hub's rate limit. The step logs a deprecation warning for this; it
+      # stops working only when Docker removes the classic builder.
       DOCKER_BUILDKIT: "0"
     commands:
       # The build context is the two files the Dockerfile reads, not the
