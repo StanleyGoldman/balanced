@@ -12,7 +12,7 @@ pub(crate) const TASK: Task = Task {
 type Step = fn() -> Result<()>;
 
 fn run() -> Result<()> {
-    let tasks: [(&str, Step); 8] = [
+    let tasks: &[(&str, Step)] = &[
         (fmt::TASK.name, fmt::run),
         (clippy::TASK.name, clippy::run),
         (test::TASK.name, test::run),
@@ -22,7 +22,7 @@ fn run() -> Result<()> {
         (typos::TASK.name, typos::run),
         (todo::TASK.name, todo::run),
     ];
-    for (name, task) in tasks {
+    for &(name, task) in tasks {
         eprintln!("==> {name}");
         task().with_context(|| format!("{name} failed"))?;
     }

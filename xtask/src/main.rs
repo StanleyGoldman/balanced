@@ -38,7 +38,7 @@ struct Task {
 }
 
 /// Every task, in the order the usage text lists them.
-const TASKS: [Task; 10] = [
+const TASKS: &[Task] = &[
     ci::TASK,
     fmt::TASK,
     clippy::TASK,
