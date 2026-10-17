@@ -12,14 +12,14 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 - `cargo xtask ci` runs the following, stopping at the first failure:
   - `fmt`
   - `clippy`, with `-D warnings`
-  - `test`, which skips the image snapshots
+  - `test`: the suite under cargo-nextest, skipping the image snapshots, then the doctests with `cargo test --doc`, which nextest can't run
   - `snapshots`: the image snapshots, on Linux only (see [testing](testing.md#image-snapshots))
   - `locales`: reports how many messages each translation lacks, without failing (see [i18n](i18n.md#translations))
   - `deny`, which is `cargo deny check`
   - `typos`
   - `todo`: every `TODO` or `FIXME` in a `.rs` or `.toml` file is written `TODO(#123)`
 - `cargo xtask mutants [<base>]` is the advisory mutation check (see [testing](testing.md#mutation-testing)).
-- The external tools need a one-time install: `cargo install --locked cargo-deny typos-cli cargo-mutants`.
+- The external tools need a one-time install: `cargo install --locked cargo-deny typos-cli cargo-mutants cargo-nextest`.
 - Warnings are allowed while you iterate. `cargo xtask clippy` denies them.
 - A new check is written as a new `xtask` task and added to `ci`, never as CI-provider config. Each task is its own module in `xtask/src/` with a `TASK` constant, listed once in `TASKS` in `main.rs`. Running programs goes through `process.rs`.
 
@@ -34,6 +34,7 @@ One check is still to come: a periodic full mutants run. It arrives when there i
 | `rustfmt.toml` | Stable options only. Import grouping isn't enforced. |
 | `deny.toml` | Licences, advisories, duplicate versions and the egui layer ban |
 | `.cargo/mutants.toml` | Which crates cargo-mutants mutates, and its exclusions |
+| `.config/nextest.toml` | The one nextest profile, used by `test`, `snapshots`, `locales` and cargo-mutants: no fail-fast, no retries, a hung test killed after 3 minutes |
 | `.typos.toml` | Words typos accepts, each with a comment |
 
 - To add a lint or a ban, put it in config, not prose. A ban's `reason` names the replacement to use.

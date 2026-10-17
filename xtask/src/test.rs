@@ -9,9 +9,20 @@ pub(crate) const TASK: Task = Task {
     run: |args| args.is_empty().then(run),
 };
 
+/// Runs the suite under nextest, then the doctests, which nextest doesn't run.
 pub(crate) fn run() -> Result<()> {
     process::run(
         "cargo",
-        &["test", "--locked", "--workspace", "--all-features"],
+        &[
+            "nextest",
+            "run",
+            "--locked",
+            "--workspace",
+            "--all-features",
+        ],
+    )?;
+    process::run(
+        "cargo",
+        &["test", "--locked", "--workspace", "--all-features", "--doc"],
     )
 }

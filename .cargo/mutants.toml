@@ -1,5 +1,6 @@
 profile = "mutants"
 all_features = true  # match `cargo xtask test`, so feature-gated code is mutated and tested
+test_tool = "nextest" # the runner `cargo xtask test` uses
 # UI, binary and xtask code is out by construction: only these crates are mutated.
 examine_globs = ["crates/balanced_core/src/**/*.rs", "crates/balanced_i18n/src/**/*.rs"]
 # Each mutant runs only its own crate's tests (`test_workspace` stays false), so core
