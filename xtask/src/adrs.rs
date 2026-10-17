@@ -30,21 +30,16 @@ const ADRS: &str = "docs/adr";
 /// What a record's file name looks like, for the message that says one doesn't.
 const SHAPE: &str = "<four digits>-<slug>.md";
 
+/// Checks the records of the working tree, or with `against`, of `HEAD` merged with
+/// that ref.
 pub(crate) fn run(against: Option<&str>) -> Result<()> {
-    let count = check_tree(Path::new("."), against)?;
-    eprintln!("adrs: {count} decision records checked");
-    Ok(())
-}
-
-/// Checks the records of the repository at `root` and returns how many there are:
-/// its working tree, or with `against`, its `HEAD` merged with that ref.
-fn check_tree(root: &Path, against: Option<&str>) -> Result<usize> {
     let names = match against {
-        Some(against) => merged_names(root, against)?,
-        None => working_names(&root.join(ADRS))?,
+        Some(against) => merged_names(Path::new("."), against)?,
+        None => working_names(Path::new(ADRS))?,
     };
     check(&names)?;
-    Ok(names.len())
+    eprintln!("adrs: {} decision records checked", names.len());
+    Ok(())
 }
 
 /// The names in the record directory of `HEAD` merged with `against`, sorted.
@@ -60,13 +55,16 @@ fn merged_names(root: &Path, against: &str) -> Result<Vec<String>> {
         &["-C", root, "rev-parse", "--verify", "--quiet", &commit],
     )
     .with_context(|| format!("`{against}` does not resolve to a commit"))?;
-    let merged = process::output_on(
+    let merged = process::output_accepting(
         "git",
         &["-C", root, "merge-tree", "--write-tree", "HEAD", against],
         &[0, 1],
     )
     .with_context(|| format!("merging `{against}` into HEAD"))?;
-    let tree = merged.lines().next().unwrap_or_default();
+    let tree = merged
+        .lines()
+        .next()
+        .with_context(|| format!("merging `{against}` into HEAD printed no tree"))?;
     let listed = process::output(
         "git",
         &[
@@ -154,12 +152,26 @@ mod tests {
         names.iter().map(|name| (*name).to_owned()).collect()
     }
 
-    fn failure(names: &[&str]) -> String {
-        format!(
-            "{:#}",
-            check(&named(names)).expect_err("these names should not pass")
-        )
+    /// The message a check that should fail fails with.
+    fn failure(result: Result<()>) -> String {
+        format!("{:#}", result.expect_err("the check should fail"))
     }
+
+    fn check_named(names: &[&str]) -> Result<()> {
+        check(&named(names))
+    }
+
+    /// Checks the records of `scratch`'s `HEAD` merged with its `main`.
+    fn check_merged_with_main(scratch: &Scratch) -> Result<()> {
+        check(&merged_names(scratch.root(), "main")?)
+    }
+
+    const MINE_AND_THEIRS_SHARE_0002: &str = "docs/adr has numbering problems:
+  - 0002 is shared by:
+    0002-mine.md
+    0002-theirs.md
+
+renumber one to 0003, keeping the one that landed first: its number may already be cited";
 
     /// A throwaway repository, so no test depends on this one's history.
     struct Scratch(tempfile::TempDir);
@@ -209,15 +221,9 @@ mod tests {
         scratch.add("0002-theirs.md");
         scratch.git(&["checkout", "-q", "mine"]);
 
-        let message = format!(
-            "{:#}",
-            check_tree(scratch.root(), Some("main")).expect_err("0002 is taken twice")
-        );
+        let message = failure(check_merged_with_main(&scratch));
 
-        assert!(
-            message.contains("0002-mine.md") && message.contains("0002-theirs.md"),
-            "both records should be named:\n{message}"
-        );
+        assert_eq!(message, MINE_AND_THEIRS_SHARE_0002);
     }
 
     /// The repair the message asks for. A check that merged this branch's names
@@ -231,10 +237,13 @@ mod tests {
         scratch.git(&["mv", "docs/adr/0002-theirs.md", "docs/adr/0003-theirs.md"]);
         scratch.git(&["commit", "-q", "-m", "renumber"]);
 
-        let count = check_tree(scratch.root(), Some("main"))
-            .expect("the renumbered record no longer clashes in the merged tree");
+        let names = merged_names(scratch.root(), "main").expect("the merged tree is read");
 
-        assert_eq!(count, 3);
+        assert_eq!(
+            names,
+            named(&["0001-first.md", "0002-mine.md", "0003-theirs.md"])
+        );
+        check(&names).expect("the renumbered record no longer clashes in the merged tree");
     }
 
     /// A merge with conflicts still writes a tree, and its names are still checked.
@@ -250,15 +259,9 @@ mod tests {
         scratch.add("0002-theirs.md");
         scratch.git(&["checkout", "-q", "mine"]);
 
-        let message = format!(
-            "{:#}",
-            check_tree(scratch.root(), Some("main")).expect_err("0002 is taken twice")
-        );
+        let message = failure(check_merged_with_main(&scratch));
 
-        assert!(
-            message.contains("0002-mine.md") && message.contains("0002-theirs.md"),
-            "the conflicted merge should still be read:\n{message}"
-        );
+        assert_eq!(message, MINE_AND_THEIRS_SHARE_0002);
     }
 
     #[test]
@@ -267,10 +270,11 @@ mod tests {
 
         let message = format!(
             "{:#}",
-            check_tree(scratch.root(), Some("origin/no-such-branch"))
+            merged_names(scratch.root(), "origin/no-such-branch")
                 .expect_err("there is no such ref")
         );
 
+        // The rest of the message is git's report, which names the scratch path.
         assert!(
             message.contains("`origin/no-such-branch` does not resolve to a commit"),
             "the ref should be named:\n{message}"
@@ -280,59 +284,71 @@ mod tests {
     /// The check passes on this repository's own records, or nothing lands.
     #[test]
     fn the_records_in_this_repository_pass() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        let records = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
-            .expect("xtask sits one level below the workspace root");
+            .expect("xtask sits one level below the workspace root")
+            .join(ADRS);
 
-        check_tree(root, None).expect("this repository's records are well numbered");
+        check(&working_names(&records).expect("the records are listed"))
+            .expect("this repository's records are well numbered");
     }
 
     #[test]
     fn distinct_numbers_pass() {
-        check(&named(&["0001-first.md", "0002-second.md"])).expect("every number is distinct");
+        check_named(&["0001-first.md", "0002-second.md"]).expect("every number is distinct");
     }
 
     #[test]
     fn a_gap_in_the_sequence_passes() {
-        check(&named(&[
-            "0001-first.md",
-            "0004-second.md",
-            "0009-third.md",
-        ]))
-        .expect("a gap is an abandoned record, not a fault");
+        check_named(&["0001-first.md", "0004-second.md", "0009-third.md"])
+            .expect("a gap is an abandoned record, not a fault");
     }
 
     #[test]
     fn two_records_sharing_a_number_are_both_named() {
-        let message = failure(&["0007-first.md", "0007-second.md"]);
+        let message = failure(check_named(&["0007-first.md", "0007-second.md"]));
 
-        assert!(
-            message.contains("0007-first.md") && message.contains("0007-second.md"),
-            "both records should be named:\n{message}"
+        assert_eq!(
+            message,
+            "docs/adr has numbering problems:
+  - 0007 is shared by:
+    0007-first.md
+    0007-second.md
+
+renumber one to 0008, keeping the one that landed first: its number may already be cited"
         );
     }
 
     #[test]
     fn three_records_sharing_a_number_are_all_named() {
-        let message = failure(&["0007-a.md", "0007-b.md", "0007-c.md"]);
+        let message = failure(check_named(&["0007-a.md", "0007-b.md", "0007-c.md"]));
 
-        for record in ["0007-a.md", "0007-b.md", "0007-c.md"] {
-            assert!(
-                message.contains(record),
-                "{record} should be named:\n{message}"
-            );
-        }
+        assert_eq!(
+            message,
+            "docs/adr has numbering problems:
+  - 0007 is shared by:
+    0007-a.md
+    0007-b.md
+    0007-c.md
+
+renumber one to 0008, keeping the one that landed first: its number may already be cited"
+        );
     }
 
     /// Past the highest rather than into a gap, so renumbering never reissues a
     /// number something already cites.
     #[test]
     fn the_hint_renumbers_to_one_past_the_highest() {
-        let message = failure(&["0002-a.md", "0007-b.md", "0007-c.md"]);
+        let message = failure(check_named(&["0002-a.md", "0007-b.md", "0007-c.md"]));
 
-        assert!(
-            message.contains("renumber one to 0008"),
-            "the hint should point past 0007, not at the 0001 gap:\n{message}"
+        assert_eq!(
+            message,
+            "docs/adr has numbering problems:
+  - 0007 is shared by:
+    0007-b.md
+    0007-c.md
+
+renumber one to 0008, keeping the one that landed first: its number may already be cited"
         );
     }
 
@@ -340,23 +356,28 @@ mod tests {
     /// rather than skipped.
     #[test]
     fn a_name_that_is_not_a_records_is_named() {
-        let message = failure(&["0001-first.md", "notes.md"]);
+        let message = failure(check_named(&["0001-first.md", "notes.md"]));
 
-        assert!(
-            message.contains("notes.md") && message.contains(SHAPE),
-            "the file should be named, with the shape it misses:\n{message}"
+        assert_eq!(
+            message,
+            "docs/adr has numbering problems:
+  - `notes.md` is not named `<four digits>-<slug>.md`"
         );
     }
 
     #[test]
     fn both_kinds_of_problem_are_reported_together() {
-        let message = failure(&["0007-a.md", "0007-b.md", "README.md"]);
+        let message = failure(check_named(&["0007-a.md", "0007-b.md", "README.md"]));
 
-        assert!(
-            message.contains("0007-a.md")
-                && message.contains("0007-b.md")
-                && message.contains("README.md"),
-            "one run should name everything wrong:\n{message}"
+        assert_eq!(
+            message,
+            "docs/adr has numbering problems:
+  - 0007 is shared by:
+    0007-a.md
+    0007-b.md
+  - `README.md` is not named `<four digits>-<slug>.md`
+
+renumber one to 0008, keeping the one that landed first: its number may already be cited"
         );
     }
 
