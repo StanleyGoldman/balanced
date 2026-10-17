@@ -7,6 +7,9 @@
 #   <old>   text that occurs exactly once in <file>; may span lines.
 #   <new>   the text that replaces it (may be empty).
 #   <test command...>  run as given, e.g. cargo test -p balanced_ui --test register -- name
+#                      Name one `--test` target per run: cargo stops at the first
+#                      failing test binary, so later targets never run and their
+#                      tests are missing from "failed".
 #
 # The file is restored by writing its saved text back, never by reversing the
 # replacement, so a <new> that is empty or occurs elsewhere can't damage it. Writing
