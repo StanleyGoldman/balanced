@@ -16,6 +16,10 @@ Uses the default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready
 
 Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
+### CI
+
+CI is Woodpecker. The `woodpecker` skill (`.claude/skills/woodpecker/SKILL.md`) reads and drives it: red runs, step logs, reruns, workflow changes, secrets and crons.
+
 ## Working preferences
 
 ### Grilling
