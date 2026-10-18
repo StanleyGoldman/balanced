@@ -2,7 +2,8 @@
 # green local run predicts a green pipeline. A check that belongs in CI belongs
 # in that task, and the task never looks at the environment to behave
 # differently here. The steps beside it rerun a check from that task on its
-# own, so prose-only pull requests, which skip it, still get that check.
+# own, so prose-only pull requests, which skip it, still get that check. The
+# `adrs` step also checks a merge only CI has the ref for.
 #
 # Linux only. There is no Windows or macOS agent; release builds are made
 # locally. Don't add a step that assumes one.
@@ -169,8 +170,10 @@ steps:
   # clash with `main` shows up only once the layers land; the push run catches
   # it then.
   #
-  # Unfiltered, and no `depends_on` link with `ci`: records arrive in
-  # prose-only pull requests, which still need this check.
+  # Unfiltered, so it runs on prose-only pull requests, where records arrive.
+  # No `depends_on` link with `ci`: when `ci` fails, or a filter skips it, this
+  # step still reports, and a dependency on a filtered-out step would reject
+  # the whole pipeline.
   #
   # Write the target branch variable without braces. Woodpecker substitutes the
   # braced form when it parses this file, comments included; the bare form
