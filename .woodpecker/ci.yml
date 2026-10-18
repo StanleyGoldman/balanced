@@ -79,8 +79,8 @@ steps:
   #   fallback: an agent without `/cache/agent` builds cold into the
   #   container, which is slow but correct.
   #
-  # `target/` is never persisted. It stays in the checkout inside this
-  # container, so every run starts empty. quicken_clone's persistent target
+  # `target/` is never persisted. On the agents it stays in the checkout inside
+  # this container, so every run starts empty. quicken_clone's persistent target
   # directories kept corrupting (link failures from a cached rlib that no
   # longer matched its sources) and failed every pipeline on that agent until
   # someone wiped them by hand; concurrent builds sharing one invalidated

@@ -33,11 +33,10 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
 
-# The checks' own tools, and sccache, CI's compiler cache (ADR 0003), as pinned
-# prebuilt binaries: an image rebuild never
-# changes them behind our back, and nothing compiles. Bump a version here to
-# move it. Installed before the toolchain so a toolchain bump doesn't refetch
-# them.
+# The checks' own tools, and sccache, CI's compiler cache (ADR 0003), as
+# pinned prebuilt binaries: an image rebuild never changes them behind our
+# back, and nothing compiles. Bump a version here to move it. Installed before
+# the toolchain so a toolchain bump doesn't refetch them.
 ARG CARGO_DENY_VERSION=0.20.2
 ARG TYPOS_VERSION=1.51.1
 ARG NEXTEST_VERSION=0.9.148

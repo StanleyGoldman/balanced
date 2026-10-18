@@ -19,6 +19,7 @@
 #   agents provide. The script keeps a `socket-proxy` container on a Docker
 #   network named `woodpecker-exec` and attaches the steps to it. Both stay up
 #   after the run for the next one.
+#
 # The run is trusted with volumes, as balanced is on the server, so a step's
 # `volumes:` mounts host paths here too: `ci`'s cargo registry lands in
 # /var/lib/woodpecker/cache/balanced/cargo on this machine, created by Docker.

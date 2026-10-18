@@ -7,7 +7,7 @@
 
 ## Checks
 
-Every check lives in `xtask` (`cargo xtask` lists them), so the same commands run locally and in CI. CI is Woodpecker, on Linux only: `.woodpecker/ci.yml` runs plain `cargo xtask ci` on every pull request and every push to `main`, in the image `.woodpecker/Dockerfile` builds (see [ADR 0004](../adr/0004-ci-image-matches-the-snapshot-machine.md)). Every run builds into an empty `target/`, and sccache caches the compiled crates in one directory every agent shares (see [ADR 0003](../adr/0003-ci-caches-with-sccache-not-a-persistent-target.md)). It is never GitHub Actions.
+Every check lives in `xtask` (`cargo xtask` lists them), so the same commands run locally and in CI. CI is Woodpecker, on Linux only: `.woodpecker/ci.yml` runs plain `cargo xtask ci` on every pull request and every push to `main`, in the image `.woodpecker/Dockerfile` builds (see [ADR 0004](../adr/0004-ci-image-matches-the-snapshot-machine.md)). It is never GitHub Actions.
 
 - `cargo xtask ci` runs the following, stopping at the first failure:
   - `fmt`
@@ -48,7 +48,8 @@ One check is still to come: a periodic full mutants run. It arrives when there i
 
 ## Build cache
 
-- sccache is optional and set up per developer, in `~/.cargo/config.toml` (`[build] rustc-wrapper = "sccache"`). The repo's `.cargo/config.toml` holds only aliases.
+- In CI, every run builds into an empty `target/`, and sccache caches the library crates in one directory every agent shares (see [ADR 0003](../adr/0003-ci-caches-with-sccache-not-a-persistent-target.md)).
+- Locally, sccache is optional and set up per developer, in `~/.cargo/config.toml` (`[build] rustc-wrapper = "sccache"`). The repo's `.cargo/config.toml` holds only aliases.
 - Agents leave `RUSTC_WRAPPER`, `CARGO_HOME` and `CARGO_TARGET_DIR` as they find them, and add no repo-level `rustc-wrapper`. Each worktree builds into its own `target/`.
 - **Verified 2026-10-13 (sccache 0.18.0, Rust 1.99.0), with egui 0.36.2 + eframe + tracing as a test dependency set:**
   - sccache works under the Claude Code sandbox. The client reaches the server on `127.0.0.1:4226`, and `sccache --show-stats` counts rise during a worktree build.
