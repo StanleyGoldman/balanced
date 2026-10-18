@@ -2,7 +2,6 @@
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
-use balanced_ui::testing::unfold_account_bar;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::App as _;
 use eframe::egui::accesskit::{Action, Role, SortDirection, Toggled};
@@ -24,7 +23,7 @@ fn app() -> Harness<'static, App> {
                 PreferencesFile::for_tests(),
             )
         });
-    unfold_account_bar(&mut harness);
+    harness.run();
     harness
 }
 

@@ -106,8 +106,6 @@ pub(crate) struct Preferences {
     /// Each Account bar heading shows its section's total.
     pub(crate) group_totals: bool,
     pub(crate) net_worth_placement: NetWorthPlacement,
-    /// The Account bar folds to a rail while the Main view is off the Accounts tab.
-    pub(crate) auto_fold: bool,
     /// Where clicking an account in the Account bar opens its Register.
     pub(crate) open_account_in: OpenIn,
     /// The columns every Register shows, and their order.
@@ -127,7 +125,6 @@ impl Default for Preferences {
             gridlines: Gridlines::default(),
             group_totals: false,
             net_worth_placement: NetWorthPlacement::default(),
-            auto_fold: true,
             open_account_in: OpenIn::CurrentRegister,
             register_columns: RegisterColumns::default(),
         }
@@ -288,7 +285,6 @@ mod tests {
             gridlines: Gridlines::Both,
             group_totals: true,
             net_worth_placement: NetWorthPlacement::StatusBar,
-            auto_fold: false,
             open_account_in: OpenIn::NewTab,
             register_columns,
         };
@@ -297,6 +293,51 @@ mod tests {
         let loaded = file.load().unwrap();
 
         assert_eq!(loaded, preferences);
+    }
+
+    #[test]
+    fn a_file_with_the_auto_fold_key_loads_its_other_preferences() {
+        let (dir, file) = file();
+        std::fs::write(
+            dir.path().join("preferences.toml"),
+            "version = 1\n\
+             scheme = \"dark\"\n\
+             font_face = \"noto_sans\"\n\
+             dense_rows = true\n\
+             monospace_money = true\n\
+             coloured_negatives = false\n\
+             alternating_rows = false\n\
+             gridlines = \"both\"\n\
+             group_totals = true\n\
+             net_worth_placement = \"status_bar\"\n\
+             auto_fold = true\n\
+             open_account_in = \"new_tab\"\n\
+             register_columns = [\"date\", \"payee\", \"num\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+             hidden_register_columns = [\"memo\"]\n",
+        )
+        .unwrap();
+
+        let loaded = file.load().unwrap();
+
+        let mut register_columns = RegisterColumns::default();
+        register_columns.move_up(RegisterColumn::Payee);
+        register_columns.set_shown(RegisterColumn::Memo, false);
+        assert_eq!(
+            loaded,
+            Preferences {
+                scheme: Scheme::Dark,
+                font_face: FontFace::NotoSans,
+                dense_rows: true,
+                monospace_money: true,
+                coloured_negatives: false,
+                alternating_rows: false,
+                gridlines: Gridlines::Both,
+                group_totals: true,
+                net_worth_placement: NetWorthPlacement::StatusBar,
+                open_account_in: OpenIn::NewTab,
+                register_columns,
+            }
+        );
     }
 
     #[test]
@@ -455,7 +496,6 @@ mod tests {
              gridlines = \"off\"\n\
              group_totals = false\n\
              net_worth_placement = \"account_bar\"\n\
-             auto_fold = true\n\
              open_account_in = \"current_register\"\n\
              register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
              hidden_register_columns = []\n"
