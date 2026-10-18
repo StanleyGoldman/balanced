@@ -4,6 +4,8 @@
 //! version because its API breaks with every release. This module is the only code
 //! that names it.
 
+use std::num::NonZeroUsize;
+
 use icu_decimal::DecimalFormatter;
 use icu_decimal::input::Decimal as FixedDecimal;
 use icu_experimental::dimension::currency::CurrencyType;
@@ -409,10 +411,10 @@ fn split_number(symbols: &NumberSymbols, text: &str) -> Result<(String, String),
         // Every pass consumes something, so the loop ends even if a separator is
         // empty. Without this, a zero-length match would push groups until memory
         // ran out.
-        if consumed == 0 {
-            return Err(AmountParseError::Invalid);
-        }
-        rest = rest.get(consumed..).ok_or(AmountParseError::Invalid)?;
+        let consumed = NonZeroUsize::new(consumed).ok_or(AmountParseError::Invalid)?;
+        rest = rest
+            .get(consumed.get()..)
+            .ok_or(AmountParseError::Invalid)?;
     }
 
     let fraction = fraction.map_or(Ok(String::new()), |fraction| {
