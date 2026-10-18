@@ -265,6 +265,12 @@ fn a_resized_column_survives_a_restart() {
     assert_eq!(column_width(&second, "Memo"), before + 60.0);
 }
 
+/// Clicks the button labelled `label`, then lets the App settle.
+fn click(harness: &mut Harness<'_, App>, label: &str) {
+    harness.get_by_role_and_label(Role::Button, label).click();
+    harness.run();
+}
+
 /// Whether the Account bar is folded to its rail.
 fn is_rail(harness: &Harness<'_, App>) -> bool {
     harness
@@ -277,8 +283,8 @@ fn switching_tabs_leaves_the_account_bar_open() {
     let empty = MemoryStorage::default();
     let mut harness = app(&empty);
 
-    open(&mut harness, "Accounts");
-    open(&mut harness, "Home");
+    click(&mut harness, "Accounts");
+    click(&mut harness, "Home");
 
     assert!(!is_rail(&harness));
 }
@@ -287,10 +293,10 @@ fn switching_tabs_leaves_the_account_bar_open() {
 fn switching_tabs_leaves_a_folded_account_bar_folded() {
     let empty = MemoryStorage::default();
     let mut harness = app(&empty);
-    open(&mut harness, "Fold the Account bar");
+    click(&mut harness, "Fold the Account bar");
 
-    open(&mut harness, "Accounts");
-    open(&mut harness, "Home");
+    click(&mut harness, "Accounts");
+    click(&mut harness, "Home");
 
     assert!(is_rail(&harness));
 }

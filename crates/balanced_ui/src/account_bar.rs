@@ -86,8 +86,8 @@ impl AccountBar {
         &self.folded
     }
 
-    /// Draws the Account bar from `frame`'s model, highlighting its selected account,
-    /// or the rail it folds to, as its Preferences say. Clicking an account opens it
+    /// Draws the Account bar from `frame`'s model as its Preferences say, highlighting
+    /// its selected account, or the rail it folds to. Clicking an account opens it
     /// where the Preferences say, and right-clicking it offers its commands. Clicking a
     /// heading folds or unfolds its section. Dragging the Account bar's edge resizes it.
     /// Clicking the fold button folds it to its rail, and the rail's button opens it.
