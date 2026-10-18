@@ -24,6 +24,8 @@ pub(crate) struct Run {
     /// The tested commit's full SHA.
     pub(crate) commit: String,
     pub(crate) found_by: FoundBy,
+    /// The web page of the CI pipeline that ran it, or `None` for a run by hand.
+    pub(crate) pipeline: Option<String>,
 }
 
 /// Which run tested the mutants.
@@ -139,7 +141,11 @@ pub(crate) fn plan(
             None => Action::Open(keyed.new_issue(survival, run)),
             Some(issue) => Action::Comment {
                 issue,
-                body: format!("Found again by {run}."),
+                body: format!(
+                    "Found again by {run}: {} at {}.",
+                    survival.text().outcome,
+                    keyed.location(&run.commit)
+                ),
             },
         });
     }
@@ -160,15 +166,18 @@ pub(crate) fn plan(
     Ok(actions)
 }
 
+/// The run, linked to its pipeline when it has one, then its commit.
 impl fmt::Display for Run {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.found_by {
-            FoundBy::PullRequest(number) => {
-                write!(f, "the post-merge run of pull request #{number}")?;
-            }
+        let name = match self.found_by {
+            FoundBy::PullRequest(number) => format!("the post-merge run of pull request #{number}"),
             FoundBy::Shard(Shard { index, count }) => {
-                write!(f, "the nightly run of shard {index}/{count}")?;
+                format!("the nightly run of shard {index}/{count}")
             }
+        };
+        match &self.pipeline {
+            Some(pipeline) => write!(f, "[{name}]({pipeline})")?,
+            None => write!(f, "{name}")?,
         }
         write!(f, " at commit {}", self.commit)
     }
@@ -248,16 +257,13 @@ impl KeyedMutant {
     /// The issue for this mutant, which survived `run`.
     fn new_issue(&self, survival: Survival, run: &Run) -> NewIssue {
         let ListedMutant {
-            file,
             function,
-            span,
             replacement,
             diff,
             ..
         } = &self.mutant;
         let function = &function.function_name;
-        let line = span.start.line;
-        let commit = &run.commit;
+        let location = self.location(&run.commit);
         let reproduce = self.reproduce_command();
         let SurvivalText {
             kind,
@@ -266,8 +272,7 @@ impl KeyedMutant {
         } = survival.text();
         let body = format!(
             "{marker}\n\n\
-             cargo-mutants made this change in `{function}` and {outcome}: \
-             [{file}:{line}](https://github.com/{REPO}/blob/{commit}/{file}#L{line})\n\n\
+             cargo-mutants made this change in `{function}` and {outcome}: {location}\n\n\
              ```diff\n{diff}```\n\n\
              Found by {run}.\n\n\
              Reproduce it:\n\n\
@@ -280,6 +285,13 @@ impl KeyedMutant {
             body,
             labels: labels.to_vec(),
         }
+    }
+
+    /// The mutant's file and line, linked to that line at `commit`.
+    fn location(&self, commit: &str) -> String {
+        let file = &self.mutant.file;
+        let line = self.mutant.span.start.line;
+        format!("[{file}:{line}](https://github.com/{REPO}/blob/{commit}/{file}#L{line})")
     }
 
     /// The by-hand command that runs this mutant alone. Its name is matched without
@@ -435,11 +447,13 @@ mod tests {
     use super::{Action, CloseReason, FoundBy, NewIssue, OpenIssue, Run, Shard, plan};
 
     const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+    const PIPELINE: &str = "https://ci.example/repos/6/pipeline/65";
 
     fn shard_run() -> Run {
         Run {
             commit: COMMIT.to_owned(),
             found_by: FoundBy::Shard(Shard { index: 3, count: 7 }),
+            pipeline: Some(PIPELINE.to_owned()),
         }
     }
 
@@ -537,7 +551,10 @@ mod tests {
             actions,
             [Action::Comment {
                 issue: 12,
-                body: format!("Found again by the nightly run of shard 3/7 at commit {COMMIT}."),
+                body: format!(
+                    "Found again by [the nightly run of shard 3/7]({PIPELINE}) at commit \
+                     {COMMIT}: no test failed at [crates/balanced_core/src/account.rs:84](https://github.com/StanleyGoldman/balanced/blob/{COMMIT}/crates/balanced_core/src/account.rs#L84)."
+                ),
             }]
         );
     }
@@ -548,6 +565,7 @@ mod tests {
         let run = Run {
             commit: COMMIT.to_owned(),
             found_by: FoundBy::PullRequest(42),
+            pipeline: None,
         };
 
         let actions = plan(
@@ -608,7 +626,10 @@ mod tests {
             actions,
             [Action::Comment {
                 issue: 12,
-                body: format!("Found again by the nightly run of shard 3/7 at commit {COMMIT}."),
+                body: format!(
+                    "Found again by [the nightly run of shard 3/7]({PIPELINE}) at commit \
+                     {COMMIT}: the tests ran past the timeout at [crates/balanced_core/src/account.rs:84](https://github.com/StanleyGoldman/balanced/blob/{COMMIT}/crates/balanced_core/src/account.rs#L84)."
+                ),
             }]
         );
     }
@@ -638,8 +659,8 @@ mod tests {
                 issue: 31,
                 reason: CloseReason::NoLongerGenerated,
                 comment: format!(
-                    "No longer generated, as seen by the nightly run of shard 3/7 at commit \
-                     {COMMIT}: its code was deleted, renamed or excluded, so closing."
+                    "No longer generated, as seen by [the nightly run of shard 3/7]({PIPELINE}) \
+                     at commit {COMMIT}: its code was deleted, renamed or excluded, so closing."
                 ),
             }]
         );
@@ -823,7 +844,7 @@ cargo-mutants made this change in `AccountId::next` and no test failed: [crates/
 +new
 ```
 
-Found by the nightly run of shard 3/7 at commit {COMMIT}.
+Found by [the nightly run of shard 3/7]({PIPELINE}) at commit {COMMIT}.
 
 Reproduce it:
 
@@ -863,8 +884,8 @@ Kill it with a test, or exclude it with a reason.
                 issue: 31,
                 reason: CloseReason::NoLongerGenerated,
                 comment: format!(
-                    "No longer generated, as seen by the nightly run of shard 3/7 at commit \
-                     {COMMIT}: its code was deleted, renamed or excluded, so closing."
+                    "No longer generated, as seen by [the nightly run of shard 3/7]({PIPELINE}) \
+                     at commit {COMMIT}: its code was deleted, renamed or excluded, so closing."
                 ),
             }])
         );
