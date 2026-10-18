@@ -2,7 +2,8 @@
 # green local run predicts a green pipeline. A check that belongs in CI belongs
 # in that task, and the task never looks at the environment to behave
 # differently here. The steps beside it rerun a check from that task on its
-# own, so prose-only pull requests, which skip it, still get that check.
+# own, so prose-only pull requests, which skip it, still get that check. The
+# `adrs` step also checks a merge only CI has the ref for.
 #
 # Linux only. There is no Windows or macOS agent; release builds are made
 # locally. Don't add a step that assumes one.
@@ -31,6 +32,23 @@ when:
 # here.
 labels:
   location: oldhermit
+
+# The default clone fetches the one commit under test, with no history, so the
+# `adrs` step below would find no merge base. This one fetches the full
+# history, and on a pull request the target branch too, into
+# `origin/<target branch>`. Steps get no forge credentials, so a step can't
+# `git fetch` what the clone left out; anything a step reads from git is
+# fetched here.
+#
+# Any tag of `woodpeckerci/plugin-git` is on the server's trusted-clone list,
+# so this step still gets the credentials a private repository needs. Another
+# image would clone with none and fail.
+clone:
+  - name: clone
+    image: woodpeckerci/plugin-git:2.10.1
+    settings:
+      partial: false
+      fetch_target_branch: true
 
 steps:
   # Builds the CI image on the Docker daemon the oldhermit agents share,
@@ -129,10 +147,9 @@ steps:
 
   # The spell-check, on every pipeline, unfiltered. It is the one check in
   # `cargo xtask ci` that reads the text of Markdown, so a prose-only pull
-  # request, which skips `ci` above, still needs it. `adrs` also looks under
-  # `docs/`, at the ADR file names; until it has an unfiltered step of its
-  # own, a prose-only pull request skips it. When `ci` runs too, the
-  # spell-check runs twice.
+  # request, which skips `ci` above, still needs it. `adrs`, which looks at
+  # the ADR file names under `docs/`, has its own unfiltered step below. When
+  # `ci` runs too, both checks run twice.
   #
   # Depends on `ci-image` only. Not on `ci`, whose filter would reject the
   # pipeline whenever it skips, and `ci` not on this, so neither waits for
@@ -142,3 +159,29 @@ steps:
     depends_on: [ci-image]
     commands:
       - cargo xtask typos
+
+  # Two pull requests can each add a record with the same number and both go
+  # green, since the file names differ, so the clash exists only in the merged
+  # tree. A pull request checks its branch merged with its target. A push to
+  # `main` checks `main` itself, the backstop for two pull requests that both
+  # went green before either landed.
+  #
+  # On a stacked pull request the target is the layer below, not `main`, so a
+  # clash with `main` shows up only once the layers land; the push run catches
+  # it then.
+  #
+  # Unfiltered, so it runs on prose-only pull requests, where records arrive.
+  # No `depends_on` link with `ci`: when `ci` fails, or a filter skips it, this
+  # step still reports, and a dependency on a filtered-out step would reject
+  # the whole pipeline.
+  #
+  # Write the target branch variable without braces. Woodpecker substitutes the
+  # braced form when it parses this file, comments included; the bare form
+  # reaches the shell, which expands it.
+  - name: adrs
+    image: balanced-ci:latest
+    depends_on: [ci-image]
+    environment:
+      CARGO_TERM_COLOR: always
+    commands:
+      - if [ "$CI_PIPELINE_EVENT" = pull_request ]; then cargo xtask adrs --against "origin/$CI_COMMIT_TARGET_BRANCH"; else cargo xtask adrs; fi
