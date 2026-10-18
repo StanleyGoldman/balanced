@@ -6,8 +6,8 @@ use anyhow::{Context as _, Result};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::plan::{Action, CloseReason, OpenIssue};
 use super::REPO;
+use super::plan::{Action, CloseReason, OpenIssue};
 use crate::process;
 
 /// The environment variable holding the token. In CI it comes from the
@@ -81,7 +81,10 @@ impl GitHub {
                 )?;
                 let created: Value =
                     serde_json::from_str(&created).context("reading the opened issue")?;
-                eprintln!("opened {}", created["html_url"].as_str().unwrap_or("an issue"));
+                eprintln!(
+                    "opened {}",
+                    created["html_url"].as_str().unwrap_or("an issue")
+                );
             }
             Action::Comment { issue, body } => self.comment(*issue, body)?,
             Action::Close {
