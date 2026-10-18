@@ -174,8 +174,6 @@ dialog-preferences-group-totals = Show group totals
 dialog-preferences-net-worth = Show Net Worth
 dialog-preferences-net-worth-account-bar = In the { -account-bar }'s footer
 dialog-preferences-net-worth-status-bar = In the Status bar
-# The Account bar folds to a narrow rail while another tab than Accounts is shown.
-dialog-preferences-auto-fold = Fold the { -account-bar } when leaving Accounts
 
 # Manage Accounts: a table of every account, with what can be changed about each.
 dialog-manage-accounts-title = Manage Accounts

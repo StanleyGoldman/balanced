@@ -426,7 +426,7 @@ impl MainWindow {
             selected: self.open_account_id(),
             preferences,
         };
-        self.account_bar.show(ui, &bar_frame, self.tab);
+        self.account_bar.show(ui, &bar_frame);
         CentralPanel::default().show(ui, |ui| match self.open_account(view) {
             Some(summary) => {
                 Self::context_header(ui, i18n, theme, commands, summary, &accounts);

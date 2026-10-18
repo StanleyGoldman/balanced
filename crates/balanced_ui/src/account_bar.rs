@@ -18,7 +18,7 @@ use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
 use crate::layout::Layout;
 use crate::preferences::{NetWorthPlacement, Preferences};
-use crate::route::{Route, TopLevelTab};
+use crate::route::Route;
 use crate::theme::Theme;
 use crate::triangle_button::{Direction, triangle_button};
 use crate::user_action::UserAction;
@@ -41,19 +41,6 @@ pub(crate) struct AccountBar {
     focus_requested: bool,
     /// Whether one of the Account bar's widgets held keyboard focus in the last frame.
     has_focus: bool,
-    /// Where the Main view was in the last frame, as auto-fold reads it.
-    visit: Visit,
-}
-
-/// Where the Main view is, as auto-fold reads it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Visit {
-    /// On the Accounts tab.
-    OnAccounts,
-    /// Off the Accounts tab, where auto-fold shows the rail.
-    Away,
-    /// Off the Accounts tab, with the rail auto-fold showed unfolded by the user.
-    AwayUnfolded,
 }
 
 impl AccountBar {
@@ -70,8 +57,6 @@ impl AccountBar {
             folded: layout.folded_sections(),
             focus_requested: false,
             has_focus: false,
-            // Every run starts on Home.
-            visit: Visit::Away,
         }
     }
 
@@ -101,35 +86,13 @@ impl AccountBar {
         &self.folded
     }
 
-    /// Draws the Account bar from `frame`'s model, highlighting its selected account,
-    /// or the rail it folds to, as its Preferences say. Clicking an account opens it
+    /// Draws the Account bar from `frame`'s model as its Preferences say, highlighting
+    /// its selected account, or the rail it folds to. Clicking an account opens it
     /// where the Preferences say, and right-clicking it offers its commands. Clicking a
     /// heading folds or unfolds its section. Dragging the Account bar's edge resizes it.
-    ///
-    /// With auto-fold on, the Account bar shows its rail while the Main view's `tab` is
-    /// not Accounts, without changing its own fold, which the layout saves. Clicking the
-    /// rail's button opens the Account bar until `tab` next changes, and saves it open.
-    pub(crate) fn show(&mut self, ui: &mut egui::Ui, frame: &BarFrame<'_>, tab: TopLevelTab) {
-        let BarFrame {
-            i18n,
-            theme,
-            preferences,
-            ..
-        } = *frame;
-        self.visit = match (tab, self.visit) {
-            (TopLevelTab::Accounts, _) => Visit::OnAccounts,
-            (
-                TopLevelTab::Home
-                | TopLevelTab::Bills
-                | TopLevelTab::Spending
-                | TopLevelTab::Planning
-                | TopLevelTab::Investing
-                | TopLevelTab::PropertyDebt,
-                Visit::OnAccounts,
-            ) => Visit::Away,
-            (_, visit) => visit,
-        };
-        let auto_folded = preferences.auto_fold && self.visit == Visit::Away;
+    /// Clicking the fold button folds it to its rail, and the rail's button opens it.
+    pub(crate) fn show(&mut self, ui: &mut egui::Ui, frame: &BarFrame<'_>) {
+        let BarFrame { i18n, theme, .. } = *frame;
         let id = Id::new("account_bar");
         let rail = Panel::left("account_bar_rail")
             .frame(theme.chrome_frame())
@@ -139,7 +102,7 @@ impl AccountBar {
             .frame(theme.chrome_frame())
             .default_size(self.width)
             .size_range(Self::MIN_WIDTH..=Self::MAX_WIDTH);
-        let mut open = self.fold == AccountBarFold::Open && !auto_folded;
+        let mut open = self.fold == AccountBarFold::Open;
         let mut fold_clicked = false;
         let mut focus = Focus::default();
         Panel::show_switched(ui, &mut open, rail, bar, |ui, expanded| {
@@ -158,18 +121,12 @@ impl AccountBar {
         self.has_focus = focus.held;
         if fold_clicked {
             open = !open;
-            if auto_folded {
-                self.visit = Visit::AwayUnfolded;
-            }
         }
-        // The rail auto-fold shows leaves the user's own fold as it was.
-        if !auto_folded || fold_clicked {
-            self.fold = if open {
-                AccountBarFold::Open
-            } else {
-                AccountBarFold::Rail
-            };
-        }
+        self.fold = if open {
+            AccountBarFold::Open
+        } else {
+            AccountBarFold::Rail
+        };
         // The panel keeps its width before a drag until the drag ends.
         if let Some(state) = PanelState::load(ui.ctx(), id) {
             self.width = state.size().x;

@@ -84,7 +84,6 @@ fn dark_then_ok_applies_the_dark_theme_and_writes_the_file() {
          gridlines = \"off\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         auto_fold = true\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
          hidden_register_columns = []\n"
     );
@@ -177,7 +176,6 @@ fn the_other_display_preferences_apply_and_are_saved_on_ok() {
          gridlines = \"off\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         auto_fold = true\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
          hidden_register_columns = []\n"
     );
@@ -242,7 +240,6 @@ fn the_register_preferences_are_saved_on_ok() {
          gridlines = \"both\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         auto_fold = true\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
          hidden_register_columns = []\n"
     );
@@ -256,11 +253,6 @@ fn the_account_bar_preferences_are_saved_on_ok() {
     show_group(&mut harness, "Account bar");
     click(&mut harness, Role::CheckBox, "Show group totals");
     click(&mut harness, Role::RadioButton, "In the Status bar");
-    click(
-        &mut harness,
-        Role::CheckBox,
-        "Fold the Account bar when leaving Accounts",
-    );
 
     click(&mut harness, Role::Button, "OK");
 
@@ -276,17 +268,9 @@ fn the_account_bar_preferences_are_saved_on_ok() {
          gridlines = \"off\"\n\
          group_totals = true\n\
          net_worth_placement = \"status_bar\"\n\
-         auto_fold = false\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
          hidden_register_columns = []\n"
     );
-}
-
-/// The App with the Account bar showing its accounts: on the Accounts tab.
-fn app_on_accounts(config_dir: &Path) -> Harness<'static, App> {
-    let mut harness = app_in(config_dir);
-    click(&mut harness, Role::Button, "Accounts");
-    harness
 }
 
 /// The total the Account bar heading `section` shows, if any.
@@ -301,7 +285,7 @@ fn heading_total(harness: &Harness<'static, App>, section: &str) -> Option<Strin
 fn group_totals_are_off_by_default() {
     let dir = config_dir();
 
-    let harness = app_on_accounts(dir.path());
+    let harness = app_in(dir.path());
 
     assert_eq!(heading_total(&harness, "Banking"), None);
 }
@@ -309,7 +293,7 @@ fn group_totals_are_off_by_default() {
 #[test]
 fn group_totals_show_on_the_headings_while_previewed() {
     let dir = config_dir();
-    let mut harness = app_on_accounts(dir.path());
+    let mut harness = app_in(dir.path());
     open_preferences(&mut harness);
     show_group(&mut harness, "Account bar");
 
@@ -342,7 +326,7 @@ fn net_worth_in_status_bar_and_anywhere(harness: &Harness<'static, App>) -> (usi
 fn net_worth_starts_in_the_account_bar_footer() {
     let dir = config_dir();
 
-    let harness = app_on_accounts(dir.path());
+    let harness = app_in(dir.path());
 
     assert_eq!(net_worth_in_status_bar_and_anywhere(&harness), (0, 1));
 }
@@ -350,7 +334,7 @@ fn net_worth_starts_in_the_account_bar_footer() {
 #[test]
 fn net_worth_moves_to_the_status_bar() {
     let dir = config_dir();
-    let mut harness = app_on_accounts(dir.path());
+    let mut harness = app_in(dir.path());
     open_preferences(&mut harness);
     show_group(&mut harness, "Account bar");
 
@@ -363,7 +347,7 @@ fn net_worth_moves_to_the_status_bar() {
 #[test]
 fn net_worth_previews_in_the_status_bar() {
     let dir = config_dir();
-    let mut harness = app_on_accounts(dir.path());
+    let mut harness = app_in(dir.path());
     open_preferences(&mut harness);
     show_group(&mut harness, "Account bar");
 
@@ -372,76 +356,21 @@ fn net_worth_previews_in_the_status_bar() {
     assert_eq!(net_worth_in_status_bar_and_anywhere(&harness), (1, 1));
 }
 
-/// Whether the Account bar is folded to its rail.
-fn is_rail(harness: &Harness<'static, App>) -> bool {
+/// The labels of the checkboxes in the open Preferences Dialog's shown group.
+fn checkboxes(harness: &Harness<'static, App>) -> Vec<String> {
     harness
-        .query_by_role_and_label(Role::Button, "Unfold the Account bar")
-        .is_some()
+        .query_all_by_role(Role::CheckBox)
+        .filter_map(|checkbox| checkbox.accesskit_node().label())
+        .collect()
 }
 
 #[test]
-fn auto_fold_folds_the_account_bar_off_the_accounts_tab() {
-    let dir = config_dir();
-    let mut harness = app_on_accounts(dir.path());
-    assert!(!is_rail(&harness));
-
-    click(&mut harness, Role::Button, "Home");
-
-    assert!(is_rail(&harness));
-}
-
-#[test]
-fn auto_fold_unfolds_the_account_bar_back_on_the_accounts_tab() {
-    let dir = config_dir();
-    let mut harness = app_on_accounts(dir.path());
-    click(&mut harness, Role::Button, "Home");
-
-    click(&mut harness, Role::Button, "Accounts");
-
-    assert!(!is_rail(&harness));
-}
-
-#[test]
-fn the_account_bar_unfolded_off_the_accounts_tab_stays_open() {
-    let dir = config_dir();
-    let mut harness = app_on_accounts(dir.path());
-    click(&mut harness, Role::Button, "Home");
-
-    click(&mut harness, Role::Button, "Unfold the Account bar");
-
-    assert!(!is_rail(&harness));
-}
-
-#[test]
-fn with_auto_fold_off_the_account_bar_stays_open_off_the_accounts_tab() {
-    let dir = config_dir();
-    let mut harness = app_on_accounts(dir.path());
-    open_preferences(&mut harness);
-    show_group(&mut harness, "Account bar");
-    click(
-        &mut harness,
-        Role::CheckBox,
-        "Fold the Account bar when leaving Accounts",
-    );
-    click(&mut harness, Role::Button, "OK");
-
-    click(&mut harness, Role::Button, "Home");
-
-    assert!(!is_rail(&harness));
-}
-
-#[test]
-fn turning_auto_fold_off_previews_the_open_account_bar() {
+fn the_account_bar_group_has_only_the_group_totals_checkbox() {
     let dir = config_dir();
     let mut harness = app_in(dir.path());
     open_preferences(&mut harness);
+
     show_group(&mut harness, "Account bar");
 
-    click(
-        &mut harness,
-        Role::CheckBox,
-        "Fold the Account bar when leaving Accounts",
-    );
-
-    assert!(!is_rail(&harness));
+    assert_eq!(checkboxes(&harness), ["Show group totals"]);
 }

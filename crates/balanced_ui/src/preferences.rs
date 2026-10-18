@@ -105,8 +105,6 @@ pub(crate) struct Preferences {
     /// Each Account bar heading shows its section's total.
     pub(crate) group_totals: bool,
     pub(crate) net_worth_placement: NetWorthPlacement,
-    /// The Account bar folds to a rail while the Main view is off the Accounts tab.
-    pub(crate) auto_fold: bool,
     /// The columns every Register shows, and their order.
     #[serde(flatten)]
     pub(crate) register_columns: RegisterColumns,
@@ -124,7 +122,6 @@ impl Default for Preferences {
             gridlines: Gridlines::default(),
             group_totals: false,
             net_worth_placement: NetWorthPlacement::default(),
-            auto_fold: true,
             register_columns: RegisterColumns::default(),
         }
     }
@@ -284,7 +281,6 @@ mod tests {
             gridlines: Gridlines::Both,
             group_totals: true,
             net_worth_placement: NetWorthPlacement::StatusBar,
-            auto_fold: false,
             register_columns,
         };
 
@@ -331,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn a_file_holding_open_account_in_keeps_every_other_preference() {
+    fn a_file_holding_retired_keys_keeps_every_other_preference() {
         let (dir, file) = file();
         std::fs::write(
             dir.path().join("preferences.toml"),
@@ -368,7 +364,6 @@ mod tests {
             gridlines: Gridlines::Both,
             group_totals: true,
             net_worth_placement: NetWorthPlacement::StatusBar,
-            auto_fold: false,
             register_columns,
         };
         assert_eq!(loaded, expected);
@@ -492,7 +487,6 @@ mod tests {
              gridlines = \"off\"\n\
              group_totals = false\n\
              net_worth_placement = \"account_bar\"\n\
-             auto_fold = true\n\
              register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
              hidden_register_columns = []\n"
         );

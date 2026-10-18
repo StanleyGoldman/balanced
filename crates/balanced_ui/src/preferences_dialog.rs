@@ -138,7 +138,7 @@ impl PreferencesForm {
         });
     }
 
-    /// The Account bar group: what the Account bar shows, and when it folds.
+    /// The Account bar group: what the Account bar shows.
     fn account_bar(&mut self, ui: &mut egui::Ui, i18n: &Localizer) {
         let draft = &mut self.draft;
         ui.checkbox(
@@ -155,10 +155,6 @@ impl PreferencesForm {
             &mut draft.net_worth_placement,
             NetWorthPlacement::StatusBar,
             fl!(i18n, "dialog-preferences-net-worth-status-bar"),
-        );
-        ui.checkbox(
-            &mut draft.auto_fold,
-            fl!(i18n, "dialog-preferences-auto-fold"),
         );
     }
 }
