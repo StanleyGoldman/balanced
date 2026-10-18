@@ -7,7 +7,7 @@
 
 ## Checks
 
-Every check lives in `xtask` (`cargo xtask` lists them), so the same commands run locally and in CI. CI is Woodpecker, on Linux only: `.woodpecker/ci.yml` runs plain `cargo xtask ci` on every pull request and every push to `main`, unless every changed path is prose or agent tooling (the step's `when:` lists the globs). It runs in the image `.woodpecker/Dockerfile` builds (see [ADR 0004](../adr/0004-ci-image-matches-the-snapshot-machine.md)). It is never GitHub Actions. `cargo xtask typos` also runs as a step of its own on every pipeline, so prose-only changes are still spell-checked.
+Every check lives in `xtask` (`cargo xtask` lists them), so the same commands run locally and in CI. CI is Woodpecker, on Linux only: `.woodpecker/ci.yml` runs plain `cargo xtask ci` on every pull request and every push to `main`, unless every changed path is prose or agent tooling (the step's `when:` lists the globs). It runs in the image `.woodpecker/Dockerfile` builds (see [ADR 0004](../adr/0004-ci-image-matches-the-snapshot-machine.md)). It is never GitHub Actions. Two checks also run as steps of their own on every pipeline, prose-only ones included: `cargo xtask typos`, so prose-only changes are still spell-checked, and `adrs`, which on a pull request runs `cargo xtask adrs --against origin/<target branch>` and on a push to `main` plain `cargo xtask adrs`.
 
 - `cargo xtask ci` runs the following, stopping at the first failure:
   - `fmt`
