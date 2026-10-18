@@ -36,6 +36,14 @@ _Avoid_: Popup, modal window
 A choice about how Balanced looks or behaves that belongs to the person using this computer and applies to every data file they open (e.g. dense rows, gridlines). Set in Tools → Preferences.
 _Avoid_: Application-level option, setting, option
 
+**Data file**:
+The one file that holds a household's finances: its accounts, transactions and undo history. Balanced has exactly one data file open at a time, and every change is kept in it the moment it's made.
+_Avoid_: Database, document, project, Quicken file
+
+**Recent files**:
+The data files the person using this computer has opened lately, newest first, listed in the File menu. The newest one opens at startup. Recent files are a record, not a Preference.
+_Avoid_: MRU list, history
+
 **Shortcut**:
 A key combination that runs a command from anywhere in the main window, shown beside its menu item (e.g. Ctrl+D deletes a transaction).
 _Avoid_: Hotkey, accelerator, keybinding
