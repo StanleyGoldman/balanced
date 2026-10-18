@@ -66,7 +66,7 @@ pub(crate) fn output_with_stdin(program: &str, args: &[&str], stdin: &str) -> Re
         .with_context(|| format!("waiting for {program}"))?;
     if !out.status.success() {
         bail!(
-            "{program} exited with {}: {}{}",
+            "{program} exited with {}: {}\n{}",
             out.status,
             String::from_utf8_lossy(&out.stderr).trim(),
             String::from_utf8_lossy(&out.stdout).trim()
