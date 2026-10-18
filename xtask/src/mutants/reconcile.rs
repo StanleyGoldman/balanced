@@ -39,8 +39,48 @@ pub(crate) fn run(scope_args: &[String], found_by: FoundBy, updates: IssueUpdate
     let issues = github.open_mutant_issues()?;
     eprintln!("mutants: {} open mutant issues", issues.len());
     let list = process::output("cargo", &["mutants", "--list", "--json"])?;
-    warm_up(&list)?;
+    let packages = scoped_packages(scope_args)?;
+    let outcomes = if packages.is_empty() {
+        eprintln!("mutants: no mutants in scope, so testing none");
+        None
+    } else {
+        Some(test(scope_args, &packages)?)
+    };
+    let run = Run { commit, found_by };
+    let actions = plan::plan(outcomes.as_deref(), &list, &issues, &run)?;
+    eprintln!("mutants: {} issue updates", actions.len());
+    for action in &actions {
+        eprintln!("{}", describe(action));
+        if updates == IssueUpdates::Apply {
+            github.apply(action)?;
+        }
+    }
+    Ok(())
+}
 
+/// The packages holding the mutants `scope_args` select. cargo-mutants prints
+/// nothing at all, not an empty list, when they select none: for a diff that is
+/// empty, changes no Rust, or changes only code it doesn't mutate.
+fn scoped_packages(scope_args: &[String]) -> Result<BTreeSet<String>> {
+    #[derive(Deserialize)]
+    struct Listed {
+        package: String,
+    }
+    let mut args = vec!["mutants", "--list", "--json"];
+    args.extend(scope_args.iter().map(String::as_str));
+    let list = process::output("cargo", &args)?;
+    if list.trim().is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let listed: Vec<Listed> =
+        serde_json::from_str(&list).context("reading the mutants in scope")?;
+    Ok(listed.into_iter().map(|listed| listed.package).collect())
+}
+
+/// Tests the mutants `scope_args` select, which `packages` hold, and returns
+/// cargo-mutants' `outcomes.json`.
+fn test(scope_args: &[String], packages: &BTreeSet<String>) -> Result<String> {
+    warm_up(packages)?;
     let args = cargo_mutants_args(scope_args);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     // Incremental on and sccache off, the fastest per-mutant builds (ADR 0002). An
@@ -53,37 +93,19 @@ pub(crate) fn run(scope_args: &[String], found_by: FoundBy, updates: IssueUpdate
     )?;
     let outcome = MutantsOutcome::from_exit_code(code).context("cargo mutants failed")?;
     eprintln!("mutants: cargo mutants finished: {outcome:?}");
-
     let outcomes_path = format!("{OUTPUT_DIR}/mutants.out/outcomes.json");
-    let outcomes = std::fs::read_to_string(&outcomes_path)
-        .with_context(|| format!("reading {outcomes_path}"))?;
-    let run = Run { commit, found_by };
-    let actions = plan::plan(&outcomes, &list, &issues, &run)?;
-    eprintln!("mutants: {} issue updates", actions.len());
-    for action in &actions {
-        eprintln!("{}", describe(action));
-        if updates == IssueUpdates::Apply {
-            github.apply(action)?;
-        }
-    }
-    Ok(())
+    std::fs::read_to_string(&outcomes_path).with_context(|| format!("reading {outcomes_path}"))
 }
 
-/// Builds each mutated package's tests the way cargo-mutants will, but through the
+/// Builds each of `packages`' tests the way cargo-mutants will, but through the
 /// step's sccache with incremental compilation off, so their dependencies come from
 /// the cache `ci` fills. cargo-mutants' own builds then find those dependencies
 /// fresh: they rebuild only the workspace crates. The profile and features match
 /// `.cargo/mutants.toml`.
-fn warm_up(list: &str) -> Result<()> {
-    #[derive(Deserialize)]
-    struct Listed {
-        package: String,
-    }
-    let listed: Vec<Listed> = serde_json::from_str(list).context("reading the mutant list")?;
-    let packages: BTreeSet<String> = listed.into_iter().map(|listed| listed.package).collect();
+fn warm_up(packages: &BTreeSet<String>) -> Result<()> {
     // One build per package, as cargo-mutants builds them: features unify only
     // across the packages a build selects.
-    for package in &packages {
+    for package in packages {
         eprintln!("mutants: warming up {package}");
         process::run(
             "cargo",

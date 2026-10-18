@@ -66,6 +66,25 @@ impl GitHub {
         Ok(issues)
     }
 
+    /// GitHub's `commits/{commit}/pulls` response: every pull request holding
+    /// `commit`, as JSON.
+    pub(crate) fn pulls_holding(&self, commit: &str) -> Result<String> {
+        self.request("GET", &format!("commits/{commit}/pulls"), None)
+    }
+
+    /// How many commits pull request `number` holds. The list of pull requests holding
+    /// a commit leaves the count out, so it takes this call of its own.
+    pub(crate) fn commit_count(&self, number: u64) -> Result<u32> {
+        #[derive(Deserialize)]
+        struct Pull {
+            commits: u32,
+        }
+        let text = self.request("GET", &format!("pulls/{number}"), None)?;
+        let pull: Pull = serde_json::from_str(&text)
+            .with_context(|| format!("reading pull request #{number}"))?;
+        Ok(pull.commits)
+    }
+
     /// Carries out one of the plan's actions.
     pub(crate) fn apply(&self, action: &Action) -> Result<()> {
         match action {

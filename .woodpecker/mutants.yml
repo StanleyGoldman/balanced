@@ -3,13 +3,20 @@
 # comment on or close; it never turns a run red. A run that couldn't finish, or
 # couldn't update its issues, is red.
 #
+# This workflow has two runs. After each merge, a push to `main` tests the mutants in the diff
+# the pull request that landed it brought in (`cargo xtask mutants-landed`).
 # The nightly cron tests one of seven round-robin shards of every mutant on
 # `main`, so all of it is tested once a week (`cargo xtask mutants-shard`).
 #
 # The cron is a Woodpecker cron on `main` at 07:00 UTC: 02:00 in New York in
 # winter, 03:00 in summer. Woodpecker schedules in UTC only. It is server
 # config, not in this file: `woodpecker-cli repo cron ls`.
+#
+# It has no path filter, so a prose-only merge runs too: it finds no mutants, tests
+# nothing and still closes the issues of mutants no longer generated.
 when:
+  - event: push
+    branch: main
   - event: cron
 
 # Runs only once `ci` has passed on the same commit, in the same pipeline, so
@@ -29,6 +36,16 @@ labels:
   location: oldhermit
   lane: mutants
 
+# The full history, which `mutants-landed` diffs: the default clone fetches the
+# one commit under test, so the landed pull request's first commit would be
+# missing. Keep the image `woodpeckerci/plugin-git`, the one the server trusts
+# with this private repository's credentials; see `ci.yml`.
+clone:
+  - name: clone
+    image: woodpeckerci/plugin-git:2.10.1
+    settings:
+      partial: false
+
 steps:
   # Uses the image `ci`'s `ci-image` step just built on the Docker daemon every
   # oldhermit agent shares (ADR 0004), so this workflow builds no image.
@@ -38,13 +55,17 @@ steps:
   # applies to the xtask build and the warm-up, which builds the mutated
   # crates' tests before cargo-mutants starts, so their dependencies come from
   # the shared sccache. cargo-mutants itself runs with incremental on and
-  # sccache off; `cargo xtask mutants-shard` sets that for it.
+  # sccache off; the xtask sets that for it.
   #
   # Memory is capped by the lane agent's Docker limit, 8 GB with no swap, not
   # by the systemd scope `cargo xtask mutants` uses by hand: a mutant that
   # allocates without end is killed before it takes down the host. The first
   # command logs the cap, so a run on an uncapped agent is visible.
-  - name: mutants-shard
+  #
+  # A push runs `mutants-landed`, and a cron `mutants-shard`. The event
+  # variable is written without braces: Woodpecker substitutes the braced form
+  # when it parses this file, while the bare form reaches the shell.
+  - name: mutants
     image: balanced-ci:latest
     volumes:
       - /var/lib/woodpecker/cache/balanced/cargo:/cache/cargo
@@ -66,4 +87,4 @@ steps:
       # The hit rate covers the xtask build and the warm-up only, since
       # cargo-mutants builds without sccache.
       - trap 'sccache --show-stats || true' EXIT
-      - cargo xtask mutants-shard
+      - if [ "$CI_PIPELINE_EVENT" = cron ]; then cargo xtask mutants-shard; else cargo xtask mutants-landed; fi
