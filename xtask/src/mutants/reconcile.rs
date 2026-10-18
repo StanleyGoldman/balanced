@@ -104,8 +104,10 @@ fn warm_up(list: &str) -> Result<()> {
 }
 
 /// cargo-mutants' arguments for a CI run over the mutants `scope_args` select:
-/// mutated in place in the throwaway checkout, two jobs, and no baseline, since the
-/// `ci` workflow has just passed on this commit.
+/// mutated in place in the throwaway checkout, and no baseline, since the `ci`
+/// workflow has just passed on this commit. In place means one job: cargo-mutants
+/// refuses `--jobs` with `--in-place`, and a second job would build in a copy of
+/// the tree, outside the `target/` the warm-up filled.
 fn cargo_mutants_args(scope_args: &[String]) -> Vec<String> {
     let mut args: Vec<String> = [
         "mutants",
@@ -113,7 +115,6 @@ fn cargo_mutants_args(scope_args: &[String]) -> Vec<String> {
         "--cargo-arg=--locked",
         "--in-place",
         "--baseline=skip",
-        "--jobs=2",
     ]
     .into_iter()
     .map(str::to_owned)
@@ -166,7 +167,7 @@ mod tests {
     use super::cargo_mutants_args;
 
     #[test]
-    fn a_ci_run_mutates_in_place_with_two_jobs_and_no_baseline() {
+    fn a_ci_run_mutates_in_place_with_no_baseline() {
         assert_eq!(
             cargo_mutants_args(&["--shard=3/7".to_owned()]),
             [
@@ -175,7 +176,6 @@ mod tests {
                 "--cargo-arg=--locked",
                 "--in-place",
                 "--baseline=skip",
-                "--jobs=2",
                 "--output=target",
                 "--shard=3/7",
             ]
