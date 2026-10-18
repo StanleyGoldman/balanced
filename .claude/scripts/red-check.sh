@@ -7,7 +7,7 @@
 #   <old>   text that occurs exactly once in <file>; may span lines.
 #   <new>   the text that replaces it (may be empty).
 #   <test command...>  a `cargo nextest run`, run as given, e.g.
-#                      cargo nextest run -p balanced_ui --test register name
+#                      cargo nextest run -p balanced_ui --features test-support --test register name
 #                      Only nextest's captured output is parsed: a `cargo test`
 #                      command always comes back as an error, and `--no-capture`
 #                      leaves "panics" empty.
