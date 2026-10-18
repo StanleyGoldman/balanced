@@ -92,6 +92,10 @@ build time. Keep `state == success` only before comparing durations.
 
 - `woodpecker-cli pipeline start StanleyGoldman/balanced <n>` reruns pipeline `<n>` on the
   same commit and event. `pipeline stop StanleyGoldman/balanced <n>` cancels it.
+- Each `start` of a pull request's pipeline is a new `pull_request` pipeline, and the server
+  cancels that pull request's running one, so the earlier run ends `killed`. To run two `ci`
+  pipelines at once, run them on two pull requests: open a throwaway draft PR at the same
+  commit, titled `[test, do not merge]`, and close it afterwards.
 - `pipeline create --branch <b>` fires the `manual` event. `ci.yml` runs only on
   `pull_request` and on `push` to `main`, so a manual pipeline includes no workflow and does
   nothing. To exercise a change, push a commit or `start` an existing number.
