@@ -5,11 +5,11 @@ description: Read and drive this repo's CI through woodpecker-cli. Use when a pi
 
 # woodpecker-cli
 
-`woodpecker-cli` talks to the Woodpecker server (3.19) that runs this repo's CI. It reads
+`woodpecker-cli` talks to the Woodpecker server that runs this repo's CI. It reads
 `WOODPECKER_SERVER` and `WOODPECKER_TOKEN` from the environment; both are set on the owner's
 machine, and `woodpecker-cli info` printing a login confirms they still work. Those two
-variables are the whole of the authentication, so a command that fails on auth is a question
-about the environment, not a reason to run `woodpecker-cli setup`.
+variables are the whole of the authentication, so a command that fails on auth means checking
+that both are still set and the token still valid.
 
 The repo is `StanleyGoldman/balanced`, id **6** on the server. A command whose only positional
 is the repo (`pipeline ls`, `pipeline last`, `repo show`) infers it from the git remote when the
@@ -17,7 +17,7 @@ argument is dropped. A command that also takes a pipeline number (`ps`, `show`, 
 `start`, `stop`) reads its first positional as the repo, so spell the repo out there, or the
 number is read as a repo and the call fails with a bare `client error 404`. A pipeline is
 addressed by its **number**, the `#n` the web UI shows and `pipeline ls` prints; the numbers
-have gaps, and a missing number 404s. `--help` on every subcommand documents its flags.
+have gaps, and a missing number 404s.
 
 ## Reading a red run
 
@@ -81,9 +81,7 @@ curl -s -H "Authorization: Bearer $WOODPECKER_TOKEN" "$WOODPECKER_SERVER/api/<pa
 | agent ids to names and labels | `agents` | each agent's `custom_labels` |
 | cron jobs | `repos/6/cron` | `null` while there are none |
 
-`ci.yml` runs on the agents labelled `location: oldhermit` (`ci.yml` says why). oldhermit-3
-carries the required label `!lane=mutants`, so it takes only workflows that ask for
-`lane: mutants`; a pull request waits for the other two.
+A pull request queues for oldhermit and oldhermit-2 only; `ci.yml`'s `labels:` comment says why.
 
 A `killed` or `canceled` step's `finished - started` is the time until it was stopped, not a
 build time. Keep `state == success` only before comparing durations.
@@ -108,17 +106,14 @@ Before pushing a changed workflow file:
 1. `woodpecker-cli lint --strict <file>` from the repo root. It checks the schema, not whether
    the steps pass. Done when it prints `Config is valid`.
 2. `.claude/scripts/woodpecker-exec.sh <file> [<event>]` runs it locally, the way the agents
-   would; its contract is in its header. Done when its JSON line has `status` `green`.
+   would, on the committed HEAD, so commit first. Done when its JSON line has `status` `green`.
 
-The script wraps `woodpecker-cli exec`, whose bare form trips here in three ways:
-
-- It mounts the **live working tree**, not a checkout of a commit, so switching branches or
-  editing a file while it runs corrupts the run. In a worktree it fails outright, because the
-  `.git` file points outside the mount. The script runs from a separate clone at HEAD.
-- `--pipeline-event` defaults to `manual`, which matches no workflow here. The script passes
-  `pull_request` unless told otherwise.
-- Host volumes are refused unless `--repo-trusted-volumes` is passed, and without it a cache
-  mount silently does nothing. Pass it once a workflow mounts one.
+The script wraps `woodpecker-cli exec`, which mounts the **live working tree**, not a checkout
+of a commit: switching branches or editing a file while a bare `exec` runs corrupts the run.
+The script's header lists the other ways a bare `exec` fails here and how it handles each.
+One it does not handle yet: host volumes are refused unless `exec` gets
+`--repo-trusted-volumes`, and without it a cache mount silently does nothing. The change that
+first mounts a host volume in a workflow adds that flag to the script.
 
 Four traps a config that lints clean still hits, each failing the pipeline before a step runs:
 
@@ -137,9 +132,10 @@ Four traps a config that lints clean still hits, each failing the pipeline befor
   `error`, no workflows, so `ps` prints nothing; the message is in `.errors[]`
   (`step 'ci' depends on step 'ci-image' which is filtered out by its conditions`). It fires
   only on the event-and-path combination where the dependent runs and its dependency does not,
-  so test a `when:` change on a pull request that does *not* touch the gated path. Mark the
-  edge optional when the dependency genuinely should not run; an optional edge is dropped
-  when the named step is absent and waited on when present:
+  so test a `when:` change on a pull request that does *not* touch the gated path. `ci-image`
+  stays unfiltered for this reason. For any other dependency that genuinely should not run,
+  mark the edge optional; an optional edge is dropped when the named step is absent and
+  waited on when present:
 
   ```yaml
   depends_on:
@@ -151,14 +147,18 @@ Four traps a config that lints clean still hits, each failing the pipeline befor
 ## Secrets
 
 The workflows read secrets by name through `from_secret`.
-`woodpecker-cli repo secret ls --repo StanleyGoldman/balanced` lists names and the events each
-is limited to; values never come back out. To add one:
+`woodpecker-cli repo secret ls --repo StanleyGoldman/balanced --format '{{.Name}} {{.Events}} {{.Images}}'`
+lists names and the events and images each is limited to; values never come back out. To add
+one:
 
 ```bash
-woodpecker-cli repo secret add --repo StanleyGoldman/balanced --name <name> --value "$VALUE" --event push --event pull_request
+woodpecker-cli repo secret add --repo StanleyGoldman/balanced --name <name> --value "$VALUE" --event <event> --image balanced-ci:latest
 ```
 
-Pass the value through a variable so it stays out of the transcript. A wrong value is fixed with
+Limit it to the events and image of the steps that read it. A secret allowed on
+`pull_request` reaches the steps of every pull request, so add that event only when a pull
+request step reads the secret. Pass the value through a variable so it stays out of the
+transcript. A wrong value is fixed with
 `repo secret update`, or `rm` and a fresh `add`.
 
 ## Crons
