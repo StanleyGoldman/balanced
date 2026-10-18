@@ -33,7 +33,8 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
 
-# The checks' own tools, as pinned prebuilt binaries: an image rebuild never
+# The checks' own tools, and sccache, CI's compiler cache (ADR 0003), as pinned
+# prebuilt binaries: an image rebuild never
 # changes them behind our back, and nothing compiles. Bump a version here to
 # move it. Installed before the toolchain so a toolchain bump doesn't refetch
 # them.
@@ -41,6 +42,7 @@ ARG CARGO_DENY_VERSION=0.20.2
 ARG TYPOS_VERSION=1.51.1
 ARG NEXTEST_VERSION=0.9.148
 ARG CARGO_MUTANTS_VERSION=27.1.0
+ARG SCCACHE_VERSION=0.18.0
 RUN mkdir -p "$CARGO_HOME/bin" && cd "$CARGO_HOME/bin" && \
     curl -fsSL "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz" | \
       tar -xz --strip-components=1 "cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl/cargo-deny" && \
@@ -49,7 +51,9 @@ RUN mkdir -p "$CARGO_HOME/bin" && cd "$CARGO_HOME/bin" && \
     curl -fsSL "https://get.nexte.st/${NEXTEST_VERSION}/linux" | tar -xz && \
     curl -fsSL "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz" | \
       tar -xz && \
-    typos --version && cargo-deny --version && cargo-nextest nextest --version && cargo-mutants mutants --version
+    curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz" | \
+      tar -xz --strip-components=1 "sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache" && \
+    typos --version && cargo-deny --version && cargo-nextest nextest --version && cargo-mutants mutants --version && sccache --version
 
 # rustup with no toolchain of its own, then the one rust-toolchain.toml names
 # (its components included), so the version is written in one place. The
