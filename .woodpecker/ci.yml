@@ -1,0 +1,73 @@
+# The pipeline calls `cargo xtask ci` rather than listing its steps, so that a
+# green local run predicts a green pipeline. A check that belongs in CI belongs
+# in that task, and the task never looks at the environment to behave
+# differently here.
+#
+# Linux only. There is no Windows or macOS agent; release builds are made
+# locally. Don't add a step that assumes one.
+#
+# Keep this file named `ci.yml`. Woodpecker names a workflow's check after its
+# file, and branch protection is to require `ci/woodpecker/pr/ci`: renamed,
+# every pull request waits for a check that never arrives and can't merge.
+
+# Pull requests, and pushes to `main` so a merge is known green and two pull
+# requests that break each other are caught. A push to any other branch only
+# builds what its pull request is already building, so it starts nothing.
+#
+# No path filter here. A pipeline that never starts reports no status at all,
+# so filtering the workflow would leave a pull request waiting on a required
+# check forever. Skipping work belongs on the steps.
+when:
+  - event: pull_request
+  - event: push
+    branch: main
+
+# Only the oldhermit agents. Scheduling is otherwise round-robin across the
+# whole pool, and the CI image lives on oldhermit's Docker daemon alone, built
+# there through its socket proxy; an agent on another host has neither.
+# oldhermit-3 carries the required label `!lane=mutants`, so it takes only
+# workflows that ask for `lane: mutants` and never this one. Don't add `lane`
+# here.
+labels:
+  location: oldhermit
+
+steps:
+  # Builds the CI image on the Docker daemon the oldhermit agents share,
+  # reached through the socket proxy every step container can see, so no
+  # `privileged` flag. Cached on that daemon and nowhere else: no registry push
+  # and no pull. With nothing changed every layer hits the cache and the step
+  # takes about a second, and an image evicted from the daemon rebuilds
+  # itself on the next run.
+  #
+  # No `when:` filter, ever. A step that depends on a step its `when:`
+  # filtered out isn't a skipped dependency but a config error that rejects
+  # the whole pipeline ("depends on step 'ci-image' which is filtered out by
+  # its conditions"), and `woodpecker-cli lint` doesn't catch it. Every other
+  # step needs this image, so a filter here is a filter on everything.
+  - name: ci-image
+    image: docker:27-cli
+    environment:
+      DOCKER_HOST: tcp://socket-proxy:2375
+      # The classic builder, which builds inside the daemon and keeps its
+      # layers there. With BuildKit on, buildx reaches a `tcp://` daemon
+      # through its `docker-container` driver: it starts its own BuildKit
+      # container with a separate cache, which the socket proxy then refuses
+      # ("unable to upgrade to tcp, received 403"), and even when it ran,
+      # quicken_clone's copy re-pulled the base image every run and hit Docker
+      # Hub's rate limit. The step logs a deprecation warning for this; it
+      # stops working only when Docker removes the classic builder.
+      DOCKER_BUILDKIT: "0"
+    commands:
+      # The build context is the two files the Dockerfile reads, not the
+      # checkout, which a local `woodpecker-cli exec` would send whole,
+      # `target/` included.
+      - tar -c .woodpecker/Dockerfile rust-toolchain.toml | docker build -t balanced-ci:latest -f .woodpecker/Dockerfile -
+
+  # Built by `ci-image` above, from .woodpecker/Dockerfile (ADR 0004).
+  - name: ci
+    image: balanced-ci:latest
+    depends_on: [ci-image]
+    environment:
+      CARGO_TERM_COLOR: always
+    commands:
+      - cargo xtask ci

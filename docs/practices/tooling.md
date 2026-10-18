@@ -7,7 +7,7 @@
 
 ## Checks
 
-Every check lives in `xtask` (`cargo xtask` lists them), so the same commands run locally and in whichever CI is chosen later. There is no CI yet, and it won't be GitHub Actions. When it arrives, it calls `cargo xtask ci` on Linux and Windows.
+Every check lives in `xtask` (`cargo xtask` lists them), so the same commands run locally and in CI. CI is Woodpecker, on Linux only: `.woodpecker/ci.yml` runs plain `cargo xtask ci` on every pull request and every push to `main`, in the image `.woodpecker/Dockerfile` builds (see [ADR 0004](../adr/0004-ci-image-matches-the-snapshot-machine.md)). It is never GitHub Actions.
 
 - `cargo xtask ci` runs the following, stopping at the first failure:
   - `fmt`
@@ -24,6 +24,7 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 - The external tools need a one-time install: `cargo install --locked cargo-deny typos-cli cargo-mutants cargo-nextest`.
 - Warnings are allowed while you iterate. `cargo xtask clippy` denies them.
 - A new check is written as a new `xtask` task and added to `ci`, never as CI-provider config. Each task is its own module in `xtask/src/` with a `TASK` constant, listed once in `TASKS` in `main.rs`. Running programs goes through `process.rs`.
+- After changing a file under `.woodpecker/`, lint it with `woodpecker-cli lint --strict <file>`, then run it locally with `.claude/scripts/woodpecker-exec.sh <file>` before pushing. The script runs the committed HEAD; its contract is in its header.
 
 One check is still to come: a periodic full mutants run. It arrives when there is code for it to check.
 
