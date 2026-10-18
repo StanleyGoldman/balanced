@@ -35,8 +35,16 @@ pub(crate) enum FoundBy {
         expect(dead_code, reason = "mutants-landed builds it, in #176")
     )]
     PullRequest(u64),
-    /// The nightly run of shard `index` of `count`.
-    Shard { index: u32, count: u32 },
+    /// The nightly run of one shard.
+    Shard(Shard),
+}
+
+/// One round-robin shard of every mutant, as cargo-mutants' `--shard` counts them
+/// (from 0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Shard {
+    pub(crate) index: u32,
+    pub(crate) count: u32,
 }
 
 /// One thing the run does to GitHub.
@@ -158,7 +166,7 @@ impl fmt::Display for Run {
             FoundBy::PullRequest(number) => {
                 write!(f, "the post-merge run of pull request #{number}")?;
             }
-            FoundBy::Shard { index, count } => {
+            FoundBy::Shard(Shard { index, count }) => {
                 write!(f, "the nightly run of shard {index}/{count}")?;
             }
         }
@@ -424,14 +432,14 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::super::key::MutantKey;
-    use super::{Action, CloseReason, FoundBy, NewIssue, OpenIssue, Run, plan};
+    use super::{Action, CloseReason, FoundBy, NewIssue, OpenIssue, Run, Shard, plan};
 
     const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 
     fn shard_run() -> Run {
         Run {
             commit: COMMIT.to_owned(),
-            found_by: FoundBy::Shard { index: 3, count: 7 },
+            found_by: FoundBy::Shard(Shard { index: 3, count: 7 }),
         }
     }
 

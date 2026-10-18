@@ -3,7 +3,6 @@
 //! `mutants-landed` differ only in which mutants they point it at.
 
 use std::collections::BTreeSet;
-use std::process::Command;
 
 use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
@@ -44,16 +43,15 @@ pub(crate) fn run(scope_args: &[String], found_by: FoundBy, updates: IssueUpdate
 
     let args = cargo_mutants_args(scope_args);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut command = Command::new("cargo");
-    command
-        .args(&args)
-        // ADR 0002: per-mutant builds are fastest incremental and without sccache,
-        // which can't cache an incremental build anyway. An empty wrapper also
-        // overrides a `build.rustc-wrapper` in a developer's cargo config.
-        .env("CARGO_INCREMENTAL", "1")
-        .env("RUSTC_WRAPPER", "");
-    let status = command.status().context("running cargo mutants")?;
-    let outcome = MutantsOutcome::from_exit_code(status.code()).context("cargo mutants failed")?;
+    // Incremental on and sccache off, the fastest per-mutant builds (ADR 0002). An
+    // empty wrapper also overrides a `build.rustc-wrapper` in a developer's cargo
+    // config.
+    let code = process::exit_code_with_env(
+        "cargo",
+        &args,
+        &[("CARGO_INCREMENTAL", "1"), ("RUSTC_WRAPPER", "")],
+    )?;
+    let outcome = MutantsOutcome::from_exit_code(code).context("cargo mutants failed")?;
     eprintln!("mutants: cargo mutants finished: {outcome:?}");
 
     let outcomes_path = format!("{OUTPUT_DIR}/mutants.out/outcomes.json");
@@ -104,13 +102,9 @@ fn warm_up(list: &str) -> Result<()> {
 }
 
 /// cargo-mutants' arguments for a CI run over the mutants `scope_args` select:
-/// mutated in place in the throwaway checkout, and no baseline, since the `ci`
-/// workflow has just passed on this commit. Without a baseline to time,
-/// cargo-mutants would wait 300 s on a hung mutant; the suites run in about a
-/// second, and a minute still beats nextest's own kill, so a hang is reported as
-/// a timeout rather than a failing test. In place means one job: cargo-mutants
-/// refuses `--jobs` with `--in-place`, and a second job would build in a copy of
-/// the tree, outside the `target/` the warm-up filled.
+/// mutated in place in the throwaway checkout, one mutant at a time, with no
+/// baseline, since the `ci` workflow has just passed on this commit. A mutant
+/// whose tests run past a minute is a timeout; nextest's own kill comes later.
 fn cargo_mutants_args(scope_args: &[String]) -> Vec<String> {
     let mut args: Vec<String> = [
         "mutants",

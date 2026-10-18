@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result};
 
-use super::plan::FoundBy;
+use super::plan::{FoundBy, Shard};
 use super::reconcile::{self, IssueUpdates};
 use crate::Task;
 
@@ -28,14 +28,6 @@ const SHARD_COUNT: u32 = 7;
 
 const SECONDS_PER_DAY: u64 = 86_400;
 
-/// One round-robin shard of every mutant, as cargo-mutants' `--shard` counts them
-/// (from 0).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Shard {
-    index: u32,
-    count: u32,
-}
-
 impl Shard {
     /// The shard a run starting `unix_seconds` after the Unix epoch tests: the days
     /// since the epoch, in UTC, modulo [`SHARD_COUNT`].
@@ -49,9 +41,8 @@ impl Shard {
         }
     }
 
-    /// cargo-mutants' arguments for testing this shard. The CI speed settings
-    /// (mutating in place, the job count, no baseline) are added by
-    /// [`reconcile::run`].
+    /// cargo-mutants' arguments that select this shard; [`reconcile::run`] adds the
+    /// rest.
     fn cargo_mutants_args(self) -> Vec<String> {
         vec![
             format!("--shard={}/{}", self.index, self.count),
@@ -75,14 +66,7 @@ fn run(updates: IssueUpdates) -> Result<()> {
         "mutants-shard: testing shard {}/{} (days since the Unix epoch mod {})",
         shard.index, shard.count, shard.count
     );
-    reconcile::run(
-        &shard.cargo_mutants_args(),
-        FoundBy::Shard {
-            index: shard.index,
-            count: shard.count,
-        },
-        updates,
-    )
+    reconcile::run(&shard.cargo_mutants_args(), FoundBy::Shard(shard), updates)
 }
 
 #[cfg(test)]
