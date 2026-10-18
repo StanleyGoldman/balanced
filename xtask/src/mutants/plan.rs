@@ -8,10 +8,8 @@ use std::fmt;
 use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
 
+use super::REPO;
 use super::key::MutantKey;
-
-/// The repository whose files the issue permalinks point at.
-const REPO_URL: &str = "https://github.com/StanleyGoldman/balanced";
 
 /// An open issue labelled `mutant`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,9 +30,21 @@ pub(crate) struct Run {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FoundBy {
     /// The post-merge run for the pull request with this number.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "mutants-landed builds it, in #176")
+    )]
     PullRequest(u64),
-    /// The nightly run of shard `index` of `count`.
-    Shard { index: u32, count: u32 },
+    /// The nightly run of one shard.
+    Shard(Shard),
+}
+
+/// One round-robin shard of every mutant, as cargo-mutants' `--shard` counts them
+/// (from 0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Shard {
+    pub(crate) index: u32,
+    pub(crate) count: u32,
 }
 
 /// One thing the run does to GitHub.
@@ -156,7 +166,7 @@ impl fmt::Display for Run {
             FoundBy::PullRequest(number) => {
                 write!(f, "the post-merge run of pull request #{number}")?;
             }
-            FoundBy::Shard { index, count } => {
+            FoundBy::Shard(Shard { index, count }) => {
                 write!(f, "the nightly run of shard {index}/{count}")?;
             }
         }
@@ -257,7 +267,7 @@ impl KeyedMutant {
         let body = format!(
             "{marker}\n\n\
              cargo-mutants made this change in `{function}` and {outcome}: \
-             [{file}:{line}]({REPO_URL}/blob/{commit}/{file}#L{line})\n\n\
+             [{file}:{line}](https://github.com/{REPO}/blob/{commit}/{file}#L{line})\n\n\
              ```diff\n{diff}```\n\n\
              Found by {run}.\n\n\
              Reproduce it:\n\n\
@@ -422,14 +432,14 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::super::key::MutantKey;
-    use super::{Action, CloseReason, FoundBy, NewIssue, OpenIssue, Run, plan};
+    use super::{Action, CloseReason, FoundBy, NewIssue, OpenIssue, Run, Shard, plan};
 
     const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 
     fn shard_run() -> Run {
         Run {
             commit: COMMIT.to_owned(),
-            found_by: FoundBy::Shard { index: 3, count: 7 },
+            found_by: FoundBy::Shard(Shard { index: 3, count: 7 }),
         }
     }
 

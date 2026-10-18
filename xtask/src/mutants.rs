@@ -1,23 +1,15 @@
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the plan's callers, mutants-landed and mutants-shard, come in #175 and #176"
-    )
-)]
+mod github;
 mod key;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "mutants-landed and mutants-shard call the plan, in #175 and #176"
-    )
-)]
-pub(crate) mod plan;
+mod plan;
+mod reconcile;
+pub(crate) mod shard;
 
 use anyhow::{Context as _, Result, bail};
 
 use crate::{Task, process};
+
+/// The repository whose issues the CI mutant runs keep, as `owner/name`.
+const REPO: &str = "StanleyGoldman/balanced";
 
 pub(crate) const TASK: Task = Task {
     name: "mutants",
