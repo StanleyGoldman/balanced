@@ -292,11 +292,6 @@ mod tests {
             )
         });
         let mut storage = MemoryStorage::default();
-        // Off the Accounts tab, auto-fold shows the Account bar as a rail.
-        harness.run();
-        harness
-            .get_by_role_and_label(Role::Button, "Accounts")
-            .click();
         harness.run();
 
         harness

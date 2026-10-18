@@ -4,7 +4,7 @@
 #![cfg(target_os = "linux")]
 
 use balanced_ui::App;
-use balanced_ui::testing::{app, check_snapshot, unfold_account_bar};
+use balanced_ui::testing::{app, check_snapshot};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{Event, Theme};
 use egui_kittest::Harness;
@@ -24,7 +24,6 @@ fn pointer_gone(harness: &mut Harness<'static, App>) {
 
 /// Opens the account named `name` from the Account bar.
 fn open_account(harness: &mut Harness<'static, App>, name: &str) {
-    unfold_account_bar(harness);
     click(harness, Role::Button, name);
     pointer_gone(harness);
 }
@@ -43,7 +42,6 @@ fn choose_both_gridlines(harness: &mut Harness<'static, App>) {
 fn account_bar_light() {
     let mut harness = app(Theme::Light);
 
-    unfold_account_bar(&mut harness);
     pointer_gone(&mut harness);
 
     check_snapshot(&mut harness, "account_bar_light");
@@ -54,7 +52,6 @@ fn account_bar_light() {
 fn account_bar_dark() {
     let mut harness = app(Theme::Dark);
 
-    unfold_account_bar(&mut harness);
     pointer_gone(&mut harness);
 
     check_snapshot(&mut harness, "account_bar_dark");
