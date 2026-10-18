@@ -331,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn a_file_holding_the_retired_open_account_in_keeps_every_other_preference() {
+    fn a_file_holding_open_account_in_keeps_every_other_preference() {
         let (dir, file) = file();
         std::fs::write(
             dir.path().join("preferences.toml"),

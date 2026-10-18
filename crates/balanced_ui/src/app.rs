@@ -198,7 +198,7 @@ impl eframe::App for App {
                 else {
                     return true;
                 };
-                // Ctrl+Tab and other chords stay with the rest of the app.
+                // Tab with Ctrl, Alt or Command held stays with the rest of the app.
                 if !(modifiers.is_none() || modifiers.shift_only()) {
                     return true;
                 }

@@ -37,7 +37,7 @@ pub(crate) struct MainWindow {
     /// The accounts of the last snapshot shown, rebuilt when it is out of date.
     accounts: Option<AccountsModel>,
     /// The Register open under the Accounts tab, if any.
-    register: Option<OpenRegister>,
+    open_register: Option<OpenRegister>,
     /// The column widths every Register shares.
     column_widths: ColumnWidths,
     /// The delete transaction confirm, while it is open.
@@ -89,7 +89,7 @@ impl MainWindow {
             status: None,
             account_bar: AccountBar::new(layout),
             accounts: None,
-            register: None,
+            open_register: None,
             column_widths: layout.column_widths(),
             delete_transaction: None,
             new_account: None,
@@ -120,7 +120,7 @@ impl MainWindow {
                 self.tab = TopLevelTab::Accounts;
                 // The account already open keeps its Register as it is.
                 if self.open_account_id() != Some(account) {
-                    self.register = Some(OpenRegister {
+                    self.open_register = Some(OpenRegister {
                         account,
                         register: Register::default(),
                     });
@@ -131,23 +131,23 @@ impl MainWindow {
 
     /// The account whose Register is open, or `None` while none is.
     fn open_account_id(&self) -> Option<AccountId> {
-        self.register.as_ref().map(|open| open.account)
+        self.open_register.as_ref().map(|open| open.account)
     }
 
     /// The open Register, or `None` while none is.
     fn register(&self) -> Option<&Register> {
-        self.register.as_ref().map(|open| &open.register)
+        self.open_register.as_ref().map(|open| &open.register)
     }
 
     /// The open Register, or `None` while none is.
     fn register_mut(&mut self) -> Option<&mut Register> {
-        self.register.as_mut().map(|open| &mut open.register)
+        self.open_register.as_mut().map(|open| &mut open.register)
     }
 
     /// Whether the Main view shows a Register: the Accounts tab is active and a
     /// Register is open.
     fn shows_register(&self) -> bool {
-        self.tab == TopLevelTab::Accounts && self.register.is_some()
+        self.tab == TopLevelTab::Accounts && self.open_register.is_some()
     }
 
     /// Whether `action` can act now on `view`. Its menu item is disabled while it
@@ -166,7 +166,7 @@ impl MainWindow {
         }
     }
 
-    /// Whether the current Register takes Tab this frame: it is shown and owns the
+    /// Whether the open Register takes Tab this frame: it is shown and owns the
     /// keyboard.
     pub(crate) fn register_takes_tab(&self, ctx: &egui::Context) -> bool {
         self.tab == TopLevelTab::Accounts
@@ -181,7 +181,7 @@ impl MainWindow {
         self.menu_nav.take_arrows(ctx, raw_input);
     }
 
-    /// Hands a Tab press, with `modifiers` held, to the current Register.
+    /// Hands a Tab press, with `modifiers` held, to the open Register.
     pub(crate) fn press_tab(&mut self, modifiers: egui::Modifiers) {
         if let Some(register) = self.register_mut() {
             register.press_tab(modifiers);
@@ -203,14 +203,15 @@ impl MainWindow {
         }
     }
 
-    /// Shows the current Register and puts its cell cursor on the draft row, with the
+    /// Shows the open Register and puts its cell cursor on the draft row, with the
     /// keyboard, unless no Register is open or its account in `view` is closed.
     pub(crate) fn go_to_draft_row(&mut self, ctx: &egui::Context, view: &LedgerView) {
         let open = self
             .open_account_id()
             .and_then(|account| view.account(account))
             .is_some_and(|summary| !summary.account().is_closed());
-        let Some(OpenRegister { register, .. }) = self.register.as_mut().filter(|_| open) else {
+        let Some(OpenRegister { register, .. }) = self.open_register.as_mut().filter(|_| open)
+        else {
             return;
         };
         self.tab = TopLevelTab::Accounts;
@@ -429,7 +430,7 @@ impl MainWindow {
         CentralPanel::default().show(ui, |ui| match self.open_account(view) {
             Some(summary) => {
                 Self::context_header(ui, i18n, theme, commands, summary, &accounts);
-                if let Some(OpenRegister { register, .. }) = &mut self.register {
+                if let Some(OpenRegister { register, .. }) = &mut self.open_register {
                     register.show(
                         ui,
                         i18n,
