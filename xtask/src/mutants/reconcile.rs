@@ -105,7 +105,10 @@ fn warm_up(list: &str) -> Result<()> {
 
 /// cargo-mutants' arguments for a CI run over the mutants `scope_args` select:
 /// mutated in place in the throwaway checkout, and no baseline, since the `ci`
-/// workflow has just passed on this commit. In place means one job: cargo-mutants
+/// workflow has just passed on this commit. Without a baseline to time,
+/// cargo-mutants would wait 300 s on a hung mutant; the suites run in about a
+/// second, and a minute still beats nextest's own kill, so a hang is reported as
+/// a timeout rather than a failing test. In place means one job: cargo-mutants
 /// refuses `--jobs` with `--in-place`, and a second job would build in a copy of
 /// the tree, outside the `target/` the warm-up filled.
 fn cargo_mutants_args(scope_args: &[String]) -> Vec<String> {
@@ -115,6 +118,7 @@ fn cargo_mutants_args(scope_args: &[String]) -> Vec<String> {
         "--cargo-arg=--locked",
         "--in-place",
         "--baseline=skip",
+        "--timeout=60",
     ]
     .into_iter()
     .map(str::to_owned)
@@ -167,7 +171,7 @@ mod tests {
     use super::cargo_mutants_args;
 
     #[test]
-    fn a_ci_run_mutates_in_place_with_no_baseline() {
+    fn a_ci_run_mutates_in_place_with_no_baseline_and_a_one_minute_timeout() {
         assert_eq!(
             cargo_mutants_args(&["--shard=3/7".to_owned()]),
             [
@@ -176,6 +180,7 @@ mod tests {
                 "--cargo-arg=--locked",
                 "--in-place",
                 "--baseline=skip",
+                "--timeout=60",
                 "--output=target",
                 "--shard=3/7",
             ]
