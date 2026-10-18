@@ -1,7 +1,8 @@
 # The pipeline calls `cargo xtask ci` rather than listing its steps, so that a
 # green local run predicts a green pipeline. A check that belongs in CI belongs
 # in that task, and the task never looks at the environment to behave
-# differently here.
+# differently here. The one step beside it is `typos`, run again on its own so
+# prose-only pull requests, which skip the build, are still spell-checked.
 #
 # Linux only. There is no Windows or macOS agent; release builds are made
 # locally. Don't add a step that assumes one.
@@ -64,10 +65,36 @@ steps:
       - tar -c .woodpecker/Dockerfile rust-toolchain.toml | docker build -t balanced-ci:latest -f .woodpecker/Dockerfile -
 
   # Built by `ci-image` above, from .woodpecker/Dockerfile (ADR 0004).
+  #
+  # Skipped when every changed path is prose: Markdown anywhere, `docs/`, or
+  # agent tooling under `.claude/`. The pipeline decides this, never
+  # `cargo xtask ci`, which doesn't look at the diff. The list names what to
+  # skip, not what to build, so a file type nobody listed builds. A skipped
+  # step still reports the check green.
+  #
+  # Nothing may `depends_on` this step: a dependency on a step its `when:`
+  # filtered out rejects the whole pipeline (see `ci-image`).
   - name: ci
     image: balanced-ci:latest
     depends_on: [ci-image]
+    when:
+      - path:
+          exclude: ["**/*.md", "docs/**", ".claude/**"]
     environment:
       CARGO_TERM_COLOR: always
     commands:
       - cargo xtask ci
+
+  # The spell-check, on every pipeline, unfiltered. It is the one check in
+  # `cargo xtask ci` that reads Markdown, so it is the one a prose-only pull
+  # request, which skips `ci` above, still needs. When `ci` runs too, the
+  # spell-check runs twice; it is cheap.
+  #
+  # Depends on `ci-image` only. Not on `ci`, whose filter would reject the
+  # pipeline whenever it skips, and `ci` not on this, so neither waits for
+  # the other.
+  - name: typos
+    image: balanced-ci:latest
+    depends_on: [ci-image]
+    commands:
+      - cargo xtask typos
