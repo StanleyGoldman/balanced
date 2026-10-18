@@ -1,5 +1,6 @@
 mod github;
 mod key;
+pub(crate) mod landed;
 mod plan;
 mod reconcile;
 pub(crate) mod shard;
@@ -65,9 +66,7 @@ fn cargo_mutants_args(scope: &Scope<'_>) -> Vec<String> {
 
 fn run(scope: Scope<'_>) -> Result<()> {
     if let Scope::ChangedSince { base, .. } = scope {
-        let diff = process::output("git", &["diff", &format!("{base}...")])?;
-        std::fs::create_dir_all("target").context("creating target/")?;
-        std::fs::write(DIFF_PATH, diff).with_context(|| format!("writing {DIFF_PATH}"))?;
+        write_diff(&format!("{base}..."), DIFF_PATH)?;
     }
     let args = cargo_mutants_args(&scope);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -85,6 +84,14 @@ fn run(scope: Scope<'_>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Writes `git diff <revisions>` to `path`, under `target/`, for cargo-mutants'
+/// `--in-diff` to read.
+fn write_diff(revisions: &str, path: &str) -> Result<()> {
+    let diff = process::output("git", &["diff", revisions])?;
+    std::fs::create_dir_all("target").context("creating target/")?;
+    std::fs::write(path, diff).with_context(|| format!("writing {path}"))
 }
 
 /// A finished cargo-mutants run. The check is advisory, so missed and timed-out

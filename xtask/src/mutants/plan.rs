@@ -30,10 +30,6 @@ pub(crate) struct Run {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FoundBy {
     /// The post-merge run for the pull request with this number.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "mutants-landed builds it, in #176")
-    )]
     PullRequest(u64),
     /// The nightly run of one shard.
     Shard(Shard),
@@ -79,12 +75,13 @@ pub(crate) struct NewIssue {
     pub(crate) labels: Vec<&'static str>,
 }
 
-/// Decides the run's actions. `outcomes` is cargo-mutants' `outcomes.json`, and `list`
-/// is `cargo mutants --list --json` at the tested commit. Opens, comments and closes
+/// Decides the run's actions. `outcomes` is cargo-mutants' `outcomes.json`, or `None`
+/// for a run whose scope held no mutants, which tested nothing; `list` is
+/// `cargo mutants --list --json` at the tested commit. Opens, comments and closes
 /// for tested mutants come in the order the run tested them, then the closes for
 /// mutants no longer generated, in the order of `issues`.
 pub(crate) fn plan(
-    outcomes: &str,
+    outcomes: Option<&str>,
     list: &str,
     issues: &[OpenIssue],
     run: &Run,
@@ -96,7 +93,10 @@ pub(crate) fn plan(
         .iter()
         .map(|keyed| (keyed.mutant.name.as_str(), keyed))
         .collect();
-    let outcomes: Outcomes = serde_json::from_str(outcomes).context("reading outcomes.json")?;
+    let outcomes: Outcomes = match outcomes {
+        Some(outcomes) => serde_json::from_str(outcomes).context("reading outcomes.json")?,
+        None => Outcomes::default(),
+    };
     let issues = KeyedIssue::key_all(issues)?;
     // Where two open issues share a key, the oldest is the mutant's issue.
     let mut issue_by_key: HashMap<&MutantKey, u64> = HashMap::new();
@@ -395,7 +395,7 @@ struct Position {
     column: u32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct Outcomes {
     outcomes: Vec<Outcome>,
 }
@@ -526,7 +526,7 @@ mod tests {
         let next = next_minus();
 
         let actions = plan(
-            &outcomes(&[(&next, "MissedMutant")]),
+            Some(&outcomes(&[(&next, "MissedMutant")])),
             &list(&[&next]),
             &[issue_for(12, &next, 0)],
             &shard_run(),
@@ -551,7 +551,7 @@ mod tests {
         };
 
         let actions = plan(
-            &outcomes(&[(&next, "CaughtMutant")]),
+            Some(&outcomes(&[(&next, "CaughtMutant")])),
             &list(&[&next]),
             &[issue_for(12, &next, 0)],
             &run,
@@ -575,7 +575,7 @@ mod tests {
         let next = next_minus();
 
         let actions = plan(
-            &outcomes(&[(&next, "Timeout")]),
+            Some(&outcomes(&[(&next, "Timeout")])),
             &list(&[&next]),
             &[],
             &shard_run(),
@@ -597,7 +597,7 @@ mod tests {
         let next = next_minus();
 
         let actions = plan(
-            &outcomes(&[(&next, "Timeout")]),
+            Some(&outcomes(&[(&next, "Timeout")])),
             &list(&[&next]),
             &[issue_for(12, &next, 0)],
             &shard_run(),
@@ -625,7 +625,7 @@ mod tests {
         );
 
         let actions = plan(
-            &outcomes(&[(&next, "CaughtMutant")]),
+            Some(&outcomes(&[(&next, "CaughtMutant")])),
             &list(&[&next]),
             &[issue_for(31, &gone, 0)],
             &shard_run(),
@@ -657,7 +657,7 @@ mod tests {
         );
 
         let actions = plan(
-            &outcomes(&[(&next, "CaughtMutant")]),
+            Some(&outcomes(&[(&next, "CaughtMutant")])),
             &list(&[&next, &untested]),
             &[issue_for(31, &untested, 0)],
             &shard_run(),
@@ -679,7 +679,7 @@ mod tests {
         );
 
         let actions = plan(
-            &outcomes(&[(&next, "Unviable"), (&times, "Unviable")]),
+            Some(&outcomes(&[(&next, "Unviable"), (&times, "Unviable")])),
             &list(&[&next, &times]),
             &[issue_for(12, &next, 0)],
             &shard_run(),
@@ -701,7 +701,7 @@ mod tests {
         );
 
         let actions = plan(
-            &outcomes(&[(&shifted, "MissedMutant")]),
+            Some(&outcomes(&[(&shifted, "MissedMutant")])),
             &list(&[&shifted]),
             &[issue_for(12, &before, 0)],
             &shard_run(),
@@ -733,7 +733,10 @@ mod tests {
 
         // Listed out of source order, so the occurrence can't come from list order.
         let actions = plan(
-            &outcomes(&[(&first, "MissedMutant"), (&second, "MissedMutant")]),
+            Some(&outcomes(&[
+                (&first, "MissedMutant"),
+                (&second, "MissedMutant"),
+            ])),
             &list(&[&second, &first]),
             &[issue_for(12, &second, 1)],
             &shard_run(),
@@ -769,7 +772,7 @@ mod tests {
         );
 
         let actions = plan(
-            &outcomes(&[(&second, "MissedMutant")]),
+            Some(&outcomes(&[(&second, "MissedMutant")])),
             &list(&[&first, &second]),
             &[],
             &shard_run(),
@@ -796,7 +799,7 @@ mod tests {
         let next = next_minus();
 
         let actions = plan(
-            &outcomes(&[(&next, "MissedMutant")]),
+            Some(&outcomes(&[(&next, "MissedMutant")])),
             &list(&[&next]),
             &[],
             &shard_run(),
@@ -833,6 +836,37 @@ Kill it with a test, or exclude it with a reason.
                 ),
                 labels: vec!["mutant", "ready-for-agent"],
             })]
+        );
+    }
+
+    #[test]
+    fn a_run_that_tested_nothing_closes_only_issues_no_longer_generated() {
+        let listed = next_minus();
+        let gone = mutant(
+            "crates/balanced_core/src/ledger.rs",
+            "Ledger::removed",
+            10,
+            5,
+            "replace Ledger::removed -> bool with true",
+        );
+
+        let actions = plan(
+            None,
+            &list(&[&listed]),
+            &[issue_for(30, &listed, 0), issue_for(31, &gone, 0)],
+            &shard_run(),
+        );
+
+        assert_eq!(
+            actions.ok(),
+            Some(vec![Action::Close {
+                issue: 31,
+                reason: CloseReason::NoLongerGenerated,
+                comment: format!(
+                    "No longer generated, as seen by the nightly run of shard 3/7 at commit \
+                     {COMMIT}: its code was deleted, renamed or excluded, so closing."
+                ),
+            }])
         );
     }
 }
