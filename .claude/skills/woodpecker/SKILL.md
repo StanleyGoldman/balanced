@@ -38,8 +38,9 @@ have gaps, and a missing number 404s.
    woodpecker-cli pipeline ps StanleyGoldman/balanced <n> --format '{{.workflow.Name}}/{{.step.Name}} #{{.step.PID}} {{.step.State}}'
    ```
 
-   `.woodpecker/ci.yml` has three steps: `clone`, `ci-image` (builds the CI image) and `ci`
-   (`cargo xtask ci`). Done when one step reads `failure`. A `clone` failure means the checkout
+   `.woodpecker/ci.yml` has four steps: `clone`, `ci-image` (builds the CI image), then `ci`
+   (`cargo xtask ci`) and `adrs` (`cargo xtask adrs`, against the target branch on a pull
+   request) side by side. Done when one step reads `failure`. A `clone` failure means the checkout
    itself failed and no step of ours ran; a `ci-image` failure is the Dockerfile or the Docker
    daemon, not the code.
 
@@ -126,8 +127,9 @@ Four traps a config that lints clean still hits, each failing the pipeline befor
 - **Build steps get no forge credentials.** Only the clone step has them, so `git fetch` in a
   build step dies with `could not read Username for 'https://github.com'` on this private
   repo. Ask for what you need from the forge in the `clone:` section
-  (`fetch-target-branch: true` brings the target branch). Ordinary network access works; steps
-  reach crates.io.
+  (`fetch-target-branch: true` brings the target branch). Keep that section's image
+  `woodpeckerci/plugin-git`: the credentials go only to images on the server's trusted-clone
+  list. Ordinary network access works; steps reach crates.io.
 - **A dependency on a step its `when:` filtered out rejects the whole pipeline.** Status
   `error`, no workflows, so `ps` prints nothing; the message is in `.errors[]`
   (`step 'ci' depends on step 'ci-image' which is filtered out by its conditions`). It fires
@@ -184,3 +186,6 @@ git diff origin/<lower>:.woodpecker/ci.yml origin/<upper>:.woodpecker/ci.yml
 ```
 
 Equal hashes, same file.
+
+On a stacked pull request, `adrs` compares with the layer below, not `main`. A clash with a
+record on `main` surfaces when the stack lands, in the push-to-`main` run.
