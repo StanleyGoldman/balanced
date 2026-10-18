@@ -159,10 +159,13 @@ lists names and the events and images each is limited to; values never come back
 one:
 
 ```bash
-woodpecker-cli repo secret add --repo StanleyGoldman/balanced --name <name> --value "$VALUE" --event <event> --image balanced-ci:latest
+woodpecker-cli repo secret add --repo StanleyGoldman/balanced --name <name> --value "$VALUE" --event <event>
 ```
 
-Limit it to the events and image of the steps that read it. A secret allowed on
+Limit it to the events of the steps that read it, and leave its images empty. An image filter
+binds only plugin steps: a step with `commands:` that reads a filtered secret errors the whole
+pipeline before any step runs (`secret "<name>" is only allowed to be used by plugins (a filter
+has been set on the secret)`), and every step here has `commands:`. A secret allowed on
 `pull_request` reaches the steps of every pull request, so add that event only when a pull
 request step reads the secret. Pass the value through a variable so it stays out of the
 transcript. A wrong value is fixed with
