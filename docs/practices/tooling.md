@@ -7,7 +7,7 @@
 
 ## Checks
 
-Every check lives in `xtask` (`cargo xtask` lists them), so the same commands run locally and in CI. CI is Woodpecker, on Linux only: `.woodpecker/ci.yml` runs plain `cargo xtask ci` on every pull request and every push to `main`, unless every changed path is prose or agent tooling (the step's `when:` lists the globs). It runs in the image `.woodpecker/Dockerfile` builds (see [ADR 0004](../adr/0004-ci-image-matches-the-snapshot-machine.md)). It is never GitHub Actions. Two checks also run as steps of their own on every pipeline, prose-only ones included: `cargo xtask typos`, so prose-only changes are still spell-checked, and `adrs`, which on a pull request runs `cargo xtask adrs --against origin/<target branch>` and on a push to `main` plain `cargo xtask adrs`.
+Every check lives in `xtask` (`cargo xtask` lists them), so the same commands run locally and in CI. CI is Woodpecker, on Linux only: `.woodpecker/ci.yml` runs plain `cargo xtask ci` on every pull request, every push to `main` and the nightly cron (ahead of `mutants.yml`), unless every changed path is prose or agent tooling (the step's `when:` lists the globs). It runs in the image `.woodpecker/Dockerfile` builds (see [ADR 0004](../adr/0004-ci-image-matches-the-snapshot-machine.md)). It is never GitHub Actions. Two checks also run as steps of their own on every pipeline, prose-only ones included: `cargo xtask typos`, so prose-only changes are still spell-checked, and `adrs`, which on a pull request runs `cargo xtask adrs --against origin/<target branch>` and on a push to `main` plain `cargo xtask adrs`.
 
 - `cargo xtask ci` runs the following, stopping at the first failure:
   - `fmt`
@@ -20,13 +20,12 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
   - `todo`: every `TODO` or `FIXME` in a `.rs` or `.toml` file is written `TODO(#123)`
   - `adrs`: no two records in `docs/adr/` share a number, and every file there is named `<four digits>-<slug>.md`. Gaps in the numbering are fine.
 - `cargo xtask adrs --against <ref>` runs the same check on this branch merged with `<ref>`, without touching the checkout. It catches a record that landed on `<ref>` with the same number after this branch was cut. Both branches merge clean, because the file names differ.
-- `cargo xtask mutants [<base>]` is the advisory mutation check (see [testing](testing.md#mutation-testing)).
+- `cargo xtask mutants [<base>] [--re <pattern>]` is the by-hand mutation check, for proving a mutant's fix (see [testing](testing.md#mutation-testing)).
+- `cargo xtask mutants-shard [--dry-run]` is a CI task: `.woodpecker/mutants.yml` runs it each night on oldhermit-3, the agent reserved for mutant runs. It tests one round-robin shard of every mutant and opens, comments on and closes `mutant` issues. It refuses a dirty tree, because it mutates files in place, and it needs `GITHUB_TOKEN`; `--dry-run` prints the issue updates instead of making them. A missed mutant leaves it green; a run that couldn't finish or couldn't update its issues is red.
 - The external tools need a one-time install: `cargo install --locked cargo-deny typos-cli cargo-mutants cargo-nextest`.
 - Warnings are allowed while you iterate. `cargo xtask clippy` denies them.
 - A new check is written as a new `xtask` task and added to `ci`, never as CI-provider config. Each task is its own module in `xtask/src/` with a `TASK` constant, listed once in `TASKS` in `main.rs`. Running programs goes through `process.rs`.
 - After changing a file under `.woodpecker/`, lint it and run it locally before pushing, as the `woodpecker` skill's "Changing the pipeline config" says.
-
-One check is still to come: a periodic full mutants run. It arrives when there is code for it to check.
 
 ## Config files
 
