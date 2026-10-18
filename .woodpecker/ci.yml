@@ -1,7 +1,8 @@
 # The pipeline calls `cargo xtask ci` rather than listing its steps, so that a
 # green local run predicts a green pipeline. A check that belongs in CI belongs
 # in that task, and the task never looks at the environment to behave
-# differently here.
+# differently here. The steps beside it rerun a check from that task on its
+# own, so prose-only pull requests, which skip it, still get that check.
 #
 # Linux only. There is no Windows or macOS agent; release builds are made
 # locally. Don't add a step that assumes one.
@@ -65,6 +66,15 @@ steps:
 
   # Built by `ci-image` above, from .woodpecker/Dockerfile (ADR 0004).
   #
+  # Skipped when every changed path is prose: Markdown anywhere, `docs/`, or
+  # agent tooling under `.claude/`. The pipeline decides this, never
+  # `cargo xtask ci`, which doesn't look at the diff. The list names what to
+  # skip, not what to build, so a file type nobody listed builds. A skipped
+  # step still reports the check green.
+  #
+  # Nothing may `depends_on` this step: a dependency on a step its `when:`
+  # filtered out rejects the whole pipeline (see `ci-image`).
+  #
   # Caching (ADR 0003). Two things outlive the step, both on the oldhermit
   # host and both under a `balanced/` directory: `/cache/agent` is mounted
   # into every repository's steps, and Woodpecker's cache folder is shared
@@ -91,6 +101,9 @@ steps:
   - name: ci
     image: balanced-ci:latest
     depends_on: [ci-image]
+    when:
+      - path:
+          exclude: ["**/*.md", "docs/**", ".claude/**"]
     volumes:
       - /var/lib/woodpecker/cache/balanced/cargo:/cache/cargo
     environment:
@@ -113,3 +126,19 @@ steps:
       # leaves the step's exit status as the build's.
       - trap 'sccache --show-stats || true' EXIT
       - cargo xtask ci
+
+  # The spell-check, on every pipeline, unfiltered. It is the one check in
+  # `cargo xtask ci` that reads the text of Markdown, so a prose-only pull
+  # request, which skips `ci` above, still needs it. `adrs` also looks under
+  # `docs/`, at the ADR file names; until it has an unfiltered step of its
+  # own, a prose-only pull request skips it. When `ci` runs too, the
+  # spell-check runs twice.
+  #
+  # Depends on `ci-image` only. Not on `ci`, whose filter would reject the
+  # pipeline whenever it skips, and `ci` not on this, so neither waits for
+  # the other.
+  - name: typos
+    image: balanced-ci:latest
+    depends_on: [ci-image]
+    commands:
+      - cargo xtask typos
