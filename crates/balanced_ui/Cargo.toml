@@ -37,6 +37,9 @@ icu_locale.workspace = true
 rust_decimal.workspace = true
 rust_decimal_macros.workspace = true
 tempfile.workspace = true
+# PROTOTYPE: only the throwaway register-display example uses these two.
+balanced_prototype_harness.workspace = true
+serde_json.workspace = true
 
 [[test]]
 name = "snapshots"
