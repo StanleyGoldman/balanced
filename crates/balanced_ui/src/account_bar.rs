@@ -18,7 +18,7 @@ use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
 use crate::layout::Layout;
 use crate::preferences::{NetWorthPlacement, Preferences};
-use crate::route::{OpenIn, Route, TopLevelTab};
+use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::triangle_button::{Direction, triangle_button};
 use crate::user_action::UserAction;
@@ -280,7 +280,7 @@ impl AccountBar {
                     response.scroll_to_me(None);
                 }
                 if response.clicked() {
-                    open(commands, row.id(), preferences.open_account_in);
+                    open(commands, row.id());
                 }
                 response.context_menu(|ui| account_menu(ui, i18n, commands, row.id()));
             }
@@ -427,21 +427,15 @@ struct JumpTarget<'a> {
     name: &'a str,
 }
 
-/// Opens `account`'s Register where `open_in` says.
-fn open(commands: &CommandSender, account: AccountId, open_in: OpenIn) {
-    commands.send(AppCommand::Navigate(Route::Account { account, open_in }));
+/// Opens `account`'s Register in place of the one shown.
+fn open(commands: &CommandSender, account: AccountId) {
+    commands.send(AppCommand::Navigate(Route::Account(account)));
 }
 
 /// An account's right-click menu.
 fn account_menu(ui: &mut egui::Ui, i18n: &Localizer, commands: &CommandSender, account: AccountId) {
     if ui.button(fl!(i18n, "account-bar-open-register")).clicked() {
-        open(commands, account, OpenIn::CurrentRegister);
-    }
-    if ui
-        .button(fl!(i18n, "account-bar-open-in-new-tab"))
-        .clicked()
-    {
-        open(commands, account, OpenIn::NewTab);
+        open(commands, account);
     }
     if ui.button(fl!(i18n, "account-bar-reconcile")).clicked() {
         commands.send(AppCommand::ShowStatus(StatusMessage::NotAvailableYet));

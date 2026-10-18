@@ -11,9 +11,6 @@ use crate::i18n::fl;
 pub(crate) enum UserAction {
     Undo,
     Redo,
-    CloseRegisterTab,
-    NextRegisterTab,
-    PreviousRegisterTab,
     /// Move keyboard focus between the Account bar and the Main view.
     SwitchPane,
     /// Start a new transaction in the open Register.
@@ -36,9 +33,6 @@ impl UserAction {
         match self {
             Self::Undo => fl!(i18n, "menu-edit-undo"),
             Self::Redo => fl!(i18n, "menu-edit-redo"),
-            Self::CloseRegisterTab => fl!(i18n, "menu-file-close-register-tab"),
-            Self::NextRegisterTab => fl!(i18n, "menu-view-next-register-tab"),
-            Self::PreviousRegisterTab => fl!(i18n, "menu-view-previous-register-tab"),
             Self::SwitchPane => fl!(i18n, "menu-view-switch-pane"),
             Self::NewTransaction => fl!(i18n, "menu-new-transaction"),
             Self::DeleteTransaction => fl!(i18n, "menu-delete-transaction"),
@@ -57,9 +51,6 @@ impl UserAction {
             Self::Undo | Self::Redo => true,
             Self::NewTransaction
             | Self::DeleteTransaction
-            | Self::CloseRegisterTab
-            | Self::NextRegisterTab
-            | Self::PreviousRegisterTab
             | Self::SwitchPane
             | Self::NewAccount
             | Self::ManageAccounts
@@ -74,9 +65,6 @@ impl UserAction {
         match self {
             Self::Undo => AppCommand::Undo,
             Self::Redo => AppCommand::Redo,
-            Self::CloseRegisterTab => AppCommand::CloseRegisterTab,
-            Self::NextRegisterTab => AppCommand::NextRegisterTab,
-            Self::PreviousRegisterTab => AppCommand::PreviousRegisterTab,
             Self::SwitchPane => AppCommand::SwitchPane,
             Self::NewTransaction => AppCommand::GoToDraftRow,
             Self::DeleteTransaction => AppCommand::OpenDialog(DialogKind::DeleteTransaction),

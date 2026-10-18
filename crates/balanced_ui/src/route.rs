@@ -1,9 +1,8 @@
 //! Where the Main window is: the top-level tab shown in the Main view, and the
-//! accounts open under the Accounts tab.
+//! account open under the Accounts tab.
 
 use balanced_core::AccountId;
 use balanced_i18n::Localizer;
-use serde::{Deserialize, Serialize};
 
 use crate::i18n::fl;
 
@@ -12,20 +11,8 @@ use crate::i18n::fl;
 pub(crate) enum Route {
     /// A top-level tab.
     Tab(TopLevelTab),
-    /// An account's Register, opened under the Accounts tab.
-    Account { account: AccountId, open_in: OpenIn },
-}
-
-/// Where an account's Register opens. The "Open an account in" Preference holds one,
-/// by its name in `snake_case`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum OpenIn {
-    /// In place of the current Register tab's account, or in a first Register tab when
-    /// none is open.
-    CurrentRegister,
-    /// In a Register tab of its own.
-    NewTab,
+    /// An account's Register, opened under the Accounts tab in place of the one shown.
+    Account(AccountId),
 }
 
 /// A top-level tab in the Main window's tab row.

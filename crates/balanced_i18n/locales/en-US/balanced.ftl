@@ -14,14 +14,11 @@ main-window-title = { -brand-name }
 
 menu-file = File
 menu-file-new-account = New Account…
-menu-file-close-register-tab = Close { -register } Tab
 menu-file-quit = Quit
 menu-edit = Edit
 menu-edit-undo = Undo
 menu-edit-redo = Redo
 menu-view = View
-menu-view-next-register-tab = Next { -register } Tab
-menu-view-previous-register-tab = Previous { -register } Tab
 menu-view-switch-pane = Switch Pane
 menu-tools = Tools
 menu-tools-manage-accounts = Manage Accounts…
@@ -56,8 +53,6 @@ tab-investing = Investing
 tab-investing-placeholder = Your investment accounts and holdings will appear here.
 tab-property-debt = Property & Debt
 tab-property-debt-placeholder = Your assets, loans and other debts will appear here.
-# The × on a Register tab, named for the account the tab shows.
-tab-register-close = Close { $account }
 
 ## Account kinds
 
@@ -87,7 +82,6 @@ account-bar-fold = Fold the { -account-bar }
 account-bar-unfold = Unfold the { -account-bar }
 # An account's right-click menu.
 account-bar-open-register = Open { -register }
-account-bar-open-in-new-tab = Open in New Tab
 account-bar-reconcile = Reconcile
 account-bar-manage-accounts = Manage Accounts…
 # The button in the Account bar's header that opens the New Account wizard.
@@ -182,11 +176,6 @@ dialog-preferences-net-worth-account-bar = In the { -account-bar }'s footer
 dialog-preferences-net-worth-status-bar = In the Status bar
 # The Account bar folds to a narrow rail while another tab than Accounts is shown.
 dialog-preferences-auto-fold = Fold the { -account-bar } when leaving Accounts
-dialog-preferences-group-accounts = Accounts
-# Where clicking an account in the Account bar opens its Register.
-dialog-preferences-open-account-in = Open an account in
-dialog-preferences-open-account-in-current = The current { -register }
-dialog-preferences-open-account-in-new-tab = A new { -register } tab
 
 # Manage Accounts: a table of every account, with what can be changed about each.
 dialog-manage-accounts-title = Manage Accounts

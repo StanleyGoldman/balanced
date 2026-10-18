@@ -7,7 +7,6 @@ use eframe::egui::{self, ComboBox};
 
 use crate::i18n::fl;
 use crate::preferences::{FontFace, Gridlines, NetWorthPlacement, Preferences, Scheme};
-use crate::route::OpenIn;
 
 /// What the Preferences Dialog holds while it is open.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,23 +21,16 @@ enum Group {
     Display,
     Register,
     AccountBar,
-    Accounts,
 }
 
 impl Group {
-    const ALL: [Self; 4] = [
-        Self::Display,
-        Self::Register,
-        Self::AccountBar,
-        Self::Accounts,
-    ];
+    const ALL: [Self; 3] = [Self::Display, Self::Register, Self::AccountBar];
 
     fn label(self, i18n: &Localizer) -> String {
         match self {
             Self::Display => fl!(i18n, "dialog-preferences-group-display"),
             Self::Register => fl!(i18n, "dialog-preferences-group-register"),
             Self::AccountBar => fl!(i18n, "dialog-preferences-group-account-bar"),
-            Self::Accounts => fl!(i18n, "dialog-preferences-group-accounts"),
         }
     }
 }
@@ -82,7 +74,6 @@ impl PreferencesForm {
                 Group::Display => self.display(ui, i18n),
                 Group::Register => self.register(ui, i18n),
                 Group::AccountBar => self.account_bar(ui, i18n),
-                Group::Accounts => self.accounts(ui, i18n),
             });
         });
         if self.draft != before {
@@ -168,22 +159,6 @@ impl PreferencesForm {
         ui.checkbox(
             &mut draft.auto_fold,
             fl!(i18n, "dialog-preferences-auto-fold"),
-        );
-    }
-
-    /// The Accounts group: where an account's Register opens.
-    fn accounts(&mut self, ui: &mut egui::Ui, i18n: &Localizer) {
-        let draft = &mut self.draft;
-        ui.label(fl!(i18n, "dialog-preferences-open-account-in"));
-        ui.radio_value(
-            &mut draft.open_account_in,
-            OpenIn::CurrentRegister,
-            fl!(i18n, "dialog-preferences-open-account-in-current"),
-        );
-        ui.radio_value(
-            &mut draft.open_account_in,
-            OpenIn::NewTab,
-            fl!(i18n, "dialog-preferences-open-account-in-new-tab"),
         );
     }
 }

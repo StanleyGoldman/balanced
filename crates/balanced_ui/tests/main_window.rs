@@ -132,6 +132,27 @@ fn selecting_an_account_opens_it_under_the_accounts_tab() {
 }
 
 #[test]
+fn selecting_another_account_opens_it_in_place_of_the_open_one() {
+    let mut harness = app();
+    harness
+        .get_by_role_and_label(Role::Button, "Everyday Checking")
+        .click();
+    harness.run();
+
+    harness
+        .get_by_role_and_label(Role::Button, "Emergency Fund")
+        .click();
+    harness.run();
+
+    harness.get_by_role_and_label(Role::Label, "Emergency Fund");
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Label, "Everyday Checking")
+            .is_none()
+    );
+}
+
+#[test]
 fn folding_a_group_hides_its_accounts() {
     let mut harness = app();
 

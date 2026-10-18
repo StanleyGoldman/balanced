@@ -24,7 +24,6 @@ mod preferences_dialog;
 mod register;
 mod register_columns;
 mod register_model;
-mod register_tabs;
 mod route;
 #[cfg(feature = "test-support")]
 pub mod testing;

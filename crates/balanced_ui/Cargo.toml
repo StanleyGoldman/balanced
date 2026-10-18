@@ -99,9 +99,5 @@ required-features = ["test-support"]
 name = "register"
 required-features = ["test-support"]
 
-[[test]]
-name = "register_tabs"
-required-features = ["test-support"]
-
 [lints]
 workspace = true

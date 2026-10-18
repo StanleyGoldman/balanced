@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::register_columns::RegisterColumns;
-use crate::route::OpenIn;
 
 /// Light or dark colours.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -108,8 +107,6 @@ pub(crate) struct Preferences {
     pub(crate) net_worth_placement: NetWorthPlacement,
     /// The Account bar folds to a rail while the Main view is off the Accounts tab.
     pub(crate) auto_fold: bool,
-    /// Where clicking an account in the Account bar opens its Register.
-    pub(crate) open_account_in: OpenIn,
     /// The columns every Register shows, and their order.
     #[serde(flatten)]
     pub(crate) register_columns: RegisterColumns,
@@ -128,7 +125,6 @@ impl Default for Preferences {
             group_totals: false,
             net_worth_placement: NetWorthPlacement::default(),
             auto_fold: true,
-            open_account_in: OpenIn::CurrentRegister,
             register_columns: RegisterColumns::default(),
         }
     }
@@ -289,7 +285,6 @@ mod tests {
             group_totals: true,
             net_worth_placement: NetWorthPlacement::StatusBar,
             auto_fold: false,
-            open_account_in: OpenIn::NewTab,
             register_columns,
         };
 
@@ -336,14 +331,57 @@ mod tests {
     }
 
     #[test]
+    fn a_file_holding_the_retired_open_account_in_keeps_every_other_preference() {
+        let (dir, file) = file();
+        std::fs::write(
+            dir.path().join("preferences.toml"),
+            "version = 1\n\
+             scheme = \"dark\"\n\
+             font_face = \"noto_sans\"\n\
+             dense_rows = true\n\
+             monospace_money = true\n\
+             coloured_negatives = false\n\
+             alternating_rows = false\n\
+             gridlines = \"both\"\n\
+             group_totals = true\n\
+             net_worth_placement = \"status_bar\"\n\
+             auto_fold = false\n\
+             open_account_in = \"new_tab\"\n\
+             register_columns = [\"payee\", \"date\", \"num\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+             hidden_register_columns = [\"memo\"]\n",
+        )
+        .unwrap();
+
+        let loaded = file.load().unwrap();
+
+        let mut register_columns = RegisterColumns::default();
+        register_columns.move_up(RegisterColumn::Payee);
+        register_columns.move_up(RegisterColumn::Payee);
+        register_columns.set_shown(RegisterColumn::Memo, false);
+        let expected = Preferences {
+            scheme: Scheme::Dark,
+            font_face: FontFace::NotoSans,
+            dense_rows: true,
+            monospace_money: true,
+            coloured_negatives: false,
+            alternating_rows: false,
+            gridlines: Gridlines::Both,
+            group_totals: true,
+            net_worth_placement: NetWorthPlacement::StatusBar,
+            auto_fold: false,
+            register_columns,
+        };
+        assert_eq!(loaded, expected);
+    }
+
+    #[test]
     fn the_enumerated_preferences_read_their_ids() {
         let (dir, file) = file();
         std::fs::write(
             dir.path().join("preferences.toml"),
             "version = 1\n\
              gridlines = \"vertical\"\n\
-             net_worth_placement = \"status_bar\"\n\
-             open_account_in = \"new_tab\"\n",
+             net_worth_placement = \"status_bar\"\n",
         )
         .unwrap();
 
@@ -352,7 +390,6 @@ mod tests {
         let expected = Preferences {
             gridlines: Gridlines::Vertical,
             net_worth_placement: NetWorthPlacement::StatusBar,
-            open_account_in: OpenIn::NewTab,
             ..Preferences::default()
         };
         assert_eq!(loaded, expected);
@@ -456,7 +493,6 @@ mod tests {
              group_totals = false\n\
              net_worth_placement = \"account_bar\"\n\
              auto_fold = true\n\
-             open_account_in = \"current_register\"\n\
              register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
              hidden_register_columns = []\n"
         );

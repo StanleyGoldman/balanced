@@ -1,6 +1,8 @@
 //! The Main window: Menu bar, tab row, Account bar, Main view and Status bar.
 
-use balanced_core::{AccountSummary, DomainCommand, DomainError, LedgerView, TransactionId};
+use balanced_core::{
+    AccountId, AccountSummary, DomainCommand, DomainError, LedgerView, TransactionId,
+};
 use balanced_i18n::Localizer;
 use eframe::egui::accesskit::Role;
 use eframe::egui::{self, Button, CentralPanel, Id, Label, MenuBar, Panel, RichText, Sides};
@@ -19,9 +21,8 @@ use crate::new_account::{self, NewAccountForm, WizardOutcome};
 use crate::new_category::NewCategoryForm;
 use crate::preferences::{NetWorthPlacement, Preferences};
 use crate::preferences_dialog::PreferencesForm;
-use crate::register::ColumnWidths;
+use crate::register::{ColumnWidths, Register};
 use crate::register_model::RegisterRow;
-use crate::register_tabs::RegisterTabs;
 use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
@@ -35,8 +36,8 @@ pub(crate) struct MainWindow {
     account_bar: AccountBar,
     /// The accounts of the last snapshot shown, rebuilt when it is out of date.
     accounts: Option<AccountsModel>,
-    /// The Registers open under the Accounts tab.
-    registers: RegisterTabs,
+    /// The Register open under the Accounts tab, if any.
+    register: Option<OpenRegister>,
     /// The column widths every Register shares.
     column_widths: ColumnWidths,
     /// The delete transaction confirm, while it is open.
@@ -66,6 +67,13 @@ pub(crate) struct WindowFrame<'a> {
     pub(crate) today: Date<Iso>,
 }
 
+/// The Register open under the Accounts tab and the account it shows.
+#[derive(Debug)]
+struct OpenRegister {
+    account: AccountId,
+    register: Register,
+}
+
 /// The delete transaction confirm's form: which transaction it deletes. Its question
 /// is formatted every frame from the Register's row, so it follows the locale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,7 +89,7 @@ impl MainWindow {
             status: None,
             account_bar: AccountBar::new(layout),
             accounts: None,
-            registers: RegisterTabs::default(),
+            register: None,
             column_widths: layout.column_widths(),
             delete_transaction: None,
             new_account: None,
@@ -108,24 +116,38 @@ impl MainWindow {
     pub(crate) fn navigate(&mut self, route: Route) {
         match route {
             Route::Tab(tab) => self.tab = tab,
-            Route::Account { account, open_in } => {
+            Route::Account(account) => {
                 self.tab = TopLevelTab::Accounts;
-                self.registers.open(account, open_in);
+                // The account already open keeps its Register as it is.
+                if self.open_account_id() != Some(account) {
+                    self.register = Some(OpenRegister {
+                        account,
+                        register: Register::default(),
+                    });
+                }
             }
         }
     }
 
-    /// Applies `change` to the Register tabs, if the Accounts tab shows them.
-    pub(crate) fn change_register_tabs(&mut self, change: impl FnOnce(&mut RegisterTabs)) {
-        if self.shows_registers() {
-            change(&mut self.registers);
-        }
+    /// The account whose Register is open, or `None` while none is.
+    fn open_account_id(&self) -> Option<AccountId> {
+        self.register.as_ref().map(|open| open.account)
     }
 
-    /// Whether the Main view shows the Register tabs: the Accounts tab is active and
-    /// a tab is open.
-    fn shows_registers(&self) -> bool {
-        self.tab == TopLevelTab::Accounts && self.registers.len() > 0
+    /// The open Register, or `None` while none is.
+    fn register(&self) -> Option<&Register> {
+        self.register.as_ref().map(|open| &open.register)
+    }
+
+    /// The open Register, or `None` while none is.
+    fn register_mut(&mut self) -> Option<&mut Register> {
+        self.register.as_mut().map(|open| &mut open.register)
+    }
+
+    /// Whether the Main view shows a Register: the Accounts tab is active and a
+    /// Register is open.
+    fn shows_register(&self) -> bool {
+        self.tab == TopLevelTab::Accounts && self.register.is_some()
     }
 
     /// Whether `action` can act now on `view`. Its menu item is disabled while it
@@ -134,12 +156,7 @@ impl MainWindow {
         match action {
             UserAction::Undo => view.can_undo(),
             UserAction::Redo => view.can_redo(),
-            UserAction::CloseRegisterTab
-            | UserAction::NewTransaction
-            | UserAction::DeleteTransaction => self.shows_registers(),
-            UserAction::NextRegisterTab | UserAction::PreviousRegisterTab => {
-                self.shows_registers() && self.registers.len() > 1
-            }
+            UserAction::NewTransaction | UserAction::DeleteTransaction => self.shows_register(),
             UserAction::SwitchPane
             | UserAction::NewAccount
             | UserAction::ManageAccounts
@@ -154,8 +171,7 @@ impl MainWindow {
     pub(crate) fn register_takes_tab(&self, ctx: &egui::Context) -> bool {
         self.tab == TopLevelTab::Accounts
             && self
-                .registers
-                .current_register()
+                .register()
                 .is_some_and(|register| register.owns_keyboard(ctx))
     }
 
@@ -167,7 +183,7 @@ impl MainWindow {
 
     /// Hands a Tab press, with `modifiers` held, to the current Register.
     pub(crate) fn press_tab(&mut self, modifiers: egui::Modifiers) {
-        if let Some(register) = self.registers.current_register_mut() {
+        if let Some(register) = self.register_mut() {
             register.press_tab(modifiers);
         }
     }
@@ -191,11 +207,10 @@ impl MainWindow {
     /// keyboard, unless no Register is open or its account in `view` is closed.
     pub(crate) fn go_to_draft_row(&mut self, ctx: &egui::Context, view: &LedgerView) {
         let open = self
-            .registers
-            .current_account()
+            .open_account_id()
             .and_then(|account| view.account(account))
             .is_some_and(|summary| !summary.account().is_closed());
-        let Some(register) = self.registers.current_register_mut().filter(|_| open) else {
+        let Some(OpenRegister { register, .. }) = self.register.as_mut().filter(|_| open) else {
             return;
         };
         self.tab = TopLevelTab::Accounts;
@@ -249,8 +264,7 @@ impl MainWindow {
                     return;
                 }
                 let Some(transaction) = self
-                    .registers
-                    .current_register()
+                    .register()
                     .and_then(|register| register.selected_row(summary.account().id()))
                     .and_then(RegisterRow::transaction)
                 else {
@@ -311,7 +325,7 @@ impl MainWindow {
         }
         let path = dialog.form.take_created_path();
         self.close_dialog(ctx, |window| &mut window.new_category);
-        if let (Some(path), Some(register)) = (path, self.registers.current_register_mut()) {
+        if let (Some(path), Some(register)) = (path, self.register_mut()) {
             register.category_created(path);
         }
     }
@@ -328,10 +342,7 @@ impl MainWindow {
     /// The account the Main view shows, if it shows one.
     fn open_account<'a>(&self, view: &'a LedgerView) -> Option<&'a AccountSummary> {
         match self.tab {
-            TopLevelTab::Accounts => self
-                .registers
-                .current_account()
-                .and_then(|id| view.account(id)),
+            TopLevelTab::Accounts => self.open_account_id().and_then(|id| view.account(id)),
             TopLevelTab::Home
             | TopLevelTab::Bills
             | TopLevelTab::Spending
@@ -365,7 +376,7 @@ impl MainWindow {
             // TODO(#90): a refused commit stops the Shortcut and shows the error bubble.
             if !actions.is_empty() {
                 self.menu_nav.close(ui.ctx());
-                if let Some(register) = self.registers.current_register_mut() {
+                if let Some(register) = self.register_mut() {
                     register.commit_edit(ui.ctx(), i18n, commands);
                 }
             }
@@ -411,34 +422,29 @@ impl MainWindow {
             theme,
             commands,
             model: &accounts,
-            selected: self.registers.current_account(),
+            selected: self.open_account_id(),
             preferences,
         };
         self.account_bar.show(ui, &bar_frame, self.tab);
-        CentralPanel::default().show(ui, |ui| {
-            if self.tab == TopLevelTab::Accounts {
-                self.registers.show_strip(ui, i18n, view);
+        CentralPanel::default().show(ui, |ui| match self.open_account(view) {
+            Some(summary) => {
+                Self::context_header(ui, i18n, theme, commands, summary, &accounts);
+                if let Some(OpenRegister { register, .. }) = &mut self.register {
+                    register.show(
+                        ui,
+                        i18n,
+                        theme,
+                        commands,
+                        summary,
+                        view,
+                        &mut self.column_widths,
+                        &preferences.register_columns,
+                        today,
+                    );
+                }
             }
-            match self.open_account(view) {
-                Some(summary) => {
-                    Self::context_header(ui, i18n, theme, commands, summary, &accounts);
-                    if let Some(register) = self.registers.current_register_mut() {
-                        register.show(
-                            ui,
-                            i18n,
-                            theme,
-                            commands,
-                            summary,
-                            view,
-                            &mut self.column_widths,
-                            &preferences.register_columns,
-                            today,
-                        );
-                    }
-                }
-                None => {
-                    ui.label(self.tab.placeholder(i18n));
-                }
+            None => {
+                ui.label(self.tab.placeholder(i18n));
             }
         });
         self.accounts = Some(accounts);
@@ -557,7 +563,7 @@ impl MainWindow {
             DialogOutcome::Back => unreachable!("a heavy Dialog has no Back button"),
             DialogOutcome::Cancelled => {
                 self.close_dialog(ctx, |window| &mut window.new_category);
-                if let Some(register) = self.registers.current_register_mut() {
+                if let Some(register) = self.register_mut() {
                     register.category_cancelled();
                 }
             }
@@ -582,8 +588,7 @@ impl MainWindow {
         let question = self
             .open_account(view)
             .and_then(|summary| {
-                self.registers
-                    .current_register()?
+                self.register()?
                     .row(summary.account().id(), form.transaction)
             })
             .map(|row| {
@@ -671,8 +676,6 @@ impl MainWindow {
             let file = ui.menu_button(fl!(i18n, "menu-file"), |ui| {
                 item(ui, &mut drawn, UserAction::NewAccount);
                 ui.separator();
-                item(ui, &mut drawn, UserAction::CloseRegisterTab);
-                ui.separator();
                 item(ui, &mut drawn, UserAction::Quit);
             });
             drawn.note_menu(&file.response);
@@ -682,9 +685,6 @@ impl MainWindow {
             });
             drawn.note_menu(&edit.response);
             let view_menu = ui.menu_button(fl!(i18n, "menu-view"), |ui| {
-                item(ui, &mut drawn, UserAction::NextRegisterTab);
-                item(ui, &mut drawn, UserAction::PreviousRegisterTab);
-                ui.separator();
                 item(ui, &mut drawn, UserAction::SwitchPane);
             });
             drawn.note_menu(&view_menu.response);

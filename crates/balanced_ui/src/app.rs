@@ -13,7 +13,6 @@ use crate::i18n::fl;
 use crate::layout::Layout;
 use crate::main_window::{MainWindow, WindowFrame};
 use crate::preferences::{Preferences, PreferencesFile};
-use crate::register_tabs::RegisterTabs;
 use crate::theme::{Theme, ThemeSettings};
 
 /// Balanced's eframe application.
@@ -140,15 +139,6 @@ impl App {
             AppCommand::OpenSplitView(_) => {
                 self.main_window.show_status(StatusMessage::NotAvailableYet);
             }
-            AppCommand::CloseRegisterTab => self
-                .main_window
-                .change_register_tabs(RegisterTabs::close_current),
-            AppCommand::NextRegisterTab => {
-                self.main_window.change_register_tabs(RegisterTabs::next);
-            }
-            AppCommand::PreviousRegisterTab => self
-                .main_window
-                .change_register_tabs(RegisterTabs::previous),
             AppCommand::SwitchPane => self.main_window.switch_pane(ctx),
             AppCommand::OpenDialog(kind) => {
                 self.main_window.open_dialog(

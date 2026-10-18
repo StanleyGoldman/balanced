@@ -85,7 +85,6 @@ fn dark_then_ok_applies_the_dark_theme_and_writes_the_file() {
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          auto_fold = true\n\
-         open_account_in = \"current_register\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
          hidden_register_columns = []\n"
     );
@@ -179,7 +178,6 @@ fn the_other_display_preferences_apply_and_are_saved_on_ok() {
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          auto_fold = true\n\
-         open_account_in = \"current_register\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
          hidden_register_columns = []\n"
     );
@@ -245,14 +243,13 @@ fn the_register_preferences_are_saved_on_ok() {
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          auto_fold = true\n\
-         open_account_in = \"current_register\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
          hidden_register_columns = []\n"
     );
 }
 
 #[test]
-fn the_account_bar_and_accounts_preferences_are_saved_on_ok() {
+fn the_account_bar_preferences_are_saved_on_ok() {
     let dir = config_dir();
     let mut harness = app_in(dir.path());
     open_preferences(&mut harness);
@@ -264,9 +261,7 @@ fn the_account_bar_and_accounts_preferences_are_saved_on_ok() {
         Role::CheckBox,
         "Fold the Account bar when leaving Accounts",
     );
-    show_group(&mut harness, "Accounts");
 
-    click(&mut harness, Role::RadioButton, "A new Register tab");
     click(&mut harness, Role::Button, "OK");
 
     assert_eq!(
@@ -282,7 +277,6 @@ fn the_account_bar_and_accounts_preferences_are_saved_on_ok() {
          group_totals = true\n\
          net_worth_placement = \"status_bar\"\n\
          auto_fold = false\n\
-         open_account_in = \"new_tab\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
          hidden_register_columns = []\n"
     );
@@ -450,38 +444,4 @@ fn turning_auto_fold_off_previews_the_open_account_bar() {
     );
 
     assert!(!is_rail(&harness));
-}
-
-/// The labels of the open Register tabs, left to right.
-fn register_tabs(harness: &Harness<'static, App>) -> Vec<String> {
-    harness
-        .query_all_by_role(Role::Tab)
-        .filter_map(|tab| tab.accesskit_node().label())
-        .collect()
-}
-
-#[test]
-fn selecting_accounts_replaces_the_current_register_by_default() {
-    let dir = config_dir();
-    let mut harness = app_on_accounts(dir.path());
-    click(&mut harness, Role::Button, "Joint Checking");
-
-    click(&mut harness, Role::Button, "Brokerage");
-
-    assert_eq!(register_tabs(&harness), ["Brokerage"]);
-}
-
-#[test]
-fn selecting_an_account_opens_a_new_register_tab_when_the_preference_says_so() {
-    let dir = config_dir();
-    let mut harness = app_on_accounts(dir.path());
-    open_preferences(&mut harness);
-    show_group(&mut harness, "Accounts");
-    click(&mut harness, Role::RadioButton, "A new Register tab");
-    click(&mut harness, Role::Button, "OK");
-    click(&mut harness, Role::Button, "Joint Checking");
-
-    click(&mut harness, Role::Button, "Brokerage");
-
-    assert_eq!(register_tabs(&harness), ["Joint Checking", "Brokerage"]);
 }
