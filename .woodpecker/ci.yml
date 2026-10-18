@@ -19,10 +19,17 @@
 # No path filter here. A pipeline that never starts reports no status at all,
 # so filtering the workflow would leave a pull request waiting on a required
 # check forever. Skipping work belongs on the steps.
+#
+# And on cron, for the nightly in `mutants.yml`, which depends on this
+# workflow: it tests mutants only on a commit `ci` has just passed, and a
+# required dependency on a workflow the event leaves out would drop it from
+# the pipeline. A cron has no changed files, so the `ci` step's path filter
+# lets it run.
 when:
   - event: pull_request
   - event: push
     branch: main
+  - event: cron
 
 # Only the oldhermit agents. Scheduling is otherwise round-robin across the
 # whole pool, and the CI image lives on oldhermit's Docker daemon alone, built

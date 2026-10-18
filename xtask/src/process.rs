@@ -1,6 +1,7 @@
 //! Running the programs tasks call.
 
-use std::process::Command;
+use std::io::Write as _;
+use std::process::{Command, Stdio};
 
 use anyhow::{Context as _, Result, bail};
 
@@ -38,6 +39,37 @@ pub(crate) fn output_accepting(program: &str, args: &[&str], success: &[i32]) ->
             args.join(" "),
             out.status,
             String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    String::from_utf8(out.stdout).with_context(|| format!("{program} printed invalid UTF-8"))
+}
+
+/// Runs `program` with `args`, writing `stdin` to its standard input, and returns
+/// what it printed on stdout, failing if it exits unsuccessfully. A secret passed
+/// this way stays out of the process listing.
+pub(crate) fn output_with_stdin(program: &str, args: &[&str], stdin: &str) -> Result<String> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("running {program}"))?;
+    child
+        .stdin
+        .take()
+        .expect("stdin is piped")
+        .write_all(stdin.as_bytes())
+        .with_context(|| format!("writing to {program}'s stdin"))?;
+    let out = child
+        .wait_with_output()
+        .with_context(|| format!("waiting for {program}"))?;
+    if !out.status.success() {
+        bail!(
+            "{program} exited with {}: {}{}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim(),
+            String::from_utf8_lossy(&out.stdout).trim()
         );
     }
     String::from_utf8(out.stdout).with_context(|| format!("{program} printed invalid UTF-8"))

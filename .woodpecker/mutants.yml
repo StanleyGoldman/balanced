@@ -1,0 +1,69 @@
+# Mutation testing after the merge, never as a pull request gate (ADR 0002). A
+# missed mutant becomes a GitHub issue labelled `mutant`, which later runs
+# comment on or close; it never turns a run red. A run that couldn't finish, or
+# couldn't update its issues, is red.
+#
+# The nightly cron tests one of seven round-robin shards of every mutant on
+# `main`, so all of it is tested once a week (`cargo xtask mutants-shard`).
+#
+# The cron is a Woodpecker cron on `main` at 07:00 UTC: 02:00 in New York in
+# winter, 03:00 in summer. Woodpecker schedules in UTC only. It is server
+# config, not in this file: `woodpecker-cli repo cron ls`.
+when:
+  - event: cron
+
+# Runs only once `ci` has passed on the same commit, in the same pipeline, so
+# the mutants are never tested on a broken `main`: a failing test would count
+# every mutant as caught and close its issue. `ci.yml` runs on `cron` for this.
+# A required dependency on a workflow the event leaves out drops this one from
+# the pipeline, so `ci` must run on every event this does.
+depends_on: [ci]
+
+# The lane. oldhermit-3 carries the required label `!lane=mutants`: it takes
+# only workflows that ask for `lane: mutants`, so it runs mutants and nothing
+# else, and a mutant run never takes an agent that pull request checks use.
+# `location` keeps a `lane: mutants` agent on another host from picking these
+# runs up, since the CI image and the caches live on oldhermit alone. To move
+# the lane, move the label on the server, not here.
+labels:
+  location: oldhermit
+  lane: mutants
+
+steps:
+  # Uses the image `ci`'s `ci-image` step just built on the Docker daemon every
+  # oldhermit agent shares (ADR 0004), so this workflow builds no image.
+  #
+  # The caches are `ci`'s (ADR 0003), and the notes on them are in `ci.yml`.
+  # The step's own environment is `ci`'s: sccache on, incremental off. That
+  # applies to the xtask build and the warm-up, which builds the mutated
+  # crates' tests before cargo-mutants starts, so their dependencies come from
+  # the shared sccache. cargo-mutants itself runs with incremental on and
+  # sccache off; `cargo xtask mutants-shard` sets that for it.
+  #
+  # Memory is capped by the lane agent's Docker limit, 8 GB with no swap, not
+  # by the systemd scope `cargo xtask mutants` uses by hand: a mutant that
+  # allocates without end is killed before it takes down the host. The first
+  # command logs the cap, so a run on an uncapped agent is visible.
+  - name: mutants-shard
+    image: balanced-ci:latest
+    volumes:
+      - /var/lib/woodpecker/cache/balanced/cargo:/cache/cargo
+    environment:
+      CARGO_TERM_COLOR: always
+      CARGO_HOME: /cache/cargo
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /cache/agent/balanced/sccache
+      SCCACHE_CACHE_SIZE: 10G
+      SCCACHE_IDLE_TIMEOUT: "0"
+      CARGO_INCREMENTAL: "0"
+      # Issues read and write, pull requests read, on this repository only.
+      # The secret is limited to `push` and `cron`, so no pull request step
+      # can read it.
+      GITHUB_TOKEN:
+        from_secret: mutants_github_token
+    commands:
+      - echo "memory.max $(cat /sys/fs/cgroup/memory.max), memory.swap.max $(cat /sys/fs/cgroup/memory.swap.max)"
+      # The hit rate covers the xtask build and the warm-up only, since
+      # cargo-mutants builds without sccache.
+      - trap 'sccache --show-stats || true' EXIT
+      - cargo xtask mutants-shard

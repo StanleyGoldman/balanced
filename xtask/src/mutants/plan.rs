@@ -8,10 +8,8 @@ use std::fmt;
 use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
 
+use super::REPO;
 use super::key::MutantKey;
-
-/// The repository whose files the issue permalinks point at.
-const REPO_URL: &str = "https://github.com/StanleyGoldman/balanced";
 
 /// An open issue labelled `mutant`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +30,10 @@ pub(crate) struct Run {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FoundBy {
     /// The post-merge run for the pull request with this number.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "mutants-landed builds it, in #176")
+    )]
     PullRequest(u64),
     /// The nightly run of shard `index` of `count`.
     Shard { index: u32, count: u32 },
@@ -257,7 +259,7 @@ impl KeyedMutant {
         let body = format!(
             "{marker}\n\n\
              cargo-mutants made this change in `{function}` and {outcome}: \
-             [{file}:{line}]({REPO_URL}/blob/{commit}/{file}#L{line})\n\n\
+             [{file}:{line}](https://github.com/{REPO}/blob/{commit}/{file}#L{line})\n\n\
              ```diff\n{diff}```\n\n\
              Found by {run}.\n\n\
              Reproduce it:\n\n\
