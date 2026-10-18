@@ -13,8 +13,7 @@ use icu_calendar::Date;
 use icu_locale::{langid, locale};
 
 /// The App on stub data in German with `de-DE` formatting, wide enough to show every
-/// Register column, with the Account bar unfolded. Its labels are German, so it
-/// unfolds the Account bar itself rather than with `testing::unfold_account_bar`.
+/// Register column.
 fn app() -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
@@ -28,10 +27,6 @@ fn app() -> Harness<'static, App> {
                 PreferencesFile::for_tests(),
             )
         });
-    harness.run();
-    harness
-        .get_by_role_and_label(Role::Button, "Kontenleiste ausklappen")
-        .click();
     harness.run();
     harness
 }

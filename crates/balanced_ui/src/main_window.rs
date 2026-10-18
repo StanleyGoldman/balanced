@@ -414,7 +414,7 @@ impl MainWindow {
             selected: self.registers.current_account(),
             preferences,
         };
-        self.account_bar.show(ui, &bar_frame, self.tab);
+        self.account_bar.show(ui, &bar_frame);
         CentralPanel::default().show(ui, |ui| {
             if self.tab == TopLevelTab::Accounts {
                 self.registers.show_strip(ui, i18n, view);
