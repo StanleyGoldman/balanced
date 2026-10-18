@@ -25,6 +25,9 @@ pub(crate) enum IssueUpdates {
 /// checkout's own files.
 const OUTPUT_DIR: &str = "target";
 
+/// The variable Woodpecker sets to the web page of the running pipeline.
+const PIPELINE_VAR: &str = "CI_PIPELINE_URL";
+
 /// Tests the mutants `scope_args` select at `HEAD`, then opens, comments on and
 /// closes `mutant` issues as the plan says, or prints those updates. Missed and
 /// timed-out mutants leave the run green; a run that can't finish, or can't
@@ -46,7 +49,11 @@ pub(crate) fn run(scope_args: &[String], found_by: FoundBy, updates: IssueUpdate
     } else {
         Some(test(scope_args, &packages)?)
     };
-    let run = Run { commit, found_by };
+    let run = Run {
+        commit,
+        found_by,
+        pipeline: std::env::var(PIPELINE_VAR).ok(),
+    };
     let actions = plan::plan(outcomes.as_deref(), &list, &issues, &run)?;
     eprintln!("mutants: {} issue updates", actions.len());
     for action in &actions {
