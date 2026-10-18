@@ -30,15 +30,9 @@ pub(crate) enum AppCommand {
     Navigate(Route),
     /// Show the split lines of a split transaction.
     OpenSplitView(TransactionId),
-    /// Put the cell cursor on the current Register's draft row, showing the Register,
+    /// Put the cell cursor on the open Register's draft row, showing the Register,
     /// unless its account is closed.
     GoToDraftRow,
-    /// Close the current Register tab.
-    CloseRegisterTab,
-    /// Make the Register tab right of the current one current, wrapping to the first.
-    NextRegisterTab,
-    /// Make the Register tab left of the current one current, wrapping to the last.
-    PreviousRegisterTab,
     /// Move keyboard focus from the Account bar to the Main view, or from anywhere
     /// else to the Account bar.
     SwitchPane,

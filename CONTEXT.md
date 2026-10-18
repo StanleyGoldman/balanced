@@ -32,12 +32,8 @@ _Avoid_: Popup, child window, floating window
 A short-lived window for a single task, usually modal, that blocks the main window until dismissed (e.g. confirm, New Account, split).
 _Avoid_: Popup, modal window
 
-**Register tab**:
-A closeable tab above the main view holding one open register, so several registers stay open at once. Used when the user's Preference opens accounts in tabs.
-_Avoid_: Document tab, account tab
-
 **Preference**:
-A choice about how Balanced looks or behaves that belongs to the person using this computer and applies to every data file they open (e.g. dense rows, register tabs). Set in Tools → Preferences.
+A choice about how Balanced looks or behaves that belongs to the person using this computer and applies to every data file they open (e.g. dense rows, gridlines). Set in Tools → Preferences.
 _Avoid_: Application-level option, setting, option
 
 **Shortcut**:

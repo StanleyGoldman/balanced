@@ -426,9 +426,10 @@ fn dragging_the_bottom_right_corner_resizes_the_dialog() {
 #[test]
 fn no_shortcut_acts_behind_the_dialog() {
     let mut harness = new_category_for("Pets");
+    let before = cursor(&harness);
 
-    press(&mut harness, Modifiers::COMMAND, Key::W);
+    press(&mut harness, Modifiers::COMMAND, Key::N);
 
     assert!(dialog_open(&harness));
-    assert!(cell_shows(&harness, "Auto & Transport:Fuel"));
+    assert_eq!(cursor(&harness), before);
 }

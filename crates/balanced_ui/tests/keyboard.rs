@@ -155,19 +155,23 @@ fn f10_opens_the_first_menu_on_its_first_enabled_item() {
 #[test]
 fn down_skips_a_disabled_menu_item() {
     let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
     press(&mut harness, Modifiers::NONE, Key::F10);
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
 
     press(&mut harness, Modifiers::NONE, Key::ArrowDown);
 
-    // Close Register Tab, between New Account and Quit, is disabled while no Register
-    // is open.
-    assert_eq!(focused(&harness).as_deref(), Some("Quit Ctrl+Q"));
+    // Redo, below Undo, is disabled while there is nothing to redo, so Down wraps back
+    // to Undo.
+    assert_eq!(focused(&harness).as_deref(), Some("Undo Ctrl+Z"));
 }
 
 #[test]
 fn up_and_down_move_within_a_menu_and_wrap() {
     let mut harness = app();
-    open(&mut harness, "Everyday Checking");
     press(&mut harness, Modifiers::NONE, Key::F10);
 
     let mut seen = Vec::new();
@@ -176,14 +180,7 @@ fn up_and_down_move_within_a_menu_and_wrap() {
         seen.push(focused(&harness).unwrap_or_default());
     }
 
-    assert_eq!(
-        seen,
-        [
-            "Close Register Tab Ctrl+W",
-            "Quit Ctrl+Q",
-            "Close Register Tab Ctrl+W"
-        ]
-    );
+    assert_eq!(seen, ["Quit Ctrl+Q", "New Account…", "Quit Ctrl+Q"]);
 }
 
 #[test]
@@ -268,8 +265,7 @@ fn a_shortcut_pressed_mid_edit_commits_the_edit_first() {
     click_cell(&mut harness, "Fresh Market");
     type_text(&mut harness, "Corner Shop");
 
-    press(&mut harness, Modifiers::COMMAND, Key::W);
-    open(&mut harness, "Everyday Checking");
+    press(&mut harness, Modifiers::COMMAND, Key::Q);
 
     let payees: Vec<String> = harness
         .query_all_by_role(Role::Cell)

@@ -43,16 +43,6 @@ fn open(harness: &mut Harness<'static, App>, name: &str) {
     harness.run();
 }
 
-/// Opens the account named `name` in a new Register tab, from its right-click menu in
-/// the Account bar.
-fn open_in_new_tab(harness: &mut Harness<'static, App>, name: &str) {
-    harness
-        .get_by_role_and_label(Role::Button, name)
-        .click_secondary();
-    harness.run();
-    click(harness, Role::Button, "Open in New Tab");
-}
-
 /// Clicks the widget with `role` labelled `label`, then lets the App settle.
 fn click(harness: &mut Harness<'static, App>, role: Role, label: &str) {
     harness.get_by_role_and_label(role, label).click();
@@ -108,7 +98,6 @@ fn unticking_memo_hides_it_and_saves_it_as_hidden() {
          gridlines = \"off\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         open_account_in = \"current_register\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
          hidden_register_columns = [\"memo\"]\n"
     );
@@ -141,26 +130,8 @@ fn moving_payee_up_puts_it_before_num_and_saves_the_order() {
          gridlines = \"off\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         open_account_in = \"current_register\"\n\
          register_columns = [\"date\", \"payee\", \"num\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
          hidden_register_columns = []\n"
-    );
-}
-
-#[test]
-fn hiding_memo_hides_it_in_a_register_already_open_in_another_tab() {
-    let dir = config_dir();
-    let mut harness = app_in(dir.path());
-    open_in_new_tab(&mut harness, "Everyday Checking");
-    open_in_new_tab(&mut harness, "Emergency Fund");
-    open_chooser(&mut harness);
-    click(&mut harness, Role::CheckBox, "Memo");
-
-    click(&mut harness, Role::Tab, "Everyday Checking");
-
-    assert_eq!(
-        headings(&harness),
-        ["Date", "Num", "Payee", "Category", "Amount", "Balance", ""]
     );
 }
 

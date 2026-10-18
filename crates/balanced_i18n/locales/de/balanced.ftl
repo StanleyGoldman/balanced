@@ -13,17 +13,11 @@
 
 menu-file = Datei
 menu-file-new-account = Neues Konto …
-# Coined from "Reiter" and "Schließen".
-menu-file-close-register-tab = { -register }-Reiter schließen
 menu-file-quit = Beenden
 menu-edit = Bearbeiten
 menu-edit-undo = Rückgängig
 menu-edit-redo = Wiederherstellen
 menu-view = Ansicht
-# Coined from "Reiter" and "Nächster".
-menu-view-next-register-tab = Nächster { -register }-Reiter
-# Coined from "Reiter" and "Voriger".
-menu-view-previous-register-tab = Voriger { -register }-Reiter
 # Coined from "Wechseln".
 menu-view-switch-pane = Bereich wechseln
 menu-tools = Extras
@@ -50,7 +44,6 @@ tab-spending = Ausgaben
 tab-planning = Planung
 tab-investing = Investitionen
 tab-property-debt = Anlagen & Verbindlichkeiten
-tab-register-close = { $account } schließen
 
 ## Account bar
 
@@ -67,8 +60,6 @@ account-bar-net-worth = Reinvermögen
 account-bar-fold = { -account-bar } einklappen
 account-bar-unfold = { -account-bar } ausklappen
 account-bar-open-register = { -register } öffnen
-# Coined from "In neuem Fenster öffnen" and "Reiter".
-account-bar-open-in-new-tab = In neuem Reiter öffnen
 account-bar-reconcile = Abgleichen
 account-bar-manage-accounts = Konten verwalten …
 account-bar-new-account = + Konto
