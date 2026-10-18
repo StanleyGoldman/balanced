@@ -18,7 +18,7 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 
 ### CI
 
-CI is Woodpecker. The `woodpecker` skill (`.claude/skills/woodpecker/SKILL.md`) reads and drives it: red runs, step logs, reruns, workflow changes, secrets and crons.
+The `woodpecker` skill (`.claude/skills/woodpecker/SKILL.md`) reads and drives CI.
 
 ## Working preferences
 
