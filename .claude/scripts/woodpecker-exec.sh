@@ -20,6 +20,10 @@
 #   network named `woodpecker-exec` and attaches the steps to it. Both stay up
 #   after the run for the next one.
 #
+# The run is trusted with volumes, as balanced is on the server, so a step's
+# `volumes:` mounts host paths here too: `ci`'s cargo registry lands in
+# /var/lib/woodpecker/cache/balanced/cargo on this machine, created by Docker.
+#
 # Output: one JSON line on stdout:
 #   {"status": "green"|"red"|"error", "commit": sha, "log": path,
 #    "failed_step": string?, "tail": [string]?, "next": string?}
@@ -71,7 +75,7 @@ elif ! docker inspect -f '{{json .NetworkSettings.Networks}}' socket-proxy | jq 
   docker network connect "$network" socket-proxy || fail "attaching socket-proxy to $network failed"
 fi
 
-if (cd "$clone" && woodpecker-cli exec --local --network "$network" \
+if (cd "$clone" && woodpecker-cli exec --local --network "$network" --repo-trusted-volumes \
       --repo StanleyGoldman/balanced --pipeline-event "$event" "$workflow") >"$log" 2>&1; then
   jq -nc --arg commit "$commit" --arg log "$log" '{status: "green", commit: $commit, log: $log}'
   exit 0

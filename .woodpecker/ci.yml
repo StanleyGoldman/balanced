@@ -74,15 +74,57 @@ steps:
   #
   # Nothing may `depends_on` this step: a dependency on a step its `when:`
   # filtered out rejects the whole pipeline (see `ci-image`).
+  #
+  # Caching (ADR 0003). Two things outlive the step, both on the oldhermit
+  # host and both under a `balanced/` directory: `/cache/agent` is mounted
+  # into every repository's steps, and Woodpecker's cache folder is shared
+  # with quicken_clone, so a path outside `balanced/` could have another
+  # repository building into it.
+  # - The cargo registry, as `CARGO_HOME`: downloaded crate sources, which
+  #   never change for a version. cargo locks it, so concurrent steps share it
+  #   safely. The tools stay on `PATH` in the image's own CARGO_HOME.
+  # - sccache's directory, on the `/cache/agent` folder every oldhermit agent
+  #   mounts from one host folder, so `ci` hits what the other agent compiled
+  #   whichever of the two it lands on. No directory per agent and no
+  #   fallback: an agent without `/cache/agent` builds cold into the
+  #   container, which is slow but correct.
+  #
+  # `target/` is never persisted. On the agents it stays in the checkout inside
+  # this container, so every run starts empty. quicken_clone's persistent target
+  # directories kept corrupting (link failures from a cached rlib that no
+  # longer matched its sources) and failed every pipeline on that agent until
+  # someone wiped them by hand; concurrent builds sharing one invalidated
+  # each other too. sccache stores whole compiler outputs keyed by a hash of
+  # their inputs, so it can't go stale that way. See
+  # docs/adr/0003-ci-caches-with-sccache-not-a-persistent-target.md. Don't add
+  # a volume or `CARGO_TARGET_DIR` for it.
   - name: ci
     image: balanced-ci:latest
     depends_on: [ci-image]
     when:
       - path:
           exclude: ["**/*.md", "docs/**", ".claude/**"]
+    volumes:
+      - /var/lib/woodpecker/cache/balanced/cargo:/cache/cargo
     environment:
       CARGO_TERM_COLOR: always
+      CARGO_HOME: /cache/cargo
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /cache/agent/balanced/sccache
+      # Each sccache server enforces this on its own, and two `ci` steps can
+      # run at once, so the directory can overshoot it (ADR 0003).
+      SCCACHE_CACHE_SIZE: 10G
+      # No idle timeout, so the server started by the first build is still
+      # the one `--show-stats` asks at the end, however long the tests take.
+      SCCACHE_IDLE_TIMEOUT: "0"
+      # sccache can't cache a crate built incrementally, so with it on, every
+      # workspace crate would compile from scratch each run.
+      CARGO_INCREMENTAL: "0"
     commands:
+      # Woodpecker runs a step's commands as one shell script, so this trap
+      # prints the hit rate when `cargo xtask ci` ends, pass or fail, and
+      # leaves the step's exit status as the build's.
+      - trap 'sccache --show-stats || true' EXIT
       - cargo xtask ci
 
   # The spell-check, on every pipeline, unfiltered. It is the one check in
