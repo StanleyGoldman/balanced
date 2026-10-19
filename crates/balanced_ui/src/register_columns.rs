@@ -13,7 +13,7 @@ pub(crate) enum RegisterColumn {
     Memo,
     /// Money out, unsigned. Its heading depends on the account's kind.
     Payment,
-    /// Money in. Its heading depends on the account's kind.
+    /// Money in, unsigned. Its heading depends on the account's kind.
     Deposit,
     Balance,
     /// The untitled column holding each row's Actions menu.

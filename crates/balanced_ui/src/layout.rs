@@ -114,9 +114,9 @@ impl Layout {
             .collect()
     }
 
-    /// The Register column widths. An unknown column id is ignored. The Amount column's
-    /// width, from a layout saved before Payment and Deposit replaced it, is the width
-    /// of each.
+    /// The Register column widths. An unknown column id is ignored, except `amount`,
+    /// whose width is the width of Payment and of Deposit when the layout holds none
+    /// of its own for them.
     pub(crate) fn column_widths(&self) -> ColumnWidths {
         let mut saved = self.column_widths.clone();
         if let Some(amount) = saved.remove("amount") {

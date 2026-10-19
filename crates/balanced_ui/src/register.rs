@@ -235,7 +235,8 @@ impl ColumnWidths {
     }
 
     /// The handle on the right edge of `column`'s heading, in the heading cell `ui`,
-    /// for a column that resizes, in a Register of an account of `kind`. Dragging it resizes the column from the next frame.
+    /// for a column that resizes, in a Register of an account of `kind`. Dragging it
+    /// resizes the column from the next frame.
     fn resize_handle(
         &mut self,
         ui: &egui::Ui,
@@ -1507,10 +1508,12 @@ impl Register {
         ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
         if leave == Leave::Enter
             && cursor.row == RowId::Draft
-            && (cursor.column.holds_amount()
+            && ((cursor.column.holds_amount() && self.draft.amount().is_some())
                 || self.cursor_columns().last() == Some(&cursor.column))
         {
-            // Enter on the draft row's amount, or its last cell, adds the row.
+            // Enter on the draft row's last cell, or on an amount cell once the row
+            // has an amount, adds the row. Enter on an empty Payment moves on to
+            // Deposit.
             self.post(keys);
             return None;
         }
@@ -1831,7 +1834,8 @@ impl Register {
     }
 }
 
-/// The draft row cell that `missing` names.
+/// The draft row cell that `missing` names. A missing amount names Payment, the
+/// first of the two cells that take one.
 fn missing_column(missing: Missing) -> RegisterColumn {
     match missing {
         Missing::Date => RegisterColumn::Date,
@@ -2724,31 +2728,22 @@ fn column_chooser(
 /// The heading of the column holding amounts on `side`, in a Register of an account
 /// of `kind`.
 fn amount_title(i18n: &Localizer, side: AmountSide, kind: AccountKind) -> String {
-    match (kind, side) {
-        (
-            AccountKind::Checking
-            | AccountKind::Savings
-            | AccountKind::Investment
-            | AccountKind::Retirement,
-            AmountSide::Payment,
-        ) => fl!(i18n, "register-column-payment"),
-        (
-            AccountKind::Checking
-            | AccountKind::Savings
-            | AccountKind::Investment
-            | AccountKind::Retirement,
-            AmountSide::Deposit,
-        ) => fl!(i18n, "register-column-deposit"),
-        (AccountKind::CreditCard, AmountSide::Payment) => fl!(i18n, "register-column-charge"),
-        (AccountKind::CreditCard, AmountSide::Deposit) => {
-            fl!(i18n, "register-column-card-payment")
-        }
-        (AccountKind::Asset | AccountKind::Liability, AmountSide::Payment) => {
-            fl!(i18n, "register-column-decrease")
-        }
-        (AccountKind::Asset | AccountKind::Liability, AmountSide::Deposit) => {
-            fl!(i18n, "register-column-increase")
-        }
+    match kind {
+        AccountKind::Checking
+        | AccountKind::Savings
+        | AccountKind::Investment
+        | AccountKind::Retirement => match side {
+            AmountSide::Payment => fl!(i18n, "register-column-payment"),
+            AmountSide::Deposit => fl!(i18n, "register-column-deposit"),
+        },
+        AccountKind::CreditCard => match side {
+            AmountSide::Payment => fl!(i18n, "register-column-charge"),
+            AmountSide::Deposit => fl!(i18n, "register-column-card-payment"),
+        },
+        AccountKind::Asset | AccountKind::Liability => match side {
+            AmountSide::Payment => fl!(i18n, "register-column-decrease"),
+            AmountSide::Deposit => fl!(i18n, "register-column-increase"),
+        },
     }
 }
 

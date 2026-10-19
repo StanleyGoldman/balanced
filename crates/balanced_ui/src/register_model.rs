@@ -58,12 +58,11 @@ impl AmountSide {
     }
 }
 
-/// An amount as the Register shows it: its side, and its unsigned text.
+/// An amount as the Register shows it, signed and unsigned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RowAmount {
     signed: FormattedAmount,
-    side: AmountSide,
-    /// The amount without its sign.
+    /// The amount without its sign, which its side's column shows.
     unsigned: FormattedAmount,
 }
 
@@ -71,7 +70,6 @@ impl RowAmount {
     fn new(i18n: &Localizer, money: Money) -> Self {
         Self {
             signed: FormattedAmount::new(i18n, money, AmountStyle::Bare),
-            side: AmountSide::of(money),
             unsigned: FormattedAmount::new(
                 i18n,
                 AmountSide::Deposit.signed(money),
@@ -233,7 +231,7 @@ impl RegisterRow {
     pub(crate) fn amount_on(&self, side: AmountSide) -> Option<&FormattedAmount> {
         self.amount
             .as_ref()
-            .filter(|amount| amount.side == side)
+            .filter(|amount| AmountSide::of(amount.signed.money()) == side)
             .map(|amount| &amount.unsigned)
     }
 
@@ -271,7 +269,8 @@ pub(crate) enum SortKey {
     Payee,
     Category,
     Memo,
-    /// The signed amount, from the heading of one side's column.
+    /// The signed amount. The side names the column whose heading was clicked, which
+    /// shows the sort arrow; both sides sort alike.
     Amount(AmountSide),
 }
 
