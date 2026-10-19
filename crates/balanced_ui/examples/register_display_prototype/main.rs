@@ -1882,7 +1882,8 @@ impl Proto {
                 if r.clicked() {
                     self.emit("AppCommand::GoToDraftRow", "context header");
                 }
-                if variant == Variant::B && o.balances {
+                // Step 2 picked header balances for both variants.
+                if o.balances {
                     for (label, value) in self.balances_text().into_iter().rev() {
                         ui.label(money(value, false).small());
                         ui.label(RichText::new(label).small().weak());
@@ -1916,22 +1917,6 @@ impl Proto {
         }
         ui.separator();
 
-        // Variant A's footer, reserved before the table takes the rest.
-        if variant == Variant::A && o.balances {
-            let footer = Panel::bottom("register_footer")
-                .frame(self.theme.footer_frame())
-                .show(ui, |ui| {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        for (label, value) in self.balances_text().into_iter().rev() {
-                            ui.label(money(value, true));
-                            ui.label(RichText::new(format!("{label}:")).weak());
-                            ui.add_space(14.0);
-                        }
-                    });
-                });
-            self.h
-                .region(footer.response.rect, "register footer balances");
-        }
 
         self.rebuild_lines();
         let mut out = Out::default();
