@@ -15,7 +15,7 @@ fn app() -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
-            App::new(
+            App::on_ledger(
                 cc,
                 Localizer::for_tests(),
                 Ledger::stub(),
@@ -148,7 +148,7 @@ fn ctrl_enter_adds_the_draft_row_with_its_running_balance() {
             "",
             "12.00",
             "",
-            "5,635.46",
+            "5,630.21",
         ]
     );
 }
@@ -173,7 +173,7 @@ fn an_amount_in_the_draft_rows_deposit_adds_money_in() {
             "",
             "",
             "12.00",
-            "5,659.46",
+            "5,654.21",
         ]
     );
 }
@@ -308,12 +308,9 @@ fn a_closed_account_has_no_draft_row() {
 fn enter_on_the_last_transactions_last_cell_goes_to_the_draft_row() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    // November's rent's Deposit, the last transaction's last cell, right of its
-    // Payment. September's rent is the same payment, higher up.
+    // The November rent's Deposit, the last transaction's last cell.
     harness
-        .query_all_by_role_and_label(Role::Cell, "1,450.00")
-        .last()
-        .expect("the Register shows November's rent")
+        .get_by_role_and_label(Role::Cell, "1,475.00")
         .click();
     harness.run();
     press(&mut harness, Modifiers::NONE, Key::ArrowRight);

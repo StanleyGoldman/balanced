@@ -12,6 +12,7 @@ The decision and the options that were rejected are in `docs/adr/0001-command-an
 | Edit buffer of the Register row being edited | The Register view | In place. Enter sends a Command |
 | Scroll, hover, focus | egui `Memory`, kept for the run only (`persist_egui_memory` is off) | egui handles them |
 | Preferences | `App`, loaded from `preferences.toml` (`PreferencesFile`) | Only through `AppCommand::SetPreferences`, or `AppCommand::SetRegisterColumns` from the column chooser, which `App::logic` applies and writes; the open Preferences Dialog's draft shows meanwhile |
+| Recent files | `App`, loaded from `recent-files.toml` (`RecentFilesFile`) | When a data file opens or is created, `App` moves it to the top and writes the file |
 | Window layout: Account bar width and fold, folded sections, Register column widths | `Layout` in eframe storage, built from the Main window by `App::save` | In place on the Main window; saved on eframe's timer and on exit |
 | View models (sorted row indices, formatted strings) | The window, cached | Rebuilt when `(generation, sort/filter, locale)` changes |
 

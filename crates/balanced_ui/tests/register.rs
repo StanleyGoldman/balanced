@@ -15,7 +15,7 @@ fn app() -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
-            App::new(
+            App::on_ledger(
                 cc,
                 Localizer::for_tests(),
                 Ledger::stub(),
@@ -344,11 +344,12 @@ fn clicking_payee_sorts_by_payee() {
             "Acme Corp",
             "Bean There",
             "City Power & Light",
-            "City Power & Light",
             "Costco",
+            "Daily Grind",
             "Fresh Market",
             "Maple Property Management",
             "Maple Property Management",
+            "Northside Water",
             "Opening Balance",
             "Shell",
             "Trattoria Roma",
@@ -365,8 +366,8 @@ fn sorting_by_payee_blanks_the_balance() {
 
     sort_by(&mut harness, "Payee");
 
-    // Twelve transactions, then the draft row, which has no balance.
-    assert_eq!(column(&harness, "Balance"), [""; 13]);
+    // Thirteen transactions, then the draft row, which has no balance.
+    assert_eq!(column(&harness, "Balance"), [""; 14]);
 }
 
 #[test]
@@ -400,11 +401,12 @@ fn clicking_payee_again_reverses_the_sort_but_not_its_ties() {
             "Trattoria Roma",
             "Shell",
             "Opening Balance",
+            "Northside Water",
             "Maple Property Management",
             "Maple Property Management",
             "Fresh Market",
+            "Daily Grind",
             "Costco",
-            "City Power & Light",
             "City Power & Light",
             "Bean There",
             "Acme Corp",
@@ -414,7 +416,7 @@ fn clicking_payee_again_reverses_the_sort_but_not_its_ties() {
         ]
     );
     // The two Acme Corp salaries tie, so they stay oldest first.
-    assert_eq!(dates[10..12], ["9/1/2026", "9/18/2026"]);
+    assert_eq!(dates[11..13], ["9/1/2026", "9/18/2026"]);
 }
 
 #[test]
@@ -429,7 +431,7 @@ fn sorting_by_date_again_brings_the_balances_back() {
         column(&harness, "Balance"),
         [
             "1,200.00", "4,400.00", "2,950.00", "2,863.58", "2,858.83", "2,766.73", "2,560.46",
-            "2,512.26", "5,712.26", "5,647.46", "5,558.81", "4,108.81",
+            "2,512.26", "5,712.26", "5,647.46", "5,642.21", "5,546.81", "4,071.81",
             // The draft row, which has no balance.
             "",
         ]
@@ -758,21 +760,15 @@ fn an_edit_starts_with_the_text_cursor_at_the_end() {
 fn tab_on_the_last_transactions_last_cell_commits_and_edits_the_draft_rows_date() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    // November's rent's Deposit, the last transaction's last cell, right of its
-    // Payment. September's rent is the same payment, higher up.
-    harness
-        .query_all_by_role_and_label(Role::Cell, "1,450.00")
-        .last()
-        .expect("the Register shows November's rent")
-        .click();
-    harness.run();
+    // The November rent's Deposit, the last transaction's last cell.
+    click_cell(&mut harness, "1,475.00");
     press(&mut harness, Modifiers::NONE, Key::ArrowRight);
     type_text(&mut harness, "70");
 
     press(&mut harness, Modifiers::NONE, Key::Tab);
 
     let deposits = column(&harness, "Deposit");
-    // The last transaction's Deposit, above the draft row's.
+    // The last transaction's, above the draft row's.
     assert_eq!(deposits[deposits.len() - 2], "70.00");
     assert_eq!(editor(&harness, "Date").as_deref(), Some(""));
 }
@@ -1409,17 +1405,16 @@ fn clicking_payment_or_deposit_sorts_by_the_signed_amount() {
     sort_by(&mut harness, "Deposit");
     let by_deposit = column(&harness, "Payee");
 
-    // The two rents of -1,450.00 come first, and the -92.10 power bill before the
-    // -88.65 one.
     let smallest_first = [
         "Maple Property Management",
         "Maple Property Management",
         "Costco",
-        "City Power & Light",
+        "Northside Water",
         "City Power & Light",
         "Fresh Market",
         "Trattoria Roma",
         "Shell",
+        "Daily Grind",
         "Bean There",
         "Opening Balance",
         "Acme Corp",
@@ -1428,4 +1423,112 @@ fn clicking_payment_or_deposit_sorts_by_the_signed_amount() {
     ];
     assert_eq!(by_payment, smallest_first);
     assert_eq!(by_deposit, smallest_first);
+}
+
+/// The Today divider's label.
+const DIVIDER: &str = "Today · 10/14/2026";
+
+/// The Date cells' labels and the Today divider's, top to bottom.
+fn date_lines(harness: &Harness<'static, App>) -> Vec<String> {
+    let header = harness
+        .get_by_role_and_label(Role::ColumnHeader, "Date")
+        .rect()
+        .x_range();
+    let mut lines: Vec<(f32, String)> = harness
+        .query_all_by_role(Role::Cell)
+        .filter(|cell| header.contains(cell.rect().center().x))
+        .map(|cell| {
+            let label = cell.accesskit_node().label().unwrap_or_default();
+            (cell.rect().center().y, label)
+        })
+        .chain(
+            harness
+                .query_all_by_role(Role::Label)
+                .filter(|label| label.accesskit_node().value().as_deref() == Some(DIVIDER))
+                .map(|label| (label.rect().center().y, DIVIDER.to_owned())),
+        )
+        .collect();
+    lines.sort_by(|a, b| a.0.total_cmp(&b.0));
+    lines.into_iter().map(|(_, label)| label).collect()
+}
+
+/// The line just above, and the line just below, the Today divider, or `None` when
+/// the divider isn't drawn between two lines.
+fn around_divider(harness: &Harness<'static, App>) -> Option<[String; 2]> {
+    let lines = date_lines(harness);
+    let divider = lines.iter().position(|line| line == DIVIDER)?;
+    let above = lines.get(divider.checked_sub(1)?)?;
+    let below = lines.get(divider + 1)?;
+    Some([above.clone(), below.clone()])
+}
+
+#[test]
+fn the_today_divider_sits_above_the_first_row_dated_after_today() {
+    let mut harness = app();
+
+    open(&mut harness, "Everyday Checking");
+
+    assert_eq!(
+        around_divider(&harness),
+        Some(["10/14/2026".to_owned(), "10/20/2026".to_owned()])
+    );
+}
+
+#[test]
+fn under_a_descending_date_sort_the_today_divider_sits_below_the_later_rows() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+
+    sort_by(&mut harness, "Date");
+
+    assert_eq!(
+        around_divider(&harness),
+        Some(["10/20/2026".to_owned(), "10/14/2026".to_owned()])
+    );
+}
+
+/// Whether the Today divider is drawn.
+fn shows_divider(harness: &Harness<'static, App>) -> bool {
+    date_lines(harness).iter().any(|line| line == DIVIDER)
+}
+
+#[test]
+fn sorting_by_payee_hides_the_today_divider() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+
+    sort_by(&mut harness, "Payee");
+
+    assert!(!shows_divider(&harness));
+}
+
+#[test]
+fn an_account_with_no_rows_dated_after_today_shows_no_today_divider() {
+    let mut harness = app();
+
+    open(&mut harness, "Joint Checking");
+
+    assert!(!shows_divider(&harness));
+}
+
+#[test]
+fn down_steps_over_the_today_divider() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "10/14/2026");
+
+    press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+
+    assert_eq!(cursor(&harness), "10/20/2026");
+}
+
+#[test]
+fn up_steps_over_the_today_divider() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "10/20/2026");
+
+    press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+
+    assert_eq!(cursor(&harness), "10/14/2026");
 }

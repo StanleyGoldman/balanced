@@ -6,10 +6,14 @@ use std::thread;
 
 use balanced_core::OpenError;
 use balanced_i18n::Localizer;
+use directories::UserDirs;
+use eframe::egui::{self, Id};
 use rfd::{AsyncFileDialog, FileHandle};
 
 use crate::command::{AppCommand, CommandSender};
+use crate::dialog::{DialogOutcome, LightDialog, OpenDialog};
 use crate::i18n::fl;
+use crate::theme::Theme;
 
 /// The native file picker File → New Data File… or File → Open Data File… shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,7 +26,8 @@ pub(crate) enum DataFilePicker {
 
 impl DataFilePicker {
     /// Shows the picker, listing `.balanced` files, and leaves the Main window free
-    /// while it is open. A picked path comes back as `AppCommand::NewDataFile` or
+    /// while it is open. The save picker starts in the Documents folder, where the OS
+    /// has one, suggesting `Balanced.balanced`. A picked path comes back as `AppCommand::NewDataFile` or
     /// `AppCommand::OpenDataFile` through `commands`; cancelling sends nothing.
     pub(crate) fn show(self, i18n: &Localizer, commands: &CommandSender) {
         // The picker is built here, on the UI thread, as macOS requires, and waited
@@ -31,7 +36,7 @@ impl DataFilePicker {
             AsyncFileDialog::new().add_filter(fl!(i18n, "dialog-data-file-filter"), &["balanced"]);
         match self {
             Self::New => wait_for(
-                picker
+                documents(picker)
                     .set_file_name(fl!(i18n, "dialog-data-file-suggested-name"))
                     .save_file(),
                 AppCommand::NewDataFile,
@@ -39,6 +44,15 @@ impl DataFilePicker {
             ),
             Self::Open => wait_for(picker.pick_file(), AppCommand::OpenDataFile, commands),
         }
+    }
+}
+
+/// `picker`, starting in the Documents folder, or where the OS starts it when there is
+/// none.
+fn documents(picker: AsyncFileDialog) -> AsyncFileDialog {
+    match UserDirs::new().as_ref().and_then(UserDirs::document_dir) {
+        Some(dir) => picker.set_directory(dir),
+        None => picker,
     }
 }
 
@@ -65,7 +79,16 @@ fn wait_for(
     }
 }
 
-/// A data file the App refused to create or open, and why. The open file stays open.
+/// The name of the file at `path`, without its folder, as the user is shown it.
+pub(crate) fn file_name(path: &Path) -> String {
+    path.file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// A data file the App refused to create or open, and why. The open file stays open,
+/// or the welcome Dialog follows when none is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DataFileRefusal {
     /// The refused file's name, without its folder.
@@ -74,7 +97,7 @@ pub(crate) struct DataFileRefusal {
 }
 
 /// Why a data file was refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum RefusalReason {
     /// No file is at the path.
     Missing,
@@ -86,6 +109,12 @@ enum RefusalReason {
     Newer,
     /// Another program, or another Balanced, has the file open.
     Locked,
+    /// The file is from an older Balanced, and the backup taken before upgrading it
+    /// couldn't be written.
+    BackupFailed,
+    /// Upgrading the file from an older Balanced failed. `backup` is the name of the
+    /// backup taken first, without its folder.
+    UpgradeFailed { backup: String },
     /// Reading the file failed.
     Unreadable,
     /// Creating a new file failed.
@@ -108,6 +137,10 @@ impl DataFileRefusal {
             | OpenError::Date { .. } => RefusalReason::Damaged,
             OpenError::Newer { .. } => RefusalReason::Newer,
             OpenError::Locked => RefusalReason::Locked,
+            OpenError::BackupFailed(_) => RefusalReason::BackupFailed,
+            OpenError::UpgradeFailed { backup, .. } => RefusalReason::UpgradeFailed {
+                backup: file_name(backup),
+            },
             OpenError::Store(_) => RefusalReason::Unreadable,
         };
         Self::new(path, reason)
@@ -124,18 +157,39 @@ impl DataFileRefusal {
     }
 
     fn new(path: &Path, reason: RefusalReason) -> Self {
-        let file = path
-            .file_name()
-            .unwrap_or(path.as_os_str())
-            .to_string_lossy()
-            .into_owned();
-        Self { file, reason }
+        Self {
+            file: file_name(path),
+            reason,
+        }
+    }
+
+    /// Draws `dialog`, the notice saying why a data file was refused, and returns
+    /// whether OK or Esc closed it this frame.
+    pub(crate) fn show_dialog(
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        theme: &Theme,
+        dialog: &mut OpenDialog<Self>,
+    ) -> bool {
+        let outcome = LightDialog::notice(
+            Id::new("data_file_refusal_dialog"),
+            fl!(i18n, "dialog-ok"),
+            theme,
+        )
+        .show(ctx, dialog, |ui, refusal| {
+            ui.label(refusal.message(i18n));
+        });
+        match outcome {
+            DialogOutcome::Open => false,
+            DialogOutcome::Accepted | DialogOutcome::Cancelled => true,
+            DialogOutcome::Back => unreachable!("a notice has no Back button"),
+        }
     }
 
     /// What the refusal Dialog says.
     pub(crate) fn message(&self, i18n: &Localizer) -> String {
         let file = self.file.clone();
-        match self.reason {
+        match &self.reason {
             RefusalReason::Missing => fl!(i18n, "dialog-data-file-missing", file = file),
             RefusalReason::NotBalanced => {
                 fl!(i18n, "dialog-data-file-not-balanced", file = file)
@@ -143,6 +197,15 @@ impl DataFileRefusal {
             RefusalReason::Damaged => fl!(i18n, "dialog-data-file-damaged", file = file),
             RefusalReason::Newer => fl!(i18n, "dialog-data-file-newer", file = file),
             RefusalReason::Locked => fl!(i18n, "dialog-data-file-locked", file = file),
+            RefusalReason::BackupFailed => {
+                fl!(i18n, "dialog-data-file-backup-failed", file = file)
+            }
+            RefusalReason::UpgradeFailed { backup } => fl!(
+                i18n,
+                "dialog-data-file-upgrade-failed",
+                file = file,
+                backup = backup.clone()
+            ),
             RefusalReason::Unreadable => fl!(i18n, "dialog-data-file-unreadable", file = file),
             RefusalReason::NotCreated => fl!(i18n, "dialog-data-file-not-created", file = file),
             RefusalReason::OpenFileNotReplaced => {
