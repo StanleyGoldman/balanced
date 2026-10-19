@@ -238,7 +238,33 @@ fn add_account_sits_below_net_worth() {
     let harness = app();
 
     let add_account = harness.get_by_role_and_label(Role::Button, "+ Add Account");
-
     let net_worth = harness.get_by_role_and_label(Role::Label, "$288,497.71");
+
     assert!(add_account.rect().top() >= net_worth.rect().bottom());
+}
+
+#[test]
+fn the_account_bar_header_holds_only_the_fold_button() {
+    let harness = app();
+
+    let banking = harness
+        .get_by_role_and_label(Role::Button, "Banking")
+        .rect();
+
+    // The header is the strip of the Account bar above its first heading, under the tabs.
+    let tabs_bottom = harness
+        .get_by_role_and_label(Role::Button, "Home")
+        .rect()
+        .bottom();
+    let header: Vec<_> = harness
+        .query_all_by_role(Role::Button)
+        .filter(|button| {
+            let rect = button.rect();
+            rect.top() >= tabs_bottom
+                && rect.bottom() <= banking.top()
+                && rect.right() <= banking.right()
+        })
+        .map(|button| button.accesskit_node().label().unwrap_or_default())
+        .collect();
+    assert_eq!(header, ["Fold the Account bar"]);
 }

@@ -161,7 +161,9 @@ impl AccountBar {
         let footer_top = (rest.bottom() - self.footer_height).max(rest.top());
         let list = Rect::from_min_max(rest.min, pos2(rest.right(), footer_top));
         ui.scope_builder(UiBuilder::new().max_rect(list), |ui| {
-            ScrollArea::vertical().show(ui, |ui| self.sections(ui, frame, focus));
+            ScrollArea::vertical()
+                .min_scrolled_height(0.0)
+                .show(ui, |ui| self.sections(ui, frame, focus));
         });
         let footer = Rect::from_min_max(pos2(rest.left(), footer_top), rest.max);
         let height = ui
