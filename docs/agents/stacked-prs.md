@@ -8,7 +8,7 @@ Offer a stack when you foresee two PRs colliding: merged one at a time, the seco
 
 ## Making a stack
 
-1. Rebase each branch onto the one below it, bottom first, so every layer holds the tip of the layer under it.
+1. Bring each branch onto the one below it, bottom first, so every layer holds the tip of the layer under it. Rebase a branch whose commits apply cleanly. Merge the lower branch in when several of the branch's commits touch the conflicted hunks: a rebase stops on each such commit to resolve the same hunks again, and a merge resolves them once.
 2. From a worktree on any branch in the chain, adopt the branches, bottom to top:
    `gh stack init --base main <bottom-branch> … <top-branch>`
    This records local tracking only; it adopts existing branches and creates any that are missing.
@@ -16,6 +16,14 @@ Offer a stack when you foresee two PRs colliding: merged one at a time, the seco
 4. Check the result with `gh stack view --short`, and update each PR's description to say which PR it sits on.
 
 To link PRs that already have the right bases, without local tracking: `gh stack link <bottom-pr> … <top-pr>`.
+
+## Joining stacks
+
+A PR sits in at most one stack, and while it does GitHub refuses to change its base (`Cannot change the base branch because the pull request is part of a stack`). To move PRs from stack A onto the top of stack B:
+
+1. `gh stack unstack <A>`. It can warn that some PRs stay stacked even when none has auto-merge; the link below settles it.
+2. Point the lowest moved PR at B's top branch: `gh pr edit <n> --base <branch>`.
+3. `gh stack link <B> <pr> … <pr>`, bottom to top. It appends them to B, and rejects any PR still in another stack.
 
 ## Keeping it current
 
