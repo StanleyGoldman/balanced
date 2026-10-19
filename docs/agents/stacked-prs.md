@@ -14,6 +14,7 @@ Offer a stack when you foresee two PRs colliding: merged one at a time, the seco
    This records local tracking only; it adopts existing branches and creates any that are missing.
 3. Push and link: `gh stack submit --auto`. It pushes every branch, retargets each existing PR's base to the branch below, opens a PR for any branch without one (as a draft, since `--auto` skips the editor), and creates the stack on GitHub. It prints the stack number (`stack #<n>`).
 4. Check the result with `gh stack view --short`, and update each PR's description to say which PR it sits on.
+5. `gh stack submit` turns off auto-merge on any PR in the stack that had it, since GitHub allows no auto-merge on a stacked PR, and says so only in a `⚠` line of its output. Tell the user which PRs lost it.
 
 To link PRs that already have the right bases, without local tracking: `gh stack link <bottom-pr> … <top-pr>`.
 
