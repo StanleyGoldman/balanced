@@ -9,9 +9,9 @@ use std::collections::BTreeSet;
 use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
 
-use super::MutantsOutcome;
 use super::github::GitHub;
 use super::plan::{self, Action, CloseReason, FoundBy, Run};
+use super::{MutantsOutcome, REPO};
 use crate::process;
 
 /// What a run does with the issue updates its plan decides.
@@ -26,6 +26,10 @@ pub(crate) enum IssueUpdates {
 /// Where cargo-mutants writes `mutants.out`, so the run never adds to the
 /// checkout's own files.
 const OUTPUT_DIR: &str = "target";
+
+/// Where a run writes its issue updates as Markdown, which
+/// `.github/workflows/mutants.yml` adds to the job summary.
+const SUMMARY_PATH: &str = "target/mutants-summary.md";
 
 /// The variable `.github/workflows/mutants.yml` sets to the web page of the
 /// running workflow.
@@ -59,6 +63,8 @@ pub(crate) fn run(scope_args: &[String], found_by: FoundBy, updates: IssueUpdate
     };
     let actions = plan::plan(outcomes.as_deref(), &list, &issues, &run)?;
     eprintln!("mutants: {} issue updates", actions.len());
+    std::fs::write(SUMMARY_PATH, summary(&actions, updates))
+        .with_context(|| format!("writing {SUMMARY_PATH}"))?;
     for action in &actions {
         eprintln!("{}", describe(action));
         if updates == IssueUpdates::Apply {
@@ -133,6 +139,35 @@ fn warm_up(packages: &BTreeSet<String>) -> Result<()> {
     Ok(())
 }
 
+/// The run's issue updates as Markdown, for the CI job summary.
+fn summary(actions: &[Action], updates: IssueUpdates) -> String {
+    let issue_link = |issue: &u64| format!("[#{issue}](https://github.com/{REPO}/issues/{issue})");
+    let heading = match updates {
+        IssueUpdates::Apply => "### Mutant issue updates",
+        IssueUpdates::Print => "### Mutant issue updates (dry run, not made)",
+    };
+    let lines: Vec<String> = actions
+        .iter()
+        .map(|action| match action {
+            Action::Open(issue) => format!("- opened: {}\n", issue.title),
+            Action::Comment { issue, .. } => format!("- commented on {}\n", issue_link(issue)),
+            Action::Close { issue, reason, .. } => {
+                let reason = match reason {
+                    CloseReason::Caught => "caught",
+                    CloseReason::NoLongerGenerated => "no longer generated",
+                };
+                format!("- closed {} as {reason}\n", issue_link(issue))
+            }
+        })
+        .collect();
+    let body = if lines.is_empty() {
+        "No issue updates.\n".to_owned()
+    } else {
+        lines.concat()
+    };
+    format!("{heading}\n\n{body}")
+}
+
 /// cargo-mutants' arguments for a CI run over the mutants `scope_args` select:
 /// mutated in place in the throwaway checkout, one mutant at a time. The run
 /// starts beside the `ci` workflow, not after it, so the baseline proves the
@@ -195,7 +230,52 @@ fn describe(action: &Action) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::cargo_mutants_args;
+    use super::{Action, CloseReason, IssueUpdates, cargo_mutants_args, summary};
+    use crate::mutants::plan::NewIssue;
+
+    fn every_kind_of_update() -> Vec<Action> {
+        vec![
+            Action::Open(NewIssue {
+                title: "Missed mutant in money.rs".to_owned(),
+                body: "body".to_owned(),
+                labels: vec!["mutant"],
+            }),
+            Action::Comment {
+                issue: 12,
+                body: "found again".to_owned(),
+            },
+            Action::Close {
+                issue: 9,
+                reason: CloseReason::Caught,
+                comment: "caught".to_owned(),
+            },
+            Action::Close {
+                issue: 7,
+                reason: CloseReason::NoLongerGenerated,
+                comment: "gone".to_owned(),
+            },
+        ]
+    }
+
+    #[test]
+    fn the_summary_links_each_issue_update() {
+        assert_eq!(
+            summary(&every_kind_of_update(), IssueUpdates::Apply),
+            "### Mutant issue updates\n\n\
+             - opened: Missed mutant in money.rs\n\
+             - commented on [#12](https://github.com/StanleyGoldman/balanced/issues/12)\n\
+             - closed [#9](https://github.com/StanleyGoldman/balanced/issues/9) as caught\n\
+             - closed [#7](https://github.com/StanleyGoldman/balanced/issues/7) as no longer generated\n"
+        );
+    }
+
+    #[test]
+    fn a_dry_run_summary_says_its_updates_were_not_made() {
+        assert_eq!(
+            summary(&[], IssueUpdates::Print),
+            "### Mutant issue updates (dry run, not made)\n\nNo issue updates.\n"
+        );
+    }
 
     #[test]
     fn a_ci_run_mutates_in_place_after_a_baseline_with_a_one_minute_timeout() {

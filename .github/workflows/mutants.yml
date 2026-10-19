@@ -83,3 +83,9 @@ jobs:
         env:
           TASK: ${{ inputs.task || (github.event_name == 'schedule' && 'mutants-shard' || 'mutants-landed') }}
         run: .github/in-image.sh cargo xtask "$TASK"
+
+      # The issues the run opened, commented on and closed, which the task
+      # writes once it has planned them.
+      - name: summarize issue updates
+        if: always() && hashFiles('target/mutants-summary.md') != ''
+        run: cat target/mutants-summary.md >> "$GITHUB_STEP_SUMMARY"

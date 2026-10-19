@@ -17,7 +17,13 @@ runs:
   steps:
     - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
     - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+    # Without the build summary and record the action adds by default: the
+    # step's log already shows a failing build, and the jobs write summaries
+    # of their own.
     - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      env:
+        DOCKER_BUILD_SUMMARY: "false"
+        DOCKER_BUILD_RECORD_UPLOAD: "false"
       with:
         context: .
         file: .github/Dockerfile
