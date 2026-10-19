@@ -29,6 +29,9 @@
 #          A test that crashed (`SIGSEGV`) or timed out isn't a `FAIL`, so it is
 #          missing from both.
 #          Read each before trusting the red: a setup failure proves nothing.
+#          A failing `.slt` file (balanced_store's `slt` target) doesn't panic, so
+#          its "panics" is empty. Read its failing record by rerunning the test on
+#          the broken code; a record that fails in setup proves nothing.
 #          Only a red result carries "panics".
 #   green: the tests pass against the broken code; they miss this break.
 #   error: bad arguments, or <old> not found exactly once (the file is untouched);
