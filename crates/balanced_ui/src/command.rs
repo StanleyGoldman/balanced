@@ -1,11 +1,13 @@
 //! [`AppCommand`]s and the [`CommandSender`] that carries them to `App::logic`.
 
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
 use balanced_core::{DomainCommand, DomainError, TransactionId, WriteError};
 use balanced_i18n::Localizer;
 use eframe::egui;
 
+use crate::data_file::DataFilePicker;
 use crate::i18n::fl;
 use crate::preferences::Preferences;
 use crate::register_columns::RegisterColumns;
@@ -47,6 +49,17 @@ pub(crate) enum AppCommand {
     /// Replace the Preferences' Register columns with these, show them in every
     /// Register and write them to the preferences file.
     SetRegisterColumns(RegisterColumns),
+    /// Show the native picker for a data file to create or open, which sends
+    /// `NewDataFile` or `OpenDataFile` once a path is picked.
+    ChooseDataFile(DataFilePicker),
+    /// Create an empty data file at the path, already picked, and switch to it. A file
+    /// already there is replaced, since the native picker has asked to overwrite it,
+    /// unless it is the open file. A file that can't be created shows a Dialog saying
+    /// why, and the open file stays open.
+    NewDataFile(PathBuf),
+    /// Open the data file at the path, already picked, and switch to it. A file that
+    /// can't be opened shows a Dialog saying why, and the open file stays open.
+    OpenDataFile(PathBuf),
     /// Show a message in the Status bar until the next one replaces it.
     ShowStatus(StatusMessage),
     /// Close the Main window, which ends the app.

@@ -163,7 +163,7 @@ fn f10_opens_the_first_menu_on_its_first_enabled_item() {
 
     press(&mut harness, Modifiers::NONE, Key::F10);
 
-    assert_eq!(focused(&harness).as_deref(), Some("New Account…"));
+    assert_eq!(focused(&harness).as_deref(), Some("New Data File…"));
 }
 
 #[test]
@@ -189,12 +189,13 @@ fn up_and_down_move_within_a_menu_and_wrap() {
     press(&mut harness, Modifiers::NONE, Key::F10);
 
     let mut seen = Vec::new();
-    for key in [Key::ArrowDown, Key::ArrowDown, Key::ArrowUp] {
+    for key in [Key::ArrowUp, Key::ArrowDown, Key::ArrowDown] {
         press(&mut harness, Modifiers::NONE, key);
         seen.push(focused(&harness).unwrap_or_default());
     }
 
-    assert_eq!(seen, ["Quit Ctrl+Q", "New Account…", "Quit Ctrl+Q"]);
+    // Up from the first item wraps to the last, and Down from the last wraps back.
+    assert_eq!(seen, ["Quit Ctrl+Q", "New Data File…", "Open Data File…"]);
 }
 
 #[test]
@@ -209,7 +210,7 @@ fn left_and_right_move_between_menus_and_wrap() {
     }
 
     // Left from File wraps to Help, and Right from Help wraps back to File.
-    assert_eq!(seen, ["About Balanced", "New Account…"]);
+    assert_eq!(seen, ["About Balanced", "New Data File…"]);
 }
 
 #[test]
@@ -258,7 +259,7 @@ fn a_lone_alt_opens_the_first_menu() {
     hold(&mut harness, Modifiers::ALT);
     hold(&mut harness, Modifiers::NONE);
 
-    assert_eq!(focused(&harness).as_deref(), Some("New Account…"));
+    assert_eq!(focused(&harness).as_deref(), Some("New Data File…"));
 }
 
 #[test]

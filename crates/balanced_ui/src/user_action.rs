@@ -4,6 +4,7 @@
 use balanced_i18n::Localizer;
 
 use crate::command::{AppCommand, DialogKind, StatusMessage};
+use crate::data_file::DataFilePicker;
 use crate::i18n::fl;
 
 /// Something the user can do from the Menu bar or with a Shortcut.
@@ -17,6 +18,10 @@ pub(crate) enum UserAction {
     NewTransaction,
     /// Delete the Register's selected transaction, once confirmed.
     DeleteTransaction,
+    /// Pick a path and create an empty data file there.
+    NewDataFile,
+    /// Pick a data file and open it.
+    OpenDataFile,
     /// Open the New Account wizard.
     NewAccount,
     /// Open Manage Accounts.
@@ -36,6 +41,8 @@ impl UserAction {
             Self::SwitchPane => fl!(i18n, "menu-view-switch-pane"),
             Self::NewTransaction => fl!(i18n, "menu-new-transaction"),
             Self::DeleteTransaction => fl!(i18n, "menu-delete-transaction"),
+            Self::NewDataFile => fl!(i18n, "menu-file-new-data-file"),
+            Self::OpenDataFile => fl!(i18n, "menu-file-open-data-file"),
             Self::NewAccount => fl!(i18n, "menu-file-new-account"),
             Self::ManageAccounts => fl!(i18n, "menu-tools-manage-accounts"),
             Self::Quit => fl!(i18n, "menu-file-quit"),
@@ -52,6 +59,8 @@ impl UserAction {
             Self::NewTransaction
             | Self::DeleteTransaction
             | Self::SwitchPane
+            | Self::NewDataFile
+            | Self::OpenDataFile
             | Self::NewAccount
             | Self::ManageAccounts
             | Self::Quit
@@ -68,6 +77,8 @@ impl UserAction {
             Self::SwitchPane => AppCommand::SwitchPane,
             Self::NewTransaction => AppCommand::GoToDraftRow,
             Self::DeleteTransaction => AppCommand::OpenDialog(DialogKind::DeleteTransaction),
+            Self::NewDataFile => AppCommand::ChooseDataFile(DataFilePicker::New),
+            Self::OpenDataFile => AppCommand::ChooseDataFile(DataFilePicker::Open),
             Self::NewAccount => AppCommand::OpenDialog(DialogKind::NewAccount),
             Self::ManageAccounts => AppCommand::OpenDialog(DialogKind::ManageAccounts),
             Self::Quit => AppCommand::Quit,

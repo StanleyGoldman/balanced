@@ -291,6 +291,29 @@ fn a_resized_column_survives_a_restart() {
     assert_eq!(column_width(&second, "Memo"), before + 60.0);
 }
 
+#[test]
+fn payment_and_deposit_each_keep_their_own_width_across_a_restart() {
+    let empty = MemoryStorage::default();
+    let mut first = app(&empty);
+    open(&mut first, "Everyday Checking");
+    let payment = column_width(&first, "Payment");
+    let deposit = column_width(&first, "Deposit");
+    resize_column(&mut first, "Payment", 40.0);
+    resize_column(&mut first, "Deposit", 20.0);
+    let storage = save(&mut first);
+
+    let mut second = app(&storage);
+    open(&mut second, "Everyday Checking");
+
+    assert_eq!(
+        (
+            column_width(&second, "Payment"),
+            column_width(&second, "Deposit")
+        ),
+        (payment + 40.0, deposit + 20.0)
+    );
+}
+
 /// Clicks the button labelled `label`, then lets the App settle.
 fn click(harness: &mut Harness<'_, App>, label: &str) {
     harness.get_by_role_and_label(Role::Button, label).click();

@@ -14,6 +14,8 @@ main-window-title = { -brand-name }
 
 menu-file = File
 menu-file-new-account = New Account…
+menu-file-new-data-file = New Data File…
+menu-file-open-data-file = Open Data File…
 menu-file-quit = Quit
 menu-edit = Edit
 menu-edit-undo = Undo
@@ -95,7 +97,16 @@ register-column-number = Num
 register-column-payee = Payee
 register-column-category = Category
 register-column-memo = Memo
-register-column-amount = Amount
+# The headings of the columns of money out and money in on a checking, savings,
+# investment or retirement account.
+register-column-payment = Payment
+register-column-deposit = Deposit
+# The headings of the columns of money out and money in on a credit card.
+register-column-charge = Charge
+register-column-card-payment = Payment
+# The headings of the columns of money out and money in on an asset or a liability.
+register-column-decrease = Decrease
+register-column-increase = Increase
 register-column-balance = Balance
 # The handle on a column heading's right edge that resizes the column.
 register-resize-column = Resize { $column }
@@ -220,6 +231,22 @@ dialog-new-account-review-type = Type: { $kind }
 dialog-new-account-review-name = Name: { $name }
 # $amount is the opening balance, $date the day it is as of.
 dialog-new-account-review-balance = Opening balance: { $amount } as of { $date }
+
+# Why a data file wasn't opened or created. $file is the file's name, such as
+# Household.balanced. The data file open before stays open.
+dialog-data-file-missing = { -brand-name } can't find “{ $file }”. It may have been moved, renamed or deleted.
+dialog-data-file-not-balanced = “{ $file }” isn't a { -brand-name } data file.
+dialog-data-file-damaged = “{ $file }” is damaged. Restore it from a backup.
+dialog-data-file-newer = “{ $file }” was made by a newer version of { -brand-name }. Update { -brand-name } to open it.
+dialog-data-file-locked = “{ $file }” is open in another program. Close it there, then try again.
+dialog-data-file-unreadable = { -brand-name } couldn't read “{ $file }”.
+dialog-data-file-not-created = { -brand-name } couldn't create “{ $file }”.
+# New Data File… picked the data file that is open.
+dialog-data-file-open-not-replaced = “{ $file }” is the data file you have open, so a new one can't replace it.
+# The name the save picker suggests for a new data file.
+dialog-data-file-suggested-name = { -brand-name }.balanced
+# The file type the native file picker lists, for files ending in .balanced.
+dialog-data-file-filter = { -brand-name } data files
 
 ## Amount field
 
