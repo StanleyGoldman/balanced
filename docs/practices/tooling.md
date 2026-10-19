@@ -60,3 +60,10 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
     - Rebuilding the first worktree after `rm -rf target` got 266 hits out of 266.
     - A copy of the worktree at another path got 219 hits and 47 misses.
   - So by default **each new worktree builds its dependencies cold**, and sccache speeds up only rebuilds at the same path. Sharing across worktrees needs `SCCACHE_BASEDIRS`, set in the environment that starts the sccache server and listing every worktree root.
+
+## Measuring performance
+
+- Time in the `release` profile, on a quiet machine. Other agent sessions build in parallel on this machine, and a probe run at load average 18 gave medians up to 4× too high, with a wide spread (#258). Wait until `/proc/loadavg` reads below 3 (a background `until` loop), then pin the run to one core with `taskset -c 0`.
+- `perf record` is refused here (`perf_event_paranoid` is 4). Break a cost down by timing its parts in the probe itself. A counting `#[global_allocator]` in a `#[cfg(test)]` module measures heap held.
+- For a cold page cache without root, evict the file first: `os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)` from `python3`.
+- `docs/research/data-file-performance.md` is a worked example: probes, method and machine.
