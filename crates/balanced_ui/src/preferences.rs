@@ -101,6 +101,8 @@ pub(crate) struct Preferences {
     pub(crate) coloured_negatives: bool,
     /// Every other Register row filled with the stripe colour.
     pub(crate) alternating_rows: bool,
+    /// A line in the Register between today's rows and the rows dated later.
+    pub(crate) today_divider: bool,
     pub(crate) gridlines: Gridlines,
     /// Each Account bar heading shows its section's total.
     pub(crate) group_totals: bool,
@@ -119,6 +121,7 @@ impl Default for Preferences {
             monospace_money: false,
             coloured_negatives: true,
             alternating_rows: true,
+            today_divider: true,
             gridlines: Gridlines::default(),
             group_totals: false,
             net_worth_placement: NetWorthPlacement::default(),
@@ -278,6 +281,7 @@ mod tests {
             monospace_money: true,
             coloured_negatives: false,
             alternating_rows: false,
+            today_divider: false,
             gridlines: Gridlines::Both,
             group_totals: true,
             net_worth_placement: NetWorthPlacement::StatusBar,
@@ -361,6 +365,7 @@ mod tests {
             monospace_money: true,
             coloured_negatives: false,
             alternating_rows: false,
+            today_divider: true,
             gridlines: Gridlines::Both,
             group_totals: true,
             net_worth_placement: NetWorthPlacement::StatusBar,
@@ -432,6 +437,15 @@ mod tests {
     }
 
     #[test]
+    fn the_today_divider_is_on_in_a_fresh_file() {
+        let (_dir, file) = file();
+
+        let loaded = file.load().unwrap();
+
+        assert!(loaded.today_divider);
+    }
+
+    #[test]
     fn no_file_loads_the_defaults() {
         let (_dir, file) = file();
 
@@ -484,6 +498,7 @@ mod tests {
              monospace_money = false\n\
              coloured_negatives = true\n\
              alternating_rows = true\n\
+             today_divider = true\n\
              gridlines = \"off\"\n\
              group_totals = false\n\
              net_worth_placement = \"account_bar\"\n\

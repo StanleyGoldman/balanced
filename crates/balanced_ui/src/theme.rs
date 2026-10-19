@@ -441,6 +441,26 @@ impl Theme {
         )
     }
 
+    /// The colour of the Today divider's label and rule.
+    pub(crate) fn today_divider(&self) -> Color32 {
+        self.palette.accent
+    }
+
+    /// The Today divider's rule across `x_range`, at `y` (the middle of its line),
+    /// given the display's pixels per point. It is one point wide, on a pixel centre.
+    pub(crate) fn today_divider_rule(
+        &self,
+        x_range: Rangef,
+        y: f32,
+        pixels_per_point: f32,
+    ) -> Shape {
+        Shape::hline(
+            x_range,
+            snap_to_pixel_centre(y, pixels_per_point),
+            Stroke::new(1.0, self.palette.accent),
+        )
+    }
+
     /// A gridline: one pixel wide, at the display's pixels per point.
     fn grid_stroke(&self, pixels_per_point: f32) -> Stroke {
         Stroke::new(1.0 / pixels_per_point, self.palette.grid)

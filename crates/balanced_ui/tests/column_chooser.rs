@@ -95,6 +95,7 @@ fn unticking_memo_hides_it_and_saves_it_as_hidden() {
          monospace_money = false\n\
          coloured_negatives = true\n\
          alternating_rows = true\n\
+         today_divider = true\n\
          gridlines = \"off\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
@@ -127,6 +128,7 @@ fn moving_payee_up_puts_it_before_num_and_saves_the_order() {
          monospace_money = false\n\
          coloured_negatives = true\n\
          alternating_rows = true\n\
+         today_divider = true\n\
          gridlines = \"off\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\

@@ -127,7 +127,7 @@ fn selecting_an_account_opens_it_under_the_accounts_tab() {
     let accounts = harness.get_by_role_and_label(Role::Button, "Accounts");
     assert_eq!(accounts.accesskit_node().toggled(), Some(Toggled::True));
     harness.get_by_role_and_label(Role::Label, "Everyday Checking");
-    harness.get_by_role_and_label(Role::Label, "$5,647.46");
+    harness.get_by_role_and_label(Role::Label, "$4,071.81");
 }
 
 #[test]
@@ -194,7 +194,7 @@ fn hidden_accounts_are_left_out_but_count_in_net_worth() {
 
     assert!(holiday_fund.is_none());
     // The stub's Net Worth with the hidden Holiday Fund's $800.00 in it.
-    harness.get_by_role_and_label(Role::Label, "$288,497.71");
+    harness.get_by_role_and_label(Role::Label, "$286,922.06");
 }
 
 /// The text of every `Label` on screen, which holds a tooltip's text as its value.

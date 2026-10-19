@@ -147,7 +147,7 @@ fn ctrl_enter_adds_the_draft_row_with_its_running_balance() {
             "Food & Dining:Groceries",
             "",
             "-12.00",
-            "5,635.46",
+            "5,630.21",
         ]
     );
 }
@@ -262,8 +262,10 @@ fn a_closed_account_has_no_draft_row() {
 fn enter_on_the_last_transactions_last_cell_goes_to_the_draft_row() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    // Trattoria Roma's amount, the last transaction's last cell.
-    harness.get_by_role_and_label(Role::Cell, "-64.80").click();
+    // The November rent's amount, the last transaction's last cell.
+    harness
+        .get_by_role_and_label(Role::Cell, "-1,475.00")
+        .click();
     harness.run();
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
@@ -271,7 +273,7 @@ fn enter_on_the_last_transactions_last_cell_goes_to_the_draft_row() {
 
     let (label, top) = cursor(&harness);
     assert_eq!(label, "");
-    assert!(top > row_top(&harness, "Trattoria Roma"));
+    assert!(top > row_top(&harness, "November rent"));
 }
 
 #[test]

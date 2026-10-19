@@ -122,6 +122,9 @@ register-new-transaction = + Transaction
 register-draft-date-missing = Date is missing
 register-draft-category-missing = Category is missing
 register-draft-amount-missing = Amount is missing
+# The line between the Register's rows dated today or earlier and its rows dated
+# later, labelled with today's date.
+register-today-divider = Today · { $date }
 # Beside a closed account's name, above its Register.
 register-closed-read-only = Closed — read-only
 register-transaction-count =
@@ -162,6 +165,8 @@ dialog-preferences-monospace-money = Line up amounts in a fixed-width font
 dialog-preferences-coloured-negatives = Show negative amounts in red
 dialog-preferences-group-register = { -register }
 dialog-preferences-alternating-rows = Alternating rows
+# The line in the Register between today's rows and the rows dated later.
+dialog-preferences-today-divider = Today divider
 # The rules drawn between the Register's cells.
 dialog-preferences-gridlines = Gridlines
 dialog-preferences-gridlines-off = Off
