@@ -308,8 +308,13 @@ fn a_closed_account_has_no_draft_row() {
 fn enter_on_the_last_transactions_last_cell_goes_to_the_draft_row() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    // Trattoria Roma's Deposit, the last transaction's last cell.
-    harness.get_by_role_and_label(Role::Cell, "64.80").click();
+    // November's rent's Deposit, the last transaction's last cell, right of its
+    // Payment. September's rent is the same payment, higher up.
+    harness
+        .query_all_by_role_and_label(Role::Cell, "1,450.00")
+        .last()
+        .expect("the Register shows November's rent")
+        .click();
     harness.run();
     press(&mut harness, Modifiers::NONE, Key::ArrowRight);
 
@@ -318,7 +323,7 @@ fn enter_on_the_last_transactions_last_cell_goes_to_the_draft_row() {
 
     let (label, top) = cursor(&harness);
     assert_eq!(label, "");
-    assert!(top > row_top(&harness, "Trattoria Roma"));
+    assert!(top > row_top(&harness, "November rent"));
 }
 
 #[test]

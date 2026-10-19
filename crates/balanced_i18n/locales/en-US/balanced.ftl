@@ -135,6 +135,10 @@ register-category-list = Show all categories
 # The row of the Category list that creates the category typed in the cell.
 register-create-category = Create "{ $name }"…
 register-new-transaction = + Transaction
+# The context header's balances: Current counts the transactions dated today or earlier,
+# Ending counts every one, the future-dated ones too.
+register-current-balance = Current
+register-ending-balance = Ending
 # Why the draft row at the bottom of the Register wasn't added, in a bubble below
 # the first empty cell the transaction needs.
 register-draft-date-missing = Date is missing

@@ -77,6 +77,9 @@ register-column-category = Kategorie
 register-column-memo = Notiz
 register-column-balance = Saldo
 register-new-transaction = + Buchung
+# Coined from "aktuell" and "Saldo".
+register-current-balance = Aktuell
+register-ending-balance = Endsaldo
 register-transaction-count =
     { $count ->
         [one] { $count } Buchung

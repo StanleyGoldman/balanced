@@ -299,19 +299,19 @@ fn group_totals_show_on_the_headings_while_previewed() {
 
     click(&mut harness, Role::CheckBox, "Show group totals");
 
-    // Everyday Checking $5,647.46, Joint Checking $1,032.00, Household Checking
+    // Everyday Checking $4,108.81, Joint Checking $1,032.00, Household Checking
     // $500.00, Emergency Fund $12,000.00, the hidden Holiday Fund $800.00 and Visa
     // Rewards -$412.30. Closed Old Checking is left out.
     assert_eq!(
         heading_total(&harness, "Banking").as_deref(),
-        Some("$19,567.16")
+        Some("$18,028.51")
     );
 }
 
 /// How many times Net Worth's amount is shown inside the Status bar, and how many
 /// times anywhere.
 fn net_worth_in_status_bar_and_anywhere(harness: &Harness<'static, App>) -> (usize, usize) {
-    let amount = "$288,497.71";
+    let amount = "$286,959.06";
     let in_status_bar = harness
         .get_by_role(Role::Status)
         .query_all_by_role_and_label(Role::Label, amount)

@@ -4,7 +4,7 @@ use balanced_core::Ledger;
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::egui::accesskit::{Role, Toggled};
-use eframe::egui::{Event, Key, Modifiers, ViewportCommand, ViewportId};
+use eframe::egui::{Color32, Event, Key, Modifiers, Shape, ViewportCommand, ViewportId, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use icu_calendar::Date;
@@ -127,7 +127,7 @@ fn selecting_an_account_opens_it_under_the_accounts_tab() {
     let accounts = harness.get_by_role_and_label(Role::Button, "Accounts");
     assert_eq!(accounts.accesskit_node().toggled(), Some(Toggled::True));
     harness.get_by_role_and_label(Role::Label, "Everyday Checking");
-    harness.get_by_role_and_label(Role::Label, "$5,647.46");
+    harness.get_by_role_and_label(Role::Label, "Ending $4,108.81");
 }
 
 #[test]
@@ -194,7 +194,7 @@ fn hidden_accounts_are_left_out_but_count_in_net_worth() {
 
     assert!(holiday_fund.is_none());
     // The stub's Net Worth with the hidden Holiday Fund's $800.00 in it.
-    harness.get_by_role_and_label(Role::Label, "$288,497.71");
+    harness.get_by_role_and_label(Role::Label, "$286,959.06");
 }
 
 /// The text of every `Label` on screen, which holds a tooltip's text as its value.
@@ -238,7 +238,7 @@ fn add_account_sits_below_net_worth() {
     let harness = app();
 
     let add_account = harness.get_by_role_and_label(Role::Button, "+ Add Account");
-    let net_worth = harness.get_by_role_and_label(Role::Label, "$288,497.71");
+    let net_worth = harness.get_by_role_and_label(Role::Label, "$286,959.06");
 
     assert!(add_account.rect().top() >= net_worth.rect().bottom());
 }
@@ -267,4 +267,139 @@ fn the_account_bar_header_holds_only_the_fold_button() {
         .map(|button| button.accesskit_node().label().unwrap_or_default())
         .collect();
     assert_eq!(header, ["Fold the Account bar"]);
+
+/// Opens `account` from the Account bar.
+fn open_account(harness: &mut Harness<'static, App>, account: &str) {
+    harness.get_by_role_and_label(Role::Button, account).click();
+    harness.run();
+}
+
+#[test]
+fn the_context_header_shows_the_current_balance_without_future_rows_and_the_ending_with_them() {
+    let mut harness = app();
+
+    open_account(&mut harness, "Everyday Checking");
+
+    // Today is 14 October 2026; the payments of 30 October and 1 November count only
+    // in Ending.
+    let values = label_values(&harness);
+    assert!(
+        values.contains(&"Current $5,647.46".to_owned()),
+        "{values:?}"
+    );
+    assert!(
+        values.contains(&"Ending $4,108.81".to_owned()),
+        "{values:?}"
+    );
+}
+
+#[test]
+fn an_account_with_no_future_rows_shows_both_balances_equal() {
+    let mut harness = app();
+
+    open_account(&mut harness, "Emergency Fund");
+
+    let values = label_values(&harness);
+    assert!(
+        values.contains(&"Current $12,000.00".to_owned()),
+        "{values:?}"
+    );
+    assert!(
+        values.contains(&"Ending $12,000.00".to_owned()),
+        "{values:?}"
+    );
+}
+
+#[test]
+fn the_context_header_shows_no_balance_beside_the_account_name() {
+    let mut harness = app();
+
+    open_account(&mut harness, "Emergency Fund");
+
+    // The Account bar's balances are part of its account buttons, so no Label shows
+    // the bare amount.
+    let shown = label_values(&harness)
+        .iter()
+        .filter(|value| *value == "$12,000.00")
+        .count();
+    assert_eq!(shown, 0);
+}
+
+/// The colours `amount` is drawn in, wherever it is drawn alone or as one section of
+/// a longer text, from the last frame's shapes.
+fn amount_colours(harness: &Harness<'static, App>, amount: &str) -> Vec<Color32> {
+    harness
+        .output()
+        .shapes
+        .iter()
+        .filter_map(
+            #[expect(clippy::wildcard_enum_match_arm, reason = "foreign enum")]
+            |clipped| match &clipped.shape {
+                Shape::Text(shape) => Some(shape),
+                _ => None,
+            },
+        )
+        .flat_map(|shape| {
+            let job = &shape.galley.job;
+            job.sections
+                .iter()
+                .filter(|section| {
+                    job.text[section.byte_range.start.0..section.byte_range.end.0].trim() == amount
+                })
+                .map(|section| shape.override_text_color.unwrap_or(section.format.color))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[test]
+fn a_negative_balance_in_the_context_header_takes_the_negative_colour() {
+    let mut harness = app();
+
+    open_account(&mut harness, "Visa Rewards");
+
+    let negative = harness.ctx.global_style().visuals.error_fg_color;
+    // In the Account bar, then as Ending and as Current.
+    assert_eq!(
+        amount_colours(&harness, "-$412.30"),
+        [negative, negative, negative]
+    );
+}
+
+/// The `Label` whose text is `value`.
+fn label<'a>(harness: &'a Harness<'static, App>, value: &str) -> egui_kittest::Node<'a> {
+    harness
+        .query_all_by_role(Role::Label)
+        .find(|label| label.accesskit_node().value().as_deref() == Some(value))
+        .unwrap_or_else(|| panic!("no Label reads {value:?}"))
+}
+
+#[test]
+fn a_narrow_window_cuts_the_account_name_short_and_keeps_the_balances_and_button_whole() {
+    let mut harness = app();
+    open_account(&mut harness, "Everyday Checking");
+    let header_widths = |harness: &Harness<'static, App>| {
+        [
+            label(harness, "Current $5,647.46").rect(),
+            label(harness, "Ending $4,108.81").rect(),
+            harness
+                .get_by_role_and_label(Role::Button, "+ Transaction")
+                .rect(),
+        ]
+        .map(|rect| rect.width())
+    };
+    let roomy = header_widths(&harness);
+
+    harness.set_size(vec2(560.0, 600.0));
+    harness.run();
+
+    assert_eq!(header_widths(&harness), roomy);
+    // Only a name cut short shows itself whole when hovered.
+    label(&harness, "Everyday Checking").hover();
+    harness.run();
+    let named = label_values(&harness)
+        .iter()
+        .filter(|value| *value == "Everyday Checking")
+        .count();
+    assert_eq!(named, 2);
 }

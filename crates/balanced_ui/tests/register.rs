@@ -344,8 +344,10 @@ fn clicking_payee_sorts_by_payee() {
             "Acme Corp",
             "Bean There",
             "City Power & Light",
+            "City Power & Light",
             "Costco",
             "Fresh Market",
+            "Maple Property Management",
             "Maple Property Management",
             "Opening Balance",
             "Shell",
@@ -363,8 +365,8 @@ fn sorting_by_payee_blanks_the_balance() {
 
     sort_by(&mut harness, "Payee");
 
-    // Ten transactions, then the draft row, which has no balance.
-    assert_eq!(column(&harness, "Balance"), [""; 11]);
+    // Twelve transactions, then the draft row, which has no balance.
+    assert_eq!(column(&harness, "Balance"), [""; 13]);
 }
 
 #[test]
@@ -399,8 +401,10 @@ fn clicking_payee_again_reverses_the_sort_but_not_its_ties() {
             "Shell",
             "Opening Balance",
             "Maple Property Management",
+            "Maple Property Management",
             "Fresh Market",
             "Costco",
+            "City Power & Light",
             "City Power & Light",
             "Bean There",
             "Acme Corp",
@@ -410,7 +414,7 @@ fn clicking_payee_again_reverses_the_sort_but_not_its_ties() {
         ]
     );
     // The two Acme Corp salaries tie, so they stay oldest first.
-    assert_eq!(dates[8..10], ["9/1/2026", "9/18/2026"]);
+    assert_eq!(dates[10..12], ["9/1/2026", "9/18/2026"]);
 }
 
 #[test]
@@ -425,7 +429,8 @@ fn sorting_by_date_again_brings_the_balances_back() {
         column(&harness, "Balance"),
         [
             "1,200.00", "4,400.00", "2,950.00", "2,863.58", "2,858.83", "2,766.73", "2,560.46",
-            "2,512.26", "5,712.26", "5,647.46", // The draft row, which has no balance.
+            "2,512.26", "5,712.26", "5,647.46", "5,558.81", "4,108.81",
+            // The draft row, which has no balance.
             "",
         ]
     );
@@ -753,14 +758,22 @@ fn an_edit_starts_with_the_text_cursor_at_the_end() {
 fn tab_on_the_last_transactions_last_cell_commits_and_edits_the_draft_rows_date() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    // Trattoria Roma's Deposit, the last transaction's last cell.
-    click_cell(&mut harness, "64.80");
+    // November's rent's Deposit, the last transaction's last cell, right of its
+    // Payment. September's rent is the same payment, higher up.
+    harness
+        .query_all_by_role_and_label(Role::Cell, "1,450.00")
+        .last()
+        .expect("the Register shows November's rent")
+        .click();
+    harness.run();
     press(&mut harness, Modifiers::NONE, Key::ArrowRight);
     type_text(&mut harness, "70");
 
     press(&mut harness, Modifiers::NONE, Key::Tab);
 
-    assert_eq!(deposit_of(&harness, "Trattoria Roma"), "70.00");
+    let deposits = column(&harness, "Deposit");
+    // The last transaction's Deposit, above the draft row's.
+    assert_eq!(deposits[deposits.len() - 2], "70.00");
     assert_eq!(editor(&harness, "Date").as_deref(), Some(""));
 }
 

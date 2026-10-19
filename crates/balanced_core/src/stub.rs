@@ -107,7 +107,8 @@ fn date(year: i32, month: u8, day: u8) -> Date<Iso> {
 impl Ledger {
     /// The in-memory data Balanced runs on until it reads data files: accounts in
     /// every sub-group, with one closed account and one hidden one, a category tree,
-    /// a split transaction, and one generated account with 20,000 transactions.
+    /// a split transaction, two future-dated transactions, and one generated account
+    /// with 20,000 transactions.
     pub fn stub() -> Self {
         let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
         let money = |amount: &str| {
@@ -153,6 +154,23 @@ impl Ledger {
                 paid(18, "Acme Corp", StubCategory::Salary, "3200.00"),
                 paid(20, "Trattoria Roma", StubCategory::Restaurants, "-64.80")
                     .memo("Anniversary dinner"),
+                // Scheduled: dated after the tests' fixed today, 14 October 2026, so the
+                // account's Current and Ending balances differ.
+                NewTransaction::new(
+                    date(2026, 10, 30),
+                    "City Power & Light",
+                    StubCategory::Utilities.id(),
+                    money("-88.65"),
+                )
+                .number("1043"),
+                NewTransaction::new(
+                    date(2026, 11, 1),
+                    "Maple Property Management",
+                    StubCategory::Home.id(),
+                    money("-1450.00"),
+                )
+                .number("1044")
+                .memo("November rent"),
             ]);
         // Emptied, then closed: its read-only Register shows its history.
         let old_checking = NewAccount::new(

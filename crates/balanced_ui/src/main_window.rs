@@ -5,7 +5,10 @@ use balanced_core::{
 };
 use balanced_i18n::Localizer;
 use eframe::egui::accesskit::Role;
-use eframe::egui::{self, Button, CentralPanel, Id, Label, MenuBar, Panel, RichText, Sides};
+use eframe::egui::text::LayoutJob;
+use eframe::egui::{
+    self, Align, Button, CentralPanel, FontSelection, Id, Label, MenuBar, Panel, RichText, Sides,
+};
 use icu_calendar::{Date, Iso};
 
 use crate::account_bar::{AccountBar, BarFrame};
@@ -430,8 +433,8 @@ impl MainWindow {
             }
         }
         let accounts = match self.accounts.take() {
-            Some(model) if model.is_current(view, i18n) => model,
-            _ => AccountsModel::new(view, i18n),
+            Some(model) if model.is_current(view, i18n, today) => model,
+            _ => AccountsModel::new(view, i18n, today),
         };
         Panel::top("menu_bar")
             .frame(theme.chrome_frame())
@@ -694,9 +697,9 @@ impl MainWindow {
         self.close_dialog(ctx, |window| &mut window.delete_transaction);
     }
 
-    /// The open account's name and balance above its Register, with + Transaction. A
-    /// closed account's header says it is read-only, and + Transaction is disabled. The
-    /// name and balance clip when the Main view is narrow.
+    /// The open account's name above its Register, with its Current and Ending balances
+    /// and + Transaction on the right. A closed account's header says it is read-only,
+    /// and + Transaction is disabled. The name clips when the Main view is narrow.
     fn context_header(
         ui: &mut egui::Ui,
         i18n: &Localizer,
@@ -706,9 +709,9 @@ impl MainWindow {
         accounts: &AccountsModel,
     ) {
         let account = summary.account();
-        let balance = accounts
-            .balance(account.id())
-            .expect("the model formats a balance for every account in its snapshot");
+        let missing = "the model formats both balances of every account in its snapshot";
+        let current = accounts.current_balance(account.id()).expect(missing);
+        let ending = accounts.balance(account.id()).expect(missing);
         let closed = account.is_closed();
         Sides::new().shrink_left().truncate().show(
             ui,
@@ -719,10 +722,30 @@ impl MainWindow {
                 }
             },
             |ui| {
-                ui.label(balance.styled(theme).heading());
+                // Sides lays the right side out from the right edge, so the last added
+                // shows first.
                 let add = Button::new(fl!(i18n, "register-new-transaction"));
                 if ui.add_enabled(!closed, add).clicked() {
                     commands.send(AppCommand::GoToDraftRow);
+                }
+                for (label, balance) in [
+                    (fl!(i18n, "register-ending-balance"), ending),
+                    (fl!(i18n, "register-current-balance"), current),
+                ] {
+                    // One Label each, so a screen reader reads the name with its amount.
+                    let mut text = LayoutJob::default();
+                    for part in [
+                        RichText::new(format!("{label} ")).small().weak(),
+                        balance.styled(theme).small(),
+                    ] {
+                        part.append_to(
+                            &mut text,
+                            ui.style(),
+                            FontSelection::Default,
+                            Align::Center,
+                        );
+                    }
+                    ui.label(text);
                 }
             },
         );

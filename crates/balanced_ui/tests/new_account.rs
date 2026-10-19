@@ -118,7 +118,11 @@ fn the_wizard_walks_from_type_to_a_new_account_last_in_its_sub_group() {
         .get_by_role_and_label(Role::Button, "Rainy Day")
         .click();
     harness.run();
-    assert!(shows(&harness, "$1,234.56"), "{:?}", labels(&harness));
+    assert!(
+        shows(&harness, "Ending $1,234.56"),
+        "{:?}",
+        labels(&harness)
+    );
 }
 
 #[test]

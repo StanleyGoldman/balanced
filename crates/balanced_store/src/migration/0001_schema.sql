@@ -114,6 +114,18 @@ FROM account AS ac
 LEFT JOIN transaction_amount AS a ON a.account_id = ac.id
 GROUP BY ac.id;
 
+-- Each account's balance at the end of each date it has a transaction on, counting every
+-- transaction dated that day or earlier. An account's balance as of any date is the row
+-- with the latest date on or before it, or 0 when there is none.
+CREATE VIEW daily_balance AS
+SELECT
+    t.account_id,
+    t.date,
+    sum(sum(a.amount)) OVER (PARTITION BY t.account_id ORDER BY t.date) AS balance
+FROM "transaction" AS t
+JOIN transaction_amount AS a ON a.transaction_id = t.id
+GROUP BY t.account_id, t.date;
+
 -- Each Account bar group's total over its open accounts, hidden ones included. Every
 -- group has a row, 0 when it has no open accounts.
 CREATE VIEW group_total AS
