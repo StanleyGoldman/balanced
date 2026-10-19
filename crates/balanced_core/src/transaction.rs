@@ -34,7 +34,7 @@ pub struct SplitLine {
 }
 
 impl SplitLine {
-    pub(crate) fn new(category: CategoryId, memo: &str, amount: Money) -> Self {
+    pub fn new(category: CategoryId, memo: &str, amount: Money) -> Self {
         Self {
             category,
             memo: memo.to_owned(),
@@ -239,7 +239,7 @@ impl NewTransaction {
     }
 
     /// A transaction with `payee`, divided between `lines`.
-    pub(crate) fn split(date: Date<Iso>, payee: &str, lines: Vec<SplitLine>) -> Self {
+    pub fn split(date: Date<Iso>, payee: &str, lines: Vec<SplitLine>) -> Self {
         Self::with_allocation(date, payee, NewAllocation::Split(lines))
     }
 
