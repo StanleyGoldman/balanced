@@ -1,0 +1,30 @@
+# An account's kind is one of the known kinds, its flags are 0 or 1, and no two accounts
+# of one kind share a position.
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES
+    (0, 'Checking', 'checking', 0, 0, 0),
+    (1, 'Savings', 'savings', 0, 1, 0),
+    (2, 'Card', 'credit_card', 0, 0, 1),
+    (3, 'Brokerage', 'investment', 0, 1, 1),
+    (4, 'IRA', 'retirement', 0, 0, 0),
+    (5, 'House', 'asset', 0, 0, 0),
+    (6, 'Mortgage', 'liability', 0, 0, 0)
+
+statement error CHECK constraint failed: account_kind_known
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES (7, 'Cash', 'cash', 0, 0, 0)
+
+statement error CHECK constraint failed: account_kind_known
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES (7, 'Checking', 'Checking', 1, 0, 0)
+
+statement error CHECK constraint failed: account_hidden_flag
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES (7, 'Checking', 'checking', 1, 2, 0)
+
+statement error CHECK constraint failed: account_closed_flag
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES (7, 'Checking', 'checking', 1, 0, -1)
+
+statement error UNIQUE constraint failed: account.kind, account.position
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES (7, 'Second checking', 'checking', 0, 0, 0)
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES (7, 'Second checking', 'checking', 1, 0, 0)

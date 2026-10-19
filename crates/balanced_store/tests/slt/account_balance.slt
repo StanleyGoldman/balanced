@@ -1,0 +1,30 @@
+# An account's balance is the sum of its transactions' amounts, splits included; an
+# account with no transactions has a balance of 0.
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES
+    (0, 'Checking', 'checking', 0, 0, 0),
+    (1, 'Savings', 'savings', 0, 0, 0),
+    (2, 'Empty', 'savings', 1, 0, 0)
+
+statement ok
+INSERT INTO category (id, parent_id, name) VALUES (0, NULL, 'Groceries')
+
+statement ok
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (0, 0, '2026-01-01', NULL, '', '', 'opening_balance', 1000, NULL),
+    (1, 0, '2026-01-02', NULL, 'Grocer', '', 'category', -250, 0),
+    (2, 0, '2026-01-03', NULL, 'Market', '', 'split', NULL, NULL),
+    (3, 1, '2026-01-01', NULL, '', '', 'opening_balance', 40, NULL)
+
+statement ok
+INSERT INTO split_line (transaction_id, position, category_id, memo, amount) VALUES
+    (2, 0, 0, '', -5),
+    (2, 1, 0, '', -6)
+
+query II rowsort
+SELECT account_id, balance FROM account_balance
+----
+0 739
+1 40
+2 0

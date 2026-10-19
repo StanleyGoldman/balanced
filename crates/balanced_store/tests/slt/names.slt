@@ -1,0 +1,26 @@
+# Account and category names can't be blank, and category names are stored trimmed.
+
+statement error CHECK constraint failed: account_name_not_blank
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES (0, '', 'checking', 0, 0, 0)
+
+statement error CHECK constraint failed: account_name_not_blank
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES (0, '   ', 'checking', 0, 0, 0)
+
+# An account name keeps whatever spacing it was given.
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES (0, ' Checking ', 'checking', 0, 0, 0)
+
+statement error CHECK constraint failed: category_name_not_blank
+INSERT INTO category (id, parent_id, name) VALUES (0, NULL, '')
+
+statement error CHECK constraint failed: category_name_not_blank
+INSERT INTO category (id, parent_id, name) VALUES (0, NULL, '  ')
+
+statement error CHECK constraint failed: category_name_trimmed
+INSERT INTO category (id, parent_id, name) VALUES (0, NULL, ' Groceries')
+
+statement error CHECK constraint failed: category_name_trimmed
+INSERT INTO category (id, parent_id, name) VALUES (0, NULL, 'Groceries ')
+
+statement ok
+INSERT INTO category (id, parent_id, name) VALUES (0, NULL, 'Home and garden')

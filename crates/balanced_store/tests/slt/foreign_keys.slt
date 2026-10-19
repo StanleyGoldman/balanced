@@ -1,0 +1,75 @@
+# Every reference must point at a row, and a row still referred to can't be deleted:
+# every foreign key is RESTRICT, so the store deletes child rows itself.
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES
+    (0, 'Checking', 'checking', 0, 0, 0),
+    (1, 'Savings', 'savings', 0, 0, 0)
+
+statement ok
+INSERT INTO category (id, parent_id, name) VALUES (0, NULL, 'Food'), (1, 0, 'Groceries'), (2, NULL, 'Household')
+
+statement ok
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (0, 0, '2026-01-01', NULL, 'Grocer', '', 'category', -1, 2),
+    (1, 0, '2026-01-02', NULL, 'Market', '', 'split', NULL, NULL),
+    (2, 1, '2026-01-01', NULL, '', '', 'opening_balance', 5, NULL)
+
+statement ok
+INSERT INTO split_line (transaction_id, position, category_id, memo, amount) VALUES (1, 0, 1, '', -2)
+
+# References to rows that don't exist.
+
+statement error FOREIGN KEY constraint failed
+INSERT INTO category (id, parent_id, name) VALUES (3, 99, 'Orphan')
+
+statement error FOREIGN KEY constraint failed
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (3, 99, '2026-01-03', NULL, 'Grocer', '', 'category', -1, 2)
+
+statement error FOREIGN KEY constraint failed
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (3, 0, '2026-01-03', NULL, 'Grocer', '', 'category', -1, 99)
+
+statement error FOREIGN KEY constraint failed
+INSERT INTO split_line (transaction_id, position, category_id, memo, amount) VALUES (99, 0, 1, '', -2)
+
+statement error FOREIGN KEY constraint failed
+INSERT INTO split_line (transaction_id, position, category_id, memo, amount) VALUES (1, 1, 99, '', -2)
+
+# Deleting a row still referred to.
+
+statement error FOREIGN KEY constraint failed
+DELETE FROM account WHERE id = 0
+
+statement error FOREIGN KEY constraint failed
+DELETE FROM account WHERE id = 1
+
+statement error FOREIGN KEY constraint failed
+DELETE FROM category WHERE id = 0
+
+statement error FOREIGN KEY constraint failed
+DELETE FROM category WHERE id = 1
+
+statement error FOREIGN KEY constraint failed
+DELETE FROM category WHERE id = 2
+
+statement error FOREIGN KEY constraint failed
+DELETE FROM "transaction" WHERE id = 1
+
+# Children first, and every delete goes through.
+
+statement ok
+DELETE FROM split_line
+
+statement ok
+DELETE FROM "transaction"
+
+statement ok
+DELETE FROM category WHERE id = 1
+
+statement ok
+DELETE FROM category
+
+statement ok
+DELETE FROM account

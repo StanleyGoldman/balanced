@@ -1,0 +1,23 @@
+# Net worth sums every account: hidden and closed ones included.
+
+query I nosort
+SELECT total FROM net_worth
+----
+0
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES
+    (0, 'Checking', 'checking', 0, 0, 0),
+    (1, 'Hidden', 'savings', 0, 1, 0),
+    (2, 'Closed', 'liability', 0, 0, 1)
+
+statement ok
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (0, 0, '2026-01-01', NULL, '', '', 'opening_balance', 1000, NULL),
+    (1, 1, '2026-01-01', NULL, '', '', 'opening_balance', 20, NULL),
+    (2, 2, '2026-01-01', NULL, '', '', 'opening_balance', -300, NULL)
+
+query I nosort
+SELECT total FROM net_worth
+----
+720

@@ -1,0 +1,27 @@
+# A transaction's amount is its own, or for a split, the sum of its lines.
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES (0, 'Checking', 'checking', 0, 0, 0)
+
+statement ok
+INSERT INTO category (id, parent_id, name) VALUES (0, NULL, 'Groceries'), (1, NULL, 'Household')
+
+statement ok
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (0, 0, '2026-01-01', NULL, '', '', 'opening_balance', 100000, NULL),
+    (1, 0, '2026-01-02', '101', 'Grocer', '', 'category', -2550, 0),
+    (2, 0, '2026-01-03', NULL, 'Market', '', 'split', NULL, NULL),
+    (3, 0, '2026-01-04', NULL, 'Market', 'no lines yet', 'split', NULL, NULL)
+
+statement ok
+INSERT INTO split_line (transaction_id, position, category_id, memo, amount) VALUES
+    (2, 0, 0, 'food', -1200),
+    (2, 1, 1, 'soap', -345)
+
+query II rowsort
+SELECT transaction_id, amount FROM transaction_amount
+----
+0 100000
+1 -2550
+2 -1545
+3 0

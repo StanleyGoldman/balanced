@@ -1,0 +1,26 @@
+# Moving an account swaps its position with a neighbour's. UNIQUE is checked row by row,
+# so one UPDATE that swaps both positions fails; parking one row outside the range
+# first lets the swap through.
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES
+    (0, 'First', 'checking', 0, 0, 0),
+    (1, 'Second', 'checking', 1, 0, 0)
+
+statement error UNIQUE constraint failed: account.kind, account.position
+UPDATE account SET position = CASE position WHEN 0 THEN 1 ELSE 0 END WHERE kind = 'checking'
+
+statement ok
+UPDATE account SET position = -1 WHERE id = 0
+
+statement ok
+UPDATE account SET position = 0 WHERE id = 1
+
+statement ok
+UPDATE account SET position = 1 WHERE id = 0
+
+query TI nosort
+SELECT name, position FROM account ORDER BY position
+----
+Second 0
+First 1

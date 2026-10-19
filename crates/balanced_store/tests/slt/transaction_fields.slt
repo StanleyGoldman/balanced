@@ -1,0 +1,37 @@
+# A transaction's date is an ISO date, its number is NULL rather than empty, and its
+# allocation is one of the known kinds.
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES (0, 'Checking', 'checking', 0, 0, 0)
+
+statement ok
+INSERT INTO category (id, parent_id, name) VALUES (0, NULL, 'Groceries')
+
+statement ok
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (0, 0, '2024-02-29', '1001', 'Grocer', '', 'category', -1, 0),
+    (1, 0, '2026-12-31', NULL, 'Grocer', '', 'category', -1, 0)
+
+statement error CHECK constraint failed: transaction_number_not_empty
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (2, 0, '2026-01-01', '', 'Grocer', '', 'category', -1, 0)
+
+statement error CHECK constraint failed: transaction_date_iso
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (2, 0, '2026-02-29', NULL, 'Grocer', '', 'category', -1, 0)
+
+statement error CHECK constraint failed: transaction_date_iso
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (2, 0, '2026-1-05', NULL, 'Grocer', '', 'category', -1, 0)
+
+statement error CHECK constraint failed: transaction_date_iso
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (2, 0, '2026-01-05 12:00', NULL, 'Grocer', '', 'category', -1, 0)
+
+statement error CHECK constraint failed: transaction_date_iso
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (2, 0, 'yesterday', NULL, 'Grocer', '', 'category', -1, 0)
+
+statement error CHECK constraint failed: transaction_allocation_known
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (2, 0, '2026-01-01', NULL, 'Grocer', '', 'transfer', -1, NULL)
