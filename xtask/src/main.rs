@@ -13,6 +13,7 @@ mod ci;
 mod clippy;
 mod deny;
 mod fmt;
+mod layers;
 mod locales;
 mod mutants;
 mod process;
@@ -47,6 +48,7 @@ const TASKS: &[Task] = &[
     snapshots::TASK,
     locales::TASK,
     deny::TASK,
+    layers::TASK,
     typos::TASK,
     todo::TASK,
     adrs::TASK,

@@ -16,6 +16,7 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
   - `snapshots`: the image snapshots, on Linux only (see [testing](testing.md#image-snapshots))
   - `locales`: reports how many messages each translation lacks, without failing (see [i18n](i18n.md#translations))
   - `deny`, which is `cargo deny check`
+  - `layers`: every workspace crate depends only on the crates below it, as `ARCHITECTURE.md` draws them, and only `balanced_store` depends on `rusqlite`. The rule is the `LAYERS` table in `xtask/src/layers.rs`; a new crate goes there and in `ARCHITECTURE.md` in the same PR.
   - `typos`
   - `todo`: every `TODO` or `FIXME` in a `.rs` or `.toml` file is written `TODO(#123)`
   - `adrs`: no two records in `docs/adr/` share a number, and every file there is named `<four digits>-<slug>.md`. Gaps in the numbering are fine.
