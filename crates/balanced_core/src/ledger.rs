@@ -566,7 +566,7 @@ impl Ledger {
                 self.create_category(&name, parent)?
             }
             DomainCommand::DeleteCategory { category } => self.delete_category(category)?,
-            DomainCommand::RestoreCategory { category } => self.restore_category(category),
+            DomainCommand::RestoreCategory { category } => self.restore_category(category)?,
         };
         Ok(Applied { inverse })
     }
@@ -825,6 +825,7 @@ impl Ledger {
         let old = &self.view.accounts[position.account].register[position.entry].transaction;
         let undo = old.undoing(&edit);
         let edited = old.edited(edit)?;
+        let row = transaction_row(self.view.accounts[position.account].account.id(), &edited);
         // The account is rebuilt, since a new amount moves every balance after it, and a
         // new date moves the transaction into date order.
         let moved = edited.date() != old.date();
@@ -838,6 +839,8 @@ impl Ledger {
                     }
                 })?;
         self.replace_account(position.account, summary)?;
+        // The row is checked only now, so the ledger's own errors come first.
+        self.store.update_transaction(&row?)?;
         Ok(DomainCommand::EditTransaction {
             transaction: id,
             edit: undo,
@@ -869,12 +872,14 @@ impl Ledger {
         let id = self.next_transaction;
         let currency = self.view.net_worth.currency();
         let transaction = transaction.into_transaction(id, currency)?;
+        let row = transaction_row(account, &transaction);
         let (summary, ()) = self.view.edit_register(index, currency, |transactions| {
             // The new id is the largest yet, so it goes after the rest of its date.
             let position = transactions.partition_point(|other| other.date() <= transaction.date());
             transactions.insert(position, transaction);
         })?;
         self.replace_account(index, summary)?;
+        self.store.insert_transaction(&row?)?;
         self.next_transaction = id.next();
         Ok(DomainCommand::DeleteTransaction { transaction: id })
     }
@@ -889,6 +894,7 @@ impl Ledger {
                 })?;
         let account = summary.account.id();
         self.replace_account(position.account, summary)?;
+        self.store.delete_transaction(id.raw())?;
         Ok(DomainCommand::RestoreTransaction {
             account,
             transaction,
@@ -914,6 +920,7 @@ impl Ledger {
         let inverse = DomainCommand::DeleteTransaction {
             transaction: transaction.id(),
         };
+        let row = transaction_row(account, &transaction);
         let (summary, ()) = self.view.edit_register(index, currency, |transactions| {
             let key = transaction.register_order();
             let Err(position) =
@@ -927,6 +934,7 @@ impl Ledger {
             transactions.insert(position, transaction);
         })?;
         self.replace_account(index, summary)?;
+        self.store.insert_transaction(&row?)?;
         Ok(inverse)
     }
 
@@ -960,10 +968,12 @@ impl Ledger {
         if let Some(parent) = parent {
             category = category.under(parent);
         }
+        let category = category.into_category(id);
+        self.store.insert_category(&category_row(&category))?;
         self.next_category = id.next();
         let view = Arc::make_mut(&mut self.view);
         // The new id is the highest yet, so the category lands after its parent.
-        view.categories.push(category.into_category(id));
+        view.categories.push(category);
         view.generation = view.generation.next();
         Ok(DomainCommand::DeleteCategory { category: id })
     }
@@ -989,22 +999,24 @@ impl Ledger {
         if has_child || in_a_transaction {
             return Err(DomainError::CategoryInUse { category: id });
         }
+        self.store.delete_category(id.raw())?;
         let view = Arc::make_mut(&mut self.view);
         let category = view.categories.remove(index);
         view.generation = view.generation.next();
         Ok(DomainCommand::RestoreCategory { category })
     }
 
-    fn restore_category(&mut self, category: Category) -> DomainCommand {
+    fn restore_category(&mut self, category: Category) -> Result<DomainCommand, DomainError> {
         let id = category.id();
-        let view = Arc::make_mut(&mut self.view);
         // Categories stay in id order, which keeps each after the one it sits under.
-        let Err(position) = view.categories.binary_search_by_key(&id, Category::id) else {
+        let Err(position) = self.view.categories.binary_search_by_key(&id, Category::id) else {
             panic!("restored {id:?}, which the ledger still holds");
         };
+        self.store.insert_category(&category_row(&category))?;
+        let view = Arc::make_mut(&mut self.view);
         view.categories.insert(position, category);
         view.generation = view.generation.next();
-        DomainCommand::DeleteCategory { category: id }
+        Ok(DomainCommand::DeleteCategory { category: id })
     }
 
     /// Puts `summary` in place of the account at `index`, recounting Net Worth, and

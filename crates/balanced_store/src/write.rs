@@ -117,18 +117,18 @@ impl Store {
         Ok(())
     }
 
+    /// Deletes category `id`. The file refuses it while a transaction, a split line or
+    /// another category uses it.
+    pub fn delete_category(&self, id: u32) -> Result<(), StoreError> {
+        self.connection
+            .execute("DELETE FROM category WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
     /// Adds a transaction, with its split lines.
     pub fn insert_transaction(&self, transaction: &TransactionRow) -> Result<(), StoreError> {
-        let connection = &self.connection;
-        let (allocation, amount, category_id) = match &transaction.allocation {
-            AllocationRow::OpeningBalance { amount } => ("opening_balance", Some(*amount), None),
-            AllocationRow::Category {
-                category_id,
-                amount,
-            } => ("category", Some(*amount), Some(*category_id)),
-            AllocationRow::Split(_) => ("split", None, None),
-        };
-        connection
+        let (allocation, amount, category_id) = allocation_columns(&transaction.allocation);
+        self.connection
             .prepare_cached(
                 "INSERT INTO \"transaction\"
                  (id, account_id, date, number, payee, memo, allocation, amount, category_id)
@@ -145,8 +145,29 @@ impl Store {
                 amount,
                 category_id,
             ])?;
+        self.insert_split_lines(transaction)
+    }
+
+    /// Replaces transaction `transaction.id`, with its split lines, by `transaction`.
+    pub fn update_transaction(&self, transaction: &TransactionRow) -> Result<(), StoreError> {
+        // Ids are inserted explicitly, so the row goes back in under its own id.
+        self.delete_transaction(transaction.id)?;
+        self.insert_transaction(transaction)
+    }
+
+    /// Deletes transaction `id` with its split lines.
+    pub fn delete_transaction(&self, id: u32) -> Result<(), StoreError> {
+        self.connection
+            .execute("DELETE FROM split_line WHERE transaction_id = ?1", [id])?;
+        self.connection
+            .execute("DELETE FROM \"transaction\" WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Adds `transaction`'s split lines, if it is split.
+    fn insert_split_lines(&self, transaction: &TransactionRow) -> Result<(), StoreError> {
         if let AllocationRow::Split(lines) = &transaction.allocation {
-            let mut insert = connection.prepare_cached(
+            let mut insert = self.connection.prepare_cached(
                 "INSERT INTO split_line (transaction_id, position, category_id, memo, amount)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             )?;
@@ -161,5 +182,17 @@ impl Store {
             }
         }
         Ok(())
+    }
+}
+
+/// The `allocation`, `amount` and `category_id` columns that hold `allocation`.
+fn allocation_columns(allocation: &AllocationRow) -> (&'static str, Option<i64>, Option<u32>) {
+    match allocation {
+        AllocationRow::OpeningBalance { amount } => ("opening_balance", Some(*amount), None),
+        AllocationRow::Category {
+            category_id,
+            amount,
+        } => ("category", Some(*amount), Some(*category_id)),
+        AllocationRow::Split(_) => ("split", None, None),
     }
 }
