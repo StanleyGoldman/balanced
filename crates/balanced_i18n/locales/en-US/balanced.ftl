@@ -234,6 +234,8 @@ dialog-data-file-unreadable = { -brand-name } couldn't read “{ $file }”.
 dialog-data-file-not-created = { -brand-name } couldn't create “{ $file }”.
 # New Data File… picked the data file that is open.
 dialog-data-file-open-not-replaced = “{ $file }” is the data file you have open, so a new one can't replace it.
+# The name the save picker suggests for a new data file.
+dialog-data-file-suggested-name = { -brand-name }.balanced
 # The file type the native file picker lists, for files ending in .balanced.
 dialog-data-file-filter = { -brand-name } data files
 

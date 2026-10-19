@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
-use balanced_core::{CurrencyCode, Ledger};
+use balanced_core::{CurrencyCode, Ledger, OpenError};
 use balanced_i18n::Localizer;
 use eframe::egui;
 
@@ -147,21 +147,7 @@ impl App {
                 .refuse_data_file(ctx, DataFileRefusal::open_file_not_replaced(&path));
             return;
         }
-        // The native picker has asked before replacing a file already at `path`.
-        match fs::remove_file(&path) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => {
-                tracing::warn!(
-                    ?error,
-                    ?path,
-                    "removing the file a new data file replaces failed"
-                );
-                self.main_window
-                    .refuse_data_file(ctx, DataFileRefusal::not_created(&path));
-                return;
-            }
-            Ok(()) | Err(_) => {}
-        }
-        match Ledger::create(&path, usd()) {
+        match create_replacing(&path) {
             Ok(ledger) => self.switch_data_file(ledger, path),
             Err(error) => {
                 tracing::warn!(?error, ?path, "creating the data file failed");
@@ -329,6 +315,53 @@ impl eframe::App for App {
         };
         self.main_window.show(ui, &frame);
     }
+}
+
+/// Creates an empty data file at `path`, replacing any file there, since the native
+/// picker has asked before replacing it. The new file is made beside it and then moved
+/// into place, so a failure leaves the old file as it was.
+fn create_replacing(path: &Path) -> Result<Ledger, CreateError> {
+    let staging = beside(path, ".new");
+    remove_if_present(&staging)?;
+    // The ledger holds the file it creates locked, so it closes before the move.
+    drop(Ledger::create(&staging, usd())?);
+    if let Err(error) = fs::rename(&staging, path) {
+        // Nothing uses the staging file, and the next New Data File… there replaces
+        // it, so failing to remove it loses nothing.
+        if let Err(error) = fs::remove_file(&staging) {
+            tracing::warn!(?error, ?staging, "removing an unused new data file failed");
+        }
+        return Err(error.into());
+    }
+    // A journal left beside the replaced file would roll its changes into the new one.
+    for suffix in ["-journal", "-wal", "-shm"] {
+        remove_if_present(&beside(path, suffix))?;
+    }
+    Ok(Ledger::open(path)?)
+}
+
+/// The path of the file beside `path` whose name is `path`'s with `suffix` added.
+fn beside(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+/// Removes the file at `path`, if there is one.
+fn remove_if_present(path: &Path) -> io::Result<()> {
+    match fs::remove_file(path) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        Ok(()) | Err(_) => Ok(()),
+    }
+}
+
+/// Why a new data file couldn't be created.
+#[derive(Debug, thiserror::Error)]
+enum CreateError {
+    #[error("moving or removing a file beside the new data file failed")]
+    Io(#[from] io::Error),
+    #[error("the new data file couldn't be created or opened")]
+    Ledger(#[from] OpenError),
 }
 
 /// The currency of a new data file. Balanced shows amounts in US dollars only, so far.

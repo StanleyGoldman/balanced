@@ -11,9 +11,6 @@ use rfd::{AsyncFileDialog, FileHandle};
 use crate::command::{AppCommand, CommandSender};
 use crate::i18n::fl;
 
-/// The name the save picker suggests for a new data file.
-const SUGGESTED_NAME: &str = "Balanced.balanced";
-
 /// The native file picker File → New Data File… or File → Open Data File… shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DataFilePicker {
@@ -34,7 +31,9 @@ impl DataFilePicker {
             AsyncFileDialog::new().add_filter(fl!(i18n, "dialog-data-file-filter"), &["balanced"]);
         match self {
             Self::New => wait_for(
-                picker.set_file_name(SUGGESTED_NAME).save_file(),
+                picker
+                    .set_file_name(fl!(i18n, "dialog-data-file-suggested-name"))
+                    .save_file(),
                 AppCommand::NewDataFile,
                 commands,
             ),
@@ -43,7 +42,7 @@ impl DataFilePicker {
     }
 }
 
-/// Waits for the open picker on a worker thread, and sends `command` with the path it
+/// Waits for `picked`, a picker already showing, on a worker thread, and sends `command` with the path it
 /// returns, if any, through `commands`.
 fn wait_for(
     picked: impl Future<Output = Option<FileHandle>> + Send + 'static,

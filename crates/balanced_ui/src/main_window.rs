@@ -235,13 +235,30 @@ impl MainWindow {
     /// the file's contents, and the Status bar's message. The new file's snapshots
     /// count generations afresh, so a cached model could pass as current.
     pub(crate) fn data_file_switched(&mut self) {
-        self.open_register = None;
-        self.accounts = None;
-        self.delete_transaction = None;
-        self.new_account = None;
-        self.new_category = None;
-        self.manage_accounts = None;
-        self.status = None;
+        let Self {
+            tab: _,
+            status,
+            account_bar: _,
+            accounts,
+            open_register,
+            column_widths: _,
+            delete_transaction,
+            new_account,
+            new_category,
+            manage_accounts,
+            // The Preferences, and a refusal shown meanwhile, belong to no one file.
+            preferences: _,
+            data_file_refusal: _,
+            focus_return: _,
+            menu_nav: _,
+        } = self;
+        *status = None;
+        *accounts = None;
+        *open_register = None;
+        *delete_transaction = None;
+        *new_account = None;
+        *new_category = None;
+        *manage_accounts = None;
     }
 
     /// Opens the Dialog saying why a data file was refused, over any Dialog already

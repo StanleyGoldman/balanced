@@ -115,5 +115,7 @@ dialog-data-file-unreadable = { -brand-name } konnte „{ $file }“ nicht lesen
 dialog-data-file-not-created = { -brand-name } konnte „{ $file }“ nicht erstellen.
 # Coined.
 dialog-data-file-open-not-replaced = „{ $file }“ ist die geöffnete Datendatei und kann nicht durch eine neue ersetzt werden.
+# A file name, the same in every language.
+dialog-data-file-suggested-name = { -brand-name }.balanced
 # Coined from GnuCash's "Nur Datenfiles".
 dialog-data-file-filter = { -brand-name }-Datendateien

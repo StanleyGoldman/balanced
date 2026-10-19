@@ -124,19 +124,24 @@ fn undo_after_switching_back_undoes_that_files_last_change() {
     assert_eq!(accounts_in(&business), ["Payroll", "Reserve"]);
 }
 
-/// Opens the file at `path`, expecting a refusal, and checks the refusal Dialog says
-/// `message` and leaves the stub open: its accounts stay in the Account bar, and OK
-/// closes the Dialog.
+/// With a data file open, opens the file at `path`, expecting a refusal, and checks
+/// the refusal Dialog says `message` and leaves the open file open: its accounts stay
+/// in the Account bar, OK closes the Dialog, and Undo still undoes its last change.
 fn assert_refused(path: &Path, message: &str) {
+    let dir = tempfile::tempdir().expect("the temp dir is writable");
+    let open_file = data_file(&dir, "Open.balanced", &["Everyday", "Savings"]);
     let mut harness = app();
+    open(&mut harness, &open_file);
 
     open(&mut harness, path);
 
     harness.get_by_label(message);
-    assert!(listed(&harness, "Joint Checking"));
+    assert!(listed(&harness, "Savings"));
     harness.get_by_role_and_label(Role::Button, "OK").click();
     harness.run();
     assert!(harness.query_by_label(message).is_none());
+    undo(&mut harness);
+    assert!(!listed(&harness, "Savings"));
 }
 
 #[test]
@@ -301,4 +306,17 @@ fn the_file_menu_offers_new_and_open_data_file() {
 
     harness.get_by_role_and_label(Role::Button, "New Data File…");
     harness.get_by_role_and_label(Role::Button, "Open Data File…");
+}
+
+#[test]
+fn a_new_data_file_clears_the_journal_the_replaced_file_left() {
+    let dir = tempfile::tempdir().expect("the temp dir is writable");
+    let old = data_file(&dir, "Household.balanced", &["Everyday"]);
+    let journal = dir.path().join("Household.balanced-journal");
+    std::fs::write(&journal, "an interrupted change").expect("the temp dir is writable");
+    let mut harness = app();
+
+    create(&mut harness, &old);
+
+    assert!(!journal.exists());
 }

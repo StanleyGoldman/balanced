@@ -40,7 +40,7 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 | `deny.toml` | Licences, advisories, duplicate versions and the egui layer ban |
 | `.cargo/mutants.toml` | Which crates cargo-mutants mutates, and its exclusions |
 | `.config/nextest.toml` | The one nextest profile, used by `test`, `snapshots`, `locales` and cargo-mutants: no fail-fast, no retries, a hung test killed after 3 minutes |
-| `.typos.toml` | Words typos accepts, each with a comment |
+| `.typos.toml` | Words typos accepts, each with a comment, and the translations it skips |
 
 - To add a lint or a ban, put it in config, not prose. A ban's `reason` names the replacement to use.
 - A ban path into a crate that isn't a dependency yet resolves silently. Once the crate is a dependency, clippy warns if a path doesn't resolve, so check the output after adding a crate that `clippy.toml` mentions.
