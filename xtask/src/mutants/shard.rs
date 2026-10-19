@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! `cargo xtask mutants-shard`: the nightly CI run that mutation-tests one shard of
 //! every mutant on `main` and reconciles the `mutant` issues (ADR 0002).
 

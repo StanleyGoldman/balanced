@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The New Category Dialog's form. Its name is read as a path: the text after the last
 //! `:` names the new category, and the text before it the category it goes under.
 

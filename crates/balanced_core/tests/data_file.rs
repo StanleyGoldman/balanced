@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! `Ledger` over a data file: what it writes is what a reopen reads back.
 
 use std::path::{Path, PathBuf};

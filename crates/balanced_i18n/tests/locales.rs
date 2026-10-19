@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Checks every translation against the `en-US` source.
 //!
 //! Fails on parse errors, on ids, attributes and terms a translation has but `en-US`

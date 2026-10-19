@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Transactions: what was paid or received, when, to whom, and which categories the
 //! amount went to.
 

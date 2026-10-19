@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! What a Register combobox lists: the [`Choices`] a field offers, and the rows of its
 //! list for the text typed so far.
 

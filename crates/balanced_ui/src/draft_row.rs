@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`Draft`]: the transaction typed into the draft row at the bottom of a Register,
 //! before it is added.
 

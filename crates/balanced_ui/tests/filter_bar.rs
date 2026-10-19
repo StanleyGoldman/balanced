@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The filter bar above the Register, which narrows its rows by search text, date
 //! range and transaction type, driven through the AccessKit tree the way a user
 //! drives it.

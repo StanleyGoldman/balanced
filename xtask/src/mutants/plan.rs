@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The mutant-run plan: what a CI mutant run does to the `mutant` issues, decided from
 //! the run's outcomes, every mutant at the tested commit and the open issues. The
 //! GitHub client only carries the actions out. See ADR 0002.

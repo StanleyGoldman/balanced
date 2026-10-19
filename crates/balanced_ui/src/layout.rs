@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`Layout`]: how the Main window was laid out, kept in eframe storage between runs.
 //! It holds the Account bar's width and fold, its folded sections and the Register's
 //! column widths, and nothing else: no financial data and no navigation.

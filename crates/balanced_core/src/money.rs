@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`Money`]: an exact amount in one currency, and the [`CurrencyCode`] it is in.
 
 use std::fmt;

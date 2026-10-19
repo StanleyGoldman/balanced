@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Reading a whole data file, with the derived numbers from its views.
 
 use std::collections::HashMap;

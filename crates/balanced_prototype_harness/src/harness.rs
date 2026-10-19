@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 #![expect(
     clippy::disallowed_methods,
     reason = "the harness times prototype sessions, screenshots and frames by the wall clock; the clock ban is for the app, whose `Clock` lives in `balanced_ui`"

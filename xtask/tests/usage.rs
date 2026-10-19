@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! `cargo xtask` with no task lists every task.
 
 use std::process::Command;
@@ -15,7 +17,7 @@ fn no_task_prints_the_usage_and_fails() {
 usage: cargo xtask <task>
 
 tasks:
-  ci                                 run fmt, clippy, test, snapshots, locales, deny, layers, typos, todo and adrs, stopping at the first failure
+  ci                                 run fmt, clippy, test, snapshots, locales, deny, layers, typos, todo, spdx, adrs and dco, stopping at the first failure
   fmt                                check formatting
   clippy                             lint with warnings denied
   test                               run every test except the image snapshots
@@ -25,7 +27,9 @@ tasks:
   layers                             require workspace crates to depend only on the layers below them
   typos                              spell-check the repo
   todo                               require every TODO and FIXME to name an issue, as TODO(#123)
+  spdx                               require every Rust source file to open with the SPDX license header
   adrs [--against <ref>]             require every decision record to have its own number
+  dco                                require a Signed-off-by trailer on every non-merge commit since the DCO began
   mutants [<base>] [--re <pattern>]  mutation-test code changed since <base> (default origin/main), or with --re alone every mutant it matches; advisory
   mutants-shard [--dry-run]          a CI task: mutation-test tonight's shard of every mutant and update the mutant issues, or with --dry-run print the updates; by hand, use mutants
   mutants-landed [--dry-run]         a CI task: mutation-test the diff the pull request that landed HEAD brought into main and update the mutant issues, or with --dry-run print the updates; by hand, use mutants

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Observation and remote control for egui prototypes, per `docs/agents/prototypes.md`.
 //!
 //! A prototype (an example under some crate's `examples/`) takes this crate as a

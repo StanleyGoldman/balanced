@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The undo log: the entries on its two stacks, as `read` returns them and as the
 //! `undo_entry` rows hold them.
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The Main window, driven through the AccessKit tree the way a user drives it.
 
 use balanced_core::Ledger;

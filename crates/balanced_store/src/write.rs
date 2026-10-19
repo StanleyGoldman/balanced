@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Writing rows. Each write joins the transaction [`Store::begin`] started, if any.
 
 use rusqlite::params;

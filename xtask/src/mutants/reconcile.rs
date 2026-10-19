@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! A CI mutant run: test the mutants cargo-mutants is pointed at, then bring the
 //! `mutant` issues in line with what it found (ADR 0002). `mutants-shard` and
 //! `mutants-landed` differ only in which mutants they point it at.

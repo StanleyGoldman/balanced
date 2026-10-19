@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! `cargo xtask` behaves the same from any directory in the workspace.
 
 use std::process::Command;

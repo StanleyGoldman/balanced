@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Keyboard focus and Menu bar navigation, driven through the AccessKit tree the way a
 //! keyboard user drives it.
 

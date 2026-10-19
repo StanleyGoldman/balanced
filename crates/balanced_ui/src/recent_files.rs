@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`RecentFiles`]: the data files opened lately on this computer, and
 //! [`RecentFilesFile`], which keeps them in `recent-files.toml`.
 

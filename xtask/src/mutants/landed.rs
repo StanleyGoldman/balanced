@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! `cargo xtask mutants-landed`: the post-merge CI run that mutation-tests the diff a
 //! pull request brought into `main` and reconciles the `mutant` issues (ADR 0002).
 

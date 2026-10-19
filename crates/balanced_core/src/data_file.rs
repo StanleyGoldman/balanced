@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! A [`Ledger`] over a data file: creating and opening one, and converting between the
 //! domain's types and the store's rows.
 

@@ -42,10 +42,20 @@ exceptions = [
   # `directories`, whose `dirs-sys` uses it. MPL-2.0 is file-level copyleft, so it doesn't
   # reach Balanced's own code.
   { crate = "option-ext", allow = ["MPL-2.0"] },
+  # Balanced's own crates, under its own license (ADR 0009). The expression is allowed crate
+  # by crate rather than in `allow`, so a GPL dependency still fails. A new workspace crate
+  # gets a line here.
+  { crate = "balanced", allow = ["GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"] },
+  { crate = "balanced_core", allow = ["GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"] },
+  { crate = "balanced_i18n", allow = ["GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"] },
+  { crate = "balanced_prototype_harness", allow = ["GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"] },
+  { crate = "balanced_store", allow = ["GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"] },
+  { crate = "balanced_ui", allow = ["GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"] },
+  { crate = "xtask", allow = ["GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"] },
 ]
 
 [licenses.private]
-ignore = true  # workspace crates are `publish = false` and carry no licence
+ignore = false  # check Balanced's own crates too, against the exceptions above
 
 [bans]
 multiple-versions = "deny"  # catches a split egui/accesskit graph before it becomes a trait error

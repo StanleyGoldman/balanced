@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Tools → Preferences: each group's Preferences, their live preview, OK and Cancel,
 //! and the preferences file, driven through the AccessKit tree the way a user drives
 //! it.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The Main window's layout across a restart: saved by one App, restored by the next.
 
 use std::collections::HashMap;

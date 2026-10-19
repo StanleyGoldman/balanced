@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`RegisterFilter`]: which of an account's transactions the filter bar lets the
 //! Register show.
 

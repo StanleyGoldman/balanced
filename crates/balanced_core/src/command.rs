@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`DomainCommand`]s, the only way the ledger changes, and the [`DomainError`]s that
 //! reject them.
 

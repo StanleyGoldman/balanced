@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Creating a category from a Register Category cell through the New Category Dialog,
 //! and the keys and placement every heavy Dialog shares, driven through the AccessKit
 //! tree the way a user drives it.

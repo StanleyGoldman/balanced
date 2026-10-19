@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The Account bar: the accounts in their fixed groups with their balances, group
 //! headings that fold, and a footer with Net Worth and + Add Account.
 

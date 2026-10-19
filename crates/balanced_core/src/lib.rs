@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The financial domain: accounts, transactions, money and the `Ledger` that applies
 //! `DomainCommand`s. Knows nothing about egui.
 

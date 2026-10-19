@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The GitHub calls a CI mutant run makes: reading the open `mutant` issues and
 //! carrying out the plan's actions. It talks to the REST API through `curl`, which
 //! the CI image already has, so xtask needs no HTTP or TLS crates.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Manage Accounts: a heavy Dialog listing every account, grouped as the Account bar
 //! groups them, where each can be renamed, hidden, closed or reopened, deleted, and
 //! moved within its sub-group. Nothing changes until OK, which sends every change as

@@ -34,7 +34,7 @@ Preferences are saved to the OS config directory, such as `~/.config/balanced/` 
 cargo xtask ci
 ```
 
-This runs every check CI runs: formatting, clippy, tests, image snapshots, locales, `cargo deny`, typos, TODOs and ADR numbering. Run `cargo xtask` with no task to list each check on its own.
+This runs every check CI runs: formatting, clippy, tests, image snapshots, locales, `cargo deny`, typos, TODOs, SPDX headers, ADR numbering and commit sign-offs. Run `cargo xtask` with no task to list each check on its own.
 
 Some checks need tools beyond the toolchain: [cargo-nextest](https://nexte.st), [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) and [typos](https://github.com/crate-ci/typos), plus [cargo-mutants](https://mutants.rs) for `cargo xtask mutants`. The image snapshots draw with Vulkan, so a machine without a GPU needs a software driver such as Mesa's lavapipe (`mesa-vulkan-drivers`). `.woodpecker/Dockerfile` pins the versions CI uses.
 
@@ -44,3 +44,14 @@ Some checks need tools beyond the toolchain: [cargo-nextest](https://nexte.st), 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md): the crates and the rules between them.
 - [`CODING_STANDARDS.md`](CODING_STANDARDS.md): the rules for Rust code.
 - [`docs/adr/`](docs/adr/): architecture decision records.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md): the license your contribution is under, and signing off commits.
+
+## License
+
+Balanced is licensed under the GNU General Public License, version 3 or later, with the Balanced Plugin Exception (`GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception`):
+
+- [`LICENSE`](LICENSE): the GPL, version 3.
+- [`LICENSE-EXCEPTION.md`](LICENSE-EXCEPTION.md): the plugin exception, which lets an extension that uses only Balanced's designated extension interface be distributed under any license. It is a draft awaiting legal review.
+- [`TRADEMARKS.md`](TRADEMARKS.md): the "Balanced" name and logo aren't covered by the license.
+
+[ADR 0009](docs/adr/0009-gpl-3-or-later-with-a-plugin-exception-and-dco-sign-off.md) records why.

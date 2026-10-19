@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The App in German text with `de-DE` formatting: amounts and dates on screen and
 //! typed into fields follow the formatting locale.
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Translated messages and locale-aware formatting. Knows nothing about egui.
 //!
 //! Text comes from the Fluent files in `locales/<language>/balanced.ftl`, and

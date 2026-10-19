@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Messages and attributes a translation lacks, which Fluent fills from `en-US`
 //! without a word.
 

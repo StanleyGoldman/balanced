@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The [`Ledger`]: the financial data, and the snapshots windows read it through.
 
 use std::collections::HashMap;
