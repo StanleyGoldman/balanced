@@ -32,18 +32,34 @@ struct Package {
 #[derive(Debug, Deserialize)]
 struct Dependency {
     name: String,
-    /// `None` for a normal dependency, else `"dev"` or `"build"`.
-    kind: Option<String>,
+    /// `None` for a normal dependency.
+    kind: Option<Kind>,
+}
+
+/// How a dependency is used, when it isn't a normal dependency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Kind {
+    /// For tests, examples and benches only.
+    Dev,
+    /// For the build script only.
+    Build,
 }
 
 /// One workspace crate and the workspace crates it may depend on.
 struct Layer {
     name: &'static str,
-    /// Allowed as any kind of dependency: every crate below this one.
-    below: &'static [&'static str],
+    /// The crates directly below this one. It may also depend on anything below them.
+    uses: &'static [&'static str],
     /// Allowed only as a dev-dependency, which is how examples take the harness.
     dev_only: &'static [&'static str],
 }
+
+/// The crate that owns all SQL, and the only one that may use [`SQLITE`].
+const STORE: &str = "balanced_store";
+
+/// The SQLite binding.
+const SQLITE: &str = "rusqlite";
 
 /// Prototype tooling, which only examples use.
 const HARNESS: &str = "balanced_prototype_harness";
@@ -53,50 +69,58 @@ const HARNESS: &str = "balanced_prototype_harness";
 const LAYERS: &[Layer] = &[
     Layer {
         name: "balanced",
-        below: &[
-            "balanced_ui",
-            "balanced_core",
-            "balanced_store",
-            "balanced_i18n",
-        ],
+        uses: &["balanced_ui"],
         dev_only: &[HARNESS],
     },
     Layer {
         name: "balanced_ui",
-        below: &["balanced_core", "balanced_store", "balanced_i18n"],
+        uses: &["balanced_core", "balanced_i18n"],
         dev_only: &[HARNESS],
     },
     Layer {
         name: "balanced_core",
-        below: &["balanced_store"],
+        uses: &[STORE],
         dev_only: &[],
     },
     Layer {
-        name: "balanced_store",
-        below: &[],
+        name: STORE,
+        uses: &[],
         dev_only: &[],
     },
     Layer {
         name: "balanced_i18n",
-        below: &[],
+        uses: &[],
         dev_only: &[],
     },
     Layer {
         name: HARNESS,
-        below: &[],
+        uses: &[],
         dev_only: &[],
     },
     Layer {
         name: "xtask",
-        below: &[],
+        uses: &[],
         dev_only: &[],
     },
 ];
 
-/// The SQLite binding, which only [`STORE`] may use: it owns all SQL.
-const SQLITE: &str = "rusqlite";
+impl Layer {
+    fn named(name: &str) -> Option<&'static Self> {
+        LAYERS.iter().find(|layer| layer.name == name)
+    }
 
-const STORE: &str = "balanced_store";
+    /// Whether `name` sits anywhere below this layer.
+    fn is_above(&self, name: &str) -> bool {
+        self.uses.iter().any(|&used| {
+            used == name || Self::named(used).is_some_and(|layer| layer.is_above(name))
+        })
+    }
+
+    fn may_depend_on(&self, dependency: &Dependency) -> bool {
+        let name = dependency.name.as_str();
+        self.is_above(name) || (dependency.kind == Some(Kind::Dev) && self.dev_only.contains(&name))
+    }
+}
 
 pub(crate) fn run() -> Result<()> {
     let json = process::output(
@@ -118,20 +142,16 @@ fn check(packages: &[Package]) -> Result<()> {
         .collect();
     let mut violations = Vec::new();
     for package in packages {
-        let layer = LAYERS.iter().find(|layer| layer.name == package.name);
-        if layer.is_none() {
+        let Some(layer) = Layer::named(&package.name) else {
             violations.push(format!(
                 "{} has no layer: add it to LAYERS in xtask/src/layers.rs and to ARCHITECTURE.md",
                 package.name
             ));
-        }
+            continue;
+        };
         for dependency in &package.dependencies {
             let name = dependency.name.as_str();
-            let allowed = layer.is_some_and(|layer| {
-                layer.below.contains(&name)
-                    || (dependency.kind.as_deref() == Some("dev") && layer.dev_only.contains(&name))
-            });
-            if members.contains(&name) && !allowed {
+            if members.contains(&name) && !layer.may_depend_on(dependency) {
                 violations.push(format!("{} depends on {name}", package.name));
             }
             if name == SQLITE && package.name != STORE {
@@ -153,16 +173,16 @@ fn check(packages: &[Package]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Dependency, Package, check};
+    use super::{Dependency, Kind, Package, check};
 
-    fn package(name: &str, dependencies: &[(&str, Option<&str>)]) -> Package {
+    fn package(name: &str, dependencies: &[(&str, Option<Kind>)]) -> Package {
         Package {
             name: name.to_owned(),
             dependencies: dependencies
                 .iter()
                 .map(|&(name, kind)| Dependency {
                     name: name.to_owned(),
-                    kind: kind.map(str::to_owned),
+                    kind,
                 })
                 .collect(),
         }
@@ -180,7 +200,41 @@ mod tests {
             package("balanced_ui", &[("balanced_core", None)]),
         ];
 
-        assert!(failure(&packages).contains("balanced_core depends on balanced_ui"));
+        let failure = failure(&packages);
+
+        assert_eq!(
+            failure,
+            "the workspace breaks the crate layers in ARCHITECTURE.md:\n\
+             balanced_core depends on balanced_ui"
+        );
+    }
+
+    #[test]
+    fn an_edge_between_siblings_fails() {
+        let packages = [
+            package("balanced_i18n", &[("balanced_core", None)]),
+            package("balanced_core", &[]),
+        ];
+
+        let failure = failure(&packages);
+
+        assert_eq!(
+            failure,
+            "the workspace breaks the crate layers in ARCHITECTURE.md:\n\
+             balanced_i18n depends on balanced_core"
+        );
+    }
+
+    #[test]
+    fn a_crate_may_skip_a_layer() {
+        let packages = [
+            package("balanced_ui", &[("balanced_store", None)]),
+            package("balanced_store", &[]),
+        ];
+
+        let result = check(&packages);
+
+        result.expect("balanced_store sits below balanced_ui");
     }
 
     #[test]
@@ -192,35 +246,57 @@ mod tests {
 
         let failure = failure(&packages);
 
-        assert!(failure.contains("balanced_core depends on rusqlite"));
-        assert!(!failure.contains("balanced_store depends on rusqlite"));
+        assert_eq!(
+            failure,
+            "the workspace breaks the crate layers in ARCHITECTURE.md:\n\
+             balanced_core depends on rusqlite; only balanced_store may"
+        );
     }
 
     #[test]
-    fn the_harness_is_allowed_only_as_a_dev_dependency() {
-        let harness = || package("balanced_prototype_harness", &[]);
-
-        check(&[
+    fn examples_may_take_the_harness_as_a_dev_dependency() {
+        let packages = [
             package(
                 "balanced_ui",
-                &[("balanced_prototype_harness", Some("dev"))],
+                &[("balanced_prototype_harness", Some(Kind::Dev))],
             ),
-            harness(),
-        ])
-        .expect("examples may take the harness");
-        assert!(
-            failure(&[
-                package("balanced_ui", &[("balanced_prototype_harness", None)]),
-                harness(),
-            ])
-            .contains("balanced_ui depends on balanced_prototype_harness")
+            package("balanced_prototype_harness", &[]),
+        ];
+
+        let result = check(&packages);
+
+        result.expect("a dev-dependency on the harness is allowed");
+    }
+
+    #[test]
+    fn the_harness_as_a_normal_dependency_fails() {
+        let packages = [
+            package("balanced_ui", &[("balanced_prototype_harness", None)]),
+            package("balanced_prototype_harness", &[]),
+        ];
+
+        let failure = failure(&packages);
+
+        assert_eq!(
+            failure,
+            "the workspace breaks the crate layers in ARCHITECTURE.md:\n\
+             balanced_ui depends on balanced_prototype_harness"
         );
     }
 
     #[test]
     fn a_crate_missing_from_the_rule_fails() {
-        assert!(
-            failure(&[package("balanced_reports", &[])]).contains("balanced_reports has no layer")
+        let packages = [
+            package("balanced_reports", &[("balanced_core", None)]),
+            package("balanced_core", &[]),
+        ];
+
+        let failure = failure(&packages);
+
+        assert_eq!(
+            failure,
+            "the workspace breaks the crate layers in ARCHITECTURE.md:\n\
+             balanced_reports has no layer: add it to LAYERS in xtask/src/layers.rs and to ARCHITECTURE.md"
         );
     }
 }
