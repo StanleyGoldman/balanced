@@ -15,7 +15,13 @@ description: Build the CI image, expose the Actions cache, restore the cargo reg
 runs:
   using: composite
   steps:
-    - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+    - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      with:
+        script: |
+          core.setSecret(process.env.ACTIONS_RUNTIME_TOKEN);
+          for (const name of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_RESULTS_URL', 'ACTIONS_CACHE_URL']) {
+            if (process.env[name]) core.exportVariable(name, process.env[name]);
+          }
     - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
     # Without the build summary and record the action adds by default: the
     # step's log already shows a failing build, and the jobs write summaries

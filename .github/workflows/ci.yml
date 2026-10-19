@@ -38,8 +38,6 @@ on:
 
 permissions:
   contents: read
-  # The `changes` job lists a pull request's files through the API.
-  pull-requests: read
 
 # A new push to a pull request cancels the run on its old head. Every run on
 # `main` finishes, so each merge is known green or red.
@@ -68,26 +66,36 @@ env:
 jobs:
   # Whether anything but prose changed: Markdown anywhere, `docs/`, or agent
   # tooling under `.claude/`. The list names what to skip, not what to build,
-  # so a file type nobody listed builds. A manual run has no changed files and
-  # skips the filter, so `code` is empty and everything runs. The workflow
-  # decides this, never `cargo xtask ci`, which doesn't look at the diff.
+  # so a file type nobody listed builds, and a diff git can't take counts as
+  # code. A manual run has no changed files and skips the filter, so `code` is
+  # empty and everything runs. The workflow decides this, never
+  # `cargo xtask ci`, which doesn't look at the diff.
   changes:
     runs-on: ubuntu-26.04
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
+      # Full history, for the merge base of a pull request's two ends.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # A pull request's whole diff from its merge base, or a push's commits.
       - id: filter
         if: github.event_name == 'pull_request' || github.event_name == 'push'
-        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
-        with:
-          predicate-quantifier: every
-          filters: |
-            code:
-              - "**"
-              - "!**/*.md"
-              - "!docs/**"
-              - "!.claude/**"
+        env:
+          RANGE: >-
+            ${{ github.event_name == 'pull_request'
+              && format('{0}...{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha)
+              || format('{0}..{1}', github.event.before, github.sha) }}
+        run: |
+          code=false
+          while IFS= read -r file; do
+            case "$file" in
+              *.md | docs/* | .claude/*) ;;
+              *) code=true ;;
+            esac
+          done < <(git diff --name-only "$RANGE" || echo "the diff failed")
+          echo "code=$code" >> "$GITHUB_OUTPUT"
 
   # The checks that compile nothing of the workspace.
   checks:
