@@ -22,11 +22,11 @@ pub(crate) const TASK: Task = Task {
     run: |args| args.is_empty().then(run),
 };
 
-/// The last commit before the DCO: `main` when ADR 0009 was adopted. Every non-merge
-/// commit after it needs a sign-off. When an unsigned commit lands on `main`
+/// The last commit before the DCO: `main` just before the check landed, the merge of
+/// ADR 0009 (#301). Every non-merge commit after it needs a sign-off. When an unsigned commit lands on `main`
 /// anyway, move this to that commit, naming it in a comment, since history on
 /// `main` can't be rewritten.
-const CUTOFF: &str = "b9b304523194e4444021c04b8b05b2f11784a7bf";
+const CUTOFF: &str = "9e05b056c89b150d6846fc58f99bf9b4cd2d554d";
 
 pub(crate) fn run() -> Result<()> {
     let commits = commits(Path::new("."), CUTOFF)?;
