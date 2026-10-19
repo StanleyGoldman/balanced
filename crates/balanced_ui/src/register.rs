@@ -92,6 +92,22 @@ impl RegisterColumn {
         }
     }
 
+    /// What the column's heading shows, given its `title`: the flag on the Flag column,
+    /// which is too narrow for its title, and the title on the rest.
+    fn heading_text(self, title: String) -> String {
+        match self {
+            Self::Flag => FLAG_GLYPH.to_owned(),
+            Self::Date
+            | Self::Number
+            | Self::Payee
+            | Self::Category
+            | Self::Memo
+            | Self::Amount
+            | Self::Balance
+            | Self::Actions => title,
+        }
+    }
+
     /// What clicking the column's heading sorts by. Number, Balance, Flag and Actions
     /// don't sort.
     fn sort_key(self) -> Option<SortKey> {
@@ -2369,24 +2385,12 @@ impl Heading {
                 node.set_sort_direction(direction.into());
             }
         });
-        // The Flag column is too narrow for its title, so its heading shows the flag.
-        let shown = match column {
-            RegisterColumn::Flag => FLAG_GLYPH.to_owned(),
-            RegisterColumn::Date
-            | RegisterColumn::Number
-            | RegisterColumn::Payee
-            | RegisterColumn::Category
-            | RegisterColumn::Memo
-            | RegisterColumn::Amount
-            | RegisterColumn::Balance
-            | RegisterColumn::Actions => title,
-        };
         let text = paint_text(
             ui,
             rect,
             column,
             insets,
-            WidgetText::from(egui::RichText::new(shown).strong()),
+            WidgetText::from(egui::RichText::new(column.heading_text(title)).strong()),
         );
         if let (Some(direction), Some(text)) = (direction, text) {
             sort_arrow(ui, column, text, direction);
@@ -2495,7 +2499,7 @@ impl Cell<'_> {
                 // The draft row is no transaction yet, so it has no commands.
                 let draft = row.id() == RowId::Draft;
                 if (selected || hovered || open) && !draft {
-                    action = actions_menu(ui, i18n, &response, access, row.is_flagged());
+                    action = actions_menu(ui, i18n, &response, access, row);
                 } else {
                     // Hidden, the menu leaves an empty cell that selects the row.
                     cell_info(ui, &response, selected, "");
@@ -2537,7 +2541,7 @@ fn flag_cell(
     response: &Response,
     access: Access,
 ) -> (Response, Option<RowAction>) {
-    if row.transaction().is_none() {
+    if row.id() == RowId::Draft {
         cell_info(ui, response, false, "");
         return (response.clone(), None);
     }
@@ -2627,15 +2631,16 @@ fn paint_text(
 
 /// The row's Actions menu: a ⋯ button on the right of the Actions cell, which opens
 /// the menu below it. The default fonts lack ⋯, so its dots are painted. Returns the
-/// command picked from the menu: Flag, or Unflag on a `flagged` row, and Delete. A
+/// command picked from the menu: Flag, or Unflag on a flagged `row`, and Delete. A
 /// read-only row's commands are disabled.
 fn actions_menu(
     ui: &egui::Ui,
     i18n: &Localizer,
     response: &Response,
     access: Access,
-    flagged: bool,
+    row: &RegisterRow,
 ) -> Option<RowAction> {
+    let flagged = row.is_flagged();
     let label = fl!(i18n, "register-actions");
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
     let rect = response.rect;

@@ -3,7 +3,7 @@
 use icu_calendar::{Date, Iso};
 
 use crate::transaction::NewTransaction;
-use crate::{CurrencyCode, Money};
+use crate::{CategoryId, CurrencyCode, Money, MoneyError, Transaction, TransactionId};
 
 /// One of the fixed groups the Account bar lists accounts in, in Account bar order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -207,9 +207,8 @@ pub(crate) struct NewAccount {
     name: String,
     kind: AccountKind,
     currency: CurrencyCode,
-    /// The opening balance first, then the rest in the order given, each with whether
-    /// it starts flagged.
-    transactions: Vec<(NewTransaction, bool)>,
+    /// The opening balance first, then the rest in the order given.
+    transactions: Vec<NewAccountTransaction>,
     hidden: bool,
     closed: bool,
 }
@@ -226,9 +225,8 @@ impl NewAccount {
             name: name.to_owned(),
             kind,
             currency: opening_balance.currency(),
-            transactions: vec![(
+            transactions: vec![NewAccountTransaction::unflagged(
                 NewTransaction::opening_balance(opened, opening_balance),
-                false,
             )],
             hidden: false,
             closed: false,
@@ -243,14 +241,17 @@ impl NewAccount {
         self.transactions.extend(
             transactions
                 .into_iter()
-                .map(|transaction| (transaction, false)),
+                .map(NewAccountTransaction::unflagged),
         );
         self
     }
 
     /// The same account, with `transaction` posted after the rest, flagged.
     pub(crate) fn with_flagged_transaction(mut self, transaction: NewTransaction) -> Self {
-        self.transactions.push((transaction, true));
+        self.transactions.push(NewAccountTransaction {
+            transaction,
+            flagged: true,
+        });
         self
     }
 
@@ -275,8 +276,8 @@ impl NewAccount {
     }
 
     /// The account, with `id`, in its opening balance's currency, and the transactions
-    /// to post to it, opening balance first, each with whether it starts flagged.
-    pub(crate) fn into_account(self, id: AccountId) -> (Account, Vec<(NewTransaction, bool)>) {
+    /// to post to it, opening balance first.
+    pub(crate) fn into_account(self, id: AccountId) -> (Account, Vec<NewAccountTransaction>) {
         let account = Account {
             id,
             name: self.name,
@@ -286,6 +287,40 @@ impl NewAccount {
             closed: self.closed,
         };
         (account, self.transactions)
+    }
+}
+
+/// A transaction to post to a [`NewAccount`], which may start flagged.
+#[derive(Debug, Clone)]
+pub(crate) struct NewAccountTransaction {
+    transaction: NewTransaction,
+    flagged: bool,
+}
+
+impl NewAccountTransaction {
+    fn unflagged(transaction: NewTransaction) -> Self {
+        Self {
+            transaction,
+            flagged: false,
+        }
+    }
+
+    /// The categories the transaction names.
+    pub(crate) fn categories(&self) -> Vec<CategoryId> {
+        self.transaction.categories()
+    }
+
+    /// The transaction, with `id`, in an account in `currency`. Fails when an amount is
+    /// in another currency, or when a split's lines overflow.
+    pub(crate) fn into_transaction(
+        self,
+        id: TransactionId,
+        currency: CurrencyCode,
+    ) -> Result<Transaction, MoneyError> {
+        Ok(self
+            .transaction
+            .into_transaction(id, currency)?
+            .with_flag(self.flagged))
     }
 }
 

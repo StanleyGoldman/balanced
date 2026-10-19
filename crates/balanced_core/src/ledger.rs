@@ -391,7 +391,7 @@ impl Ledger {
             let kind = new.kind();
             let (account, transactions) = new.into_account(AccountId::new(id));
             let mut posted = Vec::new();
-            for (new, flagged) in transactions {
+            for new in transactions {
                 for category in new.categories() {
                     assert!(
                         categories.iter().any(|known| known.id() == category),
@@ -399,7 +399,7 @@ impl Ledger {
                     );
                 }
                 let id = transaction_ids.next().expect("the ids never run out");
-                posted.push(new.into_transaction(id, currency)?.with_flag(flagged));
+                posted.push(new.into_transaction(id, currency)?);
             }
             // Ids follow posting order, so this keeps a date's transactions in that order.
             posted.sort_by_key(Transaction::register_order);
@@ -680,8 +680,7 @@ impl Ledger {
             NewAccount::new(name, kind, opened, opening_balance).into_account(id);
         let mut next_transaction = self.next_transaction;
         let mut posted = Vec::with_capacity(transactions.len());
-        // A new account holds only its opening balance, which is never flagged.
-        for (new, _flagged) in transactions {
+        for new in transactions {
             posted.push(new.into_transaction(next_transaction, currency)?);
             next_transaction = next_transaction.next();
         }
