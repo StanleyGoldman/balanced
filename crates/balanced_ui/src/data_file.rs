@@ -74,7 +74,7 @@ pub(crate) struct DataFileRefusal {
 }
 
 /// Why a data file was refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum RefusalReason {
     /// No file is at the path.
     Missing,
@@ -86,6 +86,12 @@ enum RefusalReason {
     Newer,
     /// Another program, or another Balanced, has the file open.
     Locked,
+    /// The file is from an older Balanced, and the backup taken before upgrading it
+    /// couldn't be written.
+    BackupFailed,
+    /// Upgrading the file from an older Balanced failed. `backup` is the name of the
+    /// backup taken first, without its folder.
+    UpgradeFailed { backup: String },
     /// Reading the file failed.
     Unreadable,
     /// Creating a new file failed.
@@ -108,6 +114,10 @@ impl DataFileRefusal {
             | OpenError::Date { .. } => RefusalReason::Damaged,
             OpenError::Newer { .. } => RefusalReason::Newer,
             OpenError::Locked => RefusalReason::Locked,
+            OpenError::BackupFailed(_) => RefusalReason::BackupFailed,
+            OpenError::UpgradeFailed { backup, .. } => RefusalReason::UpgradeFailed {
+                backup: file_name(backup),
+            },
             OpenError::Store(_) => RefusalReason::Unreadable,
         };
         Self::new(path, reason)
@@ -124,18 +134,16 @@ impl DataFileRefusal {
     }
 
     fn new(path: &Path, reason: RefusalReason) -> Self {
-        let file = path
-            .file_name()
-            .unwrap_or(path.as_os_str())
-            .to_string_lossy()
-            .into_owned();
-        Self { file, reason }
+        Self {
+            file: file_name(path),
+            reason,
+        }
     }
 
     /// What the refusal Dialog says.
     pub(crate) fn message(&self, i18n: &Localizer) -> String {
         let file = self.file.clone();
-        match self.reason {
+        match &self.reason {
             RefusalReason::Missing => fl!(i18n, "dialog-data-file-missing", file = file),
             RefusalReason::NotBalanced => {
                 fl!(i18n, "dialog-data-file-not-balanced", file = file)
@@ -143,6 +151,15 @@ impl DataFileRefusal {
             RefusalReason::Damaged => fl!(i18n, "dialog-data-file-damaged", file = file),
             RefusalReason::Newer => fl!(i18n, "dialog-data-file-newer", file = file),
             RefusalReason::Locked => fl!(i18n, "dialog-data-file-locked", file = file),
+            RefusalReason::BackupFailed => {
+                fl!(i18n, "dialog-data-file-backup-failed", file = file)
+            }
+            RefusalReason::UpgradeFailed { backup } => fl!(
+                i18n,
+                "dialog-data-file-upgrade-failed",
+                file = file,
+                backup = backup.clone()
+            ),
             RefusalReason::Unreadable => fl!(i18n, "dialog-data-file-unreadable", file = file),
             RefusalReason::NotCreated => fl!(i18n, "dialog-data-file-not-created", file = file),
             RefusalReason::OpenFileNotReplaced => {
@@ -150,4 +167,12 @@ impl DataFileRefusal {
             }
         }
     }
+}
+
+/// The name of the file at `path`, without its folder.
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy()
+        .into_owned()
 }

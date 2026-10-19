@@ -204,6 +204,48 @@ fn a_file_from_a_newer_balanced_is_refused_with_a_dialog() {
     );
 }
 
+/// Marks the data file at `path` as from before Balanced's first migration, so opening
+/// it runs that migration again over the tables it already has, which fails. The SQLite
+/// header holds the schema version, `user_version`, at offset 60, big-endian.
+fn make_version_0(path: &Path) {
+    rewrite(path, |bytes| {
+        bytes[60..64].copy_from_slice(&0_u32.to_be_bytes());
+    });
+}
+
+#[test]
+fn a_file_whose_upgrade_fails_is_refused_with_a_dialog_naming_its_backup() {
+    let dir = tempfile::tempdir().expect("the temp dir is writable");
+    let path = data_file(&dir, "Household.balanced", &["Everyday"]);
+    make_version_0(&path);
+
+    assert_refused(
+        &path,
+        "Balanced couldn't upgrade “Household.balanced”, so it was left as it was. \
+         A backup copy made before the upgrade is beside it, named \
+         “Household (before upgrade, v0).balanced”.",
+    );
+}
+
+#[test]
+fn a_file_whose_backup_cant_be_written_is_refused_with_a_dialog() {
+    let dir = tempfile::tempdir().expect("the temp dir is writable");
+    // The file's name fits the usual 255-byte limit, but its backup's longer name
+    // doesn't, so the backup can't be written even by root, as the tests run in CI.
+    let name = format!("{}.balanced", "H".repeat(230));
+    let path = data_file(&dir, &name, &["Everyday"]);
+    make_version_0(&path);
+
+    assert_refused(
+        &path,
+        &format!(
+            "Balanced couldn't make a backup copy of “{name}” before upgrading it, so it \
+             was left as it was. Check that its folder has room and lets you save files \
+             there, then try again."
+        ),
+    );
+}
+
 #[test]
 fn a_file_open_elsewhere_is_refused_with_a_dialog() {
     let dir = tempfile::tempdir().expect("the temp dir is writable");
