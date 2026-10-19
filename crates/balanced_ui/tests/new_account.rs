@@ -122,11 +122,11 @@ fn the_wizard_walks_from_type_to_a_new_account_last_in_its_sub_group() {
 }
 
 #[test]
-fn the_account_bar_opens_the_wizard() {
+fn add_account_in_the_account_bar_opens_the_wizard() {
     let mut harness = app();
 
     harness
-        .get_by_role_and_label(Role::Button, "+ Account")
+        .get_by_role_and_label(Role::Button, "+ Add Account")
         .click();
     harness.run();
 

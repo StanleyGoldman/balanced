@@ -329,7 +329,8 @@ impl Theme {
         Frame::new().fill(self.palette.chrome)
     }
 
-    /// The Net Worth footer under the Account bar: chrome, with room around its text.
+    /// The Account bar's footer, holding Net Worth and + Add Account: chrome, with room
+    /// around its contents.
     pub(crate) fn footer_frame(&self) -> Frame {
         self.chrome_frame().inner_margin(FOOTER_MARGIN)
     }
