@@ -1218,6 +1218,38 @@ mod tests {
     }
 
     #[test]
+    fn a_new_ledgers_store_places_each_sub_groups_accounts_in_order_from_zero() {
+        let ledger = Ledger::with_accounts(
+            usd_code(),
+            [],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(1))),
+                account("Rainy Day", AccountKind::Savings, usd(dec!(1))),
+                account("Joint", AccountKind::Checking, usd(dec!(1))),
+                account("Bills", AccountKind::Checking, usd(dec!(1))),
+            ],
+        )
+        .unwrap();
+
+        let contents = ledger.store.read().unwrap();
+
+        let places: Vec<(&str, u32)> = contents
+            .accounts
+            .iter()
+            .map(|account| (account.row.name.as_str(), account.row.position))
+            .collect();
+        assert_eq!(
+            places,
+            [
+                ("Everyday", 0),
+                ("Joint", 1),
+                ("Bills", 2),
+                ("Rainy Day", 0)
+            ]
+        );
+    }
+
+    #[test]
     fn net_worth_sums_every_balance_hidden_and_closed_accounts_included() {
         let ledger = Ledger::with_accounts(
             usd_code(),
