@@ -1,16 +1,19 @@
 //! The [`Ledger`]: the financial data, and the snapshots windows read it through.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use balanced_store::Store;
 use icu_calendar::{Date, Iso};
 
 use crate::account::NewAccount;
 use crate::category::NewCategory;
+use crate::data_file::{account_row, category_row, transaction_row};
 use crate::transaction::{NewTransaction, TransactionId};
 use crate::{
     Account, AccountGroup, AccountId, AccountKind, AccountStatus, Applied, Category, CategoryId,
     CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection, Transaction,
-    TransactionEdit, Visibility,
+    TransactionEdit, Visibility, WriteError,
 };
 
 /// Counts the changes applied to a [`Ledger`]. A window's view model rebuilds when
@@ -35,6 +38,13 @@ pub struct RegisterEntry {
 }
 
 impl RegisterEntry {
+    pub(crate) fn new(transaction: Transaction, balance: Money) -> Self {
+        Self {
+            transaction,
+            balance,
+        }
+    }
+
     pub fn transaction(&self) -> &Transaction {
         &self.transaction
     }
@@ -78,6 +88,16 @@ impl AccountSummary {
         })
     }
 
+    /// `account` holding `register`, whose last running balance is `balance`, as the data
+    /// file's views counted them.
+    pub(crate) fn loaded(account: Account, register: Vec<RegisterEntry>, balance: Money) -> Self {
+        Self {
+            account,
+            register,
+            balance,
+        }
+    }
+
     /// A copy of the account's transactions, in register order.
     fn transactions(&self) -> Vec<Transaction> {
         self.register
@@ -110,6 +130,7 @@ pub struct LedgerView {
     accounts: Vec<AccountSummary>,
     categories: Vec<Category>,
     net_worth: Money,
+    totals: Totals,
     can_undo: bool,
     can_redo: bool,
 }
@@ -212,22 +233,20 @@ impl LedgerView {
     /// The sum of the balances of `group`'s open accounts, hidden accounts included.
     /// Fails when the sum overflows.
     pub fn group_total(&self, group: AccountGroup) -> Result<Money, MoneyError> {
-        self.total(|account| !account.is_closed() && account.kind().group() == group)
+        // `index` counts within `AccountGroup::ALL`, which sizes `groups`.
+        self.totals.groups[group.index()].clone()
     }
 
     /// The sum of the balances of every closed account. Fails when the sum overflows.
     pub fn closed_total(&self) -> Result<Money, MoneyError> {
-        self.total(Account::is_closed)
+        self.totals.closed.clone()
     }
 
-    /// The sum of the balances of the accounts `include` picks.
-    fn total(&self, include: impl Fn(&Account) -> bool) -> Result<Money, MoneyError> {
-        self.accounts
-            .iter()
-            .filter(|summary| include(&summary.account))
-            .try_fold(Money::zero(self.net_worth.currency()), |total, summary| {
-                total.checked_add(summary.balance)
-            })
+    /// Counts the group totals and the closed total again after the accounts changed,
+    /// and moves to the next generation.
+    fn accounts_changed(&mut self) {
+        self.totals = Totals::count(&self.accounts, self.net_worth.currency());
+        self.generation = self.generation.next();
     }
 
     /// Whether there is a change Undo can reverse.
@@ -250,6 +269,51 @@ struct TransactionPosition {
     entry: usize,
 }
 
+/// The totals a [`LedgerView`] shows besides Net Worth.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Totals {
+    /// Each group's total, in the order of [`AccountGroup::ALL`].
+    groups: [Result<Money, MoneyError>; AccountGroup::ALL.len()],
+    closed: Result<Money, MoneyError>,
+}
+
+impl Totals {
+    /// `groups`, in the order of [`AccountGroup::ALL`], and `closed`, as the data
+    /// file's views counted them.
+    pub(crate) fn new(groups: [Money; AccountGroup::ALL.len()], closed: Money) -> Self {
+        Self {
+            groups: groups.map(Ok),
+            closed: Ok(closed),
+        }
+    }
+
+    /// The totals of `accounts`, in `currency`.
+    fn count(accounts: &[AccountSummary], currency: CurrencyCode) -> Self {
+        let total = |include: &dyn Fn(&Account) -> bool| {
+            accounts
+                .iter()
+                .filter(|summary| include(&summary.account))
+                .try_fold(Money::zero(currency), |total, summary| {
+                    total.checked_add(summary.balance)
+                })
+        };
+        Self {
+            groups: AccountGroup::ALL.map(|group| {
+                total(&|account: &Account| !account.is_closed() && account.kind().group() == group)
+            }),
+            closed: total(&Account::is_closed),
+        }
+    }
+}
+
+/// The ids the next account, transaction and category take. Ids are never reused.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NextIds {
+    pub(crate) account: AccountId,
+    pub(crate) transaction: TransactionId,
+    pub(crate) category: CategoryId,
+}
+
 /// What [`Ledger::restore`] puts back: the ledger less its Undo and Redo history.
 #[derive(Debug)]
 struct Checkpoint {
@@ -264,6 +328,8 @@ struct Checkpoint {
 #[derive(Debug)]
 pub struct Ledger {
     view: Arc<LedgerView>,
+    /// The data file. Every change is written to it as memory changes.
+    store: Store,
     /// The inverses of the changes Undo can reverse, the latest last.
     undo_stack: Vec<DomainCommand>,
     /// The inverses of the undone changes Redo can make again, the latest undone last.
@@ -331,21 +397,50 @@ impl Ledger {
             let position = summaries.partition_point(|summary| summary.account.kind() <= kind);
             summaries.insert(position, summary);
         }
-        Ok(Self {
+        let store = in_memory_store(currency, &categories, &summaries);
+        let totals = Totals::count(&summaries, currency);
+        Ok(Self::from_parts(
+            store,
+            summaries,
+            categories,
+            net_worth,
+            totals,
+            NextIds {
+                account: next_account,
+                transaction: transaction_ids.next().expect("the ids never run out"),
+                category: next_category,
+            },
+        ))
+    }
+
+    /// A ledger over `store`, which holds `accounts`, in Account bar order, and
+    /// `categories`, with no Undo or Redo history. `net_worth` and `totals` are what
+    /// `accounts` add up to.
+    pub(crate) fn from_parts(
+        store: Store,
+        accounts: Vec<AccountSummary>,
+        categories: Vec<Category>,
+        net_worth: Money,
+        totals: Totals,
+        next: NextIds,
+    ) -> Self {
+        Self {
             view: Arc::new(LedgerView {
                 generation: Generation::FIRST,
-                accounts: summaries,
+                accounts,
                 categories,
                 net_worth,
+                totals,
                 can_undo: false,
                 can_redo: false,
             }),
+            store,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
-            next_account,
-            next_transaction: transaction_ids.next().expect("the ids never run out"),
-            next_category,
-        })
+            next_account: next.account,
+            next_transaction: next.transaction,
+            next_category: next.category,
+        }
     }
 
     /// The current snapshot. It stays valid, unchanged, after the ledger changes.
@@ -357,7 +452,7 @@ impl Ledger {
     /// rejects it and leaves the ledger as it was. An applied change can be undone,
     /// and nothing undone before it can be redone any more.
     pub fn apply(&mut self, command: DomainCommand) -> Result<Applied, DomainError> {
-        let applied = self.apply_unrecorded(command)?;
+        let applied = self.write(|ledger| ledger.apply_unrecorded(command))?;
         self.undo_stack.push(applied.inverse().clone());
         self.redo_stack.clear();
         self.publish_history();
@@ -371,7 +466,7 @@ impl Ledger {
         let Some(inverse) = self.undo_stack.last().cloned() else {
             return Ok(());
         };
-        let applied = self.apply_unrecorded(inverse)?;
+        let applied = self.write(|ledger| ledger.apply_unrecorded(inverse))?;
         self.undo_stack.pop();
         self.redo_stack.push(applied.into_inverse());
         self.publish_history();
@@ -385,11 +480,38 @@ impl Ledger {
         let Some(command) = self.redo_stack.last().cloned() else {
             return Ok(());
         };
-        let applied = self.apply_unrecorded(command)?;
+        let applied = self.write(|ledger| ledger.apply_unrecorded(command))?;
         self.redo_stack.pop();
         self.undo_stack.push(applied.into_inverse());
         self.publish_history();
         Ok(())
+    }
+
+    /// Makes `change` in one transaction in the data file, which commits when `change`
+    /// succeeds. When `change` or the commit fails, rolls the file back and puts the
+    /// ledger back as it was, keeping its Undo and Redo history.
+    fn write<T>(
+        &mut self,
+        change: impl FnOnce(&mut Self) -> Result<T, DomainError>,
+    ) -> Result<T, DomainError> {
+        let checkpoint = self.checkpoint();
+        self.store.begin()?;
+        let error = match change(self) {
+            Ok(changed) => match self.store.commit() {
+                Ok(()) => return Ok(changed),
+                Err(error) => DomainError::from(error),
+            },
+            Err(error) => error,
+        };
+        let rolled_back = self.store.rollback();
+        self.restore(checkpoint);
+        match rolled_back {
+            Ok(()) => Err(error),
+            Err(source) => Err(DomainError::Store(WriteError::RollbackFailed {
+                change: Box::new(error),
+                source: Arc::new(source),
+            })),
+        }
     }
 
     /// Tells the current snapshot whether Undo and Redo can act.
@@ -450,22 +572,15 @@ impl Ledger {
     }
 
     /// Applies each of `commands` in order, returning the Command that undoes them all:
-    /// their inverses, latest first. When one is refused, puts the ledger back as it
-    /// was before the first.
+    /// their inverses, latest first. When one is refused, [`Self::write`] puts the
+    /// ledger back as it was before the first.
     fn apply_compound(
         &mut self,
         commands: Vec<DomainCommand>,
     ) -> Result<DomainCommand, DomainError> {
-        let checkpoint = self.checkpoint();
         let mut inverses = Vec::with_capacity(commands.len());
         for command in commands {
-            match self.apply_unrecorded(command) {
-                Ok(applied) => inverses.push(applied.into_inverse()),
-                Err(error) => {
-                    self.restore(checkpoint);
-                    return Err(error);
-                }
-            }
+            inverses.push(self.apply_unrecorded(command)?.into_inverse());
         }
         inverses.reverse();
         Ok(DomainCommand::Compound(inverses))
@@ -543,10 +658,11 @@ impl Ledger {
             .try_fold(Money::zero(currency), |sum, (_, summary)| {
                 sum.checked_add(summary.balance)
             })?;
+        self.store.delete_account(id.raw())?;
         let view = Arc::make_mut(&mut self.view);
         let summary = view.accounts.remove(index);
         view.net_worth = net_worth;
-        view.generation = view.generation.next();
+        view.accounts_changed();
         let transactions = summary.transactions();
         Ok(DomainCommand::RestoreAccount {
             account: summary.account,
@@ -587,7 +703,7 @@ impl Ledger {
         let view = Arc::make_mut(&mut self.view);
         // Callers take `index` from a lookup in this same list of accounts.
         let changed = change(&mut view.accounts[index].account);
-        view.generation = view.generation.next();
+        view.accounts_changed();
         changed
     }
 
@@ -600,6 +716,7 @@ impl Ledger {
             return Err(DomainError::BlankAccountName);
         }
         let index = self.account_index(id)?;
+        self.store.rename_account(id.raw(), &name)?;
         let old = self.change_account(index, |account| account.rename(name));
         Ok(DomainCommand::RenameAccount {
             account: id,
@@ -613,6 +730,8 @@ impl Ledger {
         visibility: Visibility,
     ) -> Result<DomainCommand, DomainError> {
         let index = self.account_index(id)?;
+        self.store
+            .set_account_hidden(id.raw(), visibility == Visibility::Hidden)?;
         let old = self.change_account(index, |account| account.set_visibility(visibility));
         Ok(DomainCommand::SetAccountVisibility {
             account: id,
@@ -626,6 +745,8 @@ impl Ledger {
         status: AccountStatus,
     ) -> Result<DomainCommand, DomainError> {
         let index = self.account_index(id)?;
+        self.store
+            .set_account_closed(id.raw(), status == AccountStatus::Closed)?;
         let old = self.change_account(index, |account| account.set_status(status));
         Ok(DomainCommand::SetAccountStatus {
             account: id,
@@ -647,6 +768,9 @@ impl Ledger {
             .neighbour(index)
             .filter(|neighbour| sub_group.contains(neighbour))
             .ok_or(DomainError::SubGroupEdge { account: id })?;
+        // `neighbour` is in the sub-group, so it is in this same list of accounts.
+        let other = self.view.accounts[neighbour].account.id();
+        self.store.swap_account_positions(id.raw(), other.raw())?;
         let view = Arc::make_mut(&mut self.view);
         view.accounts.swap(index, neighbour);
         view.generation = view.generation.next();
@@ -656,16 +780,17 @@ impl Ledger {
         })
     }
 
-    /// Puts `summary` at `place` among the accounts of its sub-group, recounting Net
-    /// Worth, and moves to the next generation. Fails, changing nothing, when Net Worth
-    /// overflows.
-    fn insert_account(&mut self, summary: AccountSummary, place: usize) -> Result<(), MoneyError> {
+    /// Puts `summary` at `place` among the accounts of its sub-group, recounting the
+    /// totals, and moves to the next generation. Fails, changing nothing in memory, when
+    /// Net Worth overflows or the data file refuses the account.
+    fn insert_account(&mut self, summary: AccountSummary, place: usize) -> Result<(), DomainError> {
         let net_worth = self.view.net_worth.checked_add(summary.balance)?;
+        write_account(&self.store, &summary, place)?;
         let index = self.view.sub_group(summary.account.kind()).start + place;
         let view = Arc::make_mut(&mut self.view);
         view.accounts.insert(index, summary);
         view.net_worth = net_worth;
-        view.generation = view.generation.next();
+        view.accounts_changed();
         Ok(())
     }
 
@@ -906,9 +1031,45 @@ impl Ledger {
         // Callers take `index` from a lookup in this same list of accounts.
         view.accounts[index] = summary;
         view.net_worth = net_worth;
-        view.generation = view.generation.next();
+        view.accounts_changed();
         Ok(())
     }
+}
+
+/// Writes `summary`'s account, at `place` in its sub-group, and its transactions.
+fn write_account(store: &Store, summary: &AccountSummary, place: usize) -> Result<(), DomainError> {
+    let account = &summary.account;
+    store.insert_account(&account_row(account, place))?;
+    for entry in &summary.register {
+        store.insert_transaction(&transaction_row(account.id(), &entry.transaction)?)?;
+    }
+    Ok(())
+}
+
+/// An in-memory data file in `currency` holding `categories`, each after the one it sits
+/// under, and `accounts`, in Account bar order.
+fn in_memory_store(
+    currency: CurrencyCode,
+    categories: &[Category],
+    accounts: &[AccountSummary],
+) -> Store {
+    let store = Store::create_in_memory(currency.as_str()).expect("SQLite makes an in-memory file");
+    let write = || -> Result<(), DomainError> {
+        store.begin()?;
+        for category in categories {
+            store.insert_category(&category_row(category))?;
+        }
+        // Accounts come in Account bar order, so each is last in its sub-group so far.
+        let mut placed: HashMap<AccountKind, usize> = HashMap::new();
+        for summary in accounts {
+            let place = placed.entry(summary.account.kind()).or_default();
+            write_account(&store, summary, *place)?;
+            *place += 1;
+        }
+        Ok(store.commit()?)
+    };
+    write().expect("a new ledger's rows fit the data file's schema");
+    store
 }
 
 #[cfg(test)]

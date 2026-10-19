@@ -13,6 +13,11 @@ impl CategoryId {
     pub(crate) fn next(self) -> Self {
         Self(self.0 + 1)
     }
+
+    /// The id as the data file stores it.
+    pub(crate) fn raw(self) -> u32 {
+        self.0
+    }
 }
 
 /// A category: its name, and the category it sits under, if any.
@@ -24,6 +29,10 @@ pub struct Category {
 }
 
 impl Category {
+    pub(crate) fn new(id: CategoryId, name: String, parent: Option<CategoryId>) -> Self {
+        Self { id, name, parent }
+    }
+
     pub fn id(&self) -> CategoryId {
         self.id
     }

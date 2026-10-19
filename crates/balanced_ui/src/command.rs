@@ -2,7 +2,7 @@
 
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use balanced_core::{DomainCommand, DomainError, TransactionId};
+use balanced_core::{DomainCommand, DomainError, TransactionId, WriteError};
 use balanced_i18n::Localizer;
 use eframe::egui;
 
@@ -122,6 +122,12 @@ impl StatusMessage {
                 }
                 DomainError::CategoryInUse { .. } => fl!(i18n, "status-category-in-use"),
                 DomainError::BlankCategoryName => fl!(i18n, "status-blank-category-name"),
+                DomainError::Store(WriteError::AmountOutOfRange(_)) => {
+                    fl!(i18n, "status-amount-too-large")
+                }
+                DomainError::Store(WriteError::Sqlite(_) | WriteError::RollbackFailed { .. }) => {
+                    fl!(i18n, "status-change-not-saved")
+                }
             },
         }
     }
