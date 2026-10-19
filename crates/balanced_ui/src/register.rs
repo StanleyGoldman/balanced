@@ -9,6 +9,7 @@ use balanced_core::{
 };
 use balanced_i18n::{AmountParseError, AmountReader, Localizer};
 use eframe::egui::accesskit::{self, Role};
+use eframe::egui::emath::GuiRounding as _;
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
 use eframe::egui::{
@@ -356,10 +357,11 @@ struct Rows<'a> {
     draft: Option<&'a RegisterRow>,
 }
 
-/// One line of the Register's body: a row, or the Today divider.
+/// One line of the Register's body: a row, with its index among the rows, or the
+/// Today divider.
 #[derive(Debug, Clone, Copy)]
 enum Line<'a> {
-    Row(&'a RegisterRow),
+    Row { index: usize, row: &'a RegisterRow },
     TodayDivider,
 }
 
@@ -380,11 +382,13 @@ impl<'a> Rows<'a> {
 
     /// The line at `index`, top line first.
     fn line(self, index: usize) -> Option<Line<'a>> {
-        match self.divider {
-            Some(divider) if index == divider => Some(Line::TodayDivider),
-            Some(divider) if index > divider => self.get(index - 1).map(Line::Row),
-            Some(_) | None => self.get(index).map(Line::Row),
-        }
+        let index = match self.divider {
+            Some(divider) if index == divider => return Some(Line::TodayDivider),
+            Some(divider) if index > divider => index - 1,
+            Some(_) | None => index,
+        };
+        let row = self.get(index)?;
+        Some(Line::Row { index, row })
     }
 
     /// The index of the line the row at `index` is drawn on.
@@ -647,7 +651,7 @@ impl ListState {
 /// The lines fully in view in the last frame, counted as [`Rows::line`] counts them,
 /// which keyboard scrolling keeps the cell cursor among.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct RowsInView {
+struct LinesInView {
     first: usize,
     last: usize,
     /// The height of the Register's body.
@@ -656,7 +660,7 @@ struct RowsInView {
     pitch: f32,
 }
 
-impl RowsInView {
+impl LinesInView {
     /// The scroll offset that brings line `index` fully into view, or `None` when it
     /// already is.
     #[expect(
@@ -693,7 +697,7 @@ pub(crate) struct Register {
     /// The modifiers held with each Tab press `App::raw_input_hook` took for the
     /// Register since the last frame.
     tabs: Vec<Modifiers>,
-    rows_in_view: Option<RowsInView>,
+    lines_in_view: Option<LinesInView>,
     /// Whether the edit refused to let the keyboard leave its cell this frame.
     refused_leave: bool,
     /// What the draft row holds.
@@ -807,7 +811,7 @@ impl Register {
         self.cursor = None;
         self.edit = None;
         self.awaiting_category = None;
-        self.rows_in_view = None;
+        self.lines_in_view = None;
         self.draft = Draft::default();
         self.missing = None;
         self.posted_at = None;
@@ -973,7 +977,7 @@ impl Register {
         let account = summary.account().id();
         let closed = summary.account().is_closed();
         self.catch_up(account, closed, view);
-        let today_divider = TodayDivider::of(preferences, today);
+        let today_divider = today_divider(preferences, today);
         let (model, rebuilt) = self.take_model(summary, view, today_divider, i18n);
         let choices = match self.choices.take() {
             Some(choices) if choices.is_current(view, i18n) => choices,
@@ -1012,7 +1016,8 @@ impl Register {
                     .or_else(|| centre_on.map(|index| centring_offset(ui, row_height, index)));
                 let mut table = TableBuilder::new(ui)
                     .id_salt(("register", account))
-                    .striped(theme.alternating_rows())
+                    // The rows stripe themselves, so the Today divider takes no stripe.
+                    .striped(false)
                     .resizable(false)
                     .cell_layout(Layout::left_to_right(Align::Center))
                     .auto_shrink(false)
@@ -1107,7 +1112,11 @@ impl Register {
                 .line(index)
                 .expect("`rows` lays out indices below `rows.lines()` only");
             let shown = self.shown.clone();
-            let Line::Row(row) = line else {
+            let Line::Row {
+                index: row_index,
+                row,
+            } = line
+            else {
                 let label = fl!(
                     frame.i18n,
                     "register-today-divider",
@@ -1127,9 +1136,14 @@ impl Register {
                 }
                 return;
             };
-            table_row.set_selected(self.cursor.is_some_and(|cursor| cursor.row == row.id()));
+            let selected = self.cursor.is_some_and(|cursor| cursor.row == row.id());
+            table_row.set_selected(selected);
+            let stripe = frame.theme.stripe(row_index).filter(|_| !selected);
             for (column_index, column) in shown.into_iter().enumerate() {
                 table_row.col(|ui| {
+                    if let Some(stripe) = stripe {
+                        paint_stripe(ui, frame.theme, viewport, stripe);
+                    }
                     if column_index == 0 && fully_in(viewport, ui.max_rect()) {
                         in_view = Some(in_view.map_or((index, index), |(first, _)| (first, index)));
                     }
@@ -1137,7 +1151,7 @@ impl Register {
                 });
             }
         });
-        self.rows_in_view = in_view.map(|(first, last)| RowsInView {
+        self.lines_in_view = in_view.map(|(first, last)| LinesInView {
             first,
             last,
             height: viewport.height(),
@@ -1739,8 +1753,8 @@ impl Register {
         self.cursor = Some(address);
         Some(Moved {
             scroll_offset: self
-                .rows_in_view
-                .and_then(|rows_in_view| rows_in_view.offset_showing(rows.line_of(row))),
+                .lines_in_view
+                .and_then(|lines_in_view| lines_in_view.offset_showing(rows.line_of(row))),
         })
     }
 
@@ -2568,6 +2582,28 @@ impl Cell<'_> {
         }
         (response, None)
     }
+}
+
+/// The Today divider as `preferences` say, on `today`.
+fn today_divider(preferences: &Preferences, today: Date<Iso>) -> TodayDivider {
+    if preferences.today_divider {
+        TodayDivider::Shown { today }
+    } else {
+        TodayDivider::Hidden
+    }
+}
+
+/// Fills cell `ui` and half the gap around it with `stripe`, as `egui_extras` fills a
+/// selected row, inside `viewport`, the visible part of the Register's body.
+fn paint_stripe(ui: &egui::Ui, theme: &Theme, viewport: Rect, stripe: egui::Color32) {
+    let rect = ui
+        .max_rect()
+        .expand2(0.5 * ui.spacing().item_spacing)
+        .round_ui();
+    ui.ctx()
+        .layer_painter(ui.layer_id())
+        .with_clip_rect(theme.rule_clip(ui.clip_rect(), viewport))
+        .rect_filled(rect, 0.0, stripe);
 }
 
 /// One cell of the Today divider's line: a rule across the cell, beginning with the

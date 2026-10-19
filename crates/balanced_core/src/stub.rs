@@ -198,8 +198,8 @@ impl Ledger {
     }
 }
 
-/// Everyday Checking's transactions from mid-October 2026: one on the test clock's
-/// 14 October, then two scheduled after it.
+/// Everyday Checking's transactions from mid-October 2026: one on 14 October, then
+/// two scheduled for later dates.
 fn october_transactions(money: impl Fn(&str) -> Money) -> [NewTransaction; 3] {
     [
         NewTransaction::new(

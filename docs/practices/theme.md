@@ -25,7 +25,7 @@ Draw every amount on screen with `theme.amount(&money, formatted)`, which applie
 
 These follow the painting notes on issue #17, "Prototype the Register grid", which hold for `egui_extras` 0.36.
 
-- **Stripes:** only the Register stripes. Its `TableBuilder` takes `.striped(theme.alternating_rows())`, and egui_extras paints the stripe colour from the style. A list laid out by hand paints `theme.stripe(row)` behind each row.
+- **Stripes:** only the Register stripes. egui_extras stripes by line, and the Today divider is a line but no row, so the Register's `TableBuilder` takes `.striped(false)` and each cell of an unselected row paints `theme.stripe(row)` across the cell and half the gap, before its content, clipped like a gridline. A list laid out by hand paints `theme.stripe(row)` behind each row too.
 - **Header band:** fill it with `theme.header_fill()` across the cell and half the gap around it, through the layer painter clipped to that rect intersected with the scroll viewport, so the band stays inside the Register.
 - **Gridlines:** in each cell, after its content, paint `theme.cell_rules(ui.max_rect(), column, ctx.pixels_per_point())` with `ctx.layer_painter(ui.layer_id())`, clipped to `theme.rule_clip(ui.clip_rect(), viewport)`, where `viewport` is the Register's scroll viewport.
 - **Keep `TableBuilder::resizable` off.** It draws a drag line at every column boundary, which reads as a gridline the Preference can't turn off.

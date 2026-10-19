@@ -16,7 +16,6 @@ use icu_locale::Locale;
 use crate::draft_row::Draft;
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
-use crate::preferences::Preferences;
 
 /// Separates a category from the one it sits under: `Food & Dining:Groceries`.
 pub(crate) const CATEGORY_SEPARATOR: &str = ":";
@@ -271,17 +270,6 @@ pub(crate) enum TodayDivider {
     Shown {
         today: Date<Iso>,
     },
-}
-
-impl TodayDivider {
-    /// The Today divider as `preferences` say, on `today`.
-    pub(crate) fn of(preferences: &Preferences, today: Date<Iso>) -> Self {
-        if preferences.today_divider {
-            Self::Shown { today }
-        } else {
-            Self::Hidden
-        }
-    }
 }
 
 /// What the model was built from. It is rebuilt when any of it changes.

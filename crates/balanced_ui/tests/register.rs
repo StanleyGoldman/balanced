@@ -1401,3 +1401,14 @@ fn down_steps_over_the_today_divider() {
 
     assert_eq!(cursor(&harness), "10/20/2026");
 }
+
+#[test]
+fn up_steps_over_the_today_divider() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "10/20/2026");
+
+    press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+
+    assert_eq!(cursor(&harness), "10/14/2026");
+}
