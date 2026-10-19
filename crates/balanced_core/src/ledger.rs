@@ -1165,6 +1165,29 @@ mod tests {
     }
 
     #[test]
+    fn a_new_ledgers_store_holds_a_sub_groups_accounts_in_their_order() {
+        let ledger = Ledger::with_accounts(
+            usd_code(),
+            [],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(1))),
+                account("Joint", AccountKind::Checking, usd(dec!(1))),
+                account("Bills", AccountKind::Checking, usd(dec!(1))),
+            ],
+        )
+        .unwrap();
+
+        let contents = ledger.store.read().unwrap();
+
+        let stored: Vec<&str> = contents
+            .accounts
+            .iter()
+            .map(|account| account.row.name.as_str())
+            .collect();
+        assert_eq!(stored, ["Everyday", "Joint", "Bills"]);
+    }
+
+    #[test]
     fn net_worth_sums_every_balance_hidden_and_closed_accounts_included() {
         let ledger = Ledger::with_accounts(
             usd_code(),
