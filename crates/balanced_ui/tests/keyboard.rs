@@ -133,6 +133,20 @@ fn typing_a_letter_in_the_account_bar_jumps_to_the_next_account_with_it() {
 }
 
 #[test]
+fn tab_after_the_last_heading_reaches_add_account() {
+    let mut harness = app();
+    press(&mut harness, Modifiers::NONE, Key::F6);
+    // Mortgage is the last account shown, above the folded Closed heading.
+    type_text(&mut harness, "m");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    assert_eq!(focused(&harness).as_deref(), Some("Closed"));
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(focused(&harness).as_deref(), Some("+ Add Account"));
+}
+
+#[test]
 fn the_letter_jump_wraps_to_the_first_account_with_the_letter() {
     let mut harness = app();
     press(&mut harness, Modifiers::NONE, Key::F6);

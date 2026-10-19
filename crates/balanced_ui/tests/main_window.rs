@@ -232,3 +232,13 @@ fn hovering_an_account_whose_name_fits_shows_no_tooltip() {
 
     assert!(!label_values(&harness).contains(&"Car".to_owned()));
 }
+
+#[test]
+fn add_account_sits_below_net_worth() {
+    let harness = app();
+
+    let add_account = harness.get_by_role_and_label(Role::Button, "+ Add Account");
+
+    let net_worth = harness.get_by_role_and_label(Role::Label, "$288,497.71");
+    assert!(add_account.rect().top() >= net_worth.rect().bottom());
+}

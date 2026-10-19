@@ -214,6 +214,30 @@ fn a_folded_account_bar_survives_a_restart() {
     second.get_by_role_and_label(Role::Button, "Unfold the Account bar");
 }
 
+#[test]
+fn the_folded_rail_has_no_add_account_but_file_new_account_opens_the_wizard() {
+    let empty = MemoryStorage::default();
+    let mut harness = app(&empty);
+    harness
+        .get_by_role_and_label(Role::Button, "Fold the Account bar")
+        .click();
+    harness.run();
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "+ Add Account")
+            .is_none()
+    );
+
+    harness.get_by_role_and_label(Role::Button, "File").click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "New Account…")
+        .click();
+    harness.run();
+
+    harness.get_by_role_and_label(Role::Label, "Step 1 of 4: Type");
+}
+
 /// Opens the account named `name` from the Account bar.
 fn open(harness: &mut Harness<'_, App>, name: &str) {
     harness.get_by_role_and_label(Role::Button, name).click();
