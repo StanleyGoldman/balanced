@@ -6,9 +6,9 @@ Tools enforce whatever they can: lint levels in `[workspace.lints]` (`Cargo.toml
 
 ## Cross-cutting rules
 
-- **`cargo xtask ci` passes before you push.** It runs fmt, clippy with `-D warnings`, the tests, `cargo deny check`, typos, the TODO check and the ADR numbering check (see [tooling](docs/practices/tooling.md)).
+- **`cargo xtask ci` passes before you push.** It runs fmt, clippy with `-D warnings`, the tests, `cargo deny check`, the layer check, typos, the TODO check and the ADR numbering check (see [tooling](docs/practices/tooling.md)).
 - **Silence a lint with `#[expect(lint, reason = "…")]`**, at the narrowest scope that works. The reason says why this case is the exception. An empty or generic reason fails review.
-- **Respect the layers.** Nothing below `balanced_ui` knows about egui, and `balanced_core` and `balanced_i18n` don't depend on each other. See [ARCHITECTURE.md](ARCHITECTURE.md).
+- **Respect the layers.** Nothing below `balanced_ui` knows about egui, and `balanced_core` and `balanced_i18n` don't depend on each other. `cargo xtask layers` checks the crate edges. See [ARCHITECTURE.md](ARCHITECTURE.md).
 - **Domain changes travel as Commands.** UI code sends a `DomainCommand` or `AppCommand` and reads a snapshot back. It never mutates the domain in place. See [state](docs/practices/state.md).
 - **Encode facts in types.** Use a newtype over a bare integer, an enum over a `bool` argument, a named struct over a tuple, and parse into a valid type at the boundary rather than validating later.
 - **Match our own enums exhaustively.** A new Command or Dialog variant must show up as a compile error at every `match` that handles it. `wildcard_enum_match_arm` enforces this. For a foreign enum, put `#[expect(clippy::wildcard_enum_match_arm, reason = "foreign enum")]` on the `match`.

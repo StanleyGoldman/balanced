@@ -13,7 +13,7 @@
   ```
 
   Without that table the crate silently loses every workspace lint.
-- Decide which layer the crate sits in, and update the codemap and invariants in `ARCHITECTURE.md` in the same PR. If the new crate needs a layer rule that `deny.toml` can't express, that is when the `xtask` layer check gets written.
+- Decide which layer the crate sits in, and in the same PR add it to `LAYERS` in `xtask/src/layers.rs` and update the codemap and invariants in `ARCHITECTURE.md`. `cargo xtask layers` fails on a crate missing from `LAYERS`.
 - Start with few crates. Split a crate only when compile times or ownership demand it.
 
 ## Dependencies
