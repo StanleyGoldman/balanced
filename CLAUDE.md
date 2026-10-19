@@ -104,5 +104,9 @@ The `woodpecker` skill (`.claude/skills/woodpecker/SKILL.md`) reads and drives C
 
 ### Merge conflicts
 
-- Invoke `/mattpocock-skills:resolving-merge-conflicts` the moment a merge or rebase reports a conflict, before opening any conflicted file.
-- Some sessions lack that skill (cloud sessions, for one). There, read each side's `git diff <merge-base> <side>` for the conflicted files before editing a hunk, then run `cargo xtask ci`: a test that merged cleanly can still assert the old shape, such as a full `preferences.toml` text or a harness step the other side added.
+When a merge or rebase stops on a conflict, resolve it as two intents, not two blocks of text:
+
+1. **Read each side's intent before editing a hunk.** For each conflicted file, read `git diff <merge-base> <side> -- <file>` for both sides, and find the commit, PR or ticket behind each change (`git log <merge-base>..<side> -- <file>`, then `gh pr view`).
+2. **Keep both intents where they fit together.** Where they clash, keep the side that matches the merge's goal, and name what the other side loses in the merge commit message. A side that has already merged into `main` usually describes the current state, so text it made stale on your branch goes.
+3. **Check the parts that merged cleanly too.** Two branches can add the same thing in different places, such as two entries for one crate in a list, with no conflict marker. Search the merged files for each name both sides added.
+4. **Run `cargo xtask ci` before committing.** A test that merged cleanly can still assert the old shape, such as a full `preferences.toml` text or a harness step the other side added.
