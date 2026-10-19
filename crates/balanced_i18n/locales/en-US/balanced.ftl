@@ -95,7 +95,16 @@ register-column-number = Num
 register-column-payee = Payee
 register-column-category = Category
 register-column-memo = Memo
-register-column-amount = Amount
+# The headings of the columns of money out and money in on a checking, savings,
+# investment or retirement account.
+register-column-payment = Payment
+register-column-deposit = Deposit
+# The headings of the columns of money out and money in on a credit card.
+register-column-charge = Charge
+register-column-card-payment = Payment
+# The headings of the columns of money out and money in on an asset or a liability.
+register-column-decrease = Decrease
+register-column-increase = Increase
 register-column-balance = Balance
 # The handle on a column heading's right edge that resizes the column.
 register-resize-column = Resize { $column }
