@@ -273,8 +273,13 @@ fn back_up(connection: &Connection, path: &Path, version: u32) -> Result<PathBuf
             "{name} (before upgrade, v{version}) {copy}.balanced"
         ));
     }
+    // SQLite takes the name as UTF-8 text, so a name that isn't would copy elsewhere.
+    let name = backup.to_str().ok_or_else(|| StoreError::Io {
+        path: backup.clone(),
+        source: io::Error::new(io::ErrorKind::InvalidFilename, "the name isn't UTF-8"),
+    })?;
     connection
-        .execute("VACUUM INTO ?1", [backup.to_string_lossy()])
+        .execute("VACUUM INTO ?1", [name])
         .inspect_err(|_| {
             // The file didn't exist before, so whatever the failed copy left is its own.
             fs::remove_file(&backup).ok();

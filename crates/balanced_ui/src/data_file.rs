@@ -116,7 +116,7 @@ impl DataFileRefusal {
             OpenError::Locked => RefusalReason::Locked,
             OpenError::BackupFailed(_) => RefusalReason::BackupFailed,
             OpenError::UpgradeFailed { backup, .. } => RefusalReason::UpgradeFailed {
-                backup: file_name(backup),
+                backup: Self::file_name(backup),
             },
             OpenError::Store(_) => RefusalReason::Unreadable,
         };
@@ -135,9 +135,17 @@ impl DataFileRefusal {
 
     fn new(path: &Path, reason: RefusalReason) -> Self {
         Self {
-            file: file_name(path),
+            file: Self::file_name(path),
             reason,
         }
+    }
+
+    /// The name of the file at `path`, without its folder.
+    fn file_name(path: &Path) -> String {
+        path.file_name()
+            .unwrap_or(path.as_os_str())
+            .to_string_lossy()
+            .into_owned()
     }
 
     /// What the refusal Dialog says.
@@ -167,12 +175,4 @@ impl DataFileRefusal {
             }
         }
     }
-}
-
-/// The name of the file at `path`, without its folder.
-fn file_name(path: &Path) -> String {
-    path.file_name()
-        .unwrap_or(path.as_os_str())
-        .to_string_lossy()
-        .into_owned()
 }

@@ -63,8 +63,9 @@ pub(crate) fn upgrade(
             migrate(&transaction, migrations, from)?;
             Ok(transaction.commit()?)
         });
-    connection.pragma_update(None, "foreign_keys", true)?;
-    upgraded
+    let restored = connection.pragma_update(None, "foreign_keys", true);
+    // A failed upgrade reports its own cause, not the restore's.
+    upgraded.and(restored.map_err(UpgradeError::from))
 }
 
 /// Runs, inside `transaction`, every one of `migrations` after version `from`, clears the
