@@ -91,3 +91,16 @@ fn a_failed_create_leaves_no_file() {
     assert!(matches!(result, Err(StoreError::Sqlite(_))));
     assert!(!path.exists());
 }
+
+#[test]
+fn creating_in_a_missing_folder_fails_with_the_io_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("Missing").join("Household.balanced");
+
+    let result = Store::create(&path, "USD");
+
+    assert!(matches!(
+        result,
+        Err(StoreError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound
+    ));
+}

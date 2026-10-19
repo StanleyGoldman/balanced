@@ -1,6 +1,7 @@
 //! Creating a data file.
 
-use std::fs;
+use std::fs::{self, File};
+use std::io;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, TransactionBehavior};
@@ -25,6 +26,8 @@ pub struct Store {
 pub enum StoreError {
     #[error("a file already exists at {0:?}")]
     AlreadyExists(PathBuf),
+    #[error("couldn't create the file at {path:?}")]
+    Io { path: PathBuf, source: io::Error },
     #[error("sqlite failed")]
     Sqlite(#[from] rusqlite::Error),
 }
@@ -34,18 +37,28 @@ impl Store {
     /// code such as `"USD"`. Refuses a path that already holds a file, and leaves no file
     /// behind when creating fails.
     pub fn create(path: &Path, currency: &str) -> Result<Self, StoreError> {
-        if path.exists() {
-            return Err(StoreError::AlreadyExists(path.to_owned()));
-        }
-        Self::create_new(path, currency).inspect_err(|_| {
+        // Creating the file exclusively, before SQLite opens it, means the file this
+        // removes on failure is always the one made here.
+        File::create_new(path).map_err(|source| {
+            if source.kind() == io::ErrorKind::AlreadyExists {
+                StoreError::AlreadyExists(path.to_owned())
+            } else {
+                StoreError::Io {
+                    path: path.to_owned(),
+                    source,
+                }
+            }
+        })?;
+        Self::write_schema(path, currency).inspect_err(|_| {
             // The file is half made and nobody has seen it, so it goes. Failing to remove
             // it leaves an empty or partial file, which opening later refuses.
             fs::remove_file(path).ok();
         })
     }
 
-    /// Creates the file at `path`, which holds nothing yet.
-    fn create_new(path: &Path, currency: &str) -> Result<Self, StoreError> {
+    /// Fills the empty file at `path` with the latest schema and the file's currency, in
+    /// one transaction.
+    fn write_schema(path: &Path, currency: &str) -> Result<Self, StoreError> {
         let mut connection = Connection::open(path)?;
         connection.pragma_update(None, "foreign_keys", true)?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
