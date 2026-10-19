@@ -91,3 +91,6 @@ jobs:
       - name: summarize issue updates
         if: always() && hashFiles('target/mutants-summary.md') != ''
         run: cat target/mutants-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: sccache summary
+        if: always()
+        run: .github/sccache-summary.sh

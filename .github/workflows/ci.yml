@@ -139,6 +139,9 @@ jobs:
       - name: dco
         if: needs.changes.outputs.code != 'false'
         run: .github/in-image.sh cargo xtask dco
+      - name: sccache summary
+        if: always()
+        run: .github/sccache-summary.sh
 
   clippy:
     needs: changes
@@ -149,6 +152,9 @@ jobs:
       - uses: ./.github/actions/ci-setup
       - name: clippy
         run: .github/in-image.sh cargo xtask clippy
+      - name: sccache summary
+        if: always()
+        run: .github/sccache-summary.sh
 
   # The three that build and run the test binaries, in one job so they build
   # them once.
@@ -177,6 +183,12 @@ jobs:
         with:
           report_paths: target/nextest/default/junit.xml
           annotate_only: true
+          # A table of the failing tests alone, titled suite › test.
+          detailed_summary: true
+          include_skipped: false
+          include_empty_in_summary: false
+          simplified_summary: true
+          check_title_template: "{{SUITE_NAME}} › {{TEST_NAME}}"
 
       # kittest's images of a failed snapshot, the drawing it got and its
       # difference from the committed one, so a mismatch can be seen without
@@ -196,7 +208,18 @@ jobs:
         env:
           URL: ${{ steps.snapshot-diffs.outputs.artifact-url }}
         run: |
-          printf '### Snapshot diffs\n\n[snapshot-diffs](%s): the new and diff images of each failed snapshot.\n' "$URL" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### 🖼️ Snapshot diffs"
+            echo
+            echo "These snapshots failed. [Download snapshot-diffs]($URL) for each one's drawing (\`.new.png\`) and its difference from the committed image (\`.diff.png\`)."
+            echo
+            for diff in crates/balanced_ui/tests/snapshots/*.diff.png; do
+              echo "- \`$(basename "$diff" .diff.png)\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: sccache summary
+        if: always()
+        run: .github/sccache-summary.sh
 
   # The required check. A job a prose-only change skips counts as passed.
   ci:

@@ -10,7 +10,7 @@ use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
 
 use super::github::GitHub;
-use super::plan::{self, Action, CloseReason, FoundBy, Run};
+use super::plan::{self, Action, CloseReason, FoundBy, Run, Shard};
 use super::{MutantsOutcome, REPO};
 use crate::process;
 
@@ -63,7 +63,7 @@ pub(crate) fn run(scope_args: &[String], found_by: FoundBy, updates: IssueUpdate
     };
     let actions = plan::plan(outcomes.as_deref(), &list, &issues, &run)?;
     eprintln!("mutants: {} issue updates", actions.len());
-    std::fs::write(SUMMARY_PATH, summary(&actions, updates))
+    std::fs::write(SUMMARY_PATH, summary(&actions, &run, updates))
         .with_context(|| format!("writing {SUMMARY_PATH}"))?;
     for action in &actions {
         eprintln!("{}", describe(action));
@@ -139,33 +139,68 @@ fn warm_up(packages: &BTreeSet<String>) -> Result<()> {
     Ok(())
 }
 
-/// The run's issue updates as Markdown, for the CI job summary.
-fn summary(actions: &[Action], updates: IssueUpdates) -> String {
-    let issue_link = |issue: &u64| format!("[#{issue}](https://github.com/{REPO}/issues/{issue})");
+/// The run's issue updates as Markdown, for the CI job summary: the run and
+/// its commit with a count of each kind of update, then a table of them.
+fn summary(actions: &[Action], run: &Run, updates: IssueUpdates) -> String {
+    let url = format!("https://github.com/{REPO}");
+    let issue_link = |issue: &u64| format!("[#{issue}]({url}/issues/{issue})");
     let heading = match updates {
-        IssueUpdates::Apply => "### Mutant issue updates",
-        IssueUpdates::Print => "### Mutant issue updates (dry run, not made)",
+        IssueUpdates::Apply => "### 🧬 Mutant issue updates",
+        IssueUpdates::Print => "### 🧬 Mutant issue updates (dry run, not made)",
     };
-    let lines: Vec<String> = actions
+    let found_by = match run.found_by {
+        FoundBy::PullRequest(number) => format!("Pull request [#{number}]({url}/pull/{number})"),
+        FoundBy::Shard(Shard { index, count }) => format!("Shard {index}/{count}"),
+    };
+    let short = run.commit.get(..7).unwrap_or(&run.commit);
+    let commit = format!("[`{short}`]({url}/commit/{})", run.commit);
+
+    let count =
+        |wanted: fn(&Action) -> bool| actions.iter().filter(|&action| wanted(action)).count();
+    let counts: Vec<String> = [
+        (count(|action| matches!(action, Action::Open(_))), "opened"),
+        (
+            count(|action| matches!(action, Action::Comment { .. })),
+            "found again",
+        ),
+        (
+            count(|action| matches!(action, Action::Close { .. })),
+            "closed",
+        ),
+    ]
+    .into_iter()
+    .filter(|&(count, _)| count > 0)
+    .map(|(count, kind)| format!("{count} {kind}"))
+    .collect();
+    let counts = if counts.is_empty() {
+        "no issue updates".to_owned()
+    } else {
+        counts.join(" · ")
+    };
+
+    let rows: Vec<String> = actions
         .iter()
-        .map(|action| match action {
-            Action::Open(issue) => format!("- opened: {}\n", issue.title),
-            Action::Comment { issue, .. } => format!("- commented on {}\n", issue_link(issue)),
-            Action::Close { issue, reason, .. } => {
-                let reason = match reason {
-                    CloseReason::Caught => "caught",
-                    CloseReason::NoLongerGenerated => "no longer generated",
-                };
-                format!("- closed {} as {reason}\n", issue_link(issue))
-            }
+        .map(|action| {
+            let (update, issue) = match action {
+                Action::Open(issue) => ("🆕 Opened", issue.title.clone()),
+                Action::Comment { issue, .. } => ("🔁 Found again", issue_link(issue)),
+                Action::Close { issue, reason, .. } => (
+                    match reason {
+                        CloseReason::Caught => "✅ Closed, caught",
+                        CloseReason::NoLongerGenerated => "🗑️ Closed, no longer generated",
+                    },
+                    issue_link(issue),
+                ),
+            };
+            format!("| {update} | {issue} |\n")
         })
         .collect();
-    let body = if lines.is_empty() {
-        "No issue updates.\n".to_owned()
+    let table = if rows.is_empty() {
+        String::new()
     } else {
-        lines.concat()
+        format!("\n| Update | Issue |\n|---|---|\n{}", rows.concat())
     };
-    format!("{heading}\n\n{body}")
+    format!("{heading}\n\n{found_by} at {commit}: **{counts}**\n{table}")
 }
 
 /// cargo-mutants' arguments for a CI run over the mutants `scope_args` select:
@@ -231,7 +266,7 @@ fn describe(action: &Action) -> String {
 #[cfg(test)]
 mod tests {
     use super::{Action, CloseReason, IssueUpdates, cargo_mutants_args, summary};
-    use crate::mutants::plan::NewIssue;
+    use crate::mutants::plan::{FoundBy, NewIssue, Run, Shard};
 
     fn every_kind_of_update() -> Vec<Action> {
         vec![
@@ -257,23 +292,42 @@ mod tests {
         ]
     }
 
+    fn shard_run() -> Run {
+        Run {
+            commit: "0123456789abcdef0123456789abcdef01234567".to_owned(),
+            found_by: FoundBy::Shard(Shard { index: 3, count: 7 }),
+            pipeline: None,
+        }
+    }
+
     #[test]
-    fn the_summary_links_each_issue_update() {
+    fn the_summary_tables_each_issue_update_under_its_run() {
         assert_eq!(
-            summary(&every_kind_of_update(), IssueUpdates::Apply),
-            "### Mutant issue updates\n\n\
-             - opened: Missed mutant in money.rs\n\
-             - commented on [#12](https://github.com/StanleyGoldman/balanced/issues/12)\n\
-             - closed [#9](https://github.com/StanleyGoldman/balanced/issues/9) as caught\n\
-             - closed [#7](https://github.com/StanleyGoldman/balanced/issues/7) as no longer generated\n"
+            summary(&every_kind_of_update(), &shard_run(), IssueUpdates::Apply),
+            "### 🧬 Mutant issue updates\n\n\
+             Shard 3/7 at [`0123456`](https://github.com/StanleyGoldman/balanced/commit/0123456789abcdef0123456789abcdef01234567): \
+             **1 opened · 1 found again · 2 closed**\n\n\
+             | Update | Issue |\n\
+             |---|---|\n\
+             | 🆕 Opened | Missed mutant in money.rs |\n\
+             | 🔁 Found again | [#12](https://github.com/StanleyGoldman/balanced/issues/12) |\n\
+             | ✅ Closed, caught | [#9](https://github.com/StanleyGoldman/balanced/issues/9) |\n\
+             | 🗑️ Closed, no longer generated | [#7](https://github.com/StanleyGoldman/balanced/issues/7) |\n"
         );
     }
 
     #[test]
-    fn a_dry_run_summary_says_its_updates_were_not_made() {
+    fn a_dry_run_summary_of_a_landed_pull_request_says_its_updates_were_not_made() {
+        let run = Run {
+            found_by: FoundBy::PullRequest(42),
+            ..shard_run()
+        };
         assert_eq!(
-            summary(&[], IssueUpdates::Print),
-            "### Mutant issue updates (dry run, not made)\n\nNo issue updates.\n"
+            summary(&[], &run, IssueUpdates::Print),
+            "### 🧬 Mutant issue updates (dry run, not made)\n\n\
+             Pull request [#42](https://github.com/StanleyGoldman/balanced/pull/42) at \
+             [`0123456`](https://github.com/StanleyGoldman/balanced/commit/0123456789abcdef0123456789abcdef01234567): \
+             **no issue updates**\n"
         );
     }
 

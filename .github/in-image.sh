@@ -19,9 +19,9 @@
 # With RUSTC_WRAPPER=sccache, the command runs under a trap that prints
 # sccache's hit rate when it ends, pass or fail, and saves it as JSON in
 # target/sccache-stats.json. The server lives in the container, so a later
-# step could no longer ask it. When GITHUB_STEP_SUMMARY is set, as in every
-# workflow step, the script then adds the hit rate to the job summary as one
-# line.
+# step could no longer ask it. In a workflow step (RUNNER_TEMP set), the
+# script then adds the step's hit rate as a row to $RUNNER_TEMP/sccache-rows.md,
+# which .github/sccache-summary.sh turns into a table in the job summary.
 #
 # Exit status: the command's.
 set -euo pipefail
@@ -57,15 +57,15 @@ docker run "${args[@]}" balanced-ci:latest sh -c '
     mkdir -p target && sccache --show-stats --stats-format=json > '"$stats"' || true" EXIT
   "$@"' sh "$@" || status=$?
 
-if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ -s "$stats" ]; then
+if [ -n "${RUNNER_TEMP:-}" ] && [ -s "$stats" ]; then
   jq -r --arg command "$*" '
     .stats as $s
     | ([$s.cache_hits.counts[]] | add // 0) as $hits
     | ([$s.cache_misses.counts[]] | add // 0) as $misses
     | if $hits + $misses == 0 then empty else
-        "`\($command)`: sccache \($hits) hits, \($misses) misses"
-        + " (\($hits * 100 / ($hits + $misses) | floor)% hit rate),"
-        + " \($s.requests_not_cacheable) not cacheable\n"
-      end' "$stats" >> "$GITHUB_STEP_SUMMARY" || true
+        "| `\($command)` | \($hits) | \($misses)"
+        + " | \($hits * 100 / ($hits + $misses) | floor)%"
+        + " | \($s.requests_not_cacheable) |"
+      end' "$stats" >> "$RUNNER_TEMP/sccache-rows.md" || true
 fi
 exit "$status"
