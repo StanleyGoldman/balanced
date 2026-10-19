@@ -203,7 +203,7 @@ impl App {
     fn switch_data_file(&mut self, ledger: Ledger, path: PathBuf) {
         // The file is open, so it resolves, unless it has just been moved.
         let listed = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
-        self.recent_files.opened(listed);
+        self.recent_files.note_opened(listed);
         if let Err(error) = self.recent_files_file.save(&self.recent_files) {
             tracing::warn!(?error, "saving the Recent files failed");
         }

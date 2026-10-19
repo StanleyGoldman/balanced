@@ -16,7 +16,7 @@ impl RecentFiles {
 
     /// Puts `path` at the top, as the file just opened or created, and drops the
     /// oldest file past [`RecentFiles::MAX`].
-    pub(crate) fn opened(&mut self, path: PathBuf) {
+    pub(crate) fn note_opened(&mut self, path: PathBuf) {
         self.0.retain(|listed| *listed != path);
         self.0.insert(0, path);
         self.0.truncate(Self::MAX);
@@ -152,7 +152,7 @@ mod tests {
     fn recent(paths: &[&str]) -> RecentFiles {
         let mut recent = RecentFiles::default();
         for path in paths.iter().rev() {
-            recent.opened(PathBuf::from(path));
+            recent.note_opened(PathBuf::from(path));
         }
         recent
     }
@@ -161,7 +161,7 @@ mod tests {
     fn an_opened_file_goes_to_the_top() {
         let mut recent = recent(&["/a.balanced", "/b.balanced"]);
 
-        recent.opened(PathBuf::from("/c.balanced"));
+        recent.note_opened(PathBuf::from("/c.balanced"));
 
         assert_eq!(
             recent.files(),
@@ -178,7 +178,7 @@ mod tests {
     fn a_listed_file_opened_again_moves_to_the_top_once() {
         let mut recent = recent(&["/a.balanced", "/b.balanced", "/c.balanced"]);
 
-        recent.opened(PathBuf::from("/b.balanced"));
+        recent.note_opened(PathBuf::from("/b.balanced"));
 
         assert_eq!(
             recent.files(),
@@ -194,7 +194,7 @@ mod tests {
     fn a_fifth_file_drops_the_oldest() {
         let mut recent = recent(&["/a.balanced", "/b.balanced", "/c.balanced", "/d.balanced"]);
 
-        recent.opened(PathBuf::from("/e.balanced"));
+        recent.note_opened(PathBuf::from("/e.balanced"));
 
         assert_eq!(
             recent.files(),

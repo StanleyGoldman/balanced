@@ -8,6 +8,8 @@ publish.workspace = true
 [dependencies]
 balanced_core.workspace = true
 balanced_i18n.workspace = true
+# Finds the Documents folder the save picker starts in.
+directories.workspace = true
 # `persistence` saves the window layout and geometry in eframe storage.
 eframe = { workspace = true, features = ["persistence"] }
 egui_extras.workspace = true

@@ -5,7 +5,7 @@ use balanced_i18n::Localizer;
 use eframe::egui::{self, CentralPanel, Id};
 
 use crate::command::{AppCommand, CommandSender};
-use crate::data_file::{DataFilePicker, DataFileRefusal, refusal_dialog};
+use crate::data_file::{DataFilePicker, DataFileRefusal};
 use crate::dialog::{DialogOutcome, LightDialog, OpenDialog};
 use crate::i18n::fl;
 use crate::theme::Theme;
@@ -48,10 +48,8 @@ impl Welcome {
         CentralPanel::default().show(ui, |_| {});
         let ctx = ui.ctx();
         if let Some(refusal) = &mut self.refusal {
-            match refusal_dialog(ctx, i18n, theme, refusal) {
-                DialogOutcome::Open => {}
-                DialogOutcome::Accepted | DialogOutcome::Cancelled => self.refusal = None,
-                DialogOutcome::Back => unreachable!("a notice has no Back button"),
+            if DataFileRefusal::show_dialog(ctx, i18n, theme, refusal) {
+                self.refusal = None;
             }
             return;
         }

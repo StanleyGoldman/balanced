@@ -6,6 +6,7 @@ use std::thread;
 
 use balanced_core::OpenError;
 use balanced_i18n::Localizer;
+use directories::UserDirs;
 use eframe::egui::{self, Id};
 use rfd::{AsyncFileDialog, FileHandle};
 
@@ -25,7 +26,8 @@ pub(crate) enum DataFilePicker {
 
 impl DataFilePicker {
     /// Shows the picker, listing `.balanced` files, and leaves the Main window free
-    /// while it is open. A picked path comes back as `AppCommand::NewDataFile` or
+    /// while it is open. The save picker starts in the Documents folder, where the OS
+    /// has one, suggesting `Balanced.balanced`. A picked path comes back as `AppCommand::NewDataFile` or
     /// `AppCommand::OpenDataFile` through `commands`; cancelling sends nothing.
     pub(crate) fn show(self, i18n: &Localizer, commands: &CommandSender) {
         // The picker is built here, on the UI thread, as macOS requires, and waited
@@ -34,7 +36,7 @@ impl DataFilePicker {
             AsyncFileDialog::new().add_filter(fl!(i18n, "dialog-data-file-filter"), &["balanced"]);
         match self {
             Self::New => wait_for(
-                picker
+                documents(picker)
                     .set_file_name(fl!(i18n, "dialog-data-file-suggested-name"))
                     .save_file(),
                 AppCommand::NewDataFile,
@@ -42,6 +44,15 @@ impl DataFilePicker {
             ),
             Self::Open => wait_for(picker.pick_file(), AppCommand::OpenDataFile, commands),
         }
+    }
+}
+
+/// `picker`, starting in the Documents folder, or where the OS starts it when there is
+/// none.
+fn documents(picker: AsyncFileDialog) -> AsyncFileDialog {
+    match UserDirs::new().as_ref().and_then(UserDirs::document_dir) {
+        Some(dir) => picker.set_directory(dir),
+        None => picker,
     }
 }
 
@@ -68,21 +79,12 @@ fn wait_for(
     }
 }
 
-/// Draws the Dialog saying why a data file was refused, a notice that OK closes.
-pub(crate) fn refusal_dialog(
-    ctx: &egui::Context,
-    i18n: &Localizer,
-    theme: &Theme,
-    dialog: &mut OpenDialog<DataFileRefusal>,
-) -> DialogOutcome {
-    LightDialog::notice(
-        Id::new("data_file_refusal_dialog"),
-        fl!(i18n, "dialog-ok"),
-        theme,
-    )
-    .show(ctx, dialog, |ui, refusal| {
-        ui.label(refusal.message(i18n));
-    })
+/// The name of the file at `path`, without its folder, as the user is shown it.
+pub(crate) fn file_name(path: &Path) -> String {
+    path.file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// A data file the App refused to create or open, and why. The open file stays open,
@@ -137,7 +139,7 @@ impl DataFileRefusal {
             OpenError::Locked => RefusalReason::Locked,
             OpenError::BackupFailed(_) => RefusalReason::BackupFailed,
             OpenError::UpgradeFailed { backup, .. } => RefusalReason::UpgradeFailed {
-                backup: Self::file_name(backup),
+                backup: file_name(backup),
             },
             OpenError::Store(_) => RefusalReason::Unreadable,
         };
@@ -156,17 +158,32 @@ impl DataFileRefusal {
 
     fn new(path: &Path, reason: RefusalReason) -> Self {
         Self {
-            file: Self::file_name(path),
+            file: file_name(path),
             reason,
         }
     }
 
-    /// The name of the file at `path`, without its folder.
-    fn file_name(path: &Path) -> String {
-        path.file_name()
-            .unwrap_or(path.as_os_str())
-            .to_string_lossy()
-            .into_owned()
+    /// Draws `dialog`, the notice saying why a data file was refused, and returns
+    /// whether OK or Esc closed it this frame.
+    pub(crate) fn show_dialog(
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        theme: &Theme,
+        dialog: &mut OpenDialog<Self>,
+    ) -> bool {
+        let outcome = LightDialog::notice(
+            Id::new("data_file_refusal_dialog"),
+            fl!(i18n, "dialog-ok"),
+            theme,
+        )
+        .show(ctx, dialog, |ui, refusal| {
+            ui.label(refusal.message(i18n));
+        });
+        match outcome {
+            DialogOutcome::Open => false,
+            DialogOutcome::Accepted | DialogOutcome::Cancelled => true,
+            DialogOutcome::Back => unreachable!("a notice has no Back button"),
+        }
     }
 
     /// What the refusal Dialog says.

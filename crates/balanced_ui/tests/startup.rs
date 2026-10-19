@@ -8,7 +8,7 @@ use balanced_i18n::Localizer;
 use balanced_ui::testing;
 use balanced_ui::{App, Clock, PreferencesFile, RecentFilesFile};
 use eframe::egui::accesskit::Role;
-use eframe::egui::{ViewportCommand, ViewportId};
+use eframe::egui::{Key, ViewportCommand, ViewportId};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 use icu_calendar::Date;
@@ -106,19 +106,40 @@ fn a_refused_newest_file_shows_why_then_the_welcome_dialog() {
     );
 }
 
+/// The commands the App sends the window over the next few frames. Each frame's
+/// output carries only the commands sent in that frame.
+fn viewport_commands(harness: &mut Harness<'static, App>) -> Vec<ViewportCommand> {
+    let mut commands = Vec::new();
+    for _ in 0..3 {
+        harness.step();
+        commands.extend(
+            harness.output().viewport_output[&ViewportId::ROOT]
+                .commands
+                .iter()
+                .cloned(),
+        );
+    }
+    commands
+}
+
 #[test]
 fn quit_on_the_welcome_dialog_closes_the_window() {
     let dir = tempfile::tempdir().expect("the temp dir is writable");
     let mut harness = app(dir.path());
 
     harness.get_by_role_and_label(Role::Button, "Quit").click();
-    // One step plays the click, which sends Quit; the next applies it. Only that
-    // frame's output carries the viewport command.
-    harness.step();
-    harness.step();
 
-    let root = &harness.output().viewport_output[&ViewportId::ROOT];
-    assert_eq!(root.commands, [ViewportCommand::Close]);
+    assert_eq!(viewport_commands(&mut harness), [ViewportCommand::Close]);
+}
+
+#[test]
+fn esc_on_the_welcome_dialog_closes_the_window() {
+    let dir = tempfile::tempdir().expect("the temp dir is writable");
+    let mut harness = app(dir.path());
+
+    harness.key_press(Key::Escape);
+
+    assert_eq!(viewport_commands(&mut harness), [ViewportCommand::Close]);
 }
 
 #[test]

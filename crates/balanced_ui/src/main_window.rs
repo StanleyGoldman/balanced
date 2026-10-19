@@ -13,7 +13,7 @@ use icu_calendar::{Date, Iso};
 use crate::account_bar::{AccountBar, BarFrame};
 use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
-use crate::data_file::{DataFileRefusal, refusal_dialog};
+use crate::data_file::{self, DataFileRefusal};
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
@@ -511,12 +511,8 @@ impl MainWindow {
         let Some(dialog) = &mut self.data_file_refusal else {
             return;
         };
-        match refusal_dialog(ctx, i18n, theme, dialog) {
-            DialogOutcome::Open => {}
-            DialogOutcome::Accepted | DialogOutcome::Cancelled => {
-                self.close_dialog(ctx, |window| &mut window.data_file_refusal);
-            }
-            DialogOutcome::Back => unreachable!("a notice has no Back button"),
+        if DataFileRefusal::show_dialog(ctx, i18n, theme, dialog) {
+            self.close_dialog(ctx, |window| &mut window.data_file_refusal);
         }
     }
 
@@ -785,11 +781,7 @@ impl MainWindow {
         recent_files: &[PathBuf],
     ) {
         for (number, path) in (1_u32..).zip(recent_files) {
-            let file = path
-                .file_name()
-                .unwrap_or(path.as_os_str())
-                .to_string_lossy()
-                .into_owned();
+            let file = data_file::file_name(path);
             let item = ui
                 .button(fl!(i18n, "menu-file-recent", number = number, file = file))
                 .on_hover_text(path.display().to_string());
