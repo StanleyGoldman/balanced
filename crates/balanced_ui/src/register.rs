@@ -46,6 +46,10 @@ const RESIZE_HANDLE_WIDTH: f32 = 8.0;
 const ACTION_DOT_RADIUS: f32 = 1.5;
 const ACTION_DOT_SPACING: f32 = 4.5;
 
+/// The flag the Flag column shows on a flagged transaction. The bundled
+/// emoji-icon-font draws it.
+const FLAG_GLYPH: &str = "⚑";
+
 /// The narrowest a combobox list gets, so its entries stay readable under a narrow cell.
 const LIST_MIN_WIDTH: f32 = 240.0;
 
@@ -60,8 +64,8 @@ const SORT_ARROW_GAP: f32 = 4.0;
 
 impl RegisterColumn {
     /// The column's width before the user resizes it, for a column that resizes.
-    /// Payee and Category share the width the others leave, and the Actions column
-    /// fits its button, so neither resizes.
+    /// Payee and Category share the width the others leave, and the Flag and Actions
+    /// columns fit their glyph and button, so none of them resizes.
     fn default_width(self) -> Option<f32> {
         match self {
             Self::Date => Some(80.0),
@@ -69,7 +73,7 @@ impl RegisterColumn {
             Self::Memo => Some(140.0),
             Self::Payment | Self::Deposit => Some(90.0),
             Self::Balance => Some(100.0),
-            Self::Payee | Self::Category | Self::Actions => None,
+            Self::Payee | Self::Category | Self::Flag | Self::Actions => None,
         }
     }
 
@@ -85,12 +89,30 @@ impl RegisterColumn {
             Self::Payment => amount_title(i18n, AmountSide::Payment, kind),
             Self::Deposit => amount_title(i18n, AmountSide::Deposit, kind),
             Self::Balance => fl!(i18n, "register-column-balance"),
+            Self::Flag => fl!(i18n, "register-column-flag"),
             Self::Actions => String::new(),
         }
     }
 
-    /// What clicking the column's heading sorts by. Number, Balance and Actions don't
-    /// sort.
+    /// What the column's heading shows, given its `title`: the flag on the Flag column,
+    /// which is too narrow for its title, and the title on the rest.
+    fn heading_text(self, title: String) -> String {
+        match self {
+            Self::Flag => FLAG_GLYPH.to_owned(),
+            Self::Date
+            | Self::Number
+            | Self::Payee
+            | Self::Category
+            | Self::Memo
+            | Self::Payment
+            | Self::Deposit
+            | Self::Balance
+            | Self::Actions => title,
+        }
+    }
+
+    /// What clicking the column's heading sorts by. Number, Balance, Flag and Actions
+    /// don't sort.
     fn sort_key(self) -> Option<SortKey> {
         match self {
             Self::Date => Some(SortKey::Date),
@@ -99,7 +121,7 @@ impl RegisterColumn {
             Self::Memo => Some(SortKey::Memo),
             Self::Payment => Some(SortKey::Amount(AmountSide::Payment)),
             Self::Deposit => Some(SortKey::Amount(AmountSide::Deposit)),
-            Self::Number | Self::Balance | Self::Actions => None,
+            Self::Number | Self::Balance | Self::Flag | Self::Actions => None,
         }
     }
 
@@ -109,6 +131,7 @@ impl RegisterColumn {
     fn width(self, theme: &Theme, widths: &ColumnWidths) -> Column {
         let column = match self {
             Self::Payee | Self::Category => Column::remainder().at_least(MIN_FLEX_WIDTH),
+            Self::Flag => Column::exact(theme.row_height()),
             Self::Actions => Column::exact(theme.row_height() + Theme::EDGE_INSET),
             Self::Date
             | Self::Number
@@ -125,7 +148,7 @@ impl RegisterColumn {
     }
 
     /// Whether the cell cursor can rest in the column. Balance is worked out from the
-    /// other cells, and Actions holds a menu.
+    /// other cells, Flag changes on a click, and Actions holds a menu.
     fn holds_cursor(self) -> bool {
         match self {
             Self::Date
@@ -135,7 +158,7 @@ impl RegisterColumn {
             | Self::Memo
             | Self::Payment
             | Self::Deposit => true,
-            Self::Balance | Self::Actions => false,
+            Self::Balance | Self::Flag | Self::Actions => false,
         }
     }
 
@@ -158,6 +181,7 @@ impl RegisterColumn {
             | Self::Payment
             | Self::Deposit
             | Self::Balance
+            | Self::Flag
             | Self::Actions => None,
         }
     }
@@ -172,14 +196,17 @@ impl RegisterColumn {
             | Self::Category
             | Self::Memo
             | Self::Balance
+            | Self::Flag
             | Self::Actions => false,
         }
     }
 
-    /// Where the column's text sits: amounts on the right, the rest on the left.
+    /// Where the column's text sits: amounts on the right, the flag in the middle, the
+    /// rest on the left.
     fn align(self) -> Align {
         match self {
             Self::Payment | Self::Deposit | Self::Balance => Align::Max,
+            Self::Flag => Align::Center,
             Self::Date
             | Self::Number
             | Self::Payee
@@ -888,13 +915,19 @@ impl Register {
             .collect()
     }
 
-    /// Carries out `action`, picked from transaction `id`'s Actions menu.
+    /// Carries out `action`, picked on transaction `id`'s row.
     fn act(&mut self, id: TransactionId, action: RowAction, commands: &CommandSender) {
         match action {
             RowAction::Delete => {
                 // The confirm asks about the selected row.
                 self.place_cursor(RowId::Transaction(id), RegisterColumn::Actions);
                 commands.send(AppCommand::OpenDialog(DialogKind::DeleteTransaction));
+            }
+            RowAction::SetFlagged(flagged) => {
+                commands.send(AppCommand::Domain(DomainCommand::SetFlagged {
+                    transaction: id,
+                    flagged,
+                }));
             }
         }
     }
@@ -1945,10 +1978,12 @@ impl Access {
     }
 }
 
-/// A command picked from a row's Actions menu.
+/// A command picked on a row, from its Actions menu or its Flag cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RowAction {
     Delete,
+    /// Flag the transaction, or take its flag off.
+    SetFlagged(bool),
 }
 
 /// Whether `rect` lies wholly within `viewport` from top to bottom, give or take half a
@@ -2426,7 +2461,7 @@ impl Heading {
             rect,
             column,
             insets,
-            WidgetText::from(egui::RichText::new(title).strong()),
+            WidgetText::from(egui::RichText::new(column.heading_text(title)).strong()),
         );
         if let (Some(direction), Some(text)) = (direction, text) {
             sort_arrow(ui, column, text, direction);
@@ -2486,7 +2521,7 @@ struct Cell<'a> {
 
 impl Cell<'_> {
     /// Draws the cell, the whole of which is one click target, and returns the command
-    /// picked from its Actions menu, if it has one.
+    /// picked from its Actions menu or its Flag cell, if it has one.
     fn show(
         &self,
         ui: &egui::Ui,
@@ -2521,6 +2556,7 @@ impl Cell<'_> {
             RegisterColumn::Balance => row
                 .balance()
                 .map_or_else(WidgetText::default, |balance| balance.styled(theme).into()),
+            RegisterColumn::Flag => return flag_cell(ui, i18n, row, &response, access),
             RegisterColumn::Actions => {
                 // The row's band across the whole Register, for telling whether the
                 // pointer is on this row.
@@ -2537,7 +2573,7 @@ impl Cell<'_> {
                 // The draft row is no transaction yet, so it has no commands.
                 let draft = row.id() == RowId::Draft;
                 if (selected || hovered || open) && !draft {
-                    action = actions_menu(ui, i18n, &response, access);
+                    action = actions_menu(ui, i18n, &response, access, row);
                 } else {
                     // Hidden, the menu leaves an empty cell that selects the row.
                     cell_info(ui, &response, selected, "");
@@ -2567,6 +2603,57 @@ impl Cell<'_> {
         }
         (response, None)
     }
+}
+
+/// The Flag cell of `row`, whose click target is `response`: a ⚑ when the transaction
+/// is flagged, which a click on an editable row's cell puts on or takes off. Assistive
+/// technology reads it as a checkbox. The draft row's cell is empty and takes no click.
+fn flag_cell(
+    ui: &egui::Ui,
+    i18n: &Localizer,
+    row: &RegisterRow,
+    response: &Response,
+    access: Access,
+) -> (Response, Option<RowAction>) {
+    if row.id() == RowId::Draft {
+        cell_info(ui, response, false, "");
+        return (response.clone(), None);
+    }
+    let flagged = row.is_flagged();
+    let editable = access == Access::Editable;
+    let label = fl!(
+        i18n,
+        "register-flag",
+        payee = row.payee(),
+        date = row.date(),
+        amount = row.amount_text()
+    );
+    response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, editable, flagged, &label));
+    if !editable {
+        // A read-only row's flag shows but offers no click.
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.remove_action(accesskit::Action::Click);
+        });
+    }
+    let rect = response.rect;
+    let hovered = editable && response.hovered();
+    if (flagged || hovered) && ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(response);
+        let colour = if flagged {
+            visuals.text_color()
+        } else {
+            ui.visuals().weak_text_color()
+        };
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            FLAG_GLYPH,
+            TextStyle::Body.resolve(ui.style()),
+            colour,
+        );
+    }
+    let action = (editable && response.clicked()).then_some(RowAction::SetFlagged(!flagged));
+    (response.clone(), action)
 }
 
 /// Reports a cell to AccessKit as a table cell labelled `label`, toggled when its row is
@@ -2606,7 +2693,8 @@ fn paint_text(
     );
     let x = match column.align() {
         Align::Max => inner.right() - galley.size().x,
-        Align::Min | Align::Center => inner.left(),
+        Align::Center => inner.center().x - galley.size().x / 2.0,
+        Align::Min => inner.left(),
     };
     let top = rect.center().y - galley.size().y / 2.0;
     let painted = Rect::from_min_size(pos2(x, top), galley.size());
@@ -2617,13 +2705,16 @@ fn paint_text(
 
 /// The row's Actions menu: a ⋯ button on the right of the Actions cell, which opens
 /// the menu below it. The default fonts lack ⋯, so its dots are painted. Returns the
-/// command picked from the menu. A read-only row's commands are disabled.
+/// command picked from the menu: Flag, or Unflag on a flagged `row`, and Delete. A
+/// read-only row's commands are disabled.
 fn actions_menu(
     ui: &egui::Ui,
     i18n: &Localizer,
     response: &Response,
     access: Access,
+    row: &RegisterRow,
 ) -> Option<RowAction> {
+    let flagged = row.is_flagged();
     let label = fl!(i18n, "register-actions");
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
     let rect = response.rect;
@@ -2650,10 +2741,22 @@ fn actions_menu(
     }
     Popup::menu(response)
         .show(|ui| {
-            let delete = Button::new(fl!(i18n, "register-actions-delete"));
-            ui.add_enabled(access == Access::Editable, delete)
+            let editable = access == Access::Editable;
+            let flag = Button::new(if flagged {
+                fl!(i18n, "register-actions-unflag")
+            } else {
+                fl!(i18n, "register-actions-flag")
+            });
+            let flag = ui
+                .add_enabled(editable, flag)
                 .clicked()
-                .then_some(RowAction::Delete)
+                .then_some(RowAction::SetFlagged(!flagged));
+            let delete = Button::new(fl!(i18n, "register-actions-delete"));
+            let delete = ui
+                .add_enabled(editable, delete)
+                .clicked()
+                .then_some(RowAction::Delete);
+            flag.or(delete)
         })
         .and_then(|menu| menu.inner)
 }

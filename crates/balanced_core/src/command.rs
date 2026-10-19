@@ -63,6 +63,11 @@ pub enum DomainCommand {
         transaction: TransactionId,
         edit: TransactionEdit,
     },
+    /// Flag a transaction to come back to, or take its flag off.
+    SetFlagged {
+        transaction: TransactionId,
+        flagged: bool,
+    },
     /// Delete a transaction, from whichever account holds it.
     DeleteTransaction { transaction: TransactionId },
     /// Put a deleted transaction back into `account`, with its id, where it was in the

@@ -108,6 +108,8 @@ register-column-card-payment = Payment
 register-column-decrease = Decrease
 register-column-increase = Increase
 register-column-balance = Balance
+# The column showing which transactions are flagged to come back to.
+register-column-flag = Flag
 # The handle on a column heading's right edge that resizes the column.
 register-resize-column = Resize { $column }
 # The ⚙ button at the right end of the Register header, which opens the column chooser.
@@ -123,6 +125,11 @@ register-opening-balance = Opening Balance
 register-actions = Actions
 # The Actions menu item that asks to delete the row's transaction.
 register-actions-delete = Delete…
+# The Actions menu items that flag the row's transaction, or take its flag off.
+register-actions-flag = Flag
+register-actions-unflag = Unflag
+# A Flag cell, which flags or unflags its transaction, as assistive technology reads it.
+register-flag = Flag { $payee }, { $date }, { $amount }
 # The ⏷ button beside the Category cell being edited, which lists every category.
 register-category-list = Show all categories
 # The row of the Category list that creates the category typed in the cell.
