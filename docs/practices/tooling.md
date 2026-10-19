@@ -7,7 +7,7 @@
 
 ## Checks
 
-Every check lives in `xtask` (`cargo xtask` lists them), so the same commands run locally and in CI. CI is Woodpecker, on Linux only: `.woodpecker/ci.yml` runs plain `cargo xtask ci` on every pull request, every push to `main` and the nightly cron (ahead of `mutants.yml`), unless every changed path is prose or agent tooling (the step's `when:` lists the globs). It runs in the image `.woodpecker/Dockerfile` builds (see [ADR 0004](../adr/0004-ci-image-matches-the-snapshot-machine.md)). It is never GitHub Actions. Two checks also run as steps of their own on every pipeline, prose-only ones included: `cargo xtask typos`, so prose-only changes are still spell-checked, and `adrs`, which on a pull request runs `cargo xtask adrs --against origin/<target branch>` and on a push to `main` plain `cargo xtask adrs`.
+Every check lives in `xtask` (`cargo xtask` lists them), so the same commands run locally and in CI. CI is GitHub Actions, on Linux only ([ADR 0010](../adr/0010-ci-runs-on-github-actions.md)): `.github/workflows/ci.yml` runs plain `cargo xtask ci` on every pull request and every push to `main`. On a pull request it checks out GitHub's merge of the branch into its target. When every changed path is prose or agent tooling (the `changes` step lists the globs), it runs only `cargo xtask typos` and `cargo xtask adrs` instead. Every step runs in the image `.github/Dockerfile` builds (see [ADR 0004](../adr/0004-ci-image-matches-the-snapshot-machine.md)), through `.github/in-image.sh`. Read runs with `gh run list` and `gh run view <id> --log-failed`.
 
 - `cargo xtask ci` runs the following, stopping at the first failure:
   - `fmt`
@@ -25,13 +25,14 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 - `cargo xtask adrs --against <ref>` runs the same check on this branch merged with `<ref>`, without touching the checkout. It catches a record that landed on `<ref>` with the same number after this branch was cut. Both branches merge clean, because the file names differ.
 - `dco` starts from a fixed commit, not `origin/main`: CI fetches a push or cron run by SHA alone, and a stacked pull request with only the branch below it, so `origin/main` exists in neither. It needs full history; a shallow clone fails naming the cutoff. Merge commits are exempt, because GitHub's merge button and "Update branch" make unsigned ones. Each push to `main` checks every commit since the cutoff, so an unsigned commit that lands turns `main` red; history on `main` can't be rewritten, so move `CUTOFF` to that commit, with a comment naming it.
 - `cargo xtask mutants [<base>] [--re <pattern>]` is the by-hand mutation check, for proving a mutant's fix (see [testing](testing.md#mutation-testing)).
-- `cargo xtask mutants-shard [--dry-run]` is a CI task: `.woodpecker/mutants.yml` runs it each night on oldhermit-3, the agent reserved for mutant runs. It tests one round-robin shard of every mutant and opens, comments on and closes `mutant` issues. It refuses a dirty tree, because it mutates files in place, and it needs `GITHUB_TOKEN`; `--dry-run` prints the issue updates instead of making them. A missed mutant leaves it green; a run that couldn't finish or couldn't update its issues is red.
-- `cargo xtask mutants-landed [--dry-run]` is the same kind of CI task, run by `.woodpecker/mutants.yml` on each push to `main`. It asks GitHub which merged pull request left `HEAD` as its merge commit, then tests the mutants in the diff that pull request landed and updates the issues the same way. A push no pull request landed, or a diff with no mutants, tests nothing and stays green; a failed lookup is red. By hand it needs a clean checkout whose `HEAD` is a real merge commit on `main`.
+- `cargo xtask mutants-shard [--dry-run]` is a CI task: `.github/workflows/mutants.yml` runs it each night on `main`. It tests one round-robin shard of every mutant and opens, comments on and closes `mutant` issues. It refuses a dirty tree, because it mutates files in place, and it needs `GITHUB_TOKEN`; `--dry-run` prints the issue updates instead of making them. A missed mutant leaves it green; a run that couldn't finish or couldn't update its issues is red.
+- `cargo xtask mutants-landed [--dry-run]` is the same kind of CI task, run by `.github/workflows/mutants.yml` on each push to `main`. It asks GitHub which merged pull request left `HEAD` as its merge commit, then tests the mutants in the diff that pull request landed and updates the issues the same way. A push no pull request landed, or a diff with no mutants, tests nothing and stays green; a failed lookup is red. By hand it needs a clean checkout whose `HEAD` is a real merge commit on `main`.
 - The external tools need a one-time install: `cargo install --locked cargo-deny typos-cli cargo-mutants cargo-nextest`.
 - Warnings are allowed while you iterate. `cargo xtask clippy` denies them.
 - A new check is written as a new `xtask` task and added to `ci`, never as CI-provider config. Each task is its own module in `xtask/src/` with a `TASK` constant, listed once in `TASKS` in `main.rs`. Running programs goes through `process.rs`.
 - To dry-run a branch's change to a CI task that reads `HEAD` and refuses a dirty tree, such as `mutants-shard`, on a real commit of `main` before the change lands, commit it and run `.claude/scripts/xtask-at-commit.sh <commit> <task> --dry-run` from the branch's worktree (contract in its header).
-- After changing a file under `.woodpecker/`, lint it and run it locally before pushing, as the `woodpecker` skill's "Changing the pipeline config" says.
+- To reproduce a CI failure locally, build the image with `docker build -t balanced-ci:latest -f .github/Dockerfile .`, then run the failing task in it with `.github/in-image.sh cargo xtask <task>`.
+- A change under `.github/` is proven only by a run on GitHub. Open the pull request and read its checks; for `mutants.yml`, run it with `gh workflow run mutants.yml -f task=<task>` once it is on `main`.
 
 ## Config files
 
@@ -53,7 +54,7 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 
 ## Build cache
 
-- In CI, every run builds into an empty `target/`, and sccache caches the library crates in one directory every agent shares (see [ADR 0003](../adr/0003-ci-caches-with-sccache-not-a-persistent-target.md)).
+- In CI, every run builds into an empty `target/`, and sccache caches the library crates in the GitHub Actions cache (see [ADR 0003](../adr/0003-ci-caches-with-sccache-not-a-persistent-target.md) and [ADR 0010](../adr/0010-ci-runs-on-github-actions.md)).
 - Locally, sccache is optional and set up per developer, in `~/.cargo/config.toml` (`[build] rustc-wrapper = "sccache"`). The repo's `.cargo/config.toml` holds only aliases.
 - Agents leave `RUSTC_WRAPPER`, `CARGO_HOME` and `CARGO_TARGET_DIR` as they find them, and add no repo-level `rustc-wrapper`. Each worktree builds into its own `target/`.
 - **Verified 2026-10-13 (sccache 0.18.0, Rust 1.99.0), with egui 0.36.2 + eframe + tracing as a test dependency set:**

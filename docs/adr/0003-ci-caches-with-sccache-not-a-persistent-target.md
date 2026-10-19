@@ -1,5 +1,7 @@
 # CI caches compiled crates with sccache, and starts every run with an empty target directory
 
+CI has since moved to GitHub Actions; [ADR 0010](0010-ci-runs-on-github-actions.md) maps this decision onto it.
+
 Every CI step builds into a fresh `target/` inside its container. What persists between runs on the host is sccache's cache and the cargo registry. The registry lives under `/var/lib/woodpecker/cache/balanced/`. sccache's cache is one directory, `/cache/agent/balanced/sccache`, which every agent reads and writes: all three oldhermit agents mount the same host folder as `/cache/agent`. Incremental compilation is off (`CARGO_INCREMENTAL=0`), which sccache needs to cache the workspace crates as well as their dependencies. Every log ends with `sccache --show-stats`. We chose this over keeping `target/` between runs because quicken_clone's persistent target directory corrupted repeatedly: link failures such as `undefined hidden symbol` from a cached rlib that no longer matched its sources (its #992, #1026). Each one failed every pipeline on that agent until someone with shell access to the host wiped the directory. A fresh `target/` can't carry state from an earlier commit, and sccache stores whole compiler outputs keyed by a hash of their inputs.
 
 Decided while planning Balanced's Woodpecker CI.

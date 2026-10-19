@@ -1,0 +1,164 @@
+# The workflow runs the tasks `cargo xtask ci` runs, each as a step of its own
+# so the Actions page shows which check failed and how long each took, spread
+# over jobs that run in parallel: `clippy` and `test` each compile the
+# workspace, and share little of that work, so neither waits for the other. A green
+# local `cargo xtask ci` predicts a green run here. A check that belongs in CI
+# belongs in that task's list, `STEPS` in xtask/src/ci.rs, and a test there
+# fails until this file runs the same tasks. No task looks at the environment
+# to behave differently here. Every step runs one xtask task in the CI image
+# through .github/in-image.sh (ADR 0004, ADR 0010).
+#
+# Linux only. Release builds are made locally. Don't add a job that assumes
+# Windows or macOS.
+#
+# Keep the workflow and its last job named `ci`. The `main` ruleset requires
+# that job's check, which passes only when every other job passed or was
+# skipped: renamed, every pull request waits for a check that never arrives
+# and can't merge.
+
+name: ci
+
+# Pull requests, and pushes to `main` so a merge is known green and two pull
+# requests that break each other are caught. A push to any other branch only
+# builds what its pull request is already building, so it starts nothing.
+#
+# No `paths` filter here. A workflow that never starts reports no status at
+# all, so a required check would wait forever. Skipping work belongs on the
+# jobs and steps.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # The `changes` job lists a pull request's files through the API.
+  pull-requests: read
+
+# A new push to a pull request cancels the run on its old head. Every run on
+# `main` finishes, so each merge is known green or red.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Caching (ADR 0003, ADR 0010). `target/` is never persisted: it lives in
+  # the checkout on a fresh runner, so every run starts empty. sccache caches
+  # whole compiler outputs in the GitHub Actions cache, keyed by a hash of
+  # their inputs, so it can't go stale the way a persistent target did in
+  # quicken_clone. Don't add a cache for `target/`.
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "on"
+  ACTIONS_CACHE_SERVICE_V2: "on"
+  # No idle timeout, so the server started by the first build is still the
+  # one `--show-stats` asks at the end, however long the tests take.
+  SCCACHE_IDLE_TIMEOUT: "0"
+  # sccache can't cache a crate built incrementally, so with it on, every
+  # workspace crate would compile from scratch each run.
+  CARGO_INCREMENTAL: "0"
+  CI_CARGO_HOME: ${{ github.workspace }}/../cargo
+
+jobs:
+  # Whether anything but prose changed: Markdown anywhere, `docs/`, or agent
+  # tooling under `.claude/`. The list names what to skip, not what to build,
+  # so a file type nobody listed builds. A manual run has no changed files and
+  # skips the filter, so `code` is empty and everything runs. The workflow
+  # decides this, never `cargo xtask ci`, which doesn't look at the diff.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: filter
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          predicate-quantifier: every
+          filters: |
+            code:
+              - "**"
+              - "!**/*.md"
+              - "!docs/**"
+              - "!.claude/**"
+
+  # The checks that compile nothing of the workspace.
+  checks:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: `dco` walks every commit since its cutoff. On a pull
+      # request this checks out GitHub's merge of the branch into its target,
+      # so `adrs` checks the merged tree, where two pull requests that each add
+      # a record with the same number clash. On a stacked pull request the
+      # target is the layer below; the push run on `main` catches a clash once
+      # the layers land.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/ci-setup
+
+      # These two run on every change. They are the checks that read prose,
+      # the spell-check and the record names under `docs/`, so a prose-only
+      # change, which skips the rest, still gets them.
+      - name: typos
+        run: .github/in-image.sh cargo xtask typos
+      - name: adrs
+        run: .github/in-image.sh cargo xtask adrs
+
+      - name: fmt
+        if: needs.changes.outputs.code != 'false'
+        run: .github/in-image.sh cargo xtask fmt
+      - name: deny
+        if: needs.changes.outputs.code != 'false'
+        run: .github/in-image.sh cargo xtask deny
+      - name: layers
+        if: needs.changes.outputs.code != 'false'
+        run: .github/in-image.sh cargo xtask layers
+      - name: todo
+        if: needs.changes.outputs.code != 'false'
+        run: .github/in-image.sh cargo xtask todo
+      - name: spdx
+        if: needs.changes.outputs.code != 'false'
+        run: .github/in-image.sh cargo xtask spdx
+      - name: dco
+        if: needs.changes.outputs.code != 'false'
+        run: .github/in-image.sh cargo xtask dco
+
+  clippy:
+    needs: changes
+    if: needs.changes.outputs.code != 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/ci-setup
+      - name: clippy
+        run: .github/in-image.sh cargo xtask clippy
+
+  # The three that build and run the test binaries, in one job so they build
+  # them once.
+  test:
+    needs: changes
+    if: needs.changes.outputs.code != 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/ci-setup
+      - name: test
+        run: .github/in-image.sh cargo xtask test
+      - name: snapshots
+        run: .github/in-image.sh cargo xtask snapshots
+      - name: locales
+        run: .github/in-image.sh cargo xtask locales
+
+  # The required check. A job a prose-only change skips counts as passed.
+  ci:
+    needs: [changes, checks, clippy, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: every job passed or was skipped
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

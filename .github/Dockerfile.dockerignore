@@ -1,0 +1,3 @@
+# Only the file the Dockerfile copies. See its last step.
+*
+!rust-toolchain.toml

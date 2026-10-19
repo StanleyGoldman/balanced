@@ -1,5 +1,7 @@
 # Mutation testing runs after the merge, never as a pull request gate
 
+CI has since moved to GitHub Actions; [ADR 0010](0010-ci-runs-on-github-actions.md) maps this decision onto it.
+
 Mutation testing never blocks a pull request, and agents don't run it before pushing. CI runs it in two places instead. After each merge, `cargo xtask mutants-landed` tests the mutants in the diff that pull request brought into `main`. Each night, `cargo xtask mutants-shard` tests one of seven round-robin shards of all mutants. Both runs execute on the cordoned `lane: main` Woodpecker agent. A surviving mutant becomes a GitHub issue of its own, which later runs comment on or close. We chose this because quicken_clone, the earlier attempt at this project, gated pull requests on mutants and found it too slow: the wait held up review, while the finding is about where a later regression would go unnoticed, not about the change under review. A gap found after the merge is a to-do item, not a red pull request.
 
 Decided while planning Balanced's Woodpecker CI, carrying over what quicken_clone learned (its #1243, #1311, #1239, #1242).

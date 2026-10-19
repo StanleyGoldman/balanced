@@ -27,8 +27,9 @@ pub(crate) enum IssueUpdates {
 /// checkout's own files.
 const OUTPUT_DIR: &str = "target";
 
-/// The variable Woodpecker sets to the web page of the running pipeline.
-const PIPELINE_VAR: &str = "CI_PIPELINE_URL";
+/// The variable `.github/workflows/mutants.yml` sets to the web page of the
+/// running workflow.
+const PIPELINE_VAR: &str = "CI_RUN_URL";
 
 /// Tests the mutants `scope_args` select at `HEAD`, then opens, comments on and
 /// closes `mutant` issues as the plan says, or prints those updates. Missed and
@@ -133,8 +134,10 @@ fn warm_up(packages: &BTreeSet<String>) -> Result<()> {
 }
 
 /// cargo-mutants' arguments for a CI run over the mutants `scope_args` select:
-/// mutated in place in the throwaway checkout, one mutant at a time, with no
-/// baseline, since the `ci` workflow has just passed on this commit. A mutant
+/// mutated in place in the throwaway checkout, one mutant at a time. The run
+/// starts beside the `ci` workflow, not after it, so the baseline proves the
+/// unmutated tests pass first: on a broken commit every mutant would look
+/// caught and close its issue. A mutant
 /// whose tests run past a minute is a timeout; nextest's own kill comes later.
 fn cargo_mutants_args(scope_args: &[String]) -> Vec<String> {
     let mut args: Vec<String> = [
@@ -142,7 +145,6 @@ fn cargo_mutants_args(scope_args: &[String]) -> Vec<String> {
         "--no-shuffle",
         "--cargo-arg=--locked",
         "--in-place",
-        "--baseline=skip",
         "--timeout=60",
     ]
     .into_iter()
@@ -196,7 +198,7 @@ mod tests {
     use super::cargo_mutants_args;
 
     #[test]
-    fn a_ci_run_mutates_in_place_with_no_baseline_and_a_one_minute_timeout() {
+    fn a_ci_run_mutates_in_place_after_a_baseline_with_a_one_minute_timeout() {
         assert_eq!(
             cargo_mutants_args(&["--shard=3/7".to_owned()]),
             [
@@ -204,7 +206,6 @@ mod tests {
                 "--no-shuffle",
                 "--cargo-arg=--locked",
                 "--in-place",
-                "--baseline=skip",
                 "--timeout=60",
                 "--output=target",
                 "--shard=3/7",
