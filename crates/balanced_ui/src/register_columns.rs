@@ -13,6 +13,8 @@ pub(crate) enum RegisterColumn {
     Memo,
     Amount,
     Balance,
+    /// Whether the transaction is flagged, which clicking the cell changes.
+    Flag,
     /// The untitled column holding each row's Actions menu.
     Actions,
 }
@@ -20,7 +22,7 @@ pub(crate) enum RegisterColumn {
 impl RegisterColumn {
     /// Every column, in the default order. A new column goes here as well as in the
     /// matches below, which the compiler checks; it can't check this list.
-    pub(crate) const ALL: [Self; 8] = [
+    pub(crate) const ALL: [Self; 9] = [
         Self::Date,
         Self::Number,
         Self::Payee,
@@ -28,6 +30,7 @@ impl RegisterColumn {
         Self::Memo,
         Self::Amount,
         Self::Balance,
+        Self::Flag,
         Self::Actions,
     ];
 
@@ -42,6 +45,7 @@ impl RegisterColumn {
             Self::Memo => "memo",
             Self::Amount => "amount",
             Self::Balance => "balance",
+            Self::Flag => "flag",
             Self::Actions => "actions",
         }
     }
@@ -56,7 +60,7 @@ impl RegisterColumn {
     /// last.
     pub(crate) fn can_hide(self) -> bool {
         match self {
-            Self::Number | Self::Payee | Self::Memo | Self::Balance => true,
+            Self::Number | Self::Payee | Self::Memo | Self::Balance | Self::Flag => true,
             Self::Date | Self::Category | Self::Amount | Self::Actions => false,
         }
     }

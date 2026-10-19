@@ -426,6 +426,57 @@ mod tests {
                 RegisterColumn::Category,
                 RegisterColumn::Amount,
                 RegisterColumn::Balance,
+                RegisterColumn::Flag,
+                RegisterColumn::Actions,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_new_file_shows_flag_between_balance_and_actions() {
+        let (_dir, file) = file();
+
+        let loaded = file.load().unwrap();
+
+        assert_eq!(
+            loaded.register_columns.shown(),
+            [
+                RegisterColumn::Date,
+                RegisterColumn::Number,
+                RegisterColumn::Payee,
+                RegisterColumn::Category,
+                RegisterColumn::Memo,
+                RegisterColumn::Amount,
+                RegisterColumn::Balance,
+                RegisterColumn::Flag,
+                RegisterColumn::Actions,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_file_saved_before_the_flag_column_shows_it_after_the_others() {
+        let (dir, file) = file();
+        std::fs::write(
+            dir.path().join("preferences.toml"),
+            "version = 1\n\
+             register_columns = [\"payee\", \"date\", \"num\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+             hidden_register_columns = [\"memo\"]\n",
+        )
+        .unwrap();
+
+        let loaded = file.load().unwrap();
+
+        assert_eq!(
+            loaded.register_columns.shown(),
+            [
+                RegisterColumn::Payee,
+                RegisterColumn::Date,
+                RegisterColumn::Number,
+                RegisterColumn::Category,
+                RegisterColumn::Amount,
+                RegisterColumn::Balance,
+                RegisterColumn::Flag,
                 RegisterColumn::Actions,
             ]
         );
@@ -487,7 +538,7 @@ mod tests {
              gridlines = \"off\"\n\
              group_totals = false\n\
              net_worth_placement = \"account_bar\"\n\
-             register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+             register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\", \"flag\"]\n\
              hidden_register_columns = []\n"
         );
     }
