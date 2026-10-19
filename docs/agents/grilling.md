@@ -15,7 +15,7 @@ When a grilling ticket resolves, post one comment on the issue with this shape, 
 
 **Revises:** <earlier decisions or map entries this contradicts, or "none">
 
-**Follow-ups:** <new tickets, ADRs, or `CONTEXT.md` terms it produced, linked, or "none">
+**Follow-ups:** <new tickets, ADRs, or `GLOSSARY.md` terms it produced, linked, or "none">
 ```
 
 - List every question as a table row.

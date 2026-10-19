@@ -112,7 +112,7 @@ When the session ends, post one comment on the prototype's issue with this shape
 
 **Revises:** <earlier decisions or map entries this contradicts, or "none">
 
-**Follow-ups:** <new tickets, ADRs, or `CONTEXT.md` terms it produced, linked, or "none">
+**Follow-ups:** <new tickets, ADRs, or `GLOSSARY.md` terms it produced, linked, or "none">
 
 **Prototype:** <the closed draft PR and its branch>
 ```

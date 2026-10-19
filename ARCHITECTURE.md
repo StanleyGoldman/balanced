@@ -1,6 +1,6 @@
 # Architecture
 
-Balanced is a desktop personal-finance app in the tradition of Quicken classic, built in Rust on egui/eframe. A single **Main window** holds a Menu bar, an Account bar, a Main view and a Status bar. **Dialogs** are short-lived modal overlays, and **Detached windows** are separate OS windows. `CONTEXT.md` defines these terms.
+Balanced is a desktop personal-finance app in the tradition of Quicken classic, built in Rust on egui/eframe. A single **Main window** holds a Menu bar, an Account bar, a Main view and a Status bar. **Dialogs** are short-lived modal overlays, and **Detached windows** are separate OS windows. `GLOSSARY.md` defines these terms.
 
 ## Bird's-eye view
 

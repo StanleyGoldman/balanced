@@ -14,7 +14,7 @@ Uses the default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready
 
 ### Domain docs
 
-Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
 ### CI
 
@@ -28,7 +28,7 @@ The `woodpecker` skill (`.claude/skills/woodpecker/SKILL.md`) reads and drives C
 - Number questions `Q<n>/<total>` across the ticket's whole grilling session: `n` is the question's position in that ticket, `total` your current estimate of the questions it needs. Revise `total` as answers come in, e.g. `Q3/5`, then `Q4/7`.
 - When the user has no strong preference on a ticket, answer its remaining questions with your recommendations, then summarize the decisions and flag anything surprising, such as an answer that contradicts an earlier decision.
 - Tag each recommendation with its confidence, so the user knows where to spend attention:
-  - `firm`: a documented fact settles it (ADR, `CONTEXT.md`, existing code). Cite the source.
+  - `firm`: a documented fact settles it (ADR, `GLOSSARY.md`, existing code). Cite the source.
   - `leaning`: a judgment call. Give the one-line reason.
   - `coin-flip`: a real tradeoff that needs the user's input.
 - Tag each question `cheap` or `expensive` to reverse. A public API, a data format, or an ADR-level choice is `expensive`.
