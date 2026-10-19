@@ -3,11 +3,12 @@
 
 use std::collections::HashMap;
 use std::num::TryFromIntError;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use balanced_store::OpenError as StoreOpenError;
 use balanced_store::{
-    AccountRow, AllocationRow, CategoryRow, Contents, SplitLineRow, Store, StoreError,
+    AccountRow, AllocationRow, CategoryRow, Contents, Damage, SplitLineRow, Store, StoreError,
     TransactionRow,
 };
 use icu_calendar::{Date, Iso};
@@ -23,6 +24,21 @@ use crate::{
 /// Why a data file couldn't be created or opened.
 #[derive(Debug, thiserror::Error)]
 pub enum OpenError {
+    /// No file exists at the path.
+    #[error("no file exists at {0:?}")]
+    Missing(PathBuf),
+    /// The file isn't SQLite, or another program's SQLite file.
+    #[error("the file isn't a Balanced data file")]
+    NotBalanced,
+    /// The file fails SQLite's integrity check.
+    #[error("the data file is damaged")]
+    Damaged(#[source] Damage),
+    /// The file's schema is from a newer Balanced than this one.
+    #[error("the data file is at schema version {version}, above this Balanced's {latest}")]
+    Newer { version: u32, latest: u32 },
+    /// Another connection, in this program or another, holds the file.
+    #[error("another program has the data file open")]
+    Locked,
     #[error("the data file couldn't be read or written")]
     Store(#[from] StoreError),
     #[error("the data file's currency isn't one Balanced knows")]
@@ -38,6 +54,19 @@ pub enum OpenError {
         value: String,
         reason: icu_calendar::ParseError,
     },
+}
+
+impl From<StoreOpenError> for OpenError {
+    fn from(error: StoreOpenError) -> Self {
+        match error {
+            StoreOpenError::Missing(path) => Self::Missing(path),
+            StoreOpenError::NotBalanced => Self::NotBalanced,
+            StoreOpenError::Damaged(damage) => Self::Damaged(damage),
+            StoreOpenError::Newer { version, latest } => Self::Newer { version, latest },
+            StoreOpenError::Locked => Self::Locked,
+            StoreOpenError::Store(error) => Self::Store(error),
+        }
+    }
 }
 
 /// Why the data file couldn't take a change.
@@ -88,7 +117,8 @@ impl From<StoreError> for WriteError {
 
 impl Ledger {
     /// Creates an empty data file at `path` whose amounts are in `currency`, and a
-    /// ledger over it. Refuses a path that already holds a file.
+    /// ledger over it that holds the file locked until it is dropped. Refuses a path that
+    /// already holds a file.
     pub fn create(path: &Path, currency: CurrencyCode) -> Result<Self, OpenError> {
         let store = Store::create(path, currency.as_str())?;
         let zero = Money::zero(currency);
@@ -106,7 +136,9 @@ impl Ledger {
         ))
     }
 
-    /// Opens the data file at `path`, reading all of it into a ledger.
+    /// Opens the data file at `path`, reading all of it into a ledger that holds the file
+    /// locked until it is dropped. Refuses a file that is missing, isn't a Balanced data
+    /// file, is damaged, comes from a newer Balanced, or is open elsewhere.
     pub fn open(path: &Path) -> Result<Self, OpenError> {
         let store = Store::open(path)?;
         let contents = store.read()?;

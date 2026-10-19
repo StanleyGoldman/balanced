@@ -12,4 +12,4 @@ pub use rows::{
     AccountRow, AllocationRow, CategoryRow, Contents, LastIds, SplitLineRow, StoredAccount,
     StoredTransaction, TransactionRow,
 };
-pub use store::{Store, StoreError};
+pub use store::{Damage, OpenError, Store, StoreError};
