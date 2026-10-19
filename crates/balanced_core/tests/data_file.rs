@@ -290,3 +290,40 @@ fn a_deleted_accounts_id_is_not_reused_after_a_reopen() {
 
     assert_ne!(id(&ledger, "Created"), deleted);
 }
+
+#[test]
+fn group_totals_and_the_closed_total_are_the_same_after_a_reopen() {
+    assert_reopens_as_changed(|ledger| {
+        apply(ledger, create("Everyday", AccountKind::Checking, "1200.00"));
+        apply(ledger, create("Card", AccountKind::CreditCard, "-412.30"));
+        apply(
+            ledger,
+            create("401(k)", AccountKind::Retirement, "88420.00"),
+        );
+        apply(ledger, create("House", AccountKind::Asset, "420000.00"));
+        apply(
+            ledger,
+            create("Mortgage", AccountKind::Liability, "-310500.00"),
+        );
+        apply(
+            ledger,
+            create("Old savings", AccountKind::Savings, "250.00"),
+        );
+        let card = id(ledger, "Card");
+        apply(
+            ledger,
+            DomainCommand::SetAccountVisibility {
+                account: card,
+                visibility: Visibility::Hidden,
+            },
+        );
+        let old = id(ledger, "Old savings");
+        apply(
+            ledger,
+            DomainCommand::SetAccountStatus {
+                account: old,
+                status: AccountStatus::Closed,
+            },
+        );
+    });
+}

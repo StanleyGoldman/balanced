@@ -1,5 +1,6 @@
 //! The [`Ledger`]: the financial data, and the snapshots windows read it through.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use balanced_store::Store;
@@ -12,7 +13,7 @@ use crate::transaction::{NewTransaction, TransactionId};
 use crate::{
     Account, AccountGroup, AccountId, AccountKind, AccountStatus, Applied, Category, CategoryId,
     CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection, Transaction,
-    TransactionEdit, Visibility,
+    TransactionEdit, Visibility, WriteError,
 };
 
 /// Counts the changes applied to a [`Ledger`]. A window's view model rebuilds when
@@ -232,6 +233,7 @@ impl LedgerView {
     /// The sum of the balances of `group`'s open accounts, hidden accounts included.
     /// Fails when the sum overflows.
     pub fn group_total(&self, group: AccountGroup) -> Result<Money, MoneyError> {
+        // `index` counts within `AccountGroup::ALL`, which sizes `groups`.
         self.totals.groups[group.index()].clone()
     }
 
@@ -240,9 +242,11 @@ impl LedgerView {
         self.totals.closed.clone()
     }
 
-    /// Counts the group totals and the closed total again, after an account changed.
-    fn recount(&mut self) {
+    /// Counts the group totals and the closed total again after the accounts changed,
+    /// and moves to the next generation.
+    fn accounts_changed(&mut self) {
         self.totals = Totals::count(&self.accounts, self.net_worth.currency());
+        self.generation = self.generation.next();
     }
 
     /// Whether there is a change Undo can reverse.
@@ -268,15 +272,15 @@ struct TransactionPosition {
 /// The totals a [`LedgerView`] shows besides Net Worth.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Totals {
-    /// Each group's total, in Account bar order.
-    groups: [Result<Money, MoneyError>; 3],
+    /// Each group's total, in the order of [`AccountGroup::ALL`].
+    groups: [Result<Money, MoneyError>; AccountGroup::ALL.len()],
     closed: Result<Money, MoneyError>,
 }
 
 impl Totals {
-    /// `groups`, in Account bar order, and `closed`, as the data file's views counted
-    /// them.
-    pub(crate) fn new(groups: [Money; 3], closed: Money) -> Self {
+    /// `groups`, in the order of [`AccountGroup::ALL`], and `closed`, as the data
+    /// file's views counted them.
+    pub(crate) fn new(groups: [Money; AccountGroup::ALL.len()], closed: Money) -> Self {
         Self {
             groups: groups.map(Ok),
             closed: Ok(closed),
@@ -294,12 +298,7 @@ impl Totals {
                 })
         };
         Self {
-            groups: [
-                AccountGroup::Banking,
-                AccountGroup::Investing,
-                AccountGroup::PropertyDebt,
-            ]
-            .map(|group| {
+            groups: AccountGroup::ALL.map(|group| {
                 total(&|account: &Account| !account.is_closed() && account.kind().group() == group)
             }),
             closed: total(&Account::is_closed),
@@ -400,7 +399,7 @@ impl Ledger {
         }
         let store = in_memory_store(currency, &categories, &summaries);
         let totals = Totals::count(&summaries, currency);
-        Ok(Self::loaded(
+        Ok(Self::from_parts(
             store,
             summaries,
             categories,
@@ -417,7 +416,7 @@ impl Ledger {
     /// A ledger over `store`, which holds `accounts`, in Account bar order, and
     /// `categories`, with no Undo or Redo history. `net_worth` and `totals` are what
     /// `accounts` add up to.
-    pub(crate) fn loaded(
+    pub(crate) fn from_parts(
         store: Store,
         accounts: Vec<AccountSummary>,
         categories: Vec<Category>,
@@ -506,9 +505,13 @@ impl Ledger {
         };
         let rolled_back = self.store.rollback();
         self.restore(checkpoint);
-        // A failed rollback leaves the file in doubt, which matters more than why the
-        // change failed.
-        Err(rolled_back.err().map_or(error, DomainError::from))
+        match rolled_back {
+            Ok(()) => Err(error),
+            Err(source) => Err(DomainError::Store(WriteError::RollbackFailed {
+                change: Box::new(error),
+                source: Arc::new(source),
+            })),
+        }
     }
 
     /// Tells the current snapshot whether Undo and Redo can act.
@@ -659,8 +662,7 @@ impl Ledger {
         let view = Arc::make_mut(&mut self.view);
         let summary = view.accounts.remove(index);
         view.net_worth = net_worth;
-        view.recount();
-        view.generation = view.generation.next();
+        view.accounts_changed();
         let transactions = summary.transactions();
         Ok(DomainCommand::RestoreAccount {
             account: summary.account,
@@ -701,8 +703,7 @@ impl Ledger {
         let view = Arc::make_mut(&mut self.view);
         // Callers take `index` from a lookup in this same list of accounts.
         let changed = change(&mut view.accounts[index].account);
-        view.recount();
-        view.generation = view.generation.next();
+        view.accounts_changed();
         changed
     }
 
@@ -789,8 +790,7 @@ impl Ledger {
         let view = Arc::make_mut(&mut self.view);
         view.accounts.insert(index, summary);
         view.net_worth = net_worth;
-        view.recount();
-        view.generation = view.generation.next();
+        view.accounts_changed();
         Ok(())
     }
 
@@ -1031,8 +1031,7 @@ impl Ledger {
         // Callers take `index` from a lookup in this same list of accounts.
         view.accounts[index] = summary;
         view.net_worth = net_worth;
-        view.recount();
-        view.generation = view.generation.next();
+        view.accounts_changed();
         Ok(())
     }
 }
@@ -1060,13 +1059,12 @@ fn in_memory_store(
         for category in categories {
             store.insert_category(&category_row(category))?;
         }
-        for (index, summary) in accounts.iter().enumerate() {
-            let kind = summary.account.kind();
-            let place = accounts[..index]
-                .iter()
-                .filter(|earlier| earlier.account.kind() == kind)
-                .count();
-            write_account(&store, summary, place)?;
+        // Accounts come in Account bar order, so each is last in its sub-group so far.
+        let mut placed: HashMap<AccountKind, usize> = HashMap::new();
+        for summary in accounts {
+            let place = placed.entry(summary.account.kind()).or_default();
+            write_account(&store, summary, *place)?;
+            *place += 1;
         }
         Ok(store.commit()?)
     };

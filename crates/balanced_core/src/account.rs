@@ -14,7 +14,11 @@ pub enum AccountGroup {
 }
 
 impl AccountGroup {
-    /// The group's place in Account bar order, counting from 0.
+    /// Every group, in Account bar order. A new group goes here as well as in the
+    /// matches below, which the compiler checks; it can't check this list.
+    pub const ALL: [Self; 3] = [Self::Banking, Self::Investing, Self::PropertyDebt];
+
+    /// The group's place in [`Self::ALL`].
     pub(crate) fn index(self) -> usize {
         match self {
             Self::Banking => 0,

@@ -2,6 +2,7 @@
 //! domain's types and the store's rows.
 
 use std::collections::HashMap;
+use std::num::TryFromIntError;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -16,7 +17,7 @@ use crate::ledger::{AccountSummary, NextIds, RegisterEntry, Totals};
 use crate::transaction::SplitLine;
 use crate::{
     Account, AccountGroup, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId,
-    CurrencyCode, Ledger, Money, MoneyError, Transaction, TransactionId, Visibility,
+    CurrencyCode, DomainError, Ledger, Money, MoneyError, Transaction, TransactionId, Visibility,
 };
 
 /// Why a data file couldn't be created or opened.
@@ -26,10 +27,17 @@ pub enum OpenError {
     Store(#[from] StoreError),
     #[error("the data file's currency isn't one Balanced knows")]
     Currency(#[source] MoneyError),
-    /// A value the schema admits but Balanced can't hold, such as a date outside the
-    /// calendar.
-    #[error("the data file holds a {what} Balanced can't read: {value:?}")]
-    Unreadable { what: &'static str, value: String },
+    /// A name the schema admits but Balanced doesn't know, such as a kind of account
+    /// from a newer Balanced.
+    #[error("the data file holds a {what} Balanced doesn't know: {value:?}")]
+    Unknown { what: &'static str, value: String },
+    /// A date the schema admits but Balanced's calendar can't hold. `reason` is ICU's,
+    /// which implements `Display` but not `Error`, so it can't be a source.
+    #[error("the data file holds a date Balanced can't read ({reason}): {value:?}")]
+    Date {
+        value: String,
+        reason: icu_calendar::ParseError,
+    },
 }
 
 /// Why the data file couldn't take a change.
@@ -37,19 +45,35 @@ pub enum OpenError {
 pub enum WriteError {
     /// An amount has more minor units than the file can hold.
     #[error("the amount is too large for the data file")]
-    AmountOutOfRange,
+    AmountOutOfRange(#[source] TryFromIntError),
     /// SQLite refused the write or the commit.
     #[error("the data file refused the change")]
-    Store(#[source] Arc<StoreError>),
+    Sqlite(#[source] Arc<StoreError>),
+    /// The change failed, and so did rolling the file back, which leaves the file's
+    /// transaction open.
+    #[error("the data file couldn't roll back a failed change: {change}")]
+    RollbackFailed {
+        /// Why the change failed.
+        change: Box<DomainError>,
+        #[source]
+        source: Arc<StoreError>,
+    },
 }
 
 impl PartialEq for WriteError {
-    /// Two store failures are equal only when they are the same failure.
+    /// Two SQLite failures are equal only when they are the same failure.
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::AmountOutOfRange, Self::AmountOutOfRange) => true,
-            (Self::Store(a), Self::Store(b)) => Arc::ptr_eq(a, b),
-            (Self::AmountOutOfRange | Self::Store(_), _) => false,
+            (Self::AmountOutOfRange(a), Self::AmountOutOfRange(b)) => a == b,
+            (Self::Sqlite(a), Self::Sqlite(b)) => Arc::ptr_eq(a, b),
+            (
+                Self::RollbackFailed { change, source },
+                Self::RollbackFailed {
+                    change: other_change,
+                    source: other_source,
+                },
+            ) => change == other_change && Arc::ptr_eq(source, other_source),
+            (Self::AmountOutOfRange(_) | Self::Sqlite(_) | Self::RollbackFailed { .. }, _) => false,
         }
     }
 }
@@ -58,7 +82,7 @@ impl Eq for WriteError {}
 
 impl From<StoreError> for WriteError {
     fn from(error: StoreError) -> Self {
-        Self::Store(Arc::new(error))
+        Self::Sqlite(Arc::new(error))
     }
 }
 
@@ -68,12 +92,12 @@ impl Ledger {
     pub fn create(path: &Path, currency: CurrencyCode) -> Result<Self, OpenError> {
         let store = Store::create(path, currency.as_str())?;
         let zero = Money::zero(currency);
-        Ok(Self::loaded(
+        Ok(Self::from_parts(
             store,
             Vec::new(),
             Vec::new(),
             zero,
-            Totals::new([zero; 3], zero),
+            Totals::new([zero; AccountGroup::ALL.len()], zero),
             NextIds {
                 account: AccountId::new(0),
                 transaction: TransactionId::new(0),
@@ -144,23 +168,13 @@ impl Ledger {
         // The store orders kinds by name; the Account bar orders them by group.
         accounts.sort_by_key(|&(order, _)| order);
         let accounts = accounts.into_iter().map(|(_, summary)| summary).collect();
-        let mut group_totals = [Money::zero(currency); 3];
+        let mut group_totals = [Money::zero(currency); AccountGroup::ALL.len()];
         for (name, total) in contents.group_totals {
-            let group = match name.as_str() {
-                "banking" => AccountGroup::Banking,
-                "investing" => AccountGroup::Investing,
-                "property_debt" => AccountGroup::PropertyDebt,
-                _ => {
-                    return Err(OpenError::Unreadable {
-                        what: "group",
-                        value: name,
-                    });
-                }
-            };
-            group_totals[group.index()] = money(total);
+            // `index` counts within `AccountGroup::ALL`, which sizes the array.
+            group_totals[group(&name)?.index()] = money(total);
         }
         let next = |last: Option<u32>| last.map_or(0, |id| id + 1);
-        Ok(Self::loaded(
+        Ok(Self::from_parts(
             store,
             accounts,
             categories,
@@ -188,7 +202,7 @@ fn money(minor_units: i64, currency: CurrencyCode) -> Money {
 pub(crate) fn minor_units(money: Money) -> Result<i64, WriteError> {
     // `Money` is always at its currency's decimal places, so its mantissa counts minor
     // units.
-    i64::try_from(money.amount().mantissa()).map_err(|_| WriteError::AmountOutOfRange)
+    i64::try_from(money.amount().mantissa()).map_err(WriteError::AmountOutOfRange)
 }
 
 /// The store's name for `kind`.
@@ -204,11 +218,30 @@ pub(crate) fn kind_name(kind: AccountKind) -> &'static str {
     }
 }
 
+/// The store's name for `group`.
+fn group_name(group: AccountGroup) -> &'static str {
+    match group {
+        AccountGroup::Banking => "banking",
+        AccountGroup::Investing => "investing",
+        AccountGroup::PropertyDebt => "property_debt",
+    }
+}
+
+fn group(name: &str) -> Result<AccountGroup, OpenError> {
+    AccountGroup::ALL
+        .into_iter()
+        .find(|&group| group_name(group) == name)
+        .ok_or_else(|| OpenError::Unknown {
+            what: "group",
+            value: name.to_owned(),
+        })
+}
+
 fn kind(name: &str) -> Result<AccountKind, OpenError> {
     AccountKind::ALL
         .into_iter()
         .find(|&kind| kind_name(kind) == name)
-        .ok_or_else(|| OpenError::Unreadable {
+        .ok_or_else(|| OpenError::Unknown {
             what: "kind of account",
             value: name.to_owned(),
         })
@@ -225,19 +258,10 @@ fn date_text(date: Date<Iso>) -> String {
 }
 
 fn date(text: &str) -> Result<Date<Iso>, OpenError> {
-    let unreadable = || OpenError::Unreadable {
-        what: "date",
+    Date::try_from_str(text, Iso).map_err(|reason| OpenError::Date {
         value: text.to_owned(),
-    };
-    let mut parts = text.splitn(3, '-');
-    let mut part = || parts.next().ok_or_else(unreadable);
-    let (year, month, day) = (part()?, part()?, part()?);
-    Date::try_new_iso(
-        year.parse().map_err(|_| unreadable())?,
-        month.parse().map_err(|_| unreadable())?,
-        day.parse().map_err(|_| unreadable())?,
-    )
-    .map_err(|_| unreadable())
+        reason,
+    })
 }
 
 /// The transaction `row` holds, whose amount is `amount`.
