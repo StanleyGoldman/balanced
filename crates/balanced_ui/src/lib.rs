@@ -7,6 +7,7 @@ mod app;
 mod clock;
 mod combobox;
 mod command;
+mod data_file;
 mod date_field;
 mod dialog;
 mod draft_row;

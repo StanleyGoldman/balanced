@@ -13,6 +13,10 @@
 
 menu-file = Datei
 menu-file-new-account = Neues Konto …
+# Coined from "Neue Datei" (GnuCash) and "Daten".
+menu-file-new-data-file = Neue Datendatei …
+# Coined from "Öffnen" (GnuCash) and "Datendatei", above.
+menu-file-open-data-file = Datendatei öffnen …
 menu-file-quit = Beenden
 menu-edit = Bearbeiten
 menu-edit-undo = Rückgängig
@@ -91,3 +95,27 @@ dialog-delete-account-delete = Löschen
 dialog-new-account-back = Zurück
 dialog-new-account-next = Weiter
 dialog-new-account-finish = Fertigstellen
+
+# Why a data file wasn't opened or created.
+# The first sentence follows GnuCash's "Die Datei %s konnte nicht gefunden werden"; the
+# second is coined.
+dialog-data-file-missing = Die Datei „{ $file }“ konnte nicht gefunden werden. Sie wurde vielleicht verschoben, umbenannt oder gelöscht.
+# Coined from GnuCash's "verweist nicht auf GnuCash-Daten".
+dialog-data-file-not-balanced = „{ $file }“ ist keine { -brand-name }-Datendatei.
+# "fehlerhaft" follows GnuCash; "aus einer Sicherung wiederherstellen" is coined.
+dialog-data-file-damaged = „{ $file }“ ist fehlerhaft. Stellen Sie die Datei aus einer Sicherung wieder her.
+# GnuCash's "Diese Datei scheint von einer neueren Version von GnuCash zu sein. Sie
+# brauchen eine neuere GnuCash-Version, um die Datei lesen zu können."
+dialog-data-file-newer = „{ $file }“ scheint von einer neueren Version von { -brand-name } zu sein. Sie brauchen eine neuere { -brand-name }-Version, um die Datei lesen zu können.
+# Coined.
+dialog-data-file-locked = „{ $file }“ ist in einem anderen Programm geöffnet. Schließen Sie die Datei dort und versuchen Sie es erneut.
+# Coined from GnuCash's "GnuCash konnte die verknüpfte Datei nicht öffnen".
+dialog-data-file-unreadable = { -brand-name } konnte „{ $file }“ nicht lesen.
+# Coined from the same.
+dialog-data-file-not-created = { -brand-name } konnte „{ $file }“ nicht erstellen.
+# Coined.
+dialog-data-file-open-not-replaced = „{ $file }“ ist die geöffnete Datendatei und kann nicht durch eine neue ersetzt werden.
+# A file name, the same in every language.
+dialog-data-file-suggested-name = { -brand-name }.balanced
+# Coined from GnuCash's "Nur Datenfiles".
+dialog-data-file-filter = { -brand-name }-Datendateien
