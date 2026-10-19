@@ -21,7 +21,8 @@ use crate::{
     CurrencyCode, DomainError, Ledger, Money, MoneyError, Transaction, TransactionId, Visibility,
 };
 
-/// Why a data file couldn't be created or opened.
+/// Why a data file couldn't be created or opened. The refusals mirror
+/// `balanced_store`'s, so the UI picks a Dialog from this enum alone.
 #[derive(Debug, thiserror::Error)]
 pub enum OpenError {
     /// No file exists at the path.
@@ -37,7 +38,7 @@ pub enum OpenError {
     #[error("the data file is at schema version {version}, above this Balanced's {latest}")]
     Newer { version: u32, latest: u32 },
     /// Another connection, in this program or another, holds the file.
-    #[error("another program has the data file open")]
+    #[error("the data file is open elsewhere")]
     Locked,
     #[error("the data file couldn't be read or written")]
     Store(#[from] StoreError),

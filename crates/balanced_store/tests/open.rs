@@ -36,6 +36,8 @@ fn alter(path: &Path, sql: &str) {
 /// still reads as a Balanced file.
 fn damage(path: &Path) {
     let mut bytes = std::fs::read(path).expect("the test made the file");
+    // A created file holds several pages, so its 100-byte header and its second page
+    // are in range.
     let page_size = usize::from(u16::from_be_bytes([bytes[16], bytes[17]]));
     bytes[page_size..2 * page_size].fill(0xFF);
     std::fs::write(path, bytes).expect("the test's file is writable");
@@ -67,7 +69,10 @@ fn a_missing_path_is_refused_as_missing() {
 
     let result = Store::open(&path);
 
-    assert!(matches!(result, Err(OpenError::Missing(_))));
+    assert!(
+        matches!(&result, Err(OpenError::Missing(missing)) if *missing == path),
+        "{result:?}"
+    );
     assert!(!path.exists());
 }
 
@@ -106,18 +111,12 @@ fn a_healthy_file_opens() {
 #[test]
 fn a_file_from_a_newer_balanced_is_refused_as_newer() {
     let (_dir, path) = created_file();
-    alter(&path, "PRAGMA user_version = 2");
+    alter(&path, "PRAGMA user_version = 1000");
 
     let error = refusal(&path);
 
     assert!(
-        matches!(
-            error,
-            OpenError::Newer {
-                version: 2,
-                latest: 1
-            }
-        ),
+        matches!(error, OpenError::Newer { version: 1000, .. }),
         "{error:?}"
     );
 }
@@ -145,9 +144,13 @@ fn a_file_breaking_its_own_constraints_is_refused_as_damaged() {
 
     let error = refusal(&path);
 
-    assert!(
-        matches!(error, OpenError::Damaged(Damage::Problems(_))),
-        "{error:?}"
+    let OpenError::Damaged(Damage::Problems(problems)) = error else {
+        panic!("{error:?}");
+    };
+    assert_eq!(
+        problems,
+        ["CHECK constraint failed in data_file"],
+        "the check names the broken table"
     );
 }
 

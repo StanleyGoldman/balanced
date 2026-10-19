@@ -32,6 +32,7 @@ pub enum StoreError {
 /// Why a data file couldn't be opened. Every refusal leaves the file as it was.
 #[derive(Debug, thiserror::Error)]
 pub enum OpenError {
+    /// No file exists at the path.
     #[error("no file exists at {0:?}")]
     Missing(PathBuf),
     /// The file isn't SQLite, or another program's SQLite file.
@@ -44,8 +45,9 @@ pub enum OpenError {
     #[error("the data file is at schema version {version}, above this Balanced's {latest}")]
     Newer { version: u32, latest: u32 },
     /// Another connection, in this program or another, holds the file.
-    #[error("another program has the data file open")]
+    #[error("the data file is open elsewhere")]
     Locked,
+    /// SQLite failed for a reason that isn't one of the refusals above.
     #[error("the data file couldn't be read")]
     Store(#[from] StoreError),
 }
@@ -82,6 +84,9 @@ impl Store {
             .map_err(StoreError::from)
             .and_then(|connection| Self::write_schema(connection, currency))
             .and_then(|store| {
+                store
+                    .connection
+                    .pragma_update(None, "locking_mode", "EXCLUSIVE")?;
                 lock(&store.connection)?;
                 Ok(store)
             })
@@ -112,31 +117,39 @@ impl Store {
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
-        .map_err(refusal)?;
+        .map_err(open_refusal)?;
         // A file another connection holds is refused at once rather than after waiting.
         // Once this store holds the lock, no other connection can contend for it.
-        connection.busy_timeout(Duration::ZERO).map_err(refusal)?;
+        connection
+            .busy_timeout(Duration::ZERO)
+            .map_err(open_refusal)?;
+        // In exclusive locking mode the shared lock the first check takes is never
+        // released, so no other connection can change the file between the checks and
+        // the lock.
+        connection
+            .pragma_update(None, "locking_mode", "EXCLUSIVE")
+            .map_err(open_refusal)?;
         connection
             .pragma_update(None, "foreign_keys", true)
-            .map_err(refusal)?;
+            .map_err(open_refusal)?;
         let application_id: u32 = connection
             .pragma_query_value(None, "application_id", |row| row.get(0))
-            .map_err(refusal)?;
+            .map_err(open_refusal)?;
         if application_id != APPLICATION_ID {
             return Err(OpenError::NotBalanced);
         }
-        let problems = quick_check(&connection).map_err(refusal)?;
-        if problems != ["ok"] {
+        let problems = quick_check(&connection).map_err(open_refusal)?;
+        if !problems.is_empty() {
             return Err(OpenError::Damaged(Damage::Problems(problems)));
         }
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
-            .map_err(refusal)?;
+            .map_err(open_refusal)?;
         let latest = migration::latest_version();
         if version > latest {
             return Err(OpenError::Newer { version, latest });
         }
-        lock(&connection).map_err(refusal)?;
+        lock(&connection).map_err(open_refusal)?;
         Ok(Self { connection })
     }
 
@@ -176,25 +189,26 @@ impl Store {
     }
 }
 
-/// The problems `PRAGMA quick_check` finds in the database `connection` holds: `["ok"]`
+/// The problems `PRAGMA quick_check` finds in the database `connection` holds, empty
 /// when there are none.
 fn quick_check(connection: &Connection) -> rusqlite::Result<Vec<String>> {
-    connection
+    let report = connection
         .prepare("PRAGMA quick_check")?
         .query_map([], |row| row.get(0))?
-        .collect()
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    // A healthy file's report is the single row `ok`.
+    Ok(if report == ["ok"] { Vec::new() } else { report })
 }
 
-/// Takes, on the file `connection` holds, an exclusive lock it keeps until it closes.
-/// Writes nothing: in exclusive locking mode the lock a transaction takes outlives it, and
-/// an empty transaction leaves the file as it was.
+/// Takes, on the file `connection` holds in exclusive locking mode, an exclusive lock it
+/// keeps until it closes. Writes nothing: in that mode the lock a transaction takes
+/// outlives it, and an empty transaction leaves the file as it was.
 fn lock(connection: &Connection) -> rusqlite::Result<()> {
-    connection.pragma_update(None, "locking_mode", "EXCLUSIVE")?;
     connection.execute_batch("BEGIN EXCLUSIVE; COMMIT;")
 }
 
 /// The refusal SQLite's `error` while opening a file amounts to.
-fn refusal(error: rusqlite::Error) -> OpenError {
+fn open_refusal(error: rusqlite::Error) -> OpenError {
     match error.sqlite_error_code() {
         Some(rusqlite::ErrorCode::NotADatabase) => OpenError::NotBalanced,
         Some(rusqlite::ErrorCode::DatabaseCorrupt) => OpenError::Damaged(Damage::Corrupt(error)),
