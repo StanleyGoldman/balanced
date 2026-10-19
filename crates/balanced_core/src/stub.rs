@@ -133,7 +133,11 @@ impl Ledger {
                 .memo("September rent"),
                 paid(5, "Fresh Market", StubCategory::Groceries, "-86.42"),
                 paid(6, "Bean There", StubCategory::CoffeeShops, "-4.75"),
+            ])
+            .with_flagged_transaction(
                 paid(10, "City Power & Light", StubCategory::Utilities, "-92.10").number("1042"),
+            )
+            .with_transactions([
                 NewTransaction::split(
                     date(2026, 9, 12),
                     "Costco",
@@ -210,7 +214,7 @@ fn october_transactions(money: impl Fn(&str) -> Money) -> [NewTransaction; 3] {
         ),
         NewTransaction::new(
             date(2026, 10, 20),
-            "City Power & Light",
+            "Northside Water",
             StubCategory::Utilities.id(),
             money("-95.40"),
         )
@@ -258,6 +262,7 @@ fn generated_account(money: impl Fn(&str) -> Money) -> NewAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{AccountSummary, RegisterEntry, Transaction};
 
     #[test]
     fn the_generated_account_has_four_transactions_a_day_and_ends_where_it_opened() {
@@ -280,5 +285,22 @@ mod tests {
         let usd = CurrencyCode::new("USD").unwrap();
         let five_hundred = Money::new("500.00".parse().unwrap(), usd).unwrap();
         assert_eq!(generated.balance(), five_hundred);
+    }
+
+    #[test]
+    fn the_utility_bill_is_the_one_flagged_transaction() {
+        let ledger = Ledger::stub();
+
+        let view = ledger.snapshot();
+
+        let flagged: Vec<&str> = view
+            .accounts()
+            .iter()
+            .flat_map(AccountSummary::register)
+            .map(RegisterEntry::transaction)
+            .filter(|transaction| transaction.is_flagged())
+            .map(Transaction::payee)
+            .collect();
+        assert_eq!(flagged, ["City Power & Light"]);
     }
 }

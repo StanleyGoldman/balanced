@@ -84,6 +84,8 @@ pub struct Transaction {
     memo: String,
     allocation: Allocation,
     amount: Money,
+    /// Whether the user marked it to come back to.
+    flagged: bool,
 }
 
 impl Transaction {
@@ -106,7 +108,14 @@ impl Transaction {
             memo,
             allocation,
             amount,
+            flagged: false,
         }
+    }
+
+    /// The same transaction, flagged or not.
+    #[must_use]
+    pub(crate) fn with_flag(self, flagged: bool) -> Self {
+        Self { flagged, ..self }
     }
 
     pub fn id(&self) -> TransactionId {
@@ -137,6 +146,11 @@ impl Transaction {
     /// The whole amount: the sum of the lines, for a split transaction.
     pub fn amount(&self) -> Money {
         self.amount
+    }
+
+    /// Whether the user marked the transaction to come back to.
+    pub fn is_flagged(&self) -> bool {
+        self.flagged
     }
 
     /// The transaction with `edit` made. Fails when the edit gives the opening balance
@@ -368,6 +382,7 @@ impl NewTransaction {
             memo: self.memo,
             allocation,
             amount,
+            flagged: false,
         })
     }
 }

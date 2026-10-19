@@ -167,7 +167,7 @@ fn a_checking_account_shows_payments_and_deposits_in_their_own_columns() {
     assert_eq!(
         headings(&harness),
         [
-            "Date", "Num", "Payee", "Category", "Memo", "Payment", "Deposit", "Balance", ""
+            "Date", "Num", "Payee", "Category", "Memo", "Payment", "Deposit", "Balance", "Flag", ""
         ]
     );
     assert_eq!(payment_of(&harness, "Acme Corp"), "");
@@ -344,12 +344,12 @@ fn clicking_payee_sorts_by_payee() {
             "Acme Corp",
             "Bean There",
             "City Power & Light",
-            "City Power & Light",
             "Costco",
             "Daily Grind",
             "Fresh Market",
             "Maple Property Management",
             "Maple Property Management",
+            "Northside Water",
             "Opening Balance",
             "Shell",
             "Trattoria Roma",
@@ -401,12 +401,12 @@ fn clicking_payee_again_reverses_the_sort_but_not_its_ties() {
             "Trattoria Roma",
             "Shell",
             "Opening Balance",
+            "Northside Water",
             "Maple Property Management",
             "Maple Property Management",
             "Fresh Market",
             "Daily Grind",
             "Costco",
-            "City Power & Light",
             "City Power & Light",
             "Bean There",
             "Acme Corp",
@@ -1409,7 +1409,7 @@ fn clicking_payment_or_deposit_sorts_by_the_signed_amount() {
         "Maple Property Management",
         "Maple Property Management",
         "Costco",
-        "City Power & Light",
+        "Northside Water",
         "City Power & Light",
         "Fresh Market",
         "Trattoria Roma",

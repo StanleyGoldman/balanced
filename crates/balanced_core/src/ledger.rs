@@ -608,6 +608,10 @@ impl Ledger {
             DomainCommand::EditTransaction { transaction, edit } => {
                 self.edit_transaction(transaction, edit)?
             }
+            DomainCommand::SetFlagged {
+                transaction,
+                flagged,
+            } => self.set_flagged(transaction, flagged)?,
             DomainCommand::DeleteTransaction { transaction } => {
                 self.delete_transaction(transaction)?
             }
@@ -898,6 +902,28 @@ impl Ledger {
             transaction: id,
             edit: undo,
         })
+    }
+
+    fn set_flagged(
+        &mut self,
+        id: TransactionId,
+        flagged: bool,
+    ) -> Result<DomainCommand, DomainError> {
+        let position = self.changeable(id)?;
+        // Both indices were just found in this same view.
+        let old = &self.view.accounts[position.account].register[position.entry].transaction;
+        let undo = DomainCommand::SetFlagged {
+            transaction: id,
+            flagged: old.is_flagged(),
+        };
+        let flagged = old.clone().with_flag(flagged);
+        let row = transaction_row(self.view.accounts[position.account].account.id(), &flagged)?;
+        // A flag moves no balance, so the register keeps its entries and balances.
+        let view = Arc::make_mut(&mut self.view);
+        view.accounts[position.account].register[position.entry].transaction = flagged;
+        view.accounts_changed();
+        self.store.update_transaction(&row)?;
+        Ok(undo)
     }
 
     fn post_transaction(
@@ -2451,6 +2477,95 @@ mod tests {
         let fresh_market = transaction_id(&ledger, 1);
 
         let result = ledger.apply(edit(fresh_market, TransactionEdit::Memo("Late".into())));
+
+        assert_eq!(result, Err(DomainError::AccountClosed { account: old }));
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    fn set_flagged(transaction: TransactionId, flagged: bool) -> DomainCommand {
+        DomainCommand::SetFlagged {
+            transaction,
+            flagged,
+        }
+    }
+
+    #[test]
+    fn a_posted_transaction_starts_unflagged() {
+        let mut ledger = everyday();
+        let account = ledger.snapshot().accounts()[0].account().id();
+
+        ledger
+            .apply(DomainCommand::PostTransaction {
+                account,
+                transaction: NewTransaction::new(
+                    date(6),
+                    "Shell",
+                    CategoryId::new(0),
+                    usd(dec!(-20.00)),
+                ),
+            })
+            .unwrap();
+
+        assert!(!nth_transaction(&ledger, 2).is_flagged());
+    }
+
+    #[test]
+    fn flagging_a_transaction_shows_in_the_next_snapshot() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+
+        ledger.apply(set_flagged(fresh_market, true)).unwrap();
+
+        assert!(nth_transaction(&ledger, 1).is_flagged());
+        assert_ne!(ledger.snapshot().generation(), Generation::FIRST);
+    }
+
+    #[test]
+    fn a_flagged_transaction_can_be_unflagged() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        ledger.apply(set_flagged(fresh_market, true)).unwrap();
+
+        ledger.apply(set_flagged(fresh_market, false)).unwrap();
+
+        assert!(!nth_transaction(&ledger, 1).is_flagged());
+    }
+
+    #[test]
+    fn undo_takes_a_flag_off_and_redo_puts_it_back() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        ledger.apply(set_flagged(fresh_market, true)).unwrap();
+
+        ledger.undo().unwrap();
+        let undone = nth_transaction(&ledger, 1).is_flagged();
+        ledger.redo().unwrap();
+        let redone = nth_transaction(&ledger, 1).is_flagged();
+
+        assert_eq!((undone, redone), (false, true));
+    }
+
+    #[test]
+    fn flagging_a_closed_accounts_transaction_is_rejected() {
+        let groceries = CategoryId::new(0);
+        let mut ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [account("Old", AccountKind::Checking, usd(dec!(10.00)))
+                .with_transactions([NewTransaction::new(
+                    date(5),
+                    "Fresh Market",
+                    groceries,
+                    usd(dec!(-10.00)),
+                )])
+                .closed()],
+        )
+        .unwrap();
+        let before = ledger.snapshot();
+        let old = before.accounts()[0].account().id();
+        let fresh_market = transaction_id(&ledger, 1);
+
+        let result = ledger.apply(set_flagged(fresh_market, true));
 
         assert_eq!(result, Err(DomainError::AccountClosed { account: old }));
         assert_eq!(ledger.snapshot(), before);

@@ -434,6 +434,43 @@ fn a_posted_transaction_is_there_after_a_reopen() {
     });
 }
 
+#[test]
+fn a_flagged_transaction_stays_flagged_after_a_reopen() {
+    assert_reopens_as_changed(|ledger| {
+        let (everyday, food) = everyday_and_food(ledger);
+        let bakery = post(ledger, everyday, 2, "Bakery", food, "-4.10");
+        apply(
+            ledger,
+            DomainCommand::SetFlagged {
+                transaction: bakery,
+                flagged: true,
+            },
+        );
+    });
+}
+
+#[test]
+fn an_undeleted_flagged_transaction_is_flagged_after_a_reopen() {
+    assert_reopens_as_changed(|ledger| {
+        let (everyday, food) = everyday_and_food(ledger);
+        let bakery = post(ledger, everyday, 2, "Bakery", food, "-4.10");
+        apply(
+            ledger,
+            DomainCommand::SetFlagged {
+                transaction: bakery,
+                flagged: true,
+            },
+        );
+        apply(
+            ledger,
+            DomainCommand::DeleteTransaction {
+                transaction: bakery,
+            },
+        );
+        ledger.undo().expect("the delete undoes");
+    });
+}
+
 /// Costco, on the 12th: groceries and household goods, split between `food` and
 /// `household`.
 fn costco(food: CategoryId, household: CategoryId) -> NewTransaction {
@@ -649,6 +686,10 @@ fn every_command(h: &Household) -> Vec<DomainCommand> {
         edit(TransactionEdit::Memo("Weekly shop".to_owned())),
         edit(TransactionEdit::Category(h.fuel)),
         edit(TransactionEdit::Amount(usd("-90.00"))),
+        DomainCommand::SetFlagged {
+            transaction: h.payments[1],
+            flagged: true,
+        },
         // A split's lines stay with it through an edit to its other fields.
         DomainCommand::EditTransaction {
             transaction: h.split,

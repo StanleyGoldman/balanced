@@ -1,5 +1,6 @@
 # A transaction's date is an ISO date, its number is NULL rather than empty, and its
-# allocation is one of the known kinds.
+# allocation is one of the known kinds. A transaction starts unflagged, and its flag is 0 or
+# 1.
 
 statement ok
 INSERT INTO account (id, name, kind, position, hidden, closed) VALUES (0, 'Checking', 'checking', 0, 0, 0)
@@ -35,3 +36,15 @@ INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation
 statement error CHECK constraint failed: transaction_allocation_known
 INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
     (2, 0, '2026-01-01', NULL, 'Grocer', '', 'transfer', -1, NULL)
+
+query I
+SELECT flagged FROM "transaction" ORDER BY id
+----
+0
+0
+
+statement ok
+UPDATE "transaction" SET flagged = 1 WHERE id = 0
+
+statement error CHECK constraint failed: transaction_flagged_flag
+UPDATE "transaction" SET flagged = 2 WHERE id = 0

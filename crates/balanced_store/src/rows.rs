@@ -35,6 +35,7 @@ pub struct TransactionRow {
     pub payee: String,
     pub memo: String,
     pub allocation: AllocationRow,
+    pub flagged: bool,
 }
 
 /// Where a transaction's amount went, with the amount where the row stores one.

@@ -56,6 +56,10 @@ name = "data_file"
 required-features = ["test-support"]
 
 [[test]]
+name = "flag"
+required-features = ["test-support"]
+
+[[test]]
 name = "date_field"
 required-features = ["test-support"]
 
