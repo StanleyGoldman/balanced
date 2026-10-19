@@ -167,7 +167,7 @@ fn a_checking_account_shows_payments_and_deposits_in_their_own_columns() {
     assert_eq!(
         headings(&harness),
         [
-            "Date", "Num", "Payee", "Category", "Memo", "Payment", "Deposit", "Balance", ""
+            "Date", "Num", "Payee", "Category", "Memo", "Payment", "Deposit", "Balance", "Flag", ""
         ]
     );
     assert_eq!(payment_of(&harness, "Acme Corp"), "");

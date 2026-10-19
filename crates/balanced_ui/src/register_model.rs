@@ -108,6 +108,8 @@ pub(crate) struct RegisterRow {
     /// The amount, which only the draft row can be without.
     amount: Option<RowAmount>,
     balance: Option<FormattedAmount>,
+    /// Whether the transaction is flagged. The draft row never is.
+    flagged: bool,
 }
 
 impl RegisterRow {
@@ -138,6 +140,7 @@ impl RegisterRow {
             currency,
             amount: draft.amount().map(|amount| RowAmount::new(i18n, amount)),
             balance: None,
+            flagged: false,
         }
     }
 
@@ -245,6 +248,11 @@ impl RegisterRow {
     /// other than by date it is `None`, since it would be out of order.
     pub(crate) fn balance(&self) -> Option<&FormattedAmount> {
         self.balance.as_ref()
+    }
+
+    /// Whether the transaction is flagged. The draft row never is.
+    pub(crate) fn is_flagged(&self) -> bool {
+        self.flagged
     }
 
     /// Orders this row and `other` by `key`'s column alone.
@@ -400,6 +408,7 @@ impl RegisterModel {
                     amount: Some(RowAmount::new(i18n, transaction.amount())),
                     balance: shows_balance
                         .then(|| FormattedAmount::new(i18n, entry.balance(), AmountStyle::Bare)),
+                    flagged: transaction.is_flagged(),
                 }
             })
             .collect();

@@ -81,7 +81,7 @@ fn transactions(connection: &Connection) -> rusqlite::Result<Vec<StoredTransacti
     connection
         .prepare(
             "SELECT t.id, t.account_id, t.date, t.number, t.payee, t.memo, t.allocation,
-                 t.amount, t.category_id, r.amount, r.balance
+                 t.amount, t.category_id, r.amount, r.balance, t.flagged
              FROM \"transaction\" AS t
              JOIN register_entry AS r ON r.transaction_id = t.id
              ORDER BY t.account_id, t.date, t.id",
@@ -98,6 +98,7 @@ fn transactions(connection: &Connection) -> rusqlite::Result<Vec<StoredTransacti
                     payee: row.get(4)?,
                     memo: row.get(5)?,
                     allocation,
+                    flagged: row.get(11)?,
                 },
                 amount: row.get(9)?,
                 balance: row.get(10)?,
