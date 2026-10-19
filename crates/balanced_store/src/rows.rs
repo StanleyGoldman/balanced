@@ -96,6 +96,10 @@ pub struct Contents {
     /// The highest id each table has ever held, deleted rows included, or `None` when
     /// it has never held a row.
     pub last_ids: LastIds,
+    /// The undo stack's entries, oldest first.
+    pub undo: Vec<String>,
+    /// The redo stack's entries, oldest first.
+    pub redo: Vec<String>,
 }
 
 /// The highest id each table has ever held, from `sqlite_sequence`.
@@ -104,4 +108,21 @@ pub struct LastIds {
     pub account: Option<u32>,
     pub category: Option<u32>,
     pub transaction: Option<u32>,
+}
+
+/// One of the undo log's two stacks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stack {
+    Undo,
+    Redo,
+}
+
+impl Stack {
+    /// The name the `stack` column holds.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Undo => "undo",
+            Self::Redo => "redo",
+        }
+    }
 }

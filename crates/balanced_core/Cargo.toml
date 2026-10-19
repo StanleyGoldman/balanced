@@ -10,9 +10,12 @@ balanced_store.workspace = true
 icu_calendar.workspace = true
 iso_currency.workspace = true
 rust_decimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+insta.workspace = true
 rust_decimal_macros.workspace = true
 tempfile.workspace = true
 
