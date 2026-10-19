@@ -15,6 +15,7 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 - Keep fixtures small and tests fast. Mutation testing runs the suite once for every mutant.
 - Test behaviour that could plausibly break, and skip trivial wiring.
 - Tests run against a real in-memory `Ledger`, not mocks.
+- A test that needs a write to fail breaks the path, not the permissions. CI runs as root, which writes through a read-only directory or file, so a `chmod` test passes locally and fails in CI. Make the name longer than the 255-byte limit, or put a directory where the file would go.
 - `unwrap()` belongs in a `#[test]` function. A helper function in test code writes `expect("why this can't fail")`. Review enforces this, not clippy: `allow-unwrap-in-tests` (`clippy.toml`) lets `unwrap()` through anywhere under `#[cfg(test)]`, helpers included.
 
 ## UI tests
