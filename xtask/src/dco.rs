@@ -244,6 +244,7 @@ mod tests {
             commits(scratch.root(), missing).expect_err("the cutoff is not in this history")
         );
 
+        // The rest of the message is git's own report, which varies by version.
         assert!(
             message.starts_with(
                 "the DCO cutoff 0123456789abcdef0123456789abcdef01234567 is not in this \

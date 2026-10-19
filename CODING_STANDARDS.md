@@ -14,7 +14,7 @@ Tools enforce whatever they can: lint levels in `[workspace.lints]` (`Cargo.toml
 - **Match our own enums exhaustively.** A new Command or Dialog variant must show up as a compile error at every `match` that handles it. `wildcard_enum_match_arm` enforces this. For a foreign enum, put `#[expect(clippy::wildcard_enum_match_arm, reason = "foreign enum")]` on the `match`.
 - **Write every user-visible string through the i18n layer:** `fl!` in `balanced_ui`. See [i18n](docs/practices/i18n.md).
 - **Name the issue in every TODO:** `TODO(#123)`.
-- **Open every `.rs` file with the SPDX header**, `// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception`, then a blank line.
+- **Open every `.rs` file with the SPDX header**, `// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception` as its first line.
 - **Sign off every commit** with `git commit -s` (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 - **Comments describe behaviour**, as full sentences. History and justification belong in the commit message.
 - **Give every held-back dependency version a comment saying why.**

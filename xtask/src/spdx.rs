@@ -13,7 +13,7 @@ pub(crate) const TASK: Task = Task {
 
 /// The first line of every Rust source file. The expression matches `license` in
 /// `Cargo.toml`; the exception is `LICENSE-EXCEPTION.md`.
-pub(crate) const HEADER: &str =
+const HEADER: &str =
     "// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception";
 
 pub(crate) fn run() -> Result<()> {
@@ -53,6 +53,24 @@ fn has_header(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{HEADER, has_header};
+
+    /// The header and `Cargo.toml` name one license, so changing it in one place fails here.
+    #[test]
+    fn the_header_names_the_workspace_license() {
+        let manifest =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../Cargo.toml"))
+                .expect("the workspace manifest is read");
+        let expression = HEADER
+            .strip_prefix("// SPDX-License-Identifier: ")
+            .expect("the header is an SPDX line");
+
+        assert!(
+            manifest
+                .lines()
+                .any(|line| line == format!("license = \"{expression}\"")),
+            "`license` in [workspace.package] should be {expression}"
+        );
+    }
 
     #[test]
     fn a_file_opening_with_the_header_passes() {

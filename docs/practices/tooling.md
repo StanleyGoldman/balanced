@@ -19,7 +19,7 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
   - `layers`: every workspace crate depends only on the crates below it, as `ARCHITECTURE.md` draws them, and only `balanced_store` depends on `rusqlite`. The rule is the `LAYERS` table in `xtask/src/layers.rs`; a new crate goes there and in `ARCHITECTURE.md` in the same PR.
   - `typos`
   - `todo`: every `TODO` or `FIXME` in a `.rs` or `.toml` file is written `TODO(#123)`
-  - `spdx`: every tracked `.rs` file opens with `// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception` as its first line. The expression matches `license` in `[workspace.package]`; change both together.
+  - `spdx`: every `.rs` file git doesn't ignore, untracked ones included, opens with `// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception` as its first line. The expression matches `license` in `[workspace.package]`; change both together.
   - `adrs`: no two records in `docs/adr/` share a number, and every file there is named `<four digits>-<slug>.md`. Gaps in the numbering are fine.
   - `dco`: every non-merge commit in `HEAD`'s history after `CUTOFF` in `xtask/src/dco.rs` carries a `Signed-off-by:` trailer ([ADR 0009](../adr/0009-gpl-3-or-later-with-a-plugin-exception-and-dco-sign-off.md), [CONTRIBUTING.md](../../CONTRIBUTING.md)). `git rebase --signoff <base>` repairs a branch.
 - `cargo xtask adrs --against <ref>` runs the same check on this branch merged with `<ref>`, without touching the checkout. It catches a record that landed on `<ref>` with the same number after this branch was cut. Both branches merge clean, because the file names differ.
