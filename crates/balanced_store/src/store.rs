@@ -3,6 +3,7 @@
 use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use rusqlite::{Connection, OpenFlags, TransactionBehavior};
 
@@ -28,6 +29,40 @@ pub enum StoreError {
     Sqlite(#[from] rusqlite::Error),
 }
 
+/// Why a data file couldn't be opened. Every refusal leaves the file as it was.
+#[derive(Debug, thiserror::Error)]
+pub enum OpenError {
+    /// No file exists at the path.
+    #[error("no file exists at {0:?}")]
+    Missing(PathBuf),
+    /// The file isn't SQLite, or another program's SQLite file.
+    #[error("the file isn't a Balanced data file")]
+    NotBalanced,
+    /// The file fails SQLite's integrity check.
+    #[error("the data file is damaged")]
+    Damaged(#[source] Damage),
+    /// The file's schema is from a newer Balanced than this one.
+    #[error("the data file is at schema version {version}, above this Balanced's {latest}")]
+    Newer { version: u32, latest: u32 },
+    /// Another connection, in this program or another, holds the file.
+    #[error("the data file is open elsewhere")]
+    Locked,
+    /// SQLite failed for a reason that isn't one of the refusals above.
+    #[error("the data file couldn't be read")]
+    Store(#[from] StoreError),
+}
+
+/// What is wrong with a damaged data file.
+#[derive(Debug, thiserror::Error)]
+pub enum Damage {
+    /// `PRAGMA quick_check` listed these problems.
+    #[error("the integrity check found problems: {0:?}")]
+    Problems(Vec<String>),
+    /// SQLite found the file corrupt while reading it.
+    #[error("sqlite found the file corrupt")]
+    Corrupt(#[source] rusqlite::Error),
+}
+
 impl Store {
     /// Creates an empty data file at `path` whose amounts are in `currency`, an ISO 4217
     /// code such as `"USD"`. Refuses a path that already holds a file, and leaves no file
@@ -48,6 +83,13 @@ impl Store {
         Connection::open(path)
             .map_err(StoreError::from)
             .and_then(|connection| Self::write_schema(connection, currency))
+            .and_then(|store| {
+                store
+                    .connection
+                    .pragma_update(None, "locking_mode", "EXCLUSIVE")?;
+                lock(&store.connection)?;
+                Ok(store)
+            })
             .inspect_err(|_| {
                 // The file is half made and nobody has seen it, so it goes. Failing to remove
                 // it leaves an empty or partial file, which opening later refuses.
@@ -61,15 +103,53 @@ impl Store {
         Self::write_schema(Connection::open_in_memory()?, currency)
     }
 
-    /// Opens the data file at `path` for reading and writing.
-    pub fn open(path: &Path) -> Result<Self, StoreError> {
+    /// Opens the data file at `path` for reading and writing, and holds it locked until
+    /// the store is dropped. Refuses a file that is missing, isn't a Balanced data file, is
+    /// damaged, comes from a newer Balanced, or that another connection holds, and writes
+    /// nothing to a file it refuses.
+    pub fn open(path: &Path) -> Result<Self, OpenError> {
+        if fs::metadata(path).is_err_and(|error| error.kind() == io::ErrorKind::NotFound) {
+            return Err(OpenError::Missing(path.to_owned()));
+        }
         // Without `SQLITE_OPEN_CREATE`, a missing file is an error rather than a new,
         // empty database.
         let connection = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
-        connection.pragma_update(None, "foreign_keys", true)?;
+        )
+        .map_err(open_refusal)?;
+        // A file another connection holds is refused at once rather than after waiting.
+        // Once this store holds the lock, no other connection can contend for it.
+        connection
+            .busy_timeout(Duration::ZERO)
+            .map_err(open_refusal)?;
+        // In exclusive locking mode the shared lock the first check takes is never
+        // released, so no other connection can change the file between the checks and
+        // the lock.
+        connection
+            .pragma_update(None, "locking_mode", "EXCLUSIVE")
+            .map_err(open_refusal)?;
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .map_err(open_refusal)?;
+        let application_id: u32 = connection
+            .pragma_query_value(None, "application_id", |row| row.get(0))
+            .map_err(open_refusal)?;
+        if application_id != APPLICATION_ID {
+            return Err(OpenError::NotBalanced);
+        }
+        let problems = quick_check(&connection).map_err(open_refusal)?;
+        if !problems.is_empty() {
+            return Err(OpenError::Damaged(Damage::Problems(problems)));
+        }
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(open_refusal)?;
+        let latest = migration::latest_version();
+        if version > latest {
+            return Err(OpenError::Newer { version, latest });
+        }
+        lock(&connection).map_err(open_refusal)?;
         Ok(Self { connection })
     }
 
@@ -106,5 +186,33 @@ impl Store {
         )?;
         transaction.commit()?;
         Ok(Self { connection })
+    }
+}
+
+/// The problems `PRAGMA quick_check` finds in the database `connection` holds, empty
+/// when there are none.
+fn quick_check(connection: &Connection) -> rusqlite::Result<Vec<String>> {
+    let report = connection
+        .prepare("PRAGMA quick_check")?
+        .query_map([], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    // A healthy file's report is the single row `ok`.
+    Ok(if report == ["ok"] { Vec::new() } else { report })
+}
+
+/// Takes, on the file `connection` holds in exclusive locking mode, an exclusive lock it
+/// keeps until it closes. Writes nothing: in that mode the lock a transaction takes
+/// outlives it, and an empty transaction leaves the file as it was.
+fn lock(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch("BEGIN EXCLUSIVE; COMMIT;")
+}
+
+/// The refusal SQLite's `error` while opening a file amounts to.
+fn open_refusal(error: rusqlite::Error) -> OpenError {
+    match error.sqlite_error_code() {
+        Some(rusqlite::ErrorCode::NotADatabase) => OpenError::NotBalanced,
+        Some(rusqlite::ErrorCode::DatabaseCorrupt) => OpenError::Damaged(Damage::Corrupt(error)),
+        Some(rusqlite::ErrorCode::DatabaseBusy) => OpenError::Locked,
+        _ => OpenError::Store(StoreError::Sqlite(error)),
     }
 }

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use balanced_core::{
     AccountGroup, AccountId, AccountKind, AccountStatus, AccountSummary, Category, CategoryId,
     CurrencyCode, DomainCommand, DomainError, Ledger, LedgerView, Money, MoneyError, MoveDirection,
-    NewTransaction, SplitLine, TransactionEdit, TransactionId, Visibility, WriteError,
+    NewTransaction, OpenError, SplitLine, TransactionEdit, TransactionId, Visibility, WriteError,
 };
 use icu_calendar::{Date, Iso};
 use tempfile::TempDir;
@@ -828,4 +828,38 @@ fn a_category_the_file_would_keep_is_refused_as_in_use() {
     }
     let reopened = reopen(ledger, &path);
     assert_eq!(contents(&reopened.snapshot()), before);
+}
+
+#[test]
+fn a_missing_file_is_refused_as_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("Household.balanced");
+
+    let result = Ledger::open(&path);
+
+    assert!(
+        matches!(&result, Err(OpenError::Missing(missing)) if *missing == path),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn a_file_a_ledger_has_open_is_refused_as_locked() {
+    let (_dir, path, _ledger) = new_file();
+    let before = std::fs::read(&path).unwrap();
+
+    let result = Ledger::open(&path);
+
+    assert!(matches!(result, Err(OpenError::Locked)), "{result:?}");
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn dropping_a_ledger_lets_its_file_open_again() {
+    let (_dir, path, ledger) = new_file();
+
+    drop(ledger);
+    let result = Ledger::open(&path);
+
+    assert!(result.is_ok(), "{result:?}");
 }
