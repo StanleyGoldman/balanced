@@ -129,17 +129,67 @@ fn a_transaction_shows_each_column_with_its_running_balance() {
         .iter()
         .position(|cell| cell == "Fresh Market")
         .expect("the Register lists Fresh Market");
-    // Date, Num, Payee, Category, Memo, Amount, Balance.
+    // Date, Num, Payee, Category, Memo, Payment, Deposit, Balance.
     assert_eq!(
-        cells[payee - 2..payee + 5],
+        cells[payee - 2..payee + 6],
         [
             "9/5/2026",
             "",
             "Fresh Market",
             "Food & Dining:Groceries",
             "",
-            "-86.42",
+            "86.42",
+            "",
             "2,863.58",
+        ]
+    );
+}
+
+/// The Register's column headings, left to right.
+fn headings(harness: &Harness<'static, App>) -> Vec<String> {
+    let mut headers: Vec<_> = harness
+        .query_all_by_role(Role::ColumnHeader)
+        .map(|header| {
+            let label = header.accesskit_node().label().unwrap_or_default();
+            (header.rect().left(), label)
+        })
+        .collect();
+    headers.sort_by(|(left, _), (right, _)| left.total_cmp(right));
+    headers.into_iter().map(|(_, label)| label).collect()
+}
+
+#[test]
+fn a_checking_account_shows_payments_and_deposits_in_their_own_columns() {
+    let mut harness = app();
+
+    open(&mut harness, "Everyday Checking");
+
+    assert_eq!(
+        headings(&harness),
+        [
+            "Date", "Num", "Payee", "Category", "Memo", "Payment", "Deposit", "Balance", ""
+        ]
+    );
+    assert_eq!(payment_of(&harness, "Acme Corp"), "");
+    assert_eq!(deposit_of(&harness, "Acme Corp"), "3,200.00");
+}
+
+#[test]
+fn a_credit_card_shows_charge_and_payment_and_an_asset_or_liability_decrease_and_increase() {
+    let mut harness = app();
+
+    let mut shown = Vec::new();
+    for account in ["Visa Rewards", "House", "Mortgage"] {
+        open(&mut harness, account);
+        shown.push(headings(&harness)[5..7].to_vec());
+    }
+
+    assert_eq!(
+        shown,
+        [
+            ["Charge", "Payment"],
+            ["Decrease", "Increase"],
+            ["Decrease", "Increase"],
         ]
     );
 }
@@ -156,8 +206,8 @@ fn a_split_transaction_shows_split_in_its_category() {
         .position(|cell| cell == "Costco")
         .expect("the Register lists Costco");
     assert_eq!(
-        cells[payee..payee + 4],
-        ["Costco", "[Split]", "", "-206.27"]
+        cells[payee..payee + 5],
+        ["Costco", "[Split]", "", "206.27", ""]
     );
 }
 
@@ -169,11 +219,12 @@ fn the_opening_balance_is_the_first_transaction() {
 
     let cells = cells(&harness);
     assert_eq!(
-        cells[..7],
+        cells[..8],
         [
             "1/1/2026",
             "",
             "Opening Balance",
+            "",
             "",
             "",
             "1,200.00",
@@ -402,7 +453,7 @@ fn a_register_opens_sorted_by_date_with_every_column_but_number_and_balance_sort
         )
     };
     assert_eq!(sorts("Date"), (true, Some(SortDirection::Ascending)));
-    for title in ["Payee", "Category", "Memo", "Amount"] {
+    for title in ["Payee", "Category", "Memo", "Payment", "Deposit"] {
         assert_eq!(sorts(title), (true, None), "{title}");
     }
     for title in ["Num", "Balance"] {
@@ -539,7 +590,8 @@ fn enter_commits_and_moves_right_without_opening_the_next_cell() {
 fn enter_on_the_last_cell_of_a_row_wraps_to_the_next_row() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "-86.42");
+    click_cell(&mut harness, "86.42");
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
@@ -708,15 +760,16 @@ fn an_edit_starts_with_the_text_cursor_at_the_end() {
 fn tab_on_the_last_transactions_last_cell_commits_and_edits_the_draft_rows_date() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    // The November rent's amount, the last transaction's last cell.
-    click_cell(&mut harness, "-1,475.00");
-    type_text(&mut harness, "-1500");
+    // The November rent's Deposit, the last transaction's last cell.
+    click_cell(&mut harness, "1,475.00");
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+    type_text(&mut harness, "70");
 
     press(&mut harness, Modifiers::NONE, Key::Tab);
 
-    let amounts = column(&harness, "Amount");
+    let deposits = column(&harness, "Deposit");
     // The last transaction's, above the draft row's.
-    assert_eq!(amounts[amounts.len() - 2], "-1,500.00");
+    assert_eq!(deposits[deposits.len() - 2], "70.00");
     assert_eq!(editor(&harness, "Date").as_deref(), Some(""));
 }
 
@@ -724,10 +777,10 @@ fn tab_on_the_last_transactions_last_cell_commits_and_edits_the_draft_rows_date(
 fn tab_on_the_draft_rows_last_cell_commits_and_closes_it() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    for _ in 0..5 {
+    for _ in 0..6 {
         press(&mut harness, Modifiers::NONE, Key::ArrowRight);
     }
-    type_text(&mut harness, "-70");
+    type_text(&mut harness, "70");
 
     press(&mut harness, Modifiers::NONE, Key::Tab);
 
@@ -736,8 +789,8 @@ fn tab_on_the_draft_rows_last_cell_commits_and_closes_it() {
         cells(&harness)
             .iter()
             .rev()
-            .take(8)
-            .any(|cell| cell == "-70.00")
+            .take(9)
+            .any(|cell| cell == "70.00")
     );
     assert!(harness.query_by_role(Role::TextInput).is_none());
 }
@@ -1118,45 +1171,55 @@ fn moving_the_highlight_past_the_visible_rows_scrolls_the_list() {
     assert_eq!(highlighted(&harness).as_deref(), Some("Shopping:Household"));
 }
 
-/// The Amount cell of the row whose Payee is `payee`.
-fn amount_of(harness: &Harness<'static, App>, payee: &str) -> String {
+/// The cell under the heading `title` of the first row whose Payee is `payee`.
+fn cell_of(harness: &Harness<'static, App>, title: &str, payee: &str) -> String {
     let row = column(harness, "Payee")
         .iter()
         .position(|cell| cell == payee)
         .expect("the Register lists the payee");
-    column(harness, "Amount").swap_remove(row)
+    column(harness, title).swap_remove(row)
+}
+
+/// The Payment cell of the first row whose Payee is `payee`.
+fn payment_of(harness: &Harness<'static, App>, payee: &str) -> String {
+    cell_of(harness, "Payment", payee)
+}
+
+/// The Deposit cell of the first row whose Payee is `payee`.
+fn deposit_of(harness: &Harness<'static, App>, payee: &str) -> String {
+    cell_of(harness, "Deposit", payee)
 }
 
 #[test]
 fn typed_arithmetic_commits_its_result_rounded_to_the_currency_decimal_places() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "-86.42");
+    click_cell(&mut harness, "86.42");
     type_text(&mut harness, "100/3");
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
-    assert_eq!(amount_of(&harness, "Fresh Market"), "33.33");
+    assert_eq!(payment_of(&harness, "Fresh Market"), "33.33");
 }
 
 #[test]
 fn an_amount_with_excess_decimal_places_stays_in_edit_mode() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "-86.42");
+    click_cell(&mut harness, "86.42");
     type_text(&mut harness, "12.345");
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
-    assert_eq!(editor(&harness, "Amount").as_deref(), Some("12.345"));
-    assert_eq!(amount_of(&harness, "Fresh Market"), "-86.42");
+    assert_eq!(editor(&harness, "Payment").as_deref(), Some("12.345"));
+    assert_eq!(payment_of(&harness, "Fresh Market"), "86.42");
 }
 
 #[test]
 fn an_amount_with_excess_decimal_places_shows_why_in_a_bubble() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "-86.42");
+    click_cell(&mut harness, "86.42");
     type_text(&mut harness, "12.345");
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
@@ -1169,7 +1232,7 @@ fn an_amount_with_excess_decimal_places_shows_why_in_a_bubble() {
 fn an_amount_written_with_the_wrong_marks_names_the_locale_marks() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "-86.42");
+    click_cell(&mut harness, "86.42");
     type_text(&mut harness, "1,5");
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
@@ -1182,60 +1245,60 @@ fn an_amount_written_with_the_wrong_marks_names_the_locale_marks() {
 fn leaving_a_refused_amount_keeps_the_cell_in_edit_mode() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "-86.42");
+    click_cell(&mut harness, "86.42");
     type_text(&mut harness, "12.345");
 
     click_cell(&mut harness, "Bean There");
     type_text(&mut harness, "6");
 
-    assert_eq!(editor(&harness, "Amount").as_deref(), Some("12.3456"));
-    assert_eq!(cursor(&harness), "-86.42");
+    assert_eq!(editor(&harness, "Payment").as_deref(), Some("12.3456"));
+    assert_eq!(cursor(&harness), "86.42");
 }
 
 #[test]
 fn an_amount_field_refuses_letters() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "-86.42");
+    click_cell(&mut harness, "86.42");
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
     type_text(&mut harness, "1a+b2");
 
-    assert_eq!(editor(&harness, "Amount").as_deref(), Some("-86.421+2"));
+    assert_eq!(editor(&harness, "Payment").as_deref(), Some("86.421+2"));
 }
 
 #[test]
 fn typing_a_letter_on_an_amount_cell_opens_nothing() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "-86.42");
+    click_cell(&mut harness, "86.42");
 
     type_text(&mut harness, "x");
 
-    assert_eq!(editor(&harness, "Amount"), None);
+    assert_eq!(editor(&harness, "Payment"), None);
 }
 
 #[test]
 fn a_pasted_amount_loses_its_letters() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "-86.42");
+    click_cell(&mut harness, "86.42");
     press(&mut harness, Modifiers::NONE, Key::Enter);
-    for _ in "-86.42".chars() {
+    for _ in "86.42".chars() {
         press(&mut harness, Modifiers::NONE, Key::Backspace);
     }
 
     send(&mut harness, Event::Paste("USD 12.50".to_owned()));
     harness.run();
 
-    assert_eq!(editor(&harness, "Amount").as_deref(), Some(" 12.50"));
+    assert_eq!(editor(&harness, "Payment").as_deref(), Some(" 12.50"));
 }
 
 #[test]
 fn typed_arithmetic_previews_its_rounded_result() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "-86.42");
+    click_cell(&mut harness, "86.42");
 
     type_text(&mut harness, "100/3");
 
@@ -1246,7 +1309,7 @@ fn typed_arithmetic_previews_its_rounded_result() {
 fn typed_arithmetic_with_an_exact_result_previews_it_unmarked() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "-86.42");
+    click_cell(&mut harness, "86.42");
 
     type_text(&mut harness, "10+5");
 
@@ -1257,7 +1320,7 @@ fn typed_arithmetic_with_an_exact_result_previews_it_unmarked() {
 fn a_plain_amount_has_no_preview() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "-86.42");
+    click_cell(&mut harness, "86.42");
 
     type_text(&mut harness, "12");
 
@@ -1268,7 +1331,7 @@ fn a_plain_amount_has_no_preview() {
 fn changing_a_refused_amount_clears_its_error() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "-86.42");
+    click_cell(&mut harness, "86.42");
     type_text(&mut harness, "12.345");
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
@@ -1282,7 +1345,7 @@ fn changing_a_refused_amount_clears_its_error() {
 fn a_reformatted_amount_reopens_with_the_text_cursor_at_the_end() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "-86.42");
+    click_cell(&mut harness, "86.42");
     type_text(&mut harness, "100/3");
     press(&mut harness, Modifiers::NONE, Key::Enter);
     click_cell(&mut harness, "33.33");
@@ -1290,19 +1353,76 @@ fn a_reformatted_amount_reopens_with_the_text_cursor_at_the_end() {
     press(&mut harness, Modifiers::NONE, Key::Enter);
     type_text(&mut harness, "1");
 
-    assert_eq!(editor(&harness, "Amount").as_deref(), Some("33.331"));
+    assert_eq!(editor(&harness, "Payment").as_deref(), Some("33.331"));
 }
 
 #[test]
-fn a_split_transactions_amount_does_not_open_for_editing() {
+fn a_split_transactions_payment_and_deposit_do_not_open_for_editing() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     // Costco's amount, the sum of its split lines.
-    click_cell(&mut harness, "-206.27");
+    click_cell(&mut harness, "206.27");
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
+    let payment = editor(&harness, "Payment");
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    let deposit = editor(&harness, "Deposit");
 
-    assert_eq!(editor(&harness, "Amount"), None);
+    assert_eq!((payment, deposit), (None, None));
+}
+
+#[test]
+fn an_amount_typed_in_deposit_moves_a_payment_there_as_one_undoable_edit() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "86.42");
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+    type_text(&mut harness, "86.42");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    let moved = (
+        payment_of(&harness, "Fresh Market"),
+        deposit_of(&harness, "Fresh Market"),
+    );
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
+    let undone = (
+        payment_of(&harness, "Fresh Market"),
+        deposit_of(&harness, "Fresh Market"),
+    );
+
+    assert_eq!(moved, (String::new(), "86.42".to_owned()));
+    assert_eq!(undone, ("86.42".to_owned(), String::new()));
+}
+
+#[test]
+fn clicking_payment_or_deposit_sorts_by_the_signed_amount() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+
+    sort_by(&mut harness, "Payment");
+    let by_payment = column(&harness, "Payee");
+    sort_by(&mut harness, "Deposit");
+    let by_deposit = column(&harness, "Payee");
+
+    let smallest_first = [
+        "Maple Property Management",
+        "Maple Property Management",
+        "Costco",
+        "City Power & Light",
+        "City Power & Light",
+        "Fresh Market",
+        "Trattoria Roma",
+        "Shell",
+        "Daily Grind",
+        "Bean There",
+        "Opening Balance",
+        "Acme Corp",
+        "Acme Corp",
+        "",
+    ];
+    assert_eq!(by_payment, smallest_first);
+    assert_eq!(by_deposit, smallest_first);
 }
 
 /// The Today divider's label.

@@ -11,6 +11,7 @@ use icu_calendar::{Date, Iso};
 use crate::account_bar::{AccountBar, BarFrame};
 use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
+use crate::data_file::DataFileRefusal;
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
@@ -50,6 +51,8 @@ pub(crate) struct MainWindow {
     manage_accounts: Option<OpenDialog<ManageAccountsForm>>,
     /// The Preferences Dialog, while it is open.
     preferences: Option<OpenDialog<PreferencesForm>>,
+    /// The Dialog saying why a data file was refused, while it is open.
+    data_file_refusal: Option<OpenDialog<DataFileRefusal>>,
     /// Where focus goes now that a Dialog has closed, until a frame restores it.
     focus_return: Option<FocusReturn>,
     menu_nav: MenuNav,
@@ -96,6 +99,7 @@ impl MainWindow {
             new_category: None,
             manage_accounts: None,
             preferences: None,
+            data_file_refusal: None,
             focus_return: None,
             menu_nav: MenuNav::default(),
         }
@@ -158,6 +162,8 @@ impl MainWindow {
             UserAction::Redo => view.can_redo(),
             UserAction::NewTransaction | UserAction::DeleteTransaction => self.shows_register(),
             UserAction::SwitchPane
+            | UserAction::NewDataFile
+            | UserAction::OpenDataFile
             | UserAction::NewAccount
             | UserAction::ManageAccounts
             | UserAction::Quit
@@ -222,6 +228,43 @@ impl MainWindow {
                 memory.surrender_focus(id);
             }
         });
+    }
+
+    /// Forgets everything shown from the data file that was open, now that another one
+    /// is: the Register and its account, the accounts model, the Dialogs that act on
+    /// the file's contents, and the Status bar's message. The new file's snapshots
+    /// count generations afresh, so a cached model could pass as current.
+    pub(crate) fn data_file_switched(&mut self) {
+        let Self {
+            tab: _,
+            status,
+            account_bar: _,
+            accounts,
+            open_register,
+            column_widths: _,
+            delete_transaction,
+            new_account,
+            new_category,
+            manage_accounts,
+            // The Preferences, and a refusal shown meanwhile, belong to no one file.
+            preferences: _,
+            data_file_refusal: _,
+            focus_return: _,
+            menu_nav: _,
+        } = self;
+        *status = None;
+        *accounts = None;
+        *open_register = None;
+        *delete_transaction = None;
+        *new_account = None;
+        *new_category = None;
+        *manage_accounts = None;
+    }
+
+    /// Opens the Dialog saying why a data file was refused, over any Dialog already
+    /// open, since the native file picker leaves the Main window free meanwhile.
+    pub(crate) fn refuse_data_file(&mut self, ctx: &egui::Context, refusal: DataFileRefusal) {
+        self.data_file_refusal = Some(OpenDialog::new(ctx, refusal));
     }
 
     /// Shows `message` in the Status bar.
@@ -338,6 +381,7 @@ impl MainWindow {
             || self.new_category.is_some()
             || self.manage_accounts.is_some()
             || self.preferences.is_some()
+            || self.data_file_refusal.is_some()
     }
 
     /// The account the Main view shows, if it shows one.
@@ -454,6 +498,29 @@ impl MainWindow {
         self.new_category_dialog(ui.ctx(), i18n, theme, commands, view);
         self.preferences_dialog(ui.ctx(), i18n, theme, commands);
         self.manage_accounts_dialog(ui.ctx(), i18n, theme, commands, view);
+        self.data_file_refusal_dialog(ui.ctx(), i18n, theme);
+    }
+
+    /// The Dialog saying why a data file was refused, while it is open. OK closes it.
+    fn data_file_refusal_dialog(&mut self, ctx: &egui::Context, i18n: &Localizer, theme: &Theme) {
+        let Some(dialog) = &mut self.data_file_refusal else {
+            return;
+        };
+        let outcome = LightDialog::notice(
+            Id::new("data_file_refusal_dialog"),
+            fl!(i18n, "dialog-ok"),
+            theme,
+        )
+        .show(ctx, dialog, |ui, refusal| {
+            ui.label(refusal.message(i18n));
+        });
+        match outcome {
+            DialogOutcome::Open => {}
+            DialogOutcome::Accepted | DialogOutcome::Cancelled => {
+                self.close_dialog(ctx, |window| &mut window.data_file_refusal);
+            }
+            DialogOutcome::Back => unreachable!("a notice has no Back button"),
+        }
     }
 
     /// Manage Accounts, while it is open.
@@ -675,6 +742,9 @@ impl MainWindow {
         let mut drawn = DrawnMenus::default();
         MenuBar::new().ui(ui, |ui| {
             let file = ui.menu_button(fl!(i18n, "menu-file"), |ui| {
+                item(ui, &mut drawn, UserAction::NewDataFile);
+                item(ui, &mut drawn, UserAction::OpenDataFile);
+                ui.separator();
                 item(ui, &mut drawn, UserAction::NewAccount);
                 ui.separator();
                 item(ui, &mut drawn, UserAction::Quit);

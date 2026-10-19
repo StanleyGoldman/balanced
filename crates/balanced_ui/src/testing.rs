@@ -1,6 +1,7 @@
 //! Support for tests: the App drawn by the lavapipe software rasterizer, and the
 //! snapshot check with the project thresholds (see `docs/practices/testing.md`).
 
+use std::path::Path;
 use std::sync::Arc;
 
 use balanced_core::Ledger;
@@ -11,6 +12,7 @@ use egui_wgpu::{WgpuSetup, WgpuSetupCreateNew, wgpu};
 
 use icu_calendar::Date;
 
+use crate::command::AppCommand;
 use crate::preferences::{Preferences, Scheme};
 use crate::{App, Clock, PreferencesFile};
 
@@ -48,6 +50,22 @@ pub fn app(scheme: egui::Theme) -> Harness<'static, App> {
         .build_eframe(move |cc| {
             App::new(cc, Localizer::for_tests(), Ledger::stub(), clock(), preferences_file)
         })
+}
+
+/// Sends the Command that creates a data file at `path` and switches to it, as File →
+/// New Data File… does once the native picker returns `path`.
+pub fn new_data_file(harness: &Harness<'_, App>, path: &Path) {
+    harness
+        .state()
+        .send(AppCommand::NewDataFile(path.to_owned()));
+}
+
+/// Sends the Command that opens the data file at `path` and switches to it, as File →
+/// Open Data File… does once the native picker returns `path`.
+pub fn open_data_file(harness: &Harness<'_, App>, path: &Path) {
+    harness
+        .state()
+        .send(AppCommand::OpenDataFile(path.to_owned()));
 }
 
 /// A clock stopped on 14 October 2026.
