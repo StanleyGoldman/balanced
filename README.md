@@ -40,7 +40,7 @@ Some checks need tools beyond the toolchain: [cargo-nextest](https://nexte.st), 
 
 ## Documentation
 
-- [`CONTEXT.md`](CONTEXT.md): the domain language (Main window, Account bar, Register, …).
+- [`GLOSSARY.md`](GLOSSARY.md): the domain language (Main window, Account bar, Register, …).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md): the crates and the rules between them.
 - [`CODING_STANDARDS.md`](CODING_STANDARDS.md): the rules for Rust code.
 - [`docs/adr/`](docs/adr/): architecture decision records.
