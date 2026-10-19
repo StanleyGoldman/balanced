@@ -75,7 +75,7 @@ fn the_menu_lists_the_account_tasks_in_order() {
         "Reconcile…",
         "Edit account details…",
         "Register preferences…",
-        "Print register…",
+        "Print Register…",
         "Export to CSV…",
     ]
     .map(|item| {
@@ -94,7 +94,7 @@ fn edit_account_details_opens_manage_accounts() {
 
     click(&mut harness, "Edit account details…");
 
-    harness.get_by_label("Manage Accounts");
+    harness.get_by_role_and_label(Role::Window, "Manage Accounts");
 }
 
 #[test]
@@ -103,18 +103,30 @@ fn register_preferences_opens_the_preferences_dialog() {
 
     click(&mut harness, "Register preferences…");
 
-    harness.get_by_label("Preferences");
+    harness.get_by_role_and_label(Role::Window, "Preferences");
+}
+
+/// Clicks `item` in Everyday Checking's Account Actions menu, and returns what the
+/// Status bar then shows.
+fn status_after(item: &str) -> Vec<String> {
+    let mut harness = actions_on("Everyday Checking");
+    click(&mut harness, item);
+    status(&harness)
 }
 
 #[test]
-fn the_tasks_not_built_yet_say_so_in_the_status_bar() {
-    for item in ["Reconcile…", "Print register…", "Export to CSV…"] {
-        let mut harness = actions_on("Everyday Checking");
+fn reconcile_says_it_is_not_available_yet() {
+    assert_eq!(status_after("Reconcile…"), ["Not available yet"]);
+}
 
-        click(&mut harness, item);
+#[test]
+fn print_register_says_it_is_not_available_yet() {
+    assert_eq!(status_after("Print Register…"), ["Not available yet"]);
+}
 
-        assert_eq!(status(&harness), ["Not available yet"], "{item}");
-    }
+#[test]
+fn export_to_csv_says_it_is_not_available_yet() {
+    assert_eq!(status_after("Export to CSV…"), ["Not available yet"]);
 }
 
 #[test]

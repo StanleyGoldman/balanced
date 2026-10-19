@@ -32,15 +32,16 @@ pub(crate) enum UserAction {
     /// Open the Preferences Dialog.
     Preferences,
     About,
-    /// Reconcile the open account. Not built yet.
+    /// Reconcile the open account. It reports that it isn't available yet.
     Reconcile,
     /// Open Manage Accounts from the open account's Account Actions menu.
     EditAccountDetails,
     /// Open the Preferences Dialog from the open account's Account Actions menu.
     RegisterPreferences,
-    /// Print the open Register. Not built yet.
+    /// Print the open Register. It reports that it isn't available yet.
     PrintRegister,
-    /// Export the open Register to a CSV file. Not built yet.
+    /// Export the open Register to a CSV file. It reports that it isn't available
+    /// yet.
     ExportToCsv,
 }
 
@@ -60,11 +61,11 @@ impl UserAction {
             Self::Quit => fl!(i18n, "menu-file-quit"),
             Self::Preferences => fl!(i18n, "menu-tools-preferences"),
             Self::About => fl!(i18n, "menu-help-about"),
-            Self::Reconcile => fl!(i18n, "account-actions-reconcile"),
-            Self::EditAccountDetails => fl!(i18n, "account-actions-edit-account-details"),
-            Self::RegisterPreferences => fl!(i18n, "account-actions-register-preferences"),
-            Self::PrintRegister => fl!(i18n, "account-actions-print-register"),
-            Self::ExportToCsv => fl!(i18n, "account-actions-export-to-csv"),
+            Self::Reconcile => fl!(i18n, "register-account-actions-reconcile"),
+            Self::EditAccountDetails => fl!(i18n, "register-account-actions-edit-account-details"),
+            Self::RegisterPreferences => fl!(i18n, "register-account-actions-register-preferences"),
+            Self::PrintRegister => fl!(i18n, "register-account-actions-print-register"),
+            Self::ExportToCsv => fl!(i18n, "register-account-actions-export-to-csv"),
         }
     }
 

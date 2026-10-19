@@ -708,7 +708,7 @@ impl MainWindow {
     /// clips when the Main view is narrow.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the header reads the frame's shared context and the open account"
+        reason = "the Account Actions menu items need `view` and `commands` beside the header's own drawing context"
     )]
     fn context_header(
         &self,
@@ -736,7 +736,7 @@ impl MainWindow {
             |ui| {
                 // Sides lays the right side out from the right edge, so the last added
                 // shows first.
-                ui.menu_button(fl!(i18n, "account-actions"), |ui| {
+                ui.menu_button(fl!(i18n, "register-account-actions"), |ui| {
                     for action in [
                         UserAction::Reconcile,
                         UserAction::EditAccountDetails,
