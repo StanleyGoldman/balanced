@@ -120,18 +120,16 @@ pub(crate) struct Category {
     pub(crate) parent: Option<u32>,
 }
 
-/// A transaction with its id. A split's amount is the sum of its lines.
+/// A transaction with its id: a [`NewTransaction`]'s fields after `id`, in one object.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Transaction {
     pub(crate) id: u32,
-    pub(crate) date: String,
-    pub(crate) number: Option<String>,
-    pub(crate) payee: String,
-    pub(crate) memo: String,
-    pub(crate) allocation: Allocation,
+    #[serde(flatten)]
+    pub(crate) transaction: NewTransaction,
 }
 
-/// A transaction to post, which the ledger gives an id.
+/// A transaction to post, which the ledger gives an id. A split's amount is the sum of
+/// its lines.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct NewTransaction {
     pub(crate) date: String,

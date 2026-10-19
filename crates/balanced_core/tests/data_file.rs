@@ -981,6 +981,25 @@ fn undo_keeps_the_latest_100_changes_with_or_without_a_reopen() {
 }
 
 #[test]
+fn the_file_keeps_the_latest_100_undo_entries() {
+    let (_dir, path, mut ledger) = new_file();
+    for n in 0..101 {
+        create_category(&mut ledger, &format!("Category {n}"));
+    }
+    drop(ledger);
+
+    let undo = balanced_store::Store::open(&path)
+        .unwrap()
+        .read()
+        .unwrap()
+        .undo;
+
+    assert_eq!(undo.len(), 100);
+    // Category 0's entry, the oldest, is the one trimmed.
+    assert_eq!(undo[0], r#"{"delete_category":{"category":1}}"#);
+}
+
+#[test]
 fn a_write_the_file_refuses_keeps_undo_and_redo_in_the_file() {
     let (_dir, path, mut ledger) = new_file();
     create_checking(&mut ledger, &["Everyday", "Joint"]);

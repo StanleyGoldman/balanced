@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use balanced_store::{Stack, Store};
+use balanced_store::{Stack, Store, StoreError};
 use icu_calendar::{Date, Iso};
 
 use crate::account::NewAccount;
@@ -475,15 +475,12 @@ impl Ledger {
     /// and nothing undone before it can be redone any more.
     pub fn apply(&mut self, command: DomainCommand) -> Result<Applied, DomainError> {
         let full = self.undo_stack.len() >= UNDO_LIMIT;
-        let applied = self.write(|ledger| {
-            let applied = ledger.apply_unrecorded(command)?;
-            let entry = undo_log::encode(applied.inverse())?;
-            ledger.store.push_entry(Stack::Undo, &entry)?;
+        let applied = self.apply_logged(command, |store, entry| {
+            store.push_entry(Stack::Undo, entry)?;
             if full {
-                ledger.store.drop_oldest_entry(Stack::Undo)?;
+                store.drop_oldest_entry(Stack::Undo)?;
             }
-            ledger.store.clear_stack(Stack::Redo)?;
-            Ok(applied)
+            store.clear_stack(Stack::Redo)
         })?;
         if full {
             self.undo_stack.remove(0);
@@ -501,12 +498,9 @@ impl Ledger {
         let Some(inverse) = self.undo_stack.last().cloned() else {
             return Ok(());
         };
-        let applied = self.write(|ledger| {
-            let applied = ledger.apply_unrecorded(inverse)?;
-            let entry = undo_log::encode(applied.inverse())?;
-            ledger.store.pop_entry(Stack::Undo)?;
-            ledger.store.push_entry(Stack::Redo, &entry)?;
-            Ok(applied)
+        let applied = self.apply_logged(inverse, |store, entry| {
+            store.pop_entry(Stack::Undo)?;
+            store.push_entry(Stack::Redo, entry)
         })?;
         self.undo_stack.pop();
         self.redo_stack.push(applied.into_inverse());
@@ -521,17 +515,29 @@ impl Ledger {
         let Some(command) = self.redo_stack.last().cloned() else {
             return Ok(());
         };
-        let applied = self.write(|ledger| {
-            let applied = ledger.apply_unrecorded(command)?;
-            let entry = undo_log::encode(applied.inverse())?;
-            ledger.store.pop_entry(Stack::Redo)?;
-            ledger.store.push_entry(Stack::Undo, &entry)?;
-            Ok(applied)
+        let applied = self.apply_logged(command, |store, entry| {
+            store.pop_entry(Stack::Redo)?;
+            store.push_entry(Stack::Undo, entry)
         })?;
         self.redo_stack.pop();
         self.undo_stack.push(applied.into_inverse());
         self.publish_history();
         Ok(())
+    }
+
+    /// Applies `command` and makes `log`'s changes to the undo log, given the entry for
+    /// the Command that undoes it, all in one transaction in the data file. The in-memory
+    /// stacks are the caller's to change once this succeeds.
+    fn apply_logged(
+        &mut self,
+        command: DomainCommand,
+        log: impl FnOnce(&Store, &str) -> Result<(), StoreError>,
+    ) -> Result<Applied, DomainError> {
+        self.write(|ledger| {
+            let applied = ledger.apply_unrecorded(command)?;
+            log(&ledger.store, &undo_log::encode(applied.inverse())?)?;
+            Ok(applied)
+        })
     }
 
     /// Makes `change` in one transaction in the data file, which commits when `change`

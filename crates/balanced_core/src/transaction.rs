@@ -226,11 +226,21 @@ pub(crate) enum NewAllocation {
 /// A transaction to post to an account, which gives it its id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewTransaction {
+    date: Date<Iso>,
+    number: Option<String>,
+    payee: String,
+    memo: String,
+    allocation: NewAllocation,
+}
+
+/// A [`NewTransaction`]'s fields, borrowed.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NewTransactionParts<'a> {
     pub(crate) date: Date<Iso>,
-    pub(crate) number: Option<String>,
-    pub(crate) payee: String,
-    pub(crate) memo: String,
-    pub(crate) allocation: NewAllocation,
+    pub(crate) number: Option<&'a str>,
+    pub(crate) payee: &'a str,
+    pub(crate) memo: &'a str,
+    pub(crate) allocation: &'a NewAllocation,
 }
 
 impl NewTransaction {
@@ -253,6 +263,41 @@ impl NewTransaction {
     #[cfg(feature = "test-support")]
     pub fn split_for_tests(date: Date<Iso>, payee: &str, lines: Vec<SplitLine>) -> Self {
         Self::split(date, payee, lines)
+    }
+
+    /// A transaction with every field given, as the undo log holds it.
+    pub(crate) fn from_parts(
+        date: Date<Iso>,
+        number: Option<String>,
+        payee: String,
+        memo: String,
+        allocation: NewAllocation,
+    ) -> Self {
+        Self {
+            date,
+            number,
+            payee,
+            memo,
+            allocation,
+        }
+    }
+
+    /// Every field, borrowed.
+    pub(crate) fn parts(&self) -> NewTransactionParts<'_> {
+        let Self {
+            date,
+            number,
+            payee,
+            memo,
+            allocation,
+        } = self;
+        NewTransactionParts {
+            date: *date,
+            number: number.as_deref(),
+            payee,
+            memo,
+            allocation,
+        }
     }
 
     fn with_allocation(date: Date<Iso>, payee: &str, allocation: NewAllocation) -> Self {

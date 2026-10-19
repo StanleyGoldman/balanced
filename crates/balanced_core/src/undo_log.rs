@@ -6,10 +6,10 @@ mod v1;
 use icu_calendar::{Date, Iso};
 
 use crate::data_file::{date_text, minor_units, money};
-use crate::transaction::{NewAllocation, SplitLine};
+use crate::transaction::{NewAllocation, NewTransactionParts, SplitLine};
 use crate::{
     Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId, CurrencyCode,
-    DomainCommand, Money, MoneyError, MoveDirection, NewTransaction, Transaction, TransactionEdit,
+    DomainCommand, MoneyError, MoveDirection, NewTransaction, Transaction, TransactionEdit,
     TransactionId, Visibility, WriteError,
 };
 
@@ -145,12 +145,19 @@ fn account_to_wire(account: &Account) -> v1::Account {
 }
 
 fn new_transaction_to_wire(transaction: &NewTransaction) -> Result<v1::NewTransaction, WriteError> {
+    let NewTransactionParts {
+        date,
+        number,
+        payee,
+        memo,
+        allocation,
+    } = transaction.parts();
     Ok(v1::NewTransaction {
-        date: date_text(transaction.date),
-        number: transaction.number.clone(),
-        payee: transaction.payee.clone(),
-        memo: transaction.memo.clone(),
-        allocation: match &transaction.allocation {
+        date: date_text(date),
+        number: number.map(str::to_owned),
+        payee: payee.to_owned(),
+        memo: memo.to_owned(),
+        allocation: match allocation {
             NewAllocation::OpeningBalance(amount) => v1::Allocation::OpeningBalance {
                 amount: minor_units(*amount)?,
             },
@@ -178,17 +185,19 @@ fn transaction_to_wire(transaction: &Transaction) -> Result<v1::Transaction, Wri
     let amount = || minor_units(transaction.amount());
     Ok(v1::Transaction {
         id: transaction.id().raw(),
-        date: date_text(transaction.date()),
-        number: transaction.number().map(str::to_owned),
-        payee: transaction.payee().to_owned(),
-        memo: transaction.memo().to_owned(),
-        allocation: match transaction.allocation() {
-            Allocation::OpeningBalance => v1::Allocation::OpeningBalance { amount: amount()? },
-            Allocation::Category(category) => v1::Allocation::Category {
-                category: category.raw(),
-                amount: amount()?,
+        transaction: v1::NewTransaction {
+            date: date_text(transaction.date()),
+            number: transaction.number().map(str::to_owned),
+            payee: transaction.payee().to_owned(),
+            memo: transaction.memo().to_owned(),
+            allocation: match transaction.allocation() {
+                Allocation::OpeningBalance => v1::Allocation::OpeningBalance { amount: amount()? },
+                Allocation::Category(category) => v1::Allocation::Category {
+                    category: category.raw(),
+                    amount: amount()?,
+                },
+                Allocation::Split(lines) => split_to_wire(lines)?,
             },
-            Allocation::Split(lines) => split_to_wire(lines)?,
         },
     })
 }
@@ -238,7 +247,6 @@ fn from_wire(
     command: v1::Command,
     currency: CurrencyCode,
 ) -> Result<DomainCommand, UndoEntryError> {
-    let money = |minor_units| money(minor_units, currency);
     Ok(match command {
         v1::Command::CreateAccount {
             name,
@@ -249,7 +257,7 @@ fn from_wire(
             name,
             kind: kind_from_wire(kind),
             opened: date(&opened)?,
-            opening_balance: money(opening_balance),
+            opening_balance: money(opening_balance, currency),
         },
         v1::Command::DeleteAccount { account } => DomainCommand::DeleteAccount {
             account: AccountId::new(account),
@@ -347,21 +355,22 @@ fn new_transaction_from_wire(
     transaction: v1::NewTransaction,
     currency: CurrencyCode,
 ) -> Result<NewTransaction, UndoEntryError> {
-    Ok(NewTransaction {
-        date: date(&transaction.date)?,
-        number: transaction.number,
-        payee: transaction.payee,
-        memo: transaction.memo,
-        allocation: match transaction.allocation {
-            v1::Allocation::OpeningBalance { amount } => {
-                NewAllocation::OpeningBalance(money(amount, currency))
-            }
-            v1::Allocation::Category { category, amount } => {
-                NewAllocation::Category(CategoryId::new(category), money(amount, currency))
-            }
-            v1::Allocation::Split(lines) => NewAllocation::Split(split_from_wire(lines, currency)),
-        },
-    })
+    let allocation = match transaction.allocation {
+        v1::Allocation::OpeningBalance { amount } => {
+            NewAllocation::OpeningBalance(money(amount, currency))
+        }
+        v1::Allocation::Category { category, amount } => {
+            NewAllocation::Category(CategoryId::new(category), money(amount, currency))
+        }
+        v1::Allocation::Split(lines) => NewAllocation::Split(split_from_wire(lines, currency)),
+    };
+    Ok(NewTransaction::from_parts(
+        date(&transaction.date)?,
+        transaction.number,
+        transaction.payee,
+        transaction.memo,
+        allocation,
+    ))
 }
 
 fn edit_from_wire(
@@ -380,35 +389,15 @@ fn edit_from_wire(
     })
 }
 
+/// The transaction `transaction` holds. A split's amount is the sum of its lines.
 fn transaction_from_wire(
     transaction: v1::Transaction,
     currency: CurrencyCode,
 ) -> Result<Transaction, UndoEntryError> {
-    let (allocation, amount) = match transaction.allocation {
-        v1::Allocation::OpeningBalance { amount } => {
-            (Allocation::OpeningBalance, money(amount, currency))
-        }
-        v1::Allocation::Category { category, amount } => (
-            Allocation::Category(CategoryId::new(category)),
-            money(amount, currency),
-        ),
-        v1::Allocation::Split(lines) => {
-            let lines = split_from_wire(lines, currency);
-            let amount = lines.iter().try_fold(Money::zero(currency), |sum, line| {
-                sum.checked_add(line.amount())
-            })?;
-            (Allocation::Split(lines), amount)
-        }
-    };
-    Ok(Transaction::from_parts(
-        TransactionId::new(transaction.id),
-        date(&transaction.date)?,
-        transaction.number,
-        transaction.payee,
-        transaction.memo,
-        allocation,
-        amount,
-    ))
+    Ok(
+        new_transaction_from_wire(transaction.transaction, currency)?
+            .into_transaction(TransactionId::new(transaction.id), currency)?,
+    )
 }
 
 fn split_from_wire(lines: Vec<v1::SplitLine>, currency: CurrencyCode) -> Vec<SplitLine> {
