@@ -52,6 +52,10 @@ required-features = ["test-support"]
 
 # Every App test stops the clock on one day with `Clock::fixed`.
 [[test]]
+name = "account_actions"
+required-features = ["test-support"]
+
+[[test]]
 name = "column_chooser"
 required-features = ["test-support"]
 
