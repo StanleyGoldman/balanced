@@ -122,6 +122,19 @@ impl AccountSummary {
     pub fn balance(&self) -> Money {
         self.balance
     }
+
+    /// The account's balance as of `date`: every transaction dated `date` or earlier
+    /// counted, 0 before the first.
+    pub fn balance_on(&self, date: Date<Iso>) -> Money {
+        // The register is in date order, so the entries up to `date` come first.
+        let counted = self
+            .register
+            .partition_point(|entry| entry.transaction.date() <= date);
+        match counted.checked_sub(1) {
+            Some(last) => self.register[last].balance,
+            None => Money::zero(self.balance.currency()),
+        }
+    }
 }
 
 /// An immutable snapshot of the ledger, shared by every window that reads it.
@@ -1170,6 +1183,7 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use super::*;
+    use crate::data_file::{date_text, money};
     use crate::transaction::{NewTransaction, SplitLine};
     use crate::{
         AccountKind, AccountStatus, Allocation, MoveDirection, TransactionEdit, Visibility,
@@ -1464,6 +1478,59 @@ mod tests {
             ]
         );
         assert_eq!(everyday.balance(), usd(dec!(565.00)));
+    }
+
+    #[test]
+    fn the_balance_on_a_date_counts_the_transactions_dated_then_or_earlier() {
+        let groceries = CategoryId::new(0);
+        let salary = CategoryId::new(1);
+        let ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries"), NewCategory::new("Salary")],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(100.00))).with_transactions([
+                    NewTransaction::new(date(10), "Fresh Market", groceries, usd(dec!(-30.25))),
+                    NewTransaction::new(date(5), "Acme Corp", salary, usd(dec!(500.00))),
+                    NewTransaction::new(date(10), "Bean There", groceries, usd(dec!(-4.75))),
+                ]),
+            ],
+        )
+        .unwrap();
+        let dates = [
+            Date::try_new_iso(2026, 8, 31).unwrap(),
+            date(1),
+            date(4),
+            date(5),
+            date(9),
+            date(10),
+            date(30),
+        ];
+
+        let view = ledger.snapshot();
+
+        let everyday = &view.accounts()[0];
+        let balances: Vec<Money> = dates.iter().map(|&day| everyday.balance_on(day)).collect();
+        assert_eq!(
+            balances,
+            [
+                usd(dec!(0.00)),
+                usd(dec!(100.00)),
+                usd(dec!(100.00)),
+                usd(dec!(600.00)),
+                usd(dec!(600.00)),
+                usd(dec!(565.00)),
+                usd(dec!(565.00)),
+            ]
+        );
+        let id = account_row(everyday.account(), 0).id;
+        let stored: Vec<Money> = dates
+            .iter()
+            .map(|&day| {
+                let minor_units = ledger.store.balance_on(id, &date_text(day)).unwrap();
+                money(minor_units, usd_code())
+            })
+            .collect();
+        assert_eq!(stored, balances);
     }
 
     #[test]

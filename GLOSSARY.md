@@ -58,6 +58,10 @@ _Avoid_: Transaction list, ledger view
 The empty row at the bottom of a register where the user types a new transaction; it becomes a transaction when added.
 _Avoid_: New row, blank row, entry row
 
+**Today divider**:
+The labelled line in a register sorted by date between the rows dated today or earlier and the first row dated later. It is not a row, so the cell cursor never rests on it.
+_Avoid_: Today line, future separator
+
 **Actions column**:
 The untitled last column of a register, holding a menu of commands for its row (e.g. Split, Void, Delete).
 _Avoid_: Row menu, context column
@@ -65,3 +69,7 @@ _Avoid_: Row menu, context column
 **Column chooser**:
 The control at the right end of a register's header that shows, hides and reorders the register's columns.
 _Avoid_: Column picker, column settings
+
+**Filter bar**:
+The row above a register's column headings that narrows the rows it shows by search text, date range and transaction type; it never changes a row's running balance.
+_Avoid_: Search bar, filter panel

@@ -9,13 +9,14 @@ use balanced_core::{
 };
 use balanced_i18n::{AmountParseError, AmountReader, Localizer};
 use eframe::egui::accesskit::{self, Role};
+use eframe::egui::emath::GuiRounding as _;
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
 use eframe::egui::{
     self, Align, Align2, Area, Button, Checkbox, CursorIcon, Event, EventFilter, Frame, Id, Key,
-    Label, Layout, Margin, Modifiers, Order, Popup, PopupCloseBehavior, Rect, Response, ScrollArea,
-    Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, WidgetInfo, WidgetText,
-    WidgetType, pos2, vec2,
+    Label, Layout, Margin, Modifiers, Order, Popup, PopupCloseBehavior, Rangef, Rect, Response,
+    ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, WidgetInfo,
+    WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, TableBody, TableBuilder};
 use icu_calendar::{Date, Iso};
@@ -27,9 +28,12 @@ use crate::date_field::{self, DateEdit};
 use crate::draft_row::{Draft, Missing};
 use crate::formatted_amount::i18n_currency;
 use crate::i18n::fl;
+use crate::preferences::Preferences;
 use crate::register_columns::{RegisterColumn, RegisterColumns};
+use crate::register_filter::RegisterFilter;
 use crate::register_model::{
-    AmountSide, RegisterModel, RegisterRow, RegisterSort, RowId, SortDirection, SortKey,
+    AmountSide, RegisterModel, RegisterRow, RegisterSort, RowId, Showing, SortDirection, SortKey,
+    TodayDivider,
 };
 use crate::theme::Theme;
 
@@ -412,14 +416,55 @@ struct DraftRow {
 }
 
 /// The Register's rows: the transactions' in the order of the sort, then the draft
-/// row, which an account that can't change has none of.
+/// row, which an account that can't change has none of. The Today divider is drawn
+/// between two rows, on a line of its own, and is no row.
 #[derive(Debug, Clone, Copy)]
 struct Rows<'a> {
     transactions: &'a [RegisterRow],
+    /// The index of the row the Today divider sits above, while it is drawn.
+    divider: Option<usize>,
     draft: Option<&'a RegisterRow>,
 }
 
+/// One line of the Register's body: a row, with its index among the rows, or the
+/// Today divider.
+#[derive(Debug, Clone, Copy)]
+enum Line<'a> {
+    Row { index: usize, row: &'a RegisterRow },
+    TodayDivider,
+}
+
 impl<'a> Rows<'a> {
+    /// The rows of `model`, with its Today divider, then `draft`.
+    fn new(model: &'a RegisterModel, draft: Option<&'a RegisterRow>) -> Self {
+        Self {
+            transactions: model.rows(),
+            divider: model.divider(),
+            draft,
+        }
+    }
+
+    /// How many lines the rows take: one each, and one for the Today divider.
+    fn lines(self) -> usize {
+        self.len() + usize::from(self.divider.is_some())
+    }
+
+    /// The line at `index`, top line first.
+    fn line(self, index: usize) -> Option<Line<'a>> {
+        let index = match self.divider {
+            Some(divider) if index == divider => return Some(Line::TodayDivider),
+            Some(divider) if index > divider => index - 1,
+            Some(_) | None => index,
+        };
+        let row = self.get(index)?;
+        Some(Line::Row { index, row })
+    }
+
+    /// The index of the line the row at `index` is drawn on.
+    fn line_of(self, index: usize) -> usize {
+        index + usize::from(self.divider.is_some_and(|divider| index >= divider))
+    }
+
     fn len(self) -> usize {
         self.transactions.len() + usize::from(self.draft.is_some())
     }
@@ -673,20 +718,20 @@ impl ListState {
     }
 }
 
-/// The rows fully in view in the last frame, which keyboard scrolling keeps the cell
-/// cursor among.
+/// The lines fully in view in the last frame, counted as [`Rows::line`] counts them,
+/// which keyboard scrolling keeps the cell cursor among.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct RowsInView {
+struct LinesInView {
     first: usize,
     last: usize,
     /// The height of the Register's body.
     height: f32,
-    /// The distance from one row's top to the next one's.
+    /// The distance from one line's top to the next one's.
     pitch: f32,
 }
 
-impl RowsInView {
-    /// The scroll offset that brings row `index` fully into view, or `None` when it
+impl LinesInView {
+    /// The scroll offset that brings line `index` fully into view, or `None` when it
     /// already is.
     #[expect(
         clippy::cast_precision_loss,
@@ -703,15 +748,17 @@ impl RowsInView {
     }
 }
 
-/// The open account's Register: its cached rows, its sort, the cell cursor, the cell
-/// being edited, and the draft row. The cursor's row is the selected row. Opening
-/// another account sorts it by date, empties the draft row and puts the cursor on it.
-/// None of it outlives the run.
+/// The open account's Register: its cached rows, its sort and filter, the cell cursor,
+/// the cell being edited, and the draft row. The cursor's row is the selected row.
+/// Opening another account sorts it by date, clears the filter, empties the draft row
+/// and puts the cursor on it. None of it outlives the run.
 #[derive(Debug, Default)]
 pub(crate) struct Register {
     /// The rows of the last account shown, rebuilt when they are out of date.
     model: Option<RegisterModel>,
     sort: RegisterSort,
+    /// What the filter bar is set to.
+    filter: RegisterFilter,
     /// Whether the sort changed since the rows were last shown, so the cursor's row,
     /// if any, scrolls to the middle of the Register.
     centre_pending: bool,
@@ -722,7 +769,7 @@ pub(crate) struct Register {
     /// The modifiers held with each Tab press `App::raw_input_hook` took for the
     /// Register since the last frame.
     tabs: Vec<Modifiers>,
-    rows_in_view: Option<RowsInView>,
+    lines_in_view: Option<LinesInView>,
     /// Whether the edit refused to let the keyboard leave its cell this frame.
     refused_leave: bool,
     /// What the draft row holds.
@@ -779,32 +826,41 @@ impl Register {
         model.rows().iter().find(|row| row.id() == id)
     }
 
-    /// The index of the row this frame scrolls to the middle of the Register, if any:
-    /// the draft row when it is to come into view, else the cursor's row after a sort.
-    /// The draft row is the last row, so centring it scrolls to the bottom.
-    fn row_to_centre(&mut self, rows: Rows<'_>) -> Option<usize> {
+    /// The index of the line this frame scrolls to the middle of the Register, if any:
+    /// the draft row's when it is to come into view, else the cursor's row's after a
+    /// sort. The draft row is the last row, so centring it scrolls to the bottom.
+    fn line_to_centre(&mut self, rows: Rows<'_>) -> Option<usize> {
         let centre_pending = std::mem::take(&mut self.centre_pending);
-        if std::mem::take(&mut self.reveal_draft) {
-            return rows.position(RowId::Draft);
-        }
-        self.cursor
-            .filter(|_| centre_pending)
-            .and_then(|cursor| rows.position(cursor.row))
+        let row = if std::mem::take(&mut self.reveal_draft) {
+            rows.position(RowId::Draft)
+        } else {
+            self.cursor
+                .filter(|_| centre_pending)
+                .and_then(|cursor| rows.position(cursor.row))
+        };
+        row.map(|row| rows.line_of(row))
     }
 
-    /// Catches up with what changed since the last frame: another account, `account`,
+    /// Catches up with what changed since the last frame: another account, `summary`'s,
     /// starts the Register over with the cell cursor on its draft row, unless it is
-    /// `closed`; and a post that `view` shows applied empties the draft row.
-    fn catch_up(&mut self, account: AccountId, closed: bool, view: &LedgerView) {
+    /// closed; and a post that `view` shows applied empties the draft row, and stays in
+    /// view until the filter changes.
+    fn catch_up(&mut self, summary: &AccountSummary, view: &LedgerView) {
+        let account = summary.account().id();
         if self.model.as_ref().map(RegisterModel::account) != Some(account) {
             self.start_over();
-            if !closed {
+            if !summary.account().is_closed() {
                 self.go_to_draft_row();
             }
         }
         if let Some(sent_at) = self.posted_at.take()
             && view.generation() != sent_at
         {
+            if self.filter.is_set()
+                && let Some(model) = &self.model
+            {
+                self.filter.keep(model.added(summary));
+            }
             self.draft = Draft::default();
             self.missing = None;
             self.go_to_draft_row();
@@ -826,15 +882,16 @@ impl Register {
         self.refresh_draft_row(draft_frame, false);
     }
 
-    /// Starts the Register over for another account: sorted by date, with no cell
-    /// cursor and an empty draft row.
+    /// Starts the Register over for another account: sorted by date and unfiltered,
+    /// with no cell cursor and an empty draft row.
     fn start_over(&mut self) {
         self.sort = RegisterSort::default();
+        self.filter = RegisterFilter::default();
         self.centre_pending = false;
         self.cursor = None;
         self.edit = None;
         self.awaiting_category = None;
-        self.rows_in_view = None;
+        self.lines_in_view = None;
         self.draft = Draft::default();
         self.missing = None;
         self.posted_at = None;
@@ -944,10 +1001,8 @@ impl Register {
             return;
         };
         if let (Some(model), Some(choices)) = (&self.model, &self.choices) {
-            let rows = Rows {
-                transactions: model.rows(),
-                draft: self.draft_row.as_ref().map(|draft| &draft.row),
-            };
+            let draft_row = self.draft_row.as_ref().map(|draft| &draft.row);
+            let rows = Rows::new(model, draft_row);
             let draft = &mut self.draft;
             // A refused edit is dropped: the Shortcut acts on the saved value.
             let _refused = match edit.clone() {
@@ -964,10 +1019,11 @@ impl Register {
     }
 
     /// Draws the Register of `summary`, an account in `view`, filling the space left in
-    /// `ui`. Only the rows in view are laid out. `today` is the date field's today.
+    /// `ui`, as `preferences` say. Only the rows in view are laid out. `today` is the
+    /// date field's today, and the Today divider's.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the column widths and the columns shown are shared by every Register, so the Main window lends them here beside the account, its snapshot and today's date"
+        reason = "the column widths and the Preferences are shared by every Register, so the Main window lends them here beside the account, its snapshot and today's date"
     )]
     pub(crate) fn show(
         &mut self,
@@ -978,17 +1034,17 @@ impl Register {
         summary: &AccountSummary,
         view: &LedgerView,
         widths: &mut ColumnWidths,
-        columns: &RegisterColumns,
+        preferences: &Preferences,
         today: Date<Iso>,
     ) {
+        let columns = &preferences.register_columns;
         self.show_columns(columns);
         let account = summary.account().id();
         let closed = summary.account().is_closed();
-        self.catch_up(account, closed, view);
-        let (model, rebuilt) = match self.model.take() {
-            Some(model) if model.is_current(account, view, self.sort, i18n) => (model, false),
-            _ => (RegisterModel::new(summary, view, self.sort, i18n), true),
-        };
+        self.catch_up(summary, view);
+        let today_divider = today_divider(preferences, today);
+        let (model, rebuilt) = self.take_model(summary, view, today, today_divider, i18n);
+        self.filter_bar(ui, i18n, &model);
         let choices = match self.choices.take() {
             Some(choices) if choices.is_current(view, i18n) => choices,
             _ => FieldChoices::new(view, i18n),
@@ -1002,10 +1058,7 @@ impl Register {
         };
         self.refresh_draft_row(draft_frame, rebuilt);
         let draft_row = self.draft_row.take();
-        let rows = Rows {
-            transactions: model.rows(),
-            draft: draft_row.as_ref().map(|draft| &draft.row),
-        };
+        let rows = Rows::new(&model, draft_row.as_ref().map(|draft| &draft.row));
         let keys = KeyContext {
             i18n,
             account,
@@ -1018,7 +1071,7 @@ impl Register {
         let key_scroll_offset = self.handle_keys(ui.ctx(), &keys);
         let row_height = theme.row_height();
         let pitch = row_height + ui.spacing().item_spacing.y;
-        let centre_on = self.row_to_centre(rows);
+        let centre_on = self.line_to_centre(rows);
         ScrollArea::horizontal()
             .id_salt(("register_sideways", account))
             .auto_shrink(false)
@@ -1029,7 +1082,8 @@ impl Register {
                     .or_else(|| centre_on.map(|index| centring_offset(ui, row_height, index)));
                 let mut table = TableBuilder::new(ui)
                     .id_salt(("register", account))
-                    .striped(theme.alternating_rows())
+                    // The rows stripe themselves, so the Today divider takes no stripe.
+                    .striped(false)
                     .resizable(false)
                     .cell_layout(Layout::left_to_right(Align::Center))
                     .auto_shrink(false)
@@ -1083,6 +1137,40 @@ impl Register {
         self.choices = Some(choices);
     }
 
+    /// Takes the model of `summary`'s rows, an account in `view`, as of `today` and
+    /// with the Today divider as `today_divider` says, rebuilt if it is out of date, and
+    /// whether it was.
+    fn take_model(
+        &mut self,
+        summary: &AccountSummary,
+        view: &LedgerView,
+        today: Date<Iso>,
+        today_divider: TodayDivider,
+        i18n: &Localizer,
+    ) -> (RegisterModel, bool) {
+        let shown = Showing {
+            sort: self.sort,
+            filter: &self.filter,
+            today,
+            today_divider,
+        };
+        match self.model.take() {
+            Some(model) if model.is_current(summary.account().id(), view, shown, i18n) => {
+                (model, false)
+            }
+            _ => (RegisterModel::new(summary, view, shown, i18n), true),
+        }
+    }
+
+    /// Draws the filter bar above the Register, counting `model`'s rows. A change to
+    /// the filter filters and scrolls the rows on the next frame.
+    fn filter_bar(&mut self, ui: &mut egui::Ui, i18n: &Localizer, model: &RegisterModel) {
+        if self.filter.show(ui, i18n, model) {
+            self.centre_pending = true;
+            ui.ctx().request_repaint();
+        }
+    }
+
     /// Draws `heading` in its cell `ui`, with the column's resize handle, and the
     /// column chooser on the Actions column. Clicking a sortable heading sorts by it.
     fn heading_cell(
@@ -1120,15 +1208,44 @@ impl Register {
         let frame = BodyFrame { viewport, ..frame };
         let rows = frame.rows;
         let mut in_view: Option<(usize, usize)> = None;
-        body.rows(row_height, rows.len(), |mut table_row| {
+        body.rows(row_height, rows.lines(), |mut table_row| {
             let index = table_row.index();
-            let row = rows
-                .get(index)
-                .expect("`rows` lays out indices below `rows.len()` only");
-            table_row.set_selected(self.cursor.is_some_and(|cursor| cursor.row == row.id()));
+            let line = rows
+                .line(index)
+                .expect("`rows` lays out indices below `rows.lines()` only");
             let shown = self.shown.clone();
+            let Line::Row {
+                index: row_index,
+                row,
+            } = line
+            else {
+                let label = fl!(
+                    frame.i18n,
+                    "register-today-divider",
+                    date = frame.i18n.format_date(frame.today)
+                );
+                let mut rule_start = f32::NEG_INFINITY;
+                for (column_index, column) in shown.into_iter().enumerate() {
+                    table_row.col(|ui| {
+                        let divider = DividerCell {
+                            register_id: frame.register_id,
+                            label: (column_index == 0).then_some(label.as_str()),
+                            insets: self.insets(column),
+                            viewport,
+                        };
+                        rule_start = divider.show(ui, frame.theme, rule_start);
+                    });
+                }
+                return;
+            };
+            let selected = self.cursor.is_some_and(|cursor| cursor.row == row.id());
+            table_row.set_selected(selected);
+            let stripe = frame.theme.stripe(row_index).filter(|_| !selected);
             for (column_index, column) in shown.into_iter().enumerate() {
                 table_row.col(|ui| {
+                    if let Some(stripe) = stripe {
+                        paint_stripe(ui, frame.theme, viewport, stripe);
+                    }
                     if column_index == 0 && fully_in(viewport, ui.max_rect()) {
                         in_view = Some(in_view.map_or((index, index), |(first, _)| (first, index)));
                     }
@@ -1136,7 +1253,7 @@ impl Register {
                 });
             }
         });
-        self.rows_in_view = in_view.map(|(first, last)| RowsInView {
+        self.lines_in_view = in_view.map(|(first, last)| LinesInView {
             first,
             last,
             height: viewport.height(),
@@ -1741,8 +1858,8 @@ impl Register {
         self.cursor = Some(address);
         Some(Moved {
             scroll_offset: self
-                .rows_in_view
-                .and_then(|rows_in_view| rows_in_view.offset_showing(row)),
+                .lines_in_view
+                .and_then(|lines_in_view| lines_in_view.offset_showing(rows.line_of(row))),
         })
     }
 
@@ -1948,7 +2065,7 @@ enum EditStart {
 #[derive(Clone, Copy)]
 struct BodyFrame<'a> {
     i18n: &'a Localizer,
-    /// Today's date, for the date field.
+    /// Today's date, for the date field and the Today divider.
     today: Date<Iso>,
     theme: &'a Theme,
     commands: &'a CommandSender,
@@ -2605,6 +2722,86 @@ impl Cell<'_> {
     }
 }
 
+/// The Today divider as `preferences` say, on `today`.
+fn today_divider(preferences: &Preferences, today: Date<Iso>) -> TodayDivider {
+    if preferences.today_divider {
+        TodayDivider::Shown { today }
+    } else {
+        TodayDivider::Hidden
+    }
+}
+
+/// Fills cell `ui` and half the gap around it with `stripe`, as `egui_extras` fills a
+/// selected row, inside `viewport`, the visible part of the Register's body.
+fn paint_stripe(ui: &egui::Ui, theme: &Theme, viewport: Rect, stripe: egui::Color32) {
+    let rect = ui
+        .max_rect()
+        .expand2(0.5 * ui.spacing().item_spacing)
+        .round_ui();
+    ui.ctx()
+        .layer_painter(ui.layer_id())
+        .with_clip_rect(theme.rule_clip(ui.clip_rect(), viewport))
+        .rect_filled(rect, 0.0, stripe);
+}
+
+/// One cell of the Today divider's line: a rule across the cell, beginning with the
+/// divider's label in the first cell.
+struct DividerCell<'a> {
+    /// The Register's id, which the label's id derives from.
+    register_id: Id,
+    /// The label, in the first cell only.
+    label: Option<&'a str>,
+    /// Space between the cell's edges and the label.
+    insets: Insets,
+    /// The visible part of the Register's body, which the label may run across.
+    viewport: Rect,
+}
+
+impl DividerCell<'_> {
+    /// Draws the cell, its rule starting no further left than `rule_start`, and returns
+    /// where the next cell's rule may start: past the label, which runs on over the
+    /// cells beside it.
+    fn show(&self, ui: &egui::Ui, theme: &Theme, rule_start: f32) -> f32 {
+        let rect = ui.max_rect();
+        let half_gap = ui.spacing().item_spacing.x / 2.0;
+        let painter = ui
+            .ctx()
+            .layer_painter(ui.layer_id())
+            .with_clip_rect(self.viewport);
+        let mut rule_start = rule_start.max(rect.left() - half_gap);
+        if let Some(label) = self.label {
+            let galley = painter.layout_no_wrap(
+                label.to_owned(),
+                TextStyle::Body.resolve(ui.style()),
+                theme.today_divider(),
+            );
+            let top_left = pos2(
+                rect.left() + self.insets.left,
+                rect.center().y - galley.size().y / 2.0,
+            );
+            let text = Rect::from_min_size(top_left, galley.size());
+            let response = ui.interact(
+                text,
+                self.register_id.with("register_today_divider"),
+                Sense::hover(),
+            );
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, label));
+            painter.galley(top_left, galley, theme.today_divider());
+            rule_start = text.right() + ui.spacing().item_spacing.x;
+        }
+        let right = rect.right() + half_gap;
+        if rule_start < right {
+            let rule = theme.today_divider_rule(
+                Rangef::new(rule_start, right),
+                rect.center().y,
+                ui.ctx().pixels_per_point(),
+            );
+            painter.add(rule);
+        }
+        rule_start
+    }
+}
+
 /// The Flag cell of `row`, whose click target is `response`: a ⚑ when the transaction
 /// is flagged, which a click on an editable row's cell puts on or takes off. Assistive
 /// technology reads it as a checkbox. The draft row's cell is empty and takes no click.
@@ -2934,7 +3131,7 @@ mod tests {
                         summary,
                         view,
                         widths,
-                        &RegisterColumns::default(),
+                        &Preferences::default(),
                         Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date"),
                     );
                 },

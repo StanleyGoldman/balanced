@@ -260,7 +260,7 @@ impl AccountBar {
             }
             for row in section_rows.rows() {
                 let balance = model
-                    .balance(row.id())
+                    .ending_balance(row.id())
                     .expect("the model formats a balance for every account it lists");
                 let is_selected = selected == Some(row.id());
                 let response = account_row(ui, theme, row, balance, is_selected);

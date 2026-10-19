@@ -15,7 +15,7 @@ fn app() -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
-            App::new(
+            App::on_ledger(
                 cc,
                 Localizer::for_tests(),
                 Ledger::stub(),
@@ -148,7 +148,7 @@ fn ctrl_enter_adds_the_draft_row_with_its_running_balance() {
             "",
             "12.00",
             "",
-            "5,635.46",
+            "5,630.21",
         ]
     );
 }
@@ -173,7 +173,7 @@ fn an_amount_in_the_draft_rows_deposit_adds_money_in() {
             "",
             "",
             "12.00",
-            "5,659.46",
+            "5,654.21",
         ]
     );
 }
@@ -308,8 +308,10 @@ fn a_closed_account_has_no_draft_row() {
 fn enter_on_the_last_transactions_last_cell_goes_to_the_draft_row() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    // Trattoria Roma's Deposit, the last transaction's last cell.
-    harness.get_by_role_and_label(Role::Cell, "64.80").click();
+    // The November rent's Deposit, the last transaction's last cell.
+    harness
+        .get_by_role_and_label(Role::Cell, "1,475.00")
+        .click();
     harness.run();
     press(&mut harness, Modifiers::NONE, Key::ArrowRight);
 
@@ -318,7 +320,7 @@ fn enter_on_the_last_transactions_last_cell_goes_to_the_draft_row() {
 
     let (label, top) = cursor(&harness);
     assert_eq!(label, "");
-    assert!(top > row_top(&harness, "Trattoria Roma"));
+    assert!(top > row_top(&harness, "November rent"));
 }
 
 #[test]

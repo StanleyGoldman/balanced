@@ -2,7 +2,7 @@
 //! cell's text already formatted.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use balanced_core::{
     AccountId, AccountSummary, Allocation, CategoryId, CurrencyCode, Generation, LedgerView, Money,
@@ -16,6 +16,7 @@ use icu_locale::Locale;
 use crate::draft_row::Draft;
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
+use crate::register_filter::RegisterFilter;
 
 /// Separates a category from the one it sits under: `Food & Dining:Groceries`.
 pub(crate) const CATEGORY_SEPARATOR: &str = ":";
@@ -338,32 +339,68 @@ impl RegisterSort {
     }
 }
 
+/// Whether the Register sets its rows dated after today apart with the Today divider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TodayDivider {
+    Hidden,
+    /// Drawn above the first row dated after `today`, under a sort by date.
+    Shown {
+        today: Date<Iso>,
+    },
+}
+
 /// What the model was built from. It is rebuilt when any of it changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Source {
     account: AccountId,
     generation: Generation,
     sort: RegisterSort,
+    filter: RegisterFilter,
+    /// Today's date, which the filter's date ranges count from.
+    today: Date<Iso>,
+    today_divider: TodayDivider,
     text_language: LanguageIdentifier,
     formatting_locale: Locale,
 }
 
-/// One account's Register rows, in the order of its sort.
+/// One account's Register rows that its filter shows, in the order of its sort.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisterModel {
     source: Source,
     rows: Vec<RegisterRow>,
+    /// Every transaction in the account, shown or not.
+    transactions: HashSet<TransactionId>,
+    /// The index of the row the Today divider sits above, while it is drawn.
+    divider: Option<usize>,
+}
+
+/// What a [`RegisterModel`] shows: its sort, its filter, today's date and whether the
+/// Today divider is drawn.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Showing<'a> {
+    pub(crate) sort: RegisterSort,
+    pub(crate) filter: &'a RegisterFilter,
+    pub(crate) today: Date<Iso>,
+    pub(crate) today_divider: TodayDivider,
 }
 
 impl RegisterModel {
-    /// The Register of `summary`, an account in `view`, formatted by `i18n` and
-    /// ordered by `sort`.
+    /// The Register of `summary`, an account in `view`, formatted by `i18n`, narrowed
+    /// and ordered as `shown` says, with the Today divider placed as it says. Each
+    /// row's balance is the account's running balance, whichever rows the filter hides.
     pub(crate) fn new(
         summary: &AccountSummary,
         view: &LedgerView,
-        sort: RegisterSort,
+        shown: Showing<'_>,
         i18n: &Localizer,
     ) -> Self {
+        let Showing {
+            sort,
+            filter,
+            today,
+            today_divider,
+        } = shown;
+        let matcher = filter.matcher(today);
         let mut paths = CategoryPaths {
             view,
             paths: HashMap::new(),
@@ -375,7 +412,7 @@ impl RegisterModel {
             .register()
             .iter()
             .enumerate()
-            .map(|(place, entry)| {
+            .filter_map(|(place, entry)| {
                 let transaction = entry.transaction();
                 let (kind, payee, category) = match transaction.allocation() {
                     Allocation::OpeningBalance => (
@@ -394,7 +431,7 @@ impl RegisterModel {
                         split.clone(),
                     ),
                 };
-                RegisterRow {
+                let row = RegisterRow {
                     id: RowId::Transaction(transaction.id()),
                     place,
                     kind,
@@ -409,38 +446,58 @@ impl RegisterModel {
                     balance: shows_balance
                         .then(|| FormattedAmount::new(i18n, entry.balance(), AmountStyle::Bare)),
                     flagged: transaction.is_flagged(),
-                }
+                };
+                let split_lines = match transaction.allocation() {
+                    Allocation::Split(lines) => lines.as_slice(),
+                    Allocation::OpeningBalance | Allocation::Category(_) => &[],
+                };
+                let split_categories: Vec<String> = split_lines
+                    .iter()
+                    .map(|line| paths.path(line.category()).to_owned())
+                    .collect();
+                matcher
+                    .shows(&row, split_categories.iter().map(String::as_str))
+                    .then_some(row)
             })
             .collect();
         rows.sort_by(|a, b| sort.compare(i18n, a, b));
+        let divider = match today_divider {
+            TodayDivider::Shown { today } if shows_balance => divider(&rows, sort.direction, today),
+            TodayDivider::Shown { .. } | TodayDivider::Hidden => None,
+        };
         Self {
-            source: Self::source(summary.account().id(), view, sort, i18n),
+            source: Self::source(summary.account().id(), view, shown, i18n),
             rows,
+            transactions: transaction_ids(summary).collect(),
+            divider,
         }
     }
 
-    /// Whether the model shows account `account` of `view` ordered by `sort`, as `i18n`
+    /// Whether the model shows account `account` of `view` as `shown` says, as `i18n`
     /// formats it, so needs no rebuild.
     pub(crate) fn is_current(
         &self,
         account: AccountId,
         view: &LedgerView,
-        sort: RegisterSort,
+        shown: Showing<'_>,
         i18n: &Localizer,
     ) -> bool {
-        self.source == Self::source(account, view, sort, i18n)
+        self.source == Self::source(account, view, shown, i18n)
     }
 
     fn source(
         account: AccountId,
         view: &LedgerView,
-        sort: RegisterSort,
+        shown: Showing<'_>,
         i18n: &Localizer,
     ) -> Source {
         Source {
             account,
             generation: view.generation(),
-            sort,
+            sort: shown.sort,
+            filter: shown.filter.clone(),
+            today: shown.today,
+            today_divider: shown.today_divider,
             text_language: i18n.text_language().clone(),
             formatting_locale: i18n.formatting_locale().clone(),
         }
@@ -451,9 +508,54 @@ impl RegisterModel {
         self.source.account
     }
 
-    /// The rows, in the order of the model's sort.
+    /// The rows the filter shows, in the order of the model's sort.
     pub(crate) fn rows(&self) -> &[RegisterRow] {
         &self.rows
+    }
+
+    /// How many transactions the account has, shown or not.
+    pub(crate) fn transaction_count(&self) -> usize {
+        self.transactions.len()
+    }
+
+    /// The transactions in `summary`, the model's account as it is now, that were
+    /// not in it when the model was built.
+    pub(crate) fn added<'a>(
+        &'a self,
+        summary: &'a AccountSummary,
+    ) -> impl Iterator<Item = TransactionId> + 'a {
+        transaction_ids(summary).filter(|id| !self.transactions.contains(id))
+    }
+
+    /// The index of the row the Today divider sits above: the first row dated after
+    /// today, or under a descending sort the first row dated today or earlier. `None`
+    /// while the divider is hidden, under a sort other than by date, or when no row is
+    /// dated after today.
+    pub(crate) fn divider(&self) -> Option<usize> {
+        self.divider
+    }
+}
+
+/// The ids of `summary`'s transactions, in date order.
+fn transaction_ids(summary: &AccountSummary) -> impl Iterator<Item = TransactionId> + '_ {
+    summary
+        .register()
+        .iter()
+        .map(|entry| entry.transaction().id())
+}
+
+/// The index of the row the Today divider sits above in `rows`, sorted by date in
+/// `direction`, unless no row is dated after `today`.
+fn divider(rows: &[RegisterRow], direction: SortDirection, today: Date<Iso>) -> Option<usize> {
+    let scheduled = |row: &RegisterRow| row.saved_date.is_some_and(|date| date > today);
+    match direction {
+        SortDirection::Ascending => rows.iter().position(scheduled),
+        // The scheduled rows come first, so there are some only if the first is one.
+        SortDirection::Descending => scheduled(rows.first()?).then(|| {
+            rows.iter()
+                .position(|row| !scheduled(row))
+                .unwrap_or(rows.len())
+        }),
     }
 }
 

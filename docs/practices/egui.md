@@ -77,6 +77,7 @@ egui_kittest finds widgets through the same AccessKit tree a screen reader uses,
 
 - Every interactive custom-painted widget (Register rows, Account bar entries) calls `Response::widget_info` with the correct role and label.
 - Every text field has a visible label, or is connected to one with `.labelled_by(label.id)`.
+- A right-to-left layout (`Sides`' right side, `ui.horizontal` inside it) reaches AccessKit in the order widgets are added, so a screen reader reads its widgets in reverse of what the screen shows. Draw a name and its value as one `Label`, a `LayoutJob` built from one Fluent message, as the context header does with Current and Ending (`header_balance` in `main_window.rs`).
 
 ## Upgrading egui
 

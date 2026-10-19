@@ -17,6 +17,9 @@ menu-file-new-account = New Account…
 menu-file-new-data-file = New Data File…
 menu-file-open-data-file = Open Data File…
 menu-file-quit = Quit
+# A Recent file in the File menu. $number counts from 1 at the newest, and $file is
+# the file's name, such as Household.balanced.
+menu-file-recent = { $number } { $file }
 menu-edit = Edit
 menu-edit-undo = Undo
 menu-edit-redo = Redo
@@ -135,13 +138,39 @@ register-category-list = Show all categories
 # The row of the Category list that creates the category typed in the cell.
 register-create-category = Create "{ $name }"…
 register-new-transaction = + Transaction
+# The context header's balances, each with its formatted amount: Current counts the
+# transactions dated today or earlier, Ending counts every one, the future-dated ones too.
+register-current-balance = Current { $amount }
+register-ending-balance = Ending { $amount }
 # Why the draft row at the bottom of the Register wasn't added, in a bubble below
 # the first empty cell the transaction needs.
 register-draft-date-missing = Date is missing
 register-draft-category-missing = Category is missing
 register-draft-amount-missing = Amount is missing
+# The line between the Register's rows dated today or earlier and its rows dated
+# later, labelled with today's date.
+register-today-divider = Today · { $date }
 # Beside a closed account's name, above its Register.
 register-closed-read-only = Closed — read-only
+
+# The filter bar above the Register. Its controls show no label, so screen readers
+# read these names.
+register-filter-search = Search
+    .placeholder = Search payee, category, memo
+register-filter-dates = Dates
+register-filter-dates-all = All dates
+register-filter-dates-last-30-days = Last 30 days
+register-filter-dates-last-12-months = Last 12 months
+register-filter-dates-this-year = This year
+register-filter-dates-last-year = Last year
+register-filter-type = Transaction type
+register-filter-type-all = All transactions
+register-filter-type-payments = Payments
+register-filter-type-deposits = Deposits
+register-filter-type-flagged = Flagged
+register-filter-reset = Reset
+# How many of the account's transactions the filter bar lets the Register show.
+register-filter-count = { $shown } of { $total } shown
 register-transaction-count =
     { $count ->
         [one] { $count } transaction
@@ -180,6 +209,8 @@ dialog-preferences-monospace-money = Line up amounts in a fixed-width font
 dialog-preferences-coloured-negatives = Show negative amounts in red
 dialog-preferences-group-register = { -register }
 dialog-preferences-alternating-rows = Alternating rows
+# The line in the Register between today's rows and the rows dated later.
+dialog-preferences-today-divider = Today divider
 # The rules drawn between the Register's cells.
 dialog-preferences-gridlines = Gridlines
 dialog-preferences-gridlines-off = Off
@@ -240,7 +271,8 @@ dialog-new-account-review-name = Name: { $name }
 dialog-new-account-review-balance = Opening balance: { $amount } as of { $date }
 
 # Why a data file wasn't opened or created. $file is the file's name, such as
-# Household.balanced. The data file open before stays open.
+# Household.balanced. The data file open before stays open, or the welcome Dialog
+# follows when none is.
 dialog-data-file-missing = { -brand-name } can't find “{ $file }”. It may have been moved, renamed or deleted.
 dialog-data-file-not-balanced = “{ $file }” isn't a { -brand-name } data file.
 dialog-data-file-damaged = “{ $file }” is damaged. Restore it from a backup.
@@ -257,6 +289,14 @@ dialog-data-file-open-not-replaced = “{ $file }” is the data file you have o
 dialog-data-file-suggested-name = { -brand-name }.balanced
 # The file type the native file picker lists, for files ending in .balanced.
 dialog-data-file-filter = { -brand-name } data files
+
+# The welcome Dialog, shown while no data file is open: at first run, or when the data
+# file opened last can't be opened. Continue shows the picker for the choice made.
+dialog-welcome-message = { -brand-name } keeps your finances in a data file.
+dialog-welcome-create = Create a new data file…
+dialog-welcome-open = Open an existing data file…
+dialog-welcome-continue = Continue
+dialog-welcome-quit = Quit
 
 ## Amount field
 

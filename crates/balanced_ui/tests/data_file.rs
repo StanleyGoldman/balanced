@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use balanced_core::{AccountKind, CurrencyCode, DomainCommand, Ledger, Money};
+use balanced_core::{CurrencyCode, Ledger};
 use balanced_i18n::Localizer;
 use balanced_ui::testing;
 use balanced_ui::{App, Clock, PreferencesFile};
@@ -19,7 +19,7 @@ fn app() -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .build_eframe(|cc| {
-            App::new(
+            App::on_ledger(
                 cc,
                 Localizer::for_tests(),
                 Ledger::stub(),
@@ -35,23 +35,9 @@ fn usd() -> CurrencyCode {
     CurrencyCode::new("USD").expect("USD is an ISO 4217 currency")
 }
 
-/// A closed data file at `name` in `dir`, holding checking accounts with `accounts`,
-/// created in that order, so the last one is the change Undo reverses first.
+/// A closed data file named `name` in `dir`, as [`testing::data_file`] makes it.
 fn data_file(dir: &TempDir, name: &str, accounts: &[&str]) -> PathBuf {
-    let path = dir.path().join(name);
-    let mut ledger = Ledger::create(&path, usd()).expect("a new path takes a data file");
-    for account in accounts {
-        ledger
-            .apply(DomainCommand::CreateAccount {
-                name: (*account).to_owned(),
-                kind: AccountKind::Checking,
-                opened: Date::try_new_iso(2026, 9, 1).expect("1 September 2026 is a date"),
-                opening_balance: Money::new("10.00".parse().expect("10.00 is a number"), usd())
-                    .expect("10.00 has two decimal places"),
-            })
-            .expect("a new file takes a new account");
-    }
-    path
+    testing::data_file(dir.path(), name, accounts)
 }
 
 /// The names of the accounts in the data file at `path`, opened afresh.

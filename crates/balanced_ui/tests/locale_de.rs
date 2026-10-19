@@ -18,7 +18,7 @@ fn app() -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
-            App::new(
+            App::on_ledger(
                 cc,
                 Localizer::for_tests_in(&langid!("de"), &locale!("de-DE"))
                     .expect("the embedded de messages and de-DE formatting data load"),
@@ -115,9 +115,9 @@ fn the_register_shows_dates_and_amounts_the_german_way() {
 fn the_account_bar_shows_net_worth_the_german_way() {
     let harness = app();
 
-    // The stub's Net Worth, $288,497.71 in en-US. ICU4X puts a no-break space before
+    // The stub's Net Worth, $286,922.06 in en-US. ICU4X puts a no-break space before
     // the symbol.
-    harness.get_by_role_and_label(Role::Label, "288.497,71\u{a0}$");
+    harness.get_by_role_and_label(Role::Label, "286.922,06\u{a0}$");
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn the_draft_row_reads_a_date_and_an_amount_typed_the_german_way() {
             "",
             "1.234,50",
             "",
-            "4.412,96",
+            "4.407,71",
         ]
     );
 }

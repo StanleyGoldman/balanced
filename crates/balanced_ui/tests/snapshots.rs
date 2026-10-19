@@ -110,3 +110,32 @@ fn preferences_light() {
 
     check_snapshot(&mut harness, "preferences_light");
 }
+
+/// Opens Everyday Checking and narrows its Register to payments from the filter bar,
+/// which then counts the rows it shows and offers Reset.
+fn filter_to_payments(harness: &mut Harness<'static, App>) {
+    click(harness, Role::Button, "Everyday Checking");
+    click(harness, Role::ComboBox, "Transaction type");
+    click(harness, Role::Button, "Payments");
+    pointer_gone(harness);
+}
+
+#[test]
+#[ignore = "image snapshot: run with `cargo xtask snapshots`"]
+fn register_filtered_light() {
+    let mut harness = app(Theme::Light);
+
+    filter_to_payments(&mut harness);
+
+    check_snapshot(&mut harness, "register_filtered_light");
+}
+
+#[test]
+#[ignore = "image snapshot: run with `cargo xtask snapshots`"]
+fn register_filtered_dark() {
+    let mut harness = app(Theme::Dark);
+
+    filter_to_payments(&mut harness);
+
+    check_snapshot(&mut harness, "register_filtered_dark");
+}

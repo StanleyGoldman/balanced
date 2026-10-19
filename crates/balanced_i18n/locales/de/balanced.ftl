@@ -18,6 +18,7 @@ menu-file-new-data-file = Neue Datendatei …
 # Coined from "Öffnen" (GnuCash) and "Datendatei", above.
 menu-file-open-data-file = Datendatei öffnen …
 menu-file-quit = Beenden
+menu-file-recent = { $number } { $file }
 menu-edit = Bearbeiten
 menu-edit-undo = Rückgängig
 menu-edit-redo = Wiederherstellen
@@ -77,6 +78,8 @@ register-column-category = Kategorie
 register-column-memo = Notiz
 register-column-balance = Saldo
 register-new-transaction = + Buchung
+register-current-balance = Aktuell { $amount }
+register-ending-balance = Endsaldo { $amount }
 register-transaction-count =
     { $count ->
         [one] { $count } Buchung
@@ -122,3 +125,12 @@ dialog-data-file-open-not-replaced = „{ $file }“ ist die geöffnete Datendat
 dialog-data-file-suggested-name = { -brand-name }.balanced
 # Coined from GnuCash's "Nur Datenfiles".
 dialog-data-file-filter = { -brand-name }-Datendateien
+
+# Coined from "Datendatei", above.
+dialog-welcome-message = { -brand-name } speichert Ihre Finanzen in einer Datendatei.
+# Coined from "Neue Datendatei", above, and "Erstellen".
+dialog-welcome-create = Neue Datendatei erstellen …
+# Coined from "Datendatei öffnen", above, and "Vorhanden".
+dialog-welcome-open = Vorhandene Datendatei öffnen …
+dialog-welcome-continue = Weiter
+dialog-welcome-quit = Beenden
