@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use balanced_core::{
-    AccountId, AccountSummary, Allocation, CategoryId, CurrencyCode, Generation, LedgerView,
+    AccountId, AccountSummary, Allocation, CategoryId, CurrencyCode, Generation, LedgerView, Money,
     TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
@@ -25,6 +25,58 @@ pub(crate) const CATEGORY_SEPARATOR: &str = ":";
 pub(crate) enum RowId {
     Transaction(TransactionId),
     Draft,
+}
+
+/// Which way money moves, which decides whether an amount shows as a payment or a
+/// deposit. The Register shows the amount unsigned in the column for its side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum AmountSide {
+    /// Money out: a negative amount.
+    Payment,
+    /// Money in: zero or a positive amount.
+    Deposit,
+}
+
+impl AmountSide {
+    /// The side `money` is on.
+    pub(crate) fn of(money: Money) -> Self {
+        if money.is_negative() {
+            Self::Payment
+        } else {
+            Self::Deposit
+        }
+    }
+
+    /// The signed amount of `money` on this side, whatever sign `money` has.
+    pub(crate) fn signed(self, money: Money) -> Money {
+        let unsigned = money.amount().abs();
+        let amount = match self {
+            Self::Payment => -unsigned,
+            Self::Deposit => unsigned,
+        };
+        Money::new(amount, money.currency()).expect("a change of sign keeps the decimal places")
+    }
+}
+
+/// An amount as the Register shows it, signed and unsigned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RowAmount {
+    signed: FormattedAmount,
+    /// The amount without its sign, which its side's column shows.
+    unsigned: FormattedAmount,
+}
+
+impl RowAmount {
+    fn new(i18n: &Localizer, money: Money) -> Self {
+        Self {
+            signed: FormattedAmount::new(i18n, money, AmountStyle::Bare),
+            unsigned: FormattedAmount::new(
+                i18n,
+                AmountSide::Deposit.signed(money),
+                AmountStyle::Bare,
+            ),
+        }
+    }
 }
 
 /// Where a row's amount went, as far as its Payee and Category cells care.
@@ -54,7 +106,7 @@ pub(crate) struct RegisterRow {
     memo: String,
     currency: CurrencyCode,
     /// The amount, which only the draft row can be without.
-    amount: Option<FormattedAmount>,
+    amount: Option<RowAmount>,
     balance: Option<FormattedAmount>,
     /// Whether the transaction is flagged. The draft row never is.
     flagged: bool,
@@ -86,9 +138,7 @@ impl RegisterRow {
                 .unwrap_or_default(),
             memo: draft.memo().to_owned(),
             currency,
-            amount: draft
-                .amount()
-                .map(|amount| FormattedAmount::new(i18n, amount, AmountStyle::Bare)),
+            amount: draft.amount().map(|amount| RowAmount::new(i18n, amount)),
             balance: None,
             flagged: false,
         }
@@ -168,14 +218,30 @@ impl RegisterRow {
         self.currency
     }
 
-    /// The amount, as a bare number. Only the draft row can be without one.
-    pub(crate) fn amount(&self) -> Option<&FormattedAmount> {
-        self.amount.as_ref()
+    /// The signed amount. Only the draft row can be without one.
+    pub(crate) fn amount(&self) -> Option<Money> {
+        self.amount.as_ref().map(|amount| amount.signed.money())
     }
 
-    /// The amount's text, or nothing when the row has no amount.
+    /// The signed amount's text, or nothing when the row has no amount.
     pub(crate) fn amount_text(&self) -> &str {
-        self.amount.as_ref().map_or("", FormattedAmount::text)
+        self.amount
+            .as_ref()
+            .map_or("", |amount| amount.signed.text())
+    }
+
+    /// The amount without its sign, as a bare number, when it is on `side`.
+    pub(crate) fn amount_on(&self, side: AmountSide) -> Option<&FormattedAmount> {
+        self.amount
+            .as_ref()
+            .filter(|amount| AmountSide::of(amount.signed.money()) == side)
+            .map(|amount| &amount.unsigned)
+    }
+
+    /// The text of [`RegisterRow::amount_on`], or nothing when the amount is on the
+    /// other side or the row has none.
+    pub(crate) fn amount_text_on(&self, side: AmountSide) -> &str {
+        self.amount_on(side).map_or("", FormattedAmount::text)
     }
 
     /// The running balance after this transaction, as a bare number. Under a sort
@@ -196,8 +262,8 @@ impl RegisterRow {
             SortKey::Payee => i18n.compare_text(&self.payee, &other.payee),
             SortKey::Category => i18n.compare_text(&self.category, &other.category),
             SortKey::Memo => i18n.compare_text(&self.memo, &other.memo),
-            SortKey::Amount => {
-                let amount = |row: &Self| row.amount.as_ref().map(|amount| amount.money().amount());
+            SortKey::Amount(_) => {
+                let amount = |row: &Self| row.amount().map(|amount| amount.amount());
                 amount(self).cmp(&amount(other))
             }
         }
@@ -211,7 +277,9 @@ pub(crate) enum SortKey {
     Payee,
     Category,
     Memo,
-    Amount,
+    /// The signed amount. The side names the column whose heading was clicked, which
+    /// shows the sort arrow; both sides sort alike.
+    Amount(AmountSide),
 }
 
 /// Which way a sort runs.
@@ -337,11 +405,7 @@ impl RegisterModel {
                     category,
                     memo: transaction.memo().to_owned(),
                     currency: transaction.amount().currency(),
-                    amount: Some(FormattedAmount::new(
-                        i18n,
-                        transaction.amount(),
-                        AmountStyle::Bare,
-                    )),
+                    amount: Some(RowAmount::new(i18n, transaction.amount())),
                     balance: shows_balance
                         .then(|| FormattedAmount::new(i18n, entry.balance(), AmountStyle::Bare)),
                     flagged: transaction.is_flagged(),

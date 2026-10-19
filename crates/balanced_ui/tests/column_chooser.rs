@@ -85,12 +85,12 @@ fn unticking_memo_hides_it_and_saves_it_as_hidden() {
     assert_eq!(
         headings(&harness),
         [
-            "Date", "Num", "Payee", "Category", "Amount", "Balance", "Flag", ""
+            "Date", "Num", "Payee", "Category", "Payment", "Deposit", "Balance", "Flag", ""
         ]
     );
     assert_eq!(
         file_text(&dir),
-        "version = 1\n\
+        "version = 2\n\
          scheme = \"light\"\n\
          font_face = \"egui\"\n\
          dense_rows = false\n\
@@ -100,7 +100,7 @@ fn unticking_memo_hides_it_and_saves_it_as_hidden() {
          gridlines = \"off\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\", \"flag\"]\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"flag\"]\n\
          hidden_register_columns = [\"memo\"]\n"
     );
 }
@@ -117,12 +117,12 @@ fn moving_payee_up_puts_it_before_num_and_saves_the_order() {
     assert_eq!(
         headings(&harness),
         [
-            "Date", "Payee", "Num", "Category", "Memo", "Amount", "Balance", "Flag", ""
+            "Date", "Payee", "Num", "Category", "Memo", "Payment", "Deposit", "Balance", "Flag", ""
         ]
     );
     assert_eq!(
         file_text(&dir),
-        "version = 1\n\
+        "version = 2\n\
          scheme = \"light\"\n\
          font_face = \"egui\"\n\
          dense_rows = false\n\
@@ -132,7 +132,7 @@ fn moving_payee_up_puts_it_before_num_and_saves_the_order() {
          gridlines = \"off\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         register_columns = [\"date\", \"payee\", \"num\", \"category\", \"memo\", \"amount\", \"balance\", \"flag\"]\n\
+         register_columns = [\"date\", \"payee\", \"num\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"flag\"]\n\
          hidden_register_columns = []\n"
     );
 }
@@ -150,7 +150,7 @@ fn the_chooser_stays_open_after_hiding_a_column() {
     assert_eq!(
         headings(&harness),
         [
-            "Date", "Payee", "Num", "Category", "Amount", "Balance", "Flag", ""
+            "Date", "Payee", "Num", "Category", "Payment", "Deposit", "Balance", "Flag", ""
         ]
     );
 }
@@ -170,6 +170,23 @@ fn hiding_the_sorted_column_sorts_by_date() {
         date.accesskit_node().sort_direction(),
         Some(SortDirection::Ascending)
     );
+}
+
+#[test]
+fn the_chooser_lists_payment_and_deposit_with_checkboxes_that_cant_be_unticked() {
+    let dir = config_dir();
+    let mut harness = app_in(dir.path());
+    open(&mut harness, "Everyday Checking");
+    open_chooser(&mut harness);
+
+    let checkbox = |label| {
+        let node = harness.get_by_role_and_label(Role::CheckBox, label);
+        let node = node.accesskit_node();
+        (node.toggled(), node.is_disabled())
+    };
+
+    assert_eq!(checkbox("Payment"), (Some(Toggled::True), true));
+    assert_eq!(checkbox("Deposit"), (Some(Toggled::True), true));
 }
 
 #[test]
@@ -196,7 +213,7 @@ fn unticking_flag_hides_the_flag_column() {
     assert_eq!(
         headings(&harness),
         [
-            "Date", "Num", "Payee", "Category", "Memo", "Amount", "Balance", ""
+            "Date", "Num", "Payee", "Category", "Memo", "Payment", "Deposit", "Balance", ""
         ]
     );
 }
@@ -213,7 +230,7 @@ fn moving_flag_up_puts_it_before_balance() {
     assert_eq!(
         headings(&harness),
         [
-            "Date", "Num", "Payee", "Category", "Memo", "Amount", "Flag", "Balance", ""
+            "Date", "Num", "Payee", "Category", "Memo", "Payment", "Deposit", "Flag", "Balance", ""
         ]
     );
 }

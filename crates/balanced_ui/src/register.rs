@@ -4,8 +4,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use balanced_core::{
-    Account, AccountId, AccountSummary, CurrencyCode, DomainCommand, DomainError, Generation,
-    LedgerView, Money, TransactionEdit, TransactionId,
+    Account, AccountId, AccountKind, AccountSummary, CurrencyCode, DomainCommand, DomainError,
+    Generation, LedgerView, Money, TransactionEdit, TransactionId,
 };
 use balanced_i18n::{AmountParseError, AmountReader, Localizer};
 use eframe::egui::accesskit::{self, Role};
@@ -25,11 +25,11 @@ use crate::combobox::{FieldChoices, ListRow};
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::date_field::{self, DateEdit};
 use crate::draft_row::{Draft, Missing};
-use crate::formatted_amount::{FormattedAmount, i18n_currency};
+use crate::formatted_amount::i18n_currency;
 use crate::i18n::fl;
 use crate::register_columns::{RegisterColumn, RegisterColumns};
 use crate::register_model::{
-    RegisterModel, RegisterRow, RegisterSort, RowId, SortDirection, SortKey,
+    AmountSide, RegisterModel, RegisterRow, RegisterSort, RowId, SortDirection, SortKey,
 };
 use crate::theme::Theme;
 
@@ -71,21 +71,23 @@ impl RegisterColumn {
             Self::Date => Some(80.0),
             Self::Number => Some(48.0),
             Self::Memo => Some(140.0),
-            Self::Amount => Some(90.0),
+            Self::Payment | Self::Deposit => Some(90.0),
             Self::Balance => Some(100.0),
             Self::Payee | Self::Category | Self::Flag | Self::Actions => None,
         }
     }
 
-    /// The column's heading. The Actions column has none.
-    fn title(self, i18n: &Localizer) -> String {
+    /// The column's heading in a Register of an account of `kind`. Payment and Deposit
+    /// take the words of the account's statements. The Actions column has none.
+    fn title(self, i18n: &Localizer, kind: AccountKind) -> String {
         match self {
             Self::Date => fl!(i18n, "register-column-date"),
             Self::Number => fl!(i18n, "register-column-number"),
             Self::Payee => fl!(i18n, "register-column-payee"),
             Self::Category => fl!(i18n, "register-column-category"),
             Self::Memo => fl!(i18n, "register-column-memo"),
-            Self::Amount => fl!(i18n, "register-column-amount"),
+            Self::Payment => amount_title(i18n, AmountSide::Payment, kind),
+            Self::Deposit => amount_title(i18n, AmountSide::Deposit, kind),
             Self::Balance => fl!(i18n, "register-column-balance"),
             Self::Flag => fl!(i18n, "register-column-flag"),
             Self::Actions => String::new(),
@@ -102,7 +104,8 @@ impl RegisterColumn {
             | Self::Payee
             | Self::Category
             | Self::Memo
-            | Self::Amount
+            | Self::Payment
+            | Self::Deposit
             | Self::Balance
             | Self::Actions => title,
         }
@@ -116,7 +119,8 @@ impl RegisterColumn {
             Self::Payee => Some(SortKey::Payee),
             Self::Category => Some(SortKey::Category),
             Self::Memo => Some(SortKey::Memo),
-            Self::Amount => Some(SortKey::Amount),
+            Self::Payment => Some(SortKey::Amount(AmountSide::Payment)),
+            Self::Deposit => Some(SortKey::Amount(AmountSide::Deposit)),
             Self::Number | Self::Balance | Self::Flag | Self::Actions => None,
         }
     }
@@ -129,7 +133,12 @@ impl RegisterColumn {
             Self::Payee | Self::Category => Column::remainder().at_least(MIN_FLEX_WIDTH),
             Self::Flag => Column::exact(theme.row_height()),
             Self::Actions => Column::exact(theme.row_height() + Theme::EDGE_INSET),
-            Self::Date | Self::Number | Self::Memo | Self::Amount | Self::Balance => Column::exact(
+            Self::Date
+            | Self::Number
+            | Self::Memo
+            | Self::Payment
+            | Self::Deposit
+            | Self::Balance => Column::exact(
                 widths
                     .width(self)
                     .expect("every column that resizes has a width"),
@@ -147,7 +156,8 @@ impl RegisterColumn {
             | Self::Payee
             | Self::Category
             | Self::Memo
-            | Self::Amount => true,
+            | Self::Payment
+            | Self::Deposit => true,
             Self::Balance | Self::Flag | Self::Actions => false,
         }
     }
@@ -164,13 +174,30 @@ impl RegisterColumn {
             Self::Payee if !row.is_opening_balance() => text(TextField::Payee),
             Self::Category if row.takes_category() => text(TextField::Category),
             Self::Memo => text(TextField::Memo),
-            Self::Amount if !row.is_split() => Some(CellField::Amount),
+            Self::Payment if !row.is_split() => Some(CellField::Amount(AmountSide::Payment)),
+            Self::Deposit if !row.is_split() => Some(CellField::Amount(AmountSide::Deposit)),
             Self::Payee
             | Self::Category
-            | Self::Amount
+            | Self::Payment
+            | Self::Deposit
             | Self::Balance
             | Self::Flag
             | Self::Actions => None,
+        }
+    }
+
+    /// Whether the column holds the amount, on one side.
+    fn holds_amount(self) -> bool {
+        match self {
+            Self::Payment | Self::Deposit => true,
+            Self::Date
+            | Self::Number
+            | Self::Payee
+            | Self::Category
+            | Self::Memo
+            | Self::Balance
+            | Self::Flag
+            | Self::Actions => false,
         }
     }
 
@@ -178,7 +205,7 @@ impl RegisterColumn {
     /// rest on the left.
     fn align(self) -> Align {
         match self {
-            Self::Amount | Self::Balance => Align::Max,
+            Self::Payment | Self::Deposit | Self::Balance => Align::Max,
             Self::Flag => Align::Center,
             Self::Date
             | Self::Number
@@ -235,8 +262,15 @@ impl ColumnWidths {
     }
 
     /// The handle on the right edge of `column`'s heading, in the heading cell `ui`,
-    /// for a column that resizes. Dragging it resizes the column from the next frame.
-    fn resize_handle(&mut self, ui: &egui::Ui, i18n: &Localizer, column: RegisterColumn) {
+    /// for a column that resizes, in a Register of an account of `kind`. Dragging it
+    /// resizes the column from the next frame.
+    fn resize_handle(
+        &mut self,
+        ui: &egui::Ui,
+        i18n: &Localizer,
+        column: RegisterColumn,
+        kind: AccountKind,
+    ) {
         let Some(width) = self.widths.get_mut(&column) else {
             return;
         };
@@ -248,7 +282,11 @@ impl ColumnWidths {
         let response = ui
             .interact(handle, id, Sense::drag())
             .on_hover_cursor(CursorIcon::ResizeColumn);
-        let label = fl!(i18n, "register-resize-column", column = column.title(i18n));
+        let label = fl!(
+            i18n,
+            "register-resize-column",
+            column = column.title(i18n, kind)
+        );
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), &label));
         ui.ctx()
             .accesskit_node_builder(response.id, |node| node.set_role(Role::Splitter));
@@ -279,8 +317,8 @@ enum CellField {
     Date,
     /// Plain text, or text naming an entry.
     Text(TextField),
-    /// The amount, typed as written or as arithmetic.
-    Amount,
+    /// The amount on one side, typed unsigned, as written or as arithmetic.
+    Amount(AmountSide),
 }
 
 /// A transaction field a Register cell edits as text.
@@ -445,11 +483,12 @@ struct CellEdit {
 #[derive(Debug, Clone)]
 enum EditField {
     Text(TextField),
-    /// The amount, in the transaction's currency, read with the formatting locale the
-    /// edit started in.
+    /// The amount on `side`, in the transaction's currency, read with the formatting
+    /// locale the edit started in.
     Amount {
         reader: AmountReader,
         currency: CurrencyCode,
+        side: AmountSide,
     },
 }
 
@@ -1008,6 +1047,7 @@ impl Register {
                             theme,
                             commands,
                             columns,
+                            kind: summary.account().kind(),
                         };
                         let shown = self.shown.clone();
                         for column in shown {
@@ -1057,16 +1097,17 @@ impl Register {
             theme,
             commands,
             columns,
+            kind,
         } = *frame;
-        if let Some(key) = heading.show(ui, i18n, theme) {
+        if let Some(key) = heading.show(ui, i18n, theme, kind) {
             self.sort = self.sort.clicked(key);
             self.centre_pending = true;
             // The rows sort and scroll on the next frame.
             ui.ctx().request_repaint();
         }
-        widths.resize_handle(ui, i18n, heading.column);
+        widths.resize_handle(ui, i18n, heading.column, kind);
         if heading.column == RegisterColumn::Actions
-            && let Some(columns) = column_chooser(ui, i18n, heading.register_id, columns)
+            && let Some(columns) = column_chooser(ui, i18n, heading.register_id, columns, kind)
         {
             commands.send(AppCommand::SetRegisterColumns(columns));
         }
@@ -1500,9 +1541,12 @@ impl Register {
         ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
         if leave == Leave::Enter
             && cursor.row == RowId::Draft
-            && self.cursor_columns().last() == Some(&cursor.column)
+            && ((cursor.column.holds_amount() && self.draft.amount().is_some())
+                || self.cursor_columns().last() == Some(&cursor.column))
         {
-            // Enter on the draft row's last cell adds the row.
+            // Enter on the draft row's last cell, or on an amount cell once the row
+            // has an amount, adds the row. Enter on an empty Payment moves on to
+            // Deposit.
             self.post(keys);
             return None;
         }
@@ -1643,7 +1687,7 @@ impl Register {
             })) => reader,
             Some(Edit::Text(_) | Edit::Date(_)) => return,
             None => {
-                let Some((row, CellField::Amount)) = field_at(keys.rows, cursor) else {
+                let Some((row, CellField::Amount(_))) = field_at(keys.rows, cursor) else {
                     return;
                 };
                 opened = keys.i18n.amount_reader(i18n_currency(row.currency()));
@@ -1731,10 +1775,15 @@ impl Register {
                 return;
             }
             CellField::Text(field) => (field.saved(row), EditField::Text(field)),
-            CellField::Amount => {
+            CellField::Amount(side) => {
                 let currency = row.currency();
                 let reader = keys.i18n.amount_reader(i18n_currency(currency));
-                (row.amount_text(), EditField::Amount { reader, currency })
+                let field = EditField::Amount {
+                    reader,
+                    currency,
+                    side,
+                };
+                (row.amount_text_on(side), field)
             }
         };
         let text = match start {
@@ -1818,12 +1867,13 @@ impl Register {
     }
 }
 
-/// The draft row cell that `missing` names.
+/// The draft row cell that `missing` names. A missing amount names Payment, the
+/// first of the two cells that take one.
 fn missing_column(missing: Missing) -> RegisterColumn {
     match missing {
         Missing::Date => RegisterColumn::Date,
         Missing::Category => RegisterColumn::Category,
-        Missing::Amount => RegisterColumn::Amount,
+        Missing::Amount => RegisterColumn::Payment,
     }
 }
 
@@ -2010,7 +2060,11 @@ fn commit(
             };
             change
         }
-        EditField::Amount { reader, currency } => match amount_edit(row, text, reader, *currency) {
+        EditField::Amount {
+            reader,
+            currency,
+            side,
+        } => match amount_edit(row, *side, text, reader, *currency) {
             Ok(change) => change,
             Err(error) => return Commit::Unreadable(error),
         },
@@ -2035,22 +2089,25 @@ fn save(row: RowId, edit: TransactionEdit, commands: &CommandSender, draft: &mut
     }
 }
 
-/// The edit that saves `text`, already trimmed, as the amount of `row`, read by
-/// `reader` in `currency`, or `None` when it matches the saved amount.
+/// The edit that saves `text`, already trimmed, as the amount of `row` on `side`,
+/// read by `reader` in `currency`, or `None` when it matches the saved amount. The
+/// text's sign is ignored: the side gives the amount its sign, so the amount moves to
+/// `side` when it was on the other.
 fn amount_edit(
     row: &RegisterRow,
+    side: AmountSide,
     text: &str,
     reader: &AmountReader,
     currency: CurrencyCode,
 ) -> Result<Option<TransactionEdit>, AmountParseError> {
-    if text == row.amount_text() {
+    if text == row.amount_text_on(side) {
         return Ok(None);
     }
     let amount = reader.read(text)?.amount();
     let money = Money::new(amount, currency)
         .expect("the reader gives amounts at the currency's decimal places");
-    let saved = row.amount().map(FormattedAmount::money);
-    Ok((saved != Some(money)).then_some(TransactionEdit::Amount(money)))
+    let money = side.signed(money);
+    Ok((row.amount() != Some(money)).then_some(TransactionEdit::Amount(money)))
 }
 
 /// Saves `edit`'s date, unless it matches the saved date: in `draft` on the draft
@@ -2268,7 +2325,10 @@ fn list_row(
 /// typed so far, in a bubble floating below its cell at `cell`, so the rows below
 /// never move.
 fn bubble(ui: &egui::Ui, i18n: &Localizer, edit: &CellEdit, cell: Rect) {
-    let EditField::Amount { reader, currency } = &edit.field else {
+    let EditField::Amount {
+        reader, currency, ..
+    } = &edit.field
+    else {
         return;
     };
     let (text, colour) = match (edit.error, &edit.preview) {
@@ -2300,7 +2360,10 @@ fn floating_bubble(ui: &egui::Ui, id: Id, cell: Rect, text: String, colour: egui
 /// The result of the arithmetic in `edit`'s text, or `None` when the text is a plain
 /// amount or can't be read.
 fn preview(i18n: &Localizer, edit: &CellEdit) -> Option<Preview> {
-    let EditField::Amount { reader, currency } = &edit.field else {
+    let EditField::Amount {
+        reader, currency, ..
+    } = &edit.field
+    else {
         return None;
     };
     Preview::of(i18n, reader, *currency, &edit.text)
@@ -2328,6 +2391,8 @@ struct HeaderFrame<'a> {
     commands: &'a CommandSender,
     /// The columns every Register shows, which the column chooser changes.
     columns: &'a RegisterColumns,
+    /// The account's kind, which names the Payment and Deposit columns.
+    kind: AccountKind,
 }
 
 /// A column heading on the header band.
@@ -2347,7 +2412,13 @@ impl Heading {
     /// Draws the heading. The band's fill covers the cell and half the gap around it,
     /// clipped to the Register's viewport so it never paints past it. A sortable heading
     /// highlights under the pointer, and returns what it sorts by when clicked.
-    fn show(&self, ui: &egui::Ui, i18n: &Localizer, theme: &Theme) -> Option<SortKey> {
+    fn show(
+        &self,
+        ui: &egui::Ui,
+        i18n: &Localizer,
+        theme: &Theme,
+        kind: AccountKind,
+    ) -> Option<SortKey> {
         let Self {
             register_id,
             column,
@@ -2377,7 +2448,7 @@ impl Heading {
         let direction = key
             .filter(|&key| key == sort.key())
             .map(|_| sort.direction());
-        let title = column.title(i18n);
+        let title = column.title(i18n, kind);
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), &title));
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(Role::ColumnHeader);
@@ -2476,8 +2547,11 @@ impl Cell<'_> {
             RegisterColumn::Payee => row.payee().into(),
             RegisterColumn::Category => row.category().into(),
             RegisterColumn::Memo => row.memo().into(),
-            RegisterColumn::Amount => row
-                .amount()
+            RegisterColumn::Payment => row
+                .amount_on(AmountSide::Payment)
+                .map_or_else(WidgetText::default, |amount| amount.styled(theme).into()),
+            RegisterColumn::Deposit => row
+                .amount_on(AmountSide::Deposit)
                 .map_or_else(WidgetText::default, |amount| amount.styled(theme).into()),
             RegisterColumn::Balance => row
                 .balance()
@@ -2697,6 +2771,7 @@ fn column_chooser(
     i18n: &Localizer,
     register_id: Id,
     columns: &RegisterColumns,
+    kind: AccountKind,
 ) -> Option<RegisterColumns> {
     let cell = ui.max_rect();
     let size = cell.height();
@@ -2732,7 +2807,7 @@ fn column_chooser(
             let last = entries.len().saturating_sub(1);
             for (index, (column, shown)) in entries.into_iter().enumerate() {
                 ui.horizontal(|ui| {
-                    let title = column.title(i18n);
+                    let title = column.title(i18n, kind);
                     let up = fl!(i18n, "register-column-move-up", column = title.clone());
                     if icon_button(ui, "⏶", &up, index > 0).clicked() {
                         changed.move_up(column);
@@ -2751,6 +2826,28 @@ fn column_chooser(
             (changed != *columns).then_some(changed)
         })
         .and_then(|popup| popup.inner)
+}
+
+/// The heading of the column holding amounts on `side`, in a Register of an account
+/// of `kind`.
+fn amount_title(i18n: &Localizer, side: AmountSide, kind: AccountKind) -> String {
+    match kind {
+        AccountKind::Checking
+        | AccountKind::Savings
+        | AccountKind::Investment
+        | AccountKind::Retirement => match side {
+            AmountSide::Payment => fl!(i18n, "register-column-payment"),
+            AmountSide::Deposit => fl!(i18n, "register-column-deposit"),
+        },
+        AccountKind::CreditCard => match side {
+            AmountSide::Payment => fl!(i18n, "register-column-charge"),
+            AmountSide::Deposit => fl!(i18n, "register-column-card-payment"),
+        },
+        AccountKind::Asset | AccountKind::Liability => match side {
+            AmountSide::Payment => fl!(i18n, "register-column-decrease"),
+            AmountSide::Deposit => fl!(i18n, "register-column-increase"),
+        },
+    }
 }
 
 /// A button showing `glyph`, which assistive technology reads as `label`.
@@ -2927,7 +3024,7 @@ mod tests {
     #[test]
     fn a_refused_amount_sends_nothing() {
         let (mut harness, receiver) = register();
-        click_cell(&mut harness, "-86.42");
+        click_cell(&mut harness, "86.42");
         harness.event(Event::Text("12.345".to_owned()));
         harness.run();
 
@@ -2939,8 +3036,8 @@ mod tests {
     #[test]
     fn an_amount_typed_as_the_saved_one_sends_nothing() {
         let (mut harness, receiver) = register();
-        click_cell(&mut harness, "-86.42");
-        harness.event(Event::Text("-86.420".to_owned()));
+        click_cell(&mut harness, "86.42");
+        harness.event(Event::Text("86.420".to_owned()));
         harness.run();
 
         press(&mut harness, Key::Enter);
@@ -2965,7 +3062,7 @@ mod tests {
         harness.run();
         press(&mut harness, Key::Enter);
         press(&mut harness, Key::ArrowRight);
-        harness.event(Event::Text("-12".to_owned()));
+        harness.event(Event::Text("12".to_owned()));
         harness.run();
 
         harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);

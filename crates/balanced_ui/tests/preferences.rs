@@ -74,7 +74,7 @@ fn dark_then_ok_applies_the_dark_theme_and_writes_the_file() {
     assert!(is_dark(&harness));
     assert_eq!(
         file_text(&dir),
-        "version = 1\n\
+        "version = 2\n\
          scheme = \"dark\"\n\
          font_face = \"egui\"\n\
          dense_rows = false\n\
@@ -84,7 +84,7 @@ fn dark_then_ok_applies_the_dark_theme_and_writes_the_file() {
          gridlines = \"off\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\", \"flag\"]\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"flag\"]\n\
          hidden_register_columns = []\n"
     );
 }
@@ -166,7 +166,7 @@ fn the_other_display_preferences_apply_and_are_saved_on_ok() {
     assert_eq!(first_face, "Noto Sans");
     assert_eq!(
         file_text(&dir),
-        "version = 1\n\
+        "version = 2\n\
          scheme = \"light\"\n\
          font_face = \"noto_sans\"\n\
          dense_rows = true\n\
@@ -176,7 +176,7 @@ fn the_other_display_preferences_apply_and_are_saved_on_ok() {
          gridlines = \"off\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\", \"flag\"]\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"flag\"]\n\
          hidden_register_columns = []\n"
     );
 }
@@ -230,7 +230,7 @@ fn the_register_preferences_are_saved_on_ok() {
 
     assert_eq!(
         file_text(&dir),
-        "version = 1\n\
+        "version = 2\n\
          scheme = \"light\"\n\
          font_face = \"egui\"\n\
          dense_rows = false\n\
@@ -240,7 +240,7 @@ fn the_register_preferences_are_saved_on_ok() {
          gridlines = \"both\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\", \"flag\"]\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"flag\"]\n\
          hidden_register_columns = []\n"
     );
 }
@@ -258,7 +258,7 @@ fn the_account_bar_preferences_are_saved_on_ok() {
 
     assert_eq!(
         file_text(&dir),
-        "version = 1\n\
+        "version = 2\n\
          scheme = \"light\"\n\
          font_face = \"egui\"\n\
          dense_rows = false\n\
@@ -268,7 +268,7 @@ fn the_account_bar_preferences_are_saved_on_ok() {
          gridlines = \"off\"\n\
          group_totals = true\n\
          net_worth_placement = \"status_bar\"\n\
-         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\", \"flag\"]\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"flag\"]\n\
          hidden_register_columns = []\n"
     );
 }
