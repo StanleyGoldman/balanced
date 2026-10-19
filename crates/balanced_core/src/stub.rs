@@ -154,24 +154,8 @@ impl Ledger {
                 paid(18, "Acme Corp", StubCategory::Salary, "3200.00"),
                 paid(20, "Trattoria Roma", StubCategory::Restaurants, "-64.80")
                     .memo("Anniversary dinner"),
-                // Scheduled: dated after the tests' fixed today, 14 October 2026, so the
-                // account's Current and Ending balances differ.
-                NewTransaction::new(
-                    date(2026, 10, 30),
-                    "City Power & Light",
-                    StubCategory::Utilities.id(),
-                    money("-88.65"),
-                )
-                .number("1043"),
-                NewTransaction::new(
-                    date(2026, 11, 1),
-                    "Maple Property Management",
-                    StubCategory::Home.id(),
-                    money("-1450.00"),
-                )
-                .number("1044")
-                .memo("November rent"),
-            ]);
+            ])
+            .with_transactions(scheduled_payments(money));
         // Emptied, then closed: its read-only Register shows its history.
         let old_checking = NewAccount::new(
             "Old Checking",
@@ -216,6 +200,28 @@ impl Ledger {
         )
         .expect("the stub amounts are all in USD, far from overflow")
     }
+}
+
+/// Everyday Checking's scheduled payments, dated after the tests' fixed today, 14 October
+/// 2026, so the account's Current and Ending balances differ.
+fn scheduled_payments(money: impl Fn(&str) -> Money) -> [NewTransaction; 2] {
+    [
+        NewTransaction::new(
+            date(2026, 10, 30),
+            "City Power & Light",
+            StubCategory::Utilities.id(),
+            money("-88.65"),
+        )
+        .number("1043"),
+        NewTransaction::new(
+            date(2026, 11, 1),
+            "Maple Property Management",
+            StubCategory::Home.id(),
+            money("-1450.00"),
+        )
+        .number("1044")
+        .memo("November rent"),
+    ]
 }
 
 /// An account with [`GENERATED_TRANSACTIONS`] transactions, four a day, so the

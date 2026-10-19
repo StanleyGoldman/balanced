@@ -76,10 +76,10 @@ fn undo(harness: &mut Harness<'static, App>) {
     harness.run();
 }
 
-/// Selects the row whose Payee cell reads `payee` and picks `item` from its Actions
-/// menu.
-fn pick_action(harness: &mut Harness<'static, App>, payee: &str, item: &str) {
-    click(harness, Role::Cell, payee);
+/// Selects the row holding the one cell that reads `cell` and picks `item` from its
+/// Actions menu.
+fn pick_action(harness: &mut Harness<'static, App>, cell: &str, item: &str) {
+    click(harness, Role::Cell, cell);
     click(harness, Role::Button, "Actions");
     click(harness, Role::Button, item);
 }
@@ -135,7 +135,8 @@ fn flag_in_the_actions_menu_flags_the_row() {
 fn unflag_in_the_actions_menu_unflags_the_row() {
     let mut harness = app_showing("Everyday Checking");
 
-    pick_action(&mut harness, "City Power & Light", "Unflag");
+    // The flagged September bill, by its Num: October's has the same payee.
+    pick_action(&mut harness, "1042", "Unflag");
 
     assert!(!flagged(&harness, CITY_POWER));
 }
@@ -143,7 +144,8 @@ fn unflag_in_the_actions_menu_unflags_the_row() {
 #[test]
 fn undo_puts_back_a_flag_taken_off_in_the_actions_menu() {
     let mut harness = app_showing("Everyday Checking");
-    pick_action(&mut harness, "City Power & Light", "Unflag");
+    // The flagged September bill, by its Num: October's has the same payee.
+    pick_action(&mut harness, "1042", "Unflag");
 
     undo(&mut harness);
 

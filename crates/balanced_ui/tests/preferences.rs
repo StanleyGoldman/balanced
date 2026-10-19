@@ -359,7 +359,7 @@ fn add_account_stays_at_the_foot_of_the_account_bar_with_net_worth_in_the_status
         .rect();
     let net_worth = harness
         .get_by_role(Role::Status)
-        .get_by_role_and_label(Role::Label, "$288,497.71")
+        .get_by_role_and_label(Role::Label, "$286,959.06")
         .rect();
     // The Account bar's footer ends where the Status bar, and its Net Worth, begin.
     let gap = net_worth.top() - add_account.bottom();

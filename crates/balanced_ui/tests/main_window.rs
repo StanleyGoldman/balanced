@@ -267,6 +267,7 @@ fn the_account_bar_header_holds_only_the_fold_button() {
         .map(|button| button.accesskit_node().label().unwrap_or_default())
         .collect();
     assert_eq!(header, ["Fold the Account bar"]);
+}
 
 /// Opens `account` from the Account bar.
 fn open_account(harness: &mut Harness<'static, App>, account: &str) {
