@@ -98,6 +98,7 @@ The `woodpecker` skill (`.claude/skills/woodpecker/SKILL.md`) reads and drives C
 - Open pull requests and leave merging to a human; never merge one yourself.
 - Stage by explicit path (`git add <paths>`) and check `git status` before committing: untracked output from another branch (e.g. build or prototype output ignored only on that branch) survives `git switch`.
 - Leave remote branches to GitHub, which deletes a PR's head branch when it merges; cleanup after a merge covers only local branches and worktrees.
+- Each worktree's `target/` grows to tens of GB and outlives the merge. Run `.claude/scripts/clean-merged-targets.sh` at the start of an `/implement` run, and whenever a build fails with `No space left on device`; it deletes `target/` only for worktrees whose PR merged or closed (contract in its header).
 - Before pushing to an existing PR's branch, check the PR is still open (`gh pr view <n> --json state`); once it has merged, put follow-ups on a fresh branch from `origin/main` and open a new PR.
 - Whenever you push to a pull request, update its title and description to cover everything it now contains.
 - **Stack** a PR whose branch builds on another open PR's branch, with `gh stack`, and offer a stack when you foresee two PRs conflicting if merged one at a time. See `docs/agents/stacked-prs.md`.
