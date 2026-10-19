@@ -390,3 +390,43 @@ pub(crate) fn transaction_row(
         allocation,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn out_of_range() -> WriteError {
+        WriteError::AmountOutOfRange(i64::try_from(u128::MAX).unwrap_err())
+    }
+
+    fn store_error() -> Arc<StoreError> {
+        Arc::new(StoreError::AlreadyExists(PathBuf::from(
+            "Household.balanced",
+        )))
+    }
+
+    #[test]
+    fn two_out_of_range_amounts_are_the_same_error() {
+        assert_eq!(out_of_range(), out_of_range());
+    }
+
+    #[test]
+    fn an_out_of_range_amount_is_not_a_sqlite_failure() {
+        assert_ne!(out_of_range(), WriteError::Sqlite(store_error()));
+    }
+
+    #[test]
+    fn rollback_failures_of_different_changes_are_different_errors() {
+        let source = store_error();
+        let rollback_failed = |change| WriteError::RollbackFailed {
+            change: Box::new(change),
+            source: Arc::clone(&source),
+        };
+        assert_ne!(
+            rollback_failed(DomainError::BlankAccountName),
+            rollback_failed(DomainError::UnknownAccount {
+                account: AccountId::new(0),
+            }),
+        );
+    }
+}
