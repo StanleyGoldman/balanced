@@ -13,6 +13,17 @@ pub enum AccountGroup {
     PropertyDebt,
 }
 
+impl AccountGroup {
+    /// The group's place in Account bar order, counting from 0.
+    pub(crate) fn index(self) -> usize {
+        match self {
+            Self::Banking => 0,
+            Self::Investing => 1,
+            Self::PropertyDebt => 2,
+        }
+    }
+}
+
 /// What an account holds. Each kind is one sub-group of one fixed [`AccountGroup`].
 ///
 /// Kinds are declared, and ordered, the way the Account bar lists their sub-groups:
@@ -83,6 +94,11 @@ impl AccountId {
     pub(crate) fn next(self) -> Self {
         Self(self.0 + 1)
     }
+
+    /// The id as the data file stores it.
+    pub(crate) fn raw(self) -> u32 {
+        self.0
+    }
 }
 
 /// An account: its name, its kind, its currency, and whether it is hidden or closed.
@@ -100,6 +116,24 @@ pub struct Account {
 }
 
 impl Account {
+    pub(crate) fn new(
+        id: AccountId,
+        name: String,
+        kind: AccountKind,
+        currency: CurrencyCode,
+        visibility: Visibility,
+        status: AccountStatus,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            kind,
+            currency,
+            hidden: visibility == Visibility::Hidden,
+            closed: status == AccountStatus::Closed,
+        }
+    }
+
     pub fn id(&self) -> AccountId {
         self.id
     }

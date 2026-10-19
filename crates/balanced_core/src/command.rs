@@ -5,7 +5,7 @@ use icu_calendar::{Date, Iso};
 
 use crate::{
     Account, AccountId, AccountKind, AccountStatus, Category, CategoryId, Money, MoneyError,
-    NewTransaction, Transaction, TransactionId, Visibility,
+    NewTransaction, Transaction, TransactionId, Visibility, WriteError,
 };
 
 /// A change to the ledger. `Ledger::apply` applies it, or rejects it with a
@@ -191,4 +191,13 @@ pub enum DomainError {
     /// The command gave a transaction an amount in another currency than its account's.
     #[error("the amount is in another currency than the account: {transaction:?}")]
     CurrencyMismatch { transaction: TransactionId },
+    /// The data file couldn't take the change.
+    #[error(transparent)]
+    Store(#[from] WriteError),
+}
+
+impl From<balanced_store::StoreError> for DomainError {
+    fn from(error: balanced_store::StoreError) -> Self {
+        Self::Store(error.into())
+    }
 }

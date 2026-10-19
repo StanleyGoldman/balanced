@@ -6,7 +6,8 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-rusqlite.workspace = true
+# `cache` keeps the prepared INSERTs a large account is written with.
+rusqlite = { workspace = true, features = ["cache"] }
 thiserror.workspace = true
 
 [dev-dependencies]

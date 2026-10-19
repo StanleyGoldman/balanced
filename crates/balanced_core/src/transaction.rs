@@ -18,6 +18,11 @@ impl TransactionId {
     pub(crate) fn next(self) -> Self {
         Self(self.0 + 1)
     }
+
+    /// The id as the data file stores it.
+    pub(crate) fn raw(self) -> u32 {
+        self.0
+    }
 }
 
 /// One line of a split transaction: part of its amount, in one category.
@@ -76,6 +81,28 @@ pub struct Transaction {
 }
 
 impl Transaction {
+    /// A transaction as the data file holds it, whose amount is `amount`: the sum of
+    /// the lines, for a split transaction.
+    pub(crate) fn from_parts(
+        id: TransactionId,
+        date: Date<Iso>,
+        number: Option<String>,
+        payee: String,
+        memo: String,
+        allocation: Allocation,
+        amount: Money,
+    ) -> Self {
+        Self {
+            id,
+            date,
+            number,
+            payee,
+            memo,
+            allocation,
+            amount,
+        }
+    }
+
     pub fn id(&self) -> TransactionId {
         self.id
     }
