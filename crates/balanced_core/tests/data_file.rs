@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use balanced_core::{
     AccountGroup, AccountId, AccountKind, AccountStatus, AccountSummary, Category, CategoryId,
     CurrencyCode, DomainCommand, DomainError, Ledger, LedgerView, Money, MoneyError, MoveDirection,
-    NewTransaction, SplitLine, TransactionEdit, TransactionId, Visibility,
+    NewTransaction, SplitLine, TransactionEdit, TransactionId, Visibility, WriteError,
 };
 use icu_calendar::{Date, Iso};
 use tempfile::TempDir;
@@ -436,12 +436,12 @@ fn a_posted_transaction_is_there_after_a_reopen() {
 /// Costco, on the 12th: groceries and household goods, split between `food` and
 /// `household`.
 fn costco(food: CategoryId, household: CategoryId) -> NewTransaction {
-    NewTransaction::split(
+    NewTransaction::split_for_tests(
         date(12),
         "Costco",
         vec![
-            SplitLine::new(food, "Food", usd("-142.37")),
-            SplitLine::new(household, "Paper towels, detergent", usd("-63.90")),
+            SplitLine::for_tests(food, "Food", usd("-142.37")),
+            SplitLine::for_tests(household, "Paper towels, detergent", usd("-63.90")),
         ],
     )
 }
@@ -648,6 +648,11 @@ fn every_command(h: &Household) -> Vec<DomainCommand> {
         edit(TransactionEdit::Memo("Weekly shop".to_owned())),
         edit(TransactionEdit::Category(h.fuel)),
         edit(TransactionEdit::Amount(usd("-90.00"))),
+        // A split's lines stay with it through an edit to its other fields.
+        DomainCommand::EditTransaction {
+            transaction: h.split,
+            edit: TransactionEdit::Payee("Costco Wholesale".to_owned()),
+        },
         DomainCommand::DeleteTransaction {
             transaction: h.split,
         },
@@ -764,10 +769,10 @@ fn an_amount_beyond_the_files_range_leaves_memory_undo_and_the_file_as_they_were
         },
         |h, amount| DomainCommand::PostTransaction {
             account: h.everyday,
-            transaction: NewTransaction::split(
+            transaction: NewTransaction::split_for_tests(
                 date(4),
                 "Lottery",
-                vec![SplitLine::new(h.food, "Prize", amount)],
+                vec![SplitLine::for_tests(h.food, "Prize", amount)],
             ),
         },
         |h, amount| DomainCommand::EditTransaction {
@@ -788,7 +793,13 @@ fn an_amount_beyond_the_files_range_leaves_memory_undo_and_the_file_as_they_were
             command(&h, too_large),
         ]));
 
-        assert!(matches!(result, Err(DomainError::Store(_))), "{result:?}");
+        assert!(
+            matches!(
+                result,
+                Err(DomainError::Store(WriteError::AmountOutOfRange(_)))
+            ),
+            "{result:?}"
+        );
         assert_eq!(ledger.snapshot(), before);
         ledger.undo().expect("the last change before still undoes");
         let undone = contents(&ledger.snapshot());

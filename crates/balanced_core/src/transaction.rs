@@ -34,12 +34,18 @@ pub struct SplitLine {
 }
 
 impl SplitLine {
-    pub fn new(category: CategoryId, memo: &str, amount: Money) -> Self {
+    pub(crate) fn new(category: CategoryId, memo: &str, amount: Money) -> Self {
         Self {
             category,
             memo: memo.to_owned(),
             amount,
         }
+    }
+
+    /// A line in `category`, for tests outside the crate's own code.
+    #[cfg(feature = "test-support")]
+    pub fn for_tests(category: CategoryId, memo: &str, amount: Money) -> Self {
+        Self::new(category, memo, amount)
     }
 
     pub fn category(&self) -> CategoryId {
@@ -239,8 +245,14 @@ impl NewTransaction {
     }
 
     /// A transaction with `payee`, divided between `lines`.
-    pub fn split(date: Date<Iso>, payee: &str, lines: Vec<SplitLine>) -> Self {
+    pub(crate) fn split(date: Date<Iso>, payee: &str, lines: Vec<SplitLine>) -> Self {
         Self::with_allocation(date, payee, NewAllocation::Split(lines))
+    }
+
+    /// A split transaction, for tests outside the crate's own code.
+    #[cfg(feature = "test-support")]
+    pub fn split_for_tests(date: Date<Iso>, payee: &str, lines: Vec<SplitLine>) -> Self {
+        Self::split(date, payee, lines)
     }
 
     fn with_allocation(date: Date<Iso>, payee: &str, allocation: NewAllocation) -> Self {

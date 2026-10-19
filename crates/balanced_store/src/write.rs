@@ -150,32 +150,15 @@ impl Store {
 
     /// Replaces transaction `transaction.id`, with its split lines, by `transaction`.
     pub fn update_transaction(&self, transaction: &TransactionRow) -> Result<(), StoreError> {
-        let (allocation, amount, category_id) = allocation_columns(&transaction.allocation);
-        self.delete_split_lines(transaction.id)?;
-        self.connection
-            .prepare_cached(
-                "UPDATE \"transaction\"
-                 SET account_id = ?2, date = ?3, number = ?4, payee = ?5, memo = ?6,
-                     allocation = ?7, amount = ?8, category_id = ?9
-                 WHERE id = ?1",
-            )?
-            .execute(params![
-                transaction.id,
-                transaction.account_id,
-                transaction.date,
-                transaction.number,
-                transaction.payee,
-                transaction.memo,
-                allocation,
-                amount,
-                category_id,
-            ])?;
-        self.insert_split_lines(transaction)
+        // Ids are inserted explicitly, so the row goes back in under its own id.
+        self.delete_transaction(transaction.id)?;
+        self.insert_transaction(transaction)
     }
 
     /// Deletes transaction `id` with its split lines.
     pub fn delete_transaction(&self, id: u32) -> Result<(), StoreError> {
-        self.delete_split_lines(id)?;
+        self.connection
+            .execute("DELETE FROM split_line WHERE transaction_id = ?1", [id])?;
         self.connection
             .execute("DELETE FROM \"transaction\" WHERE id = ?1", [id])?;
         Ok(())
@@ -198,13 +181,6 @@ impl Store {
                 ])?;
             }
         }
-        Ok(())
-    }
-
-    /// Deletes the split lines of transaction `id`.
-    fn delete_split_lines(&self, id: u32) -> Result<(), StoreError> {
-        self.connection
-            .execute("DELETE FROM split_line WHERE transaction_id = ?1", [id])?;
         Ok(())
     }
 }

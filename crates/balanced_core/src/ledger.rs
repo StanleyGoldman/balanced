@@ -825,7 +825,6 @@ impl Ledger {
         let old = &self.view.accounts[position.account].register[position.entry].transaction;
         let undo = old.undoing(&edit);
         let edited = old.edited(edit)?;
-        // Written once the ledger's own rules have passed, so their errors come first.
         let row = transaction_row(self.view.accounts[position.account].account.id(), &edited);
         // The account is rebuilt, since a new amount moves every balance after it, and a
         // new date moves the transaction into date order.
@@ -840,6 +839,7 @@ impl Ledger {
                     }
                 })?;
         self.replace_account(position.account, summary)?;
+        // The row is checked only now, so the ledger's own errors come first.
         self.store.update_transaction(&row?)?;
         Ok(DomainCommand::EditTransaction {
             transaction: id,
