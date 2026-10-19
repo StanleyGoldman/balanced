@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Prompt: the agent's next instruction to the user, shown in a bottom panel of the window.
 //!
 //! This module parses the `prompt` control command; [`crate::Harness`] stores, draws and logs it.

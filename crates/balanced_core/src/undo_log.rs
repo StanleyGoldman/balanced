@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The undo log's entries: each a [`DomainCommand`] as JSON, through the wire types in
 //! [`v1`], which `DomainCommand` itself doesn't depend on (ADR 0007).
 

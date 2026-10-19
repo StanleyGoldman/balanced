@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 use anyhow::{Context as _, Result, bail};
 
 use crate::{Task, process};

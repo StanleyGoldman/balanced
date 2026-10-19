@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Formatting and parsing money amounts in the formatting locale.
 //!
 //! Formatting is built on `icu_experimental`'s `CurrencyFormatter`, pinned to an exact

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Upgrading a data file from an older Balanced, driven by migrations the tests define on
 //! top of Balanced's own: the backup taken first, the upgrade itself, and what a failure
 //! leaves behind.

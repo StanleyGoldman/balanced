@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The user-action list: what the Menu bar and the keymap offer, each action's label
 //! and the [`AppCommand`] it sends.
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The Main window: Menu bar, tab row, Account bar, Main view and Status bar.
 
 use std::path::PathBuf;

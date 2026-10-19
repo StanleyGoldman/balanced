@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Picking a data file to create or open, and why one was refused, as the refusal
 //! Dialog says it.
 

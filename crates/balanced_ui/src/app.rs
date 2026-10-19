@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`App`]: the eframe application, which owns the open data file's ledger, the Main
 //! window and the welcome screen.
 

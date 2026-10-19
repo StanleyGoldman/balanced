@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The keymap: one fixed table of each user action's default chords. It feeds both
 //! the Shortcut text beside menu items and the per-frame dispatcher.
 

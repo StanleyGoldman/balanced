@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Deleting a transaction through its confirm Dialog, and the Dialog keys every light
 //! Dialog shares, driven through the AccessKit tree the way a user drives it.
 

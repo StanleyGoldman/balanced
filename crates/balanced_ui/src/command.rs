@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`AppCommand`]s and the [`CommandSender`] that carries them to `App::logic`.
 
 use std::path::PathBuf;

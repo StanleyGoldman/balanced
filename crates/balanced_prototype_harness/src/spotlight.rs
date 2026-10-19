@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Spotlight: dims the window except the tracked widgets and regions its targets name.
 //!
 //! This module holds the window-free parts (command parsing, target matching and the overlay

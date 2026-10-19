@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Creating and opening a data file, and the transactions every write runs in.
 
 use std::fs::{self, File};

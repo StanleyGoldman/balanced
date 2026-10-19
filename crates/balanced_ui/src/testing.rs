@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Support for tests: the App drawn by the lavapipe software rasterizer, and the
 //! snapshot check with the project thresholds (see `docs/practices/testing.md`).
 

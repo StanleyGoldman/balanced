@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`RegisterModel`]: one account's transactions as the Register shows them, with every
 //! cell's text already formatted.
 

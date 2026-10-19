@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! `cargo xtask adrs`: every decision record carries its own number.
 //!
 //! Two pull requests can each add a record with the same number and both merge

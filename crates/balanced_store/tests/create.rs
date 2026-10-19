@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Creating a data file, observed by reopening it with plain SQLite.
 
 use balanced_store::{Store, StoreError};

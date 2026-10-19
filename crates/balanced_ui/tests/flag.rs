@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Flagging transactions from the Register's Flag column and its Actions menu, driven
 //! through the AccessKit tree the way a user drives it.
 

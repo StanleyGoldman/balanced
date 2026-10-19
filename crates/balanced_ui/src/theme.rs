@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The theme: Balanced's one look, in light and dark, shaped by the Preferences that
 //! affect it. This is the one module that builds colours.
 

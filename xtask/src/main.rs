@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Workspace automation, run as `cargo xtask <task>`.
 //!
 //! Every check a CI runs lives here, so any CI provider only has to call
@@ -11,6 +13,7 @@
 mod adrs;
 mod ci;
 mod clippy;
+mod dco;
 mod deny;
 mod fmt;
 mod layers;
@@ -18,6 +21,7 @@ mod locales;
 mod mutants;
 mod process;
 mod snapshots;
+mod spdx;
 mod test;
 mod todo;
 mod typos;
@@ -51,7 +55,9 @@ const TASKS: &[Task] = &[
     layers::TASK,
     typos::TASK,
     todo::TASK,
+    spdx::TASK,
     adrs::TASK,
+    dco::TASK,
     mutants::TASK,
     mutants::shard::TASK,
     mutants::landed::TASK,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The welcome screen: what the App shows while no data file is open, at first run or
 //! when the data file opened last was refused.
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The Preferences Dialog's form: a draft of the Preferences, edited one group at a
 //! time. The App shows the draft while the Dialog is open.
 

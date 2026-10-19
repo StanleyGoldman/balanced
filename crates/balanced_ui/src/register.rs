@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The Register: one account's transactions in a table, one row each, with the running
 //! balance after each.
 

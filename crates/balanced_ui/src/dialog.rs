@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The modal helper: how every Dialog dims the Main window, takes Esc and Enter, keeps
 //! inside the window and gives focus back when it closes.
 

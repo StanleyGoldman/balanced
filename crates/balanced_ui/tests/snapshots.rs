@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Image snapshots of the layout-critical views, in light and dark. They are checked on
 //! Linux only, by `cargo xtask snapshots` (see `docs/practices/testing.md`).
 

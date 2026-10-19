@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The rows the store reads and writes, in primitive types: ids as `u32`, amounts as
 //! `i64` minor units, dates as ISO `YYYY-MM-DD` text, and enums as their TEXT names.
 

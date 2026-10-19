@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The draft row at the bottom of each Register, which adds transactions.
 
 use balanced_core::Ledger;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Starting the App from the Recent files: the newest opens, and with none, or with
 //! the newest refused, the welcome Dialog asks for a data file. The native file picker
 //! can't be driven, so a test that picks a file sends the Command the picker sends.

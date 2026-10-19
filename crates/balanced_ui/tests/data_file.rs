@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Creating and opening data files from the App. The native file picker can't be
 //! driven, so each test starts at the path it would return, sending the Command that
 //! File → New Data File… or File → Open Data File… sends once a path is picked.

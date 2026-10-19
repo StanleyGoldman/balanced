@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The in-memory data Balanced runs on until it reads data files.
 
 use icu_calendar::{Date, Iso};

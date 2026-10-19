@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Version 1 of the undo log's wire format: a `DomainCommand` as JSON. The format is part
 //! of the data file's schema version. Adding a Command or an optional field keeps it;
 //! any other change needs a migration that clears the log (ADR 0007).

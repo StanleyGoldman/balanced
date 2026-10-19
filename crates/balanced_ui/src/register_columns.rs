@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`RegisterColumn`], a column of the Register, and [`RegisterColumns`], which of them
 //! every Register shows and in what order.
 

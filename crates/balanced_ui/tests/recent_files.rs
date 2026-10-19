@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The Recent files: opening or creating a data file moves it to the top of
 //! `recent-files.toml`, and the File menu lists them. The native file picker can't be
 //! driven, so a test that picks a file sends the Command the picker sends.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Runs every `tests/slt/*.slt` file against a new data file. Each file is one test and
 //! gets a file of its own, made by `Store::create`, so the SQL under test is the schema
 //! the app creates.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`AccountsModel`]: the accounts as the Account bar and the context header show them,
 //! with every amount already formatted.
 

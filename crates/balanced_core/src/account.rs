@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Accounts: what kind each is, the fixed group its kind belongs to, and its flags.
 
 use icu_calendar::{Date, Iso};

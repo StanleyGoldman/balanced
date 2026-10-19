@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! A `Ledger` over a data file from an older Balanced: what the upgrade on open keeps of
 //! the undo log, driven by migrations the tests define on top of Balanced's own.
 

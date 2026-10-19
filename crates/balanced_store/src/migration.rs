@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The schema, built up by numbered migrations. A file's `user_version` is the number of
 //! migrations it has had.
 

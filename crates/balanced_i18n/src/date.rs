@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! How the formatting locale writes a date as numbers, and reading typed dates back.
 
 use icu_calendar::{Date, Iso};

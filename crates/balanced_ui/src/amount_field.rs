@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The amount field's rules, shared by every field that takes an amount: the
 //! characters it refuses, the result of arithmetic typed in it, and why it refuses its
 //! text.

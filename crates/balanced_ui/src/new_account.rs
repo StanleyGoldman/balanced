@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The New Account wizard: a light Dialog that steps through an account's type, its
 //! name and its opening balance, then reviews them before creating the account.
 //!

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`Preferences`]: the choices that apply to every data file on this computer, and
 //! [`PreferencesFile`], which keeps them in `preferences.toml`.
 

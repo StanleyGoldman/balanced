@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`Clock`]: where today's date comes from. It is the one place that reads the time,
 //! so tests can fix the date.
 

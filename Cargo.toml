@@ -7,6 +7,7 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.99"
 publish = false
+license = "GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"
 
 [workspace.dependencies]
 anyhow = "1.0.104"

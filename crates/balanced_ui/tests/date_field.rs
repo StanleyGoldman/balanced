@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The Register's segmented date field, driven through the AccessKit tree the way a
 //! user drives it, on a clock stopped on Wednesday 14 October 2026.
 

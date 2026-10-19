@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! A square button showing a painted triangle, for arrows egui's fonts lack.
 
 use eframe::egui::{self, Rect, Response, Sense, Shape, Stroke, WidgetInfo, WidgetType, vec2};
