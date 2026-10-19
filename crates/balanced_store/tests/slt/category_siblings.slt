@@ -1,0 +1,23 @@
+# Sibling categories can't share a name that differs only in ASCII case. Categories
+# under different parents can. Wider case folding is Ledger's check, not the file's.
+
+statement ok
+INSERT INTO category (id, parent_id, name) VALUES
+    (0, NULL, 'Food'),
+    (1, NULL, 'Home'),
+    (2, 0, 'Supplies'),
+    (3, 1, 'Supplies')
+
+statement error UNIQUE constraint failed: index 'category_sibling_name'
+INSERT INTO category (id, parent_id, name) VALUES (4, NULL, 'FOOD')
+
+statement error UNIQUE constraint failed: index 'category_sibling_name'
+INSERT INTO category (id, parent_id, name) VALUES (4, 0, 'supplies')
+
+# A top-level name can repeat a child's name.
+statement ok
+INSERT INTO category (id, parent_id, name) VALUES (4, NULL, 'Supplies')
+
+# Non-ASCII letters are compared as written: these two differ only in case.
+statement ok
+INSERT INTO category (id, parent_id, name) VALUES (5, NULL, 'Électricité'), (6, NULL, 'électricité')

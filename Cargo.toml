@@ -13,6 +13,7 @@ anyhow = "1.0.104"
 balanced_core = { path = "crates/balanced_core" }
 balanced_i18n = { path = "crates/balanced_i18n" }
 balanced_prototype_harness = { path = "crates/balanced_prototype_harness" }
+balanced_store = { path = "crates/balanced_store" }
 balanced_ui = { path = "crates/balanced_ui" }
 directories = "6.0.0"
 egui = { version = "0.36.2", default-features = false }
@@ -41,6 +42,9 @@ rust-embed = "8.13.0"
 # serialise as strings.
 rust_decimal = { version = "1.43.0", default-features = false, features = ["std"] }
 rust_decimal_macros = "1.40.0"
+# `bundled` compiles SQLite 3.53.2 into the app, so a rusqlite upgrade is also a SQLite upgrade.
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+sqllogictest = "0.29.1"
 serde = { version = "1.0.229", features = ["derive"] }
 sys-locale = "0.3.2"
 thiserror = "2.0.21"

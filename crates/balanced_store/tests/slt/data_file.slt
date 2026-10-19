@@ -1,0 +1,15 @@
+# The file has one data_file row, holding a three-letter ISO 4217 currency code.
+
+query T nosort
+SELECT currency FROM data_file
+----
+USD
+
+statement error CHECK constraint failed: data_file_one_row
+INSERT INTO data_file (id, currency) VALUES (2, 'EUR')
+
+statement error CHECK constraint failed: data_file_currency_code
+UPDATE data_file SET currency = 'usd'
+
+statement error CHECK constraint failed: data_file_currency_code
+UPDATE data_file SET currency = 'USDT'

@@ -1,0 +1,35 @@
+# Running balances accumulate per account in register order: by date, then by id.
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES
+    (0, 'Checking', 'checking', 0, 0, 0),
+    (1, 'Savings', 'savings', 0, 0, 0)
+
+statement ok
+INSERT INTO category (id, parent_id, name) VALUES (0, NULL, 'Groceries')
+
+# Ids run against the dates: transaction 3 is the earliest after the opening balance,
+# and 4 and 2 share a date, so 2 comes first.
+statement ok
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (0, 0, '2026-01-01', NULL, '', '', 'opening_balance', 1000, NULL),
+    (1, 1, '2026-01-01', NULL, '', '', 'opening_balance', 5000, NULL),
+    (4, 0, '2026-01-05', NULL, 'Grocer', '', 'category', -100, 0),
+    (2, 0, '2026-01-05', NULL, 'Grocer', '', 'category', -10, 0),
+    (3, 0, '2026-01-03', NULL, 'Market', '', 'split', NULL, NULL),
+    (5, 1, '2026-01-02', NULL, 'Bank', '', 'category', 7, 0)
+
+statement ok
+INSERT INTO split_line (transaction_id, position, category_id, memo, amount) VALUES
+    (3, 0, 0, '', -1),
+    (3, 1, 0, '', -2)
+
+query ITII nosort
+SELECT account_id, date, transaction_id, balance FROM register_entry ORDER BY account_id, date, transaction_id
+----
+0 2026-01-01 0 1000
+0 2026-01-03 3 997
+0 2026-01-05 2 987
+0 2026-01-05 4 887
+1 2026-01-01 1 5000
+1 2026-01-02 5 5007

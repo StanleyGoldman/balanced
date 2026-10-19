@@ -1,0 +1,60 @@
+# A transaction's shape follows its allocation. A split stores neither an amount nor a
+# category; a categorised transaction has both; an opening balance has an amount, no
+# payee and no category, and an account has at most one.
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES
+    (0, 'Checking', 'checking', 0, 0, 0),
+    (1, 'Savings', 'savings', 0, 0, 0)
+
+statement ok
+INSERT INTO category (id, parent_id, name) VALUES (0, NULL, 'Groceries')
+
+statement ok
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (0, 0, '2026-01-01', NULL, '', 'Starting out', 'opening_balance', 100, NULL),
+    (1, 0, '2026-01-02', NULL, 'Grocer', '', 'category', -1, 0),
+    (2, 0, '2026-01-03', NULL, 'Market', '', 'split', NULL, NULL)
+
+statement error CHECK constraint failed: transaction_amount_unless_split
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (3, 0, '2026-01-03', NULL, 'Market', '', 'split', -5, NULL)
+
+statement error CHECK constraint failed: transaction_category_when_category
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (3, 0, '2026-01-03', NULL, 'Market', '', 'split', NULL, 0)
+
+statement error CHECK constraint failed: transaction_amount_unless_split
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (3, 0, '2026-01-03', NULL, 'Grocer', '', 'category', NULL, 0)
+
+statement error CHECK constraint failed: transaction_category_when_category
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (3, 0, '2026-01-03', NULL, 'Grocer', '', 'category', -1, NULL)
+
+statement error CHECK constraint failed: transaction_amount_unless_split
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (3, 1, '2026-01-01', NULL, '', '', 'opening_balance', NULL, NULL)
+
+statement error CHECK constraint failed: transaction_opening_balance_no_payee
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (3, 1, '2026-01-01', NULL, 'Bank', '', 'opening_balance', 100, NULL)
+
+statement error CHECK constraint failed: transaction_category_when_category
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (3, 1, '2026-01-01', NULL, '', '', 'opening_balance', 100, 0)
+
+statement error UNIQUE constraint failed: transaction.account_id
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (3, 0, '2026-01-05', NULL, '', '', 'opening_balance', 100, NULL)
+
+statement ok
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (3, 1, '2026-01-01', NULL, '', '', 'opening_balance', 100, NULL)
+
+# Turning a split into a categorised transaction needs its amount and category set too.
+statement error CHECK constraint failed: transaction_amount_unless_split
+UPDATE "transaction" SET allocation = 'category' WHERE id = 2
+
+statement ok
+UPDATE "transaction" SET allocation = 'category', amount = -3, category_id = 0 WHERE id = 2

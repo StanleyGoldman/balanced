@@ -1,0 +1,23 @@
+# The closed total sums every closed account, whatever its group.
+
+query I nosort
+SELECT total FROM closed_total
+----
+0
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES
+    (0, 'Checking', 'checking', 0, 0, 0),
+    (1, 'Old savings', 'savings', 0, 1, 1),
+    (2, 'Car', 'asset', 0, 0, 1)
+
+statement ok
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (0, 0, '2026-01-01', NULL, '', '', 'opening_balance', 1000, NULL),
+    (1, 1, '2026-01-01', NULL, '', '', 'opening_balance', 30, NULL),
+    (2, 2, '2026-01-01', NULL, '', '', 'opening_balance', 900, NULL)
+
+query I nosort
+SELECT total FROM closed_total
+----
+930

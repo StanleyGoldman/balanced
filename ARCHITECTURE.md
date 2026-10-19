@@ -22,9 +22,8 @@ The workspace is flat. Each crate sits in `crates/<name>/`, except `xtask/`.
 - **`balanced_core`**: the financial domain. It holds accounts, transactions, money, `DomainCommand`, the `Ledger` (`apply` and `snapshot`), undo and redo, and `DomainError`.
 - **`balanced_i18n`**: message lookup, the locale fallback chain, and locale-aware formatting of numbers, dates and money.
 - **`balanced_prototype_harness`**: tooling for prototypes, not part of the app. It provides the event log, screenshots, F2/F3 notes and markers, and the agent's control file (see `docs/agents/prototypes.md`). It depends on egui but knows nothing of Balanced's domain. Only prototype examples use it, as a dev-dependency.
+- **`balanced_store`**: the data file, a SQLite database. It creates the file, runs the migrations that build its schema, and holds all of Balanced's SQL, including the views that serve as the test oracle for `Ledger`'s derived numbers. It depends on no workspace crate, and its API speaks in primitive rows (integer ids, minor units, ISO date text). Nothing uses it yet; `balanced_core` will sit on it.
 - **`xtask`**: repo automation, run as `cargo xtask <task>`, including every check (`cargo xtask ci`).
-
-A persistence crate, `balanced_store`, comes later, below `balanced_core`.
 
 ## Invariants
 

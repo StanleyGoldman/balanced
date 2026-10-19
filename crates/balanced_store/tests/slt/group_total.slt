@@ -1,0 +1,25 @@
+# A group's total sums the balances of its open accounts, hidden ones included. Closed
+# accounts count in no group, and a group with no open accounts totals 0.
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES
+    (0, 'Checking', 'checking', 0, 0, 0),
+    (1, 'Card', 'credit_card', 0, 1, 0),
+    (2, 'Old savings', 'savings', 0, 0, 1),
+    (3, 'IRA', 'retirement', 0, 0, 0),
+    (4, 'Car', 'asset', 0, 0, 1)
+
+statement ok
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (0, 0, '2026-01-01', NULL, '', '', 'opening_balance', 1000, NULL),
+    (1, 1, '2026-01-01', NULL, '', '', 'opening_balance', -300, NULL),
+    (2, 2, '2026-01-01', NULL, '', '', 'opening_balance', 50000, NULL),
+    (3, 3, '2026-01-01', NULL, '', '', 'opening_balance', 7, NULL),
+    (4, 4, '2026-01-01', NULL, '', '', 'opening_balance', 900, NULL)
+
+query TI rowsort
+SELECT account_group, total FROM group_total
+----
+banking 700
+investing 7
+property_debt 0
