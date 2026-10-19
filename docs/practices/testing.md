@@ -47,6 +47,7 @@ The tests live in `crates/balanced_ui/tests/snapshots.rs`, and the images in `cr
 - **A crash is not a diff:** a snapshot test can die with `SIGSEGV` (signal 11) inside lavapipe, with no image compared. nextest runs each test in its own process, so the crash fails only that test, reported as `SIGSEGV` rather than `FAIL`, and the rest still pass or fail on their images. Rerun `cargo xtask snapshots`. A test that crashes again is a bug to investigate.
 - **Reviewing a failure:** kittest writes `<name>.new.png` and `<name>.diff.png` beside the snapshot (both gitignored). Look at both images and name every changed region. A change the code was meant to make gets updated; anything else is a bug to fix.
 - **Updating:** `UPDATE_SNAPSHOTS=1 cargo xtask snapshots` rewrites the failing snapshots. Commit each new PNG with the code that changed it, and say in the PR which views changed and why. A snapshot that fails on noise is fixed in the test setup; the thresholds stay put.
+- **A merge conflict:** git can't merge a PNG, so a snapshot that both sides redrew stops a merge whenever `main` moves. Check out either side (`git checkout --theirs <png>`), regenerate it with `UPDATE_SNAPSHOTS=1 cargo xtask snapshots`, and open the new image to confirm it shows both sides' changes before you `git add` it. A PR whose snapshots overlap a busy area of `main`, such as the Register, can conflict again after each merge, so check `gh pr view <n> --json mergeable` after pushing.
 
 ## Mutation testing
 
