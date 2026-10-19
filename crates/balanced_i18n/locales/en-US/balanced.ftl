@@ -86,8 +86,8 @@ account-bar-unfold = Unfold the { -account-bar }
 account-bar-open-register = Open { -register }
 account-bar-reconcile = Reconcile
 account-bar-manage-accounts = Manage Accounts…
-# The button in the Account bar's header that opens the New Account wizard.
-account-bar-new-account = + Account
+# The button in the Account bar's footer that opens the New Account wizard.
+account-bar-new-account = + Add Account
 
 ## Register
 

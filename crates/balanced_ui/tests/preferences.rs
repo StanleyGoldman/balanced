@@ -345,6 +345,28 @@ fn net_worth_moves_to_the_status_bar() {
 }
 
 #[test]
+fn add_account_stays_at_the_foot_of_the_account_bar_with_net_worth_in_the_status_bar() {
+    let dir = config_dir();
+    let mut harness = app_in(dir.path());
+    open_preferences(&mut harness);
+    show_group(&mut harness, "Account bar");
+
+    click(&mut harness, Role::RadioButton, "In the Status bar");
+    click(&mut harness, Role::Button, "OK");
+
+    let add_account = harness
+        .get_by_role_and_label(Role::Button, "+ Add Account")
+        .rect();
+    let net_worth = harness
+        .get_by_role(Role::Status)
+        .get_by_role_and_label(Role::Label, "$288,497.71")
+        .rect();
+    // The Account bar's footer ends where the Status bar, and its Net Worth, begin.
+    let gap = net_worth.top() - add_account.bottom();
+    assert!((0.0..add_account.height()).contains(&gap), "{gap}");
+}
+
+#[test]
 fn net_worth_previews_in_the_status_bar() {
     let dir = config_dir();
     let mut harness = app_in(dir.path());

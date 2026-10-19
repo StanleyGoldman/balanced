@@ -66,7 +66,7 @@ account-bar-unfold = { -account-bar } ausklappen
 account-bar-open-register = { -register } öffnen
 account-bar-reconcile = Abgleichen
 account-bar-manage-accounts = Konten verwalten …
-account-bar-new-account = + Konto
+account-bar-new-account = + Konto hinzufügen
 
 ## Register
 
