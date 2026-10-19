@@ -396,7 +396,9 @@ mod tests {
     use super::*;
 
     fn out_of_range() -> WriteError {
-        WriteError::AmountOutOfRange(i64::try_from(u128::MAX).unwrap_err())
+        WriteError::AmountOutOfRange(
+            i64::try_from(u128::MAX).expect_err("u128::MAX doesn't fit in an i64"),
+        )
     }
 
     fn store_error() -> Arc<StoreError> {
@@ -416,12 +418,27 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_failures_are_the_same_error_only_when_they_are_one_failure() {
+        let failure = store_error();
+
+        assert_eq!(
+            WriteError::Sqlite(Arc::clone(&failure)),
+            WriteError::Sqlite(failure),
+        );
+        assert_ne!(
+            WriteError::Sqlite(store_error()),
+            WriteError::Sqlite(store_error()),
+        );
+    }
+
+    #[test]
     fn rollback_failures_of_different_changes_are_different_errors() {
         let source = store_error();
         let rollback_failed = |change| WriteError::RollbackFailed {
             change: Box::new(change),
             source: Arc::clone(&source),
         };
+
         assert_ne!(
             rollback_failed(DomainError::BlankAccountName),
             rollback_failed(DomainError::UnknownAccount {
