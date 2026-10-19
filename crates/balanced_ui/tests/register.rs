@@ -1409,9 +1409,13 @@ fn clicking_payment_or_deposit_sorts_by_the_signed_amount() {
     sort_by(&mut harness, "Deposit");
     let by_deposit = column(&harness, "Payee");
 
+    // The two rents of -1,450.00 come first, and the -92.10 power bill before the
+    // -88.65 one.
     let smallest_first = [
         "Maple Property Management",
+        "Maple Property Management",
         "Costco",
+        "City Power & Light",
         "City Power & Light",
         "Fresh Market",
         "Trattoria Roma",
