@@ -130,7 +130,7 @@ impl Default for Preferences {
 /// The version of the file's format this build writes. A rename, or a change in what a
 /// key means, bumps it and adds a step to [`migrate`]. Adding or removing a key does
 /// not: a missing key takes its default, and an unknown key is ignored.
-const VERSION: i64 = 1;
+const VERSION: i64 = 2;
 
 /// The key holding the file's format version.
 const VERSION_KEY: &str = "version";
@@ -144,10 +144,30 @@ struct Contents<'a> {
 }
 
 /// Brings `table`, read from a file in format `version`, up to [`VERSION`].
-fn migrate(table: toml::Table, version: i64) -> Result<toml::Table, LoadError> {
+fn migrate(mut table: toml::Table, version: i64) -> Result<toml::Table, LoadError> {
     match version {
+        1 => {
+            split_amount_column(&mut table);
+            migrate(table, 2)
+        }
         VERSION => Ok(table),
         _ => Err(LoadError::UnknownVersion(version)),
+    }
+}
+
+/// Version 1 to 2: the Amount column became Payment and Deposit, which take its place
+/// in the saved column order. Amount couldn't be hidden, so the hidden list has none.
+fn split_amount_column(table: &mut toml::Table) {
+    let Some(toml::Value::Array(order)) = table.get_mut("register_columns") else {
+        return;
+    };
+    let ids = std::mem::take(order);
+    for id in ids {
+        if id.as_str() == Some("amount") {
+            order.extend(["payment", "deposit"].map(toml::Value::from));
+        } else {
+            order.push(id);
+        }
     }
 }
 
@@ -197,7 +217,8 @@ impl PreferencesFile {
         };
         let table: toml::Table = toml::from_str(&text)?;
         let version = match table.get(VERSION_KEY) {
-            None => VERSION,
+            // Version 1 was the first, so a file without a version is in it.
+            None => 1,
             Some(toml::Value::Integer(version)) => *version,
             Some(_) => return Err(LoadError::VersionNotANumber),
         };
@@ -370,6 +391,34 @@ mod tests {
     }
 
     #[test]
+    fn a_version_1_file_puts_payment_and_deposit_where_amount_was() {
+        let (dir, file) = file();
+        std::fs::write(
+            dir.path().join("preferences.toml"),
+            "version = 1\n\
+             register_columns = [\"amount\", \"date\", \"num\", \"payee\", \"category\", \"memo\", \"balance\"]\n",
+        )
+        .unwrap();
+
+        let loaded = file.load().unwrap();
+
+        assert_eq!(
+            loaded.register_columns.shown(),
+            [
+                RegisterColumn::Payment,
+                RegisterColumn::Deposit,
+                RegisterColumn::Date,
+                RegisterColumn::Number,
+                RegisterColumn::Payee,
+                RegisterColumn::Category,
+                RegisterColumn::Memo,
+                RegisterColumn::Balance,
+                RegisterColumn::Actions,
+            ]
+        );
+    }
+
+    #[test]
     fn the_enumerated_preferences_read_their_ids() {
         let (dir, file) = file();
         std::fs::write(
@@ -424,7 +473,8 @@ mod tests {
                 RegisterColumn::Date,
                 RegisterColumn::Number,
                 RegisterColumn::Category,
-                RegisterColumn::Amount,
+                RegisterColumn::Payment,
+                RegisterColumn::Deposit,
                 RegisterColumn::Balance,
                 RegisterColumn::Actions,
             ]
@@ -457,11 +507,11 @@ mod tests {
     #[test]
     fn a_version_from_a_later_build_is_an_error() {
         let (dir, file) = file();
-        std::fs::write(dir.path().join("preferences.toml"), "version = 2\n").unwrap();
+        std::fs::write(dir.path().join("preferences.toml"), "version = 3\n").unwrap();
 
         let loaded = file.load();
 
-        assert!(matches!(loaded, Err(LoadError::UnknownVersion(2))));
+        assert!(matches!(loaded, Err(LoadError::UnknownVersion(3))));
     }
 
     #[test]
@@ -477,7 +527,7 @@ mod tests {
         let text = std::fs::read_to_string(dir.path().join("preferences.toml")).unwrap();
         assert_eq!(
             text,
-            "version = 1\n\
+            "version = 2\n\
              scheme = \"light\"\n\
              font_face = \"liberation_sans\"\n\
              dense_rows = false\n\
@@ -487,7 +537,7 @@ mod tests {
              gridlines = \"off\"\n\
              group_totals = false\n\
              net_worth_placement = \"account_bar\"\n\
-             register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+             register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\"]\n\
              hidden_register_columns = []\n"
         );
     }

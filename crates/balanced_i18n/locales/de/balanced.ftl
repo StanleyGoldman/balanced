@@ -75,7 +75,6 @@ register-column-number = Nr
 register-column-payee = Zahlungsempfänger
 register-column-category = Kategorie
 register-column-memo = Notiz
-register-column-amount = Betrag
 register-column-balance = Saldo
 register-new-transaction = + Buchung
 register-transaction-count =

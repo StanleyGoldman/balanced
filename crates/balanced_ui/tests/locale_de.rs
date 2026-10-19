@@ -87,7 +87,7 @@ fn row_of(harness: &Harness<'static, App>, payee: &str) -> Vec<String> {
         .iter()
         .position(|cell| cell == payee)
         .expect("the Register lists the payee");
-    cells[payee - 2..payee + 5].to_vec()
+    cells[payee - 2..payee + 6].to_vec()
 }
 
 #[test]
@@ -104,7 +104,8 @@ fn the_register_shows_dates_and_amounts_the_german_way() {
             "Fresh Market",
             "Food & Dining:Groceries",
             "",
-            "-86,42",
+            "86,42",
+            "",
             "2.863,58",
         ]
     );
@@ -130,10 +131,10 @@ fn the_draft_row_reads_a_date_and_an_amount_typed_the_german_way() {
     type_text(&mut harness, "Corner Cafe");
     press(&mut harness, Modifiers::NONE, Key::Tab);
     type_text(&mut harness, "Food & Dining:Groceries");
-    // Category, Memo, Amount.
+    // Category, Memo, Payment.
     press(&mut harness, Modifiers::NONE, Key::Tab);
     press(&mut harness, Modifiers::NONE, Key::Tab);
-    type_text(&mut harness, "-1.234,5");
+    type_text(&mut harness, "1.234,5");
 
     press(&mut harness, Modifiers::COMMAND, Key::Enter);
 
@@ -145,7 +146,8 @@ fn the_draft_row_reads_a_date_and_an_amount_typed_the_german_way() {
             "Corner Cafe",
             "Food & Dining:Groceries",
             "",
-            "-1.234,50",
+            "1.234,50",
+            "",
             "4.412,96",
         ]
     );

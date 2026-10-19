@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::account_bar::{AccountBar, AccountBarFold};
 use crate::accounts_model::Section;
 use crate::register::ColumnWidths;
+use crate::register_columns::RegisterColumn;
 
 /// The eframe storage key the layout is saved under.
 const STORAGE_KEY: &str = "layout";
@@ -113,9 +114,17 @@ impl Layout {
             .collect()
     }
 
-    /// The Register column widths. An unknown column id is ignored.
+    /// The Register column widths. An unknown column id is ignored, except `amount`,
+    /// whose width is the width of Payment and of Deposit when the layout holds none
+    /// of its own for them.
     pub(crate) fn column_widths(&self) -> ColumnWidths {
-        ColumnWidths::from_saved(&self.column_widths)
+        let mut saved = self.column_widths.clone();
+        if let Some(amount) = saved.remove("amount") {
+            for column in [RegisterColumn::Payment, RegisterColumn::Deposit] {
+                saved.entry(column.id().to_owned()).or_insert(amount);
+            }
+        }
+        ColumnWidths::from_saved(&saved)
     }
 }
 
@@ -210,6 +219,21 @@ mod tests {
         let layout = Layout::load(Some(&storage));
 
         let expected = ColumnWidths::from_saved(&BTreeMap::from([("memo".to_owned(), 210.0)]));
+        assert_eq!(layout.column_widths(), expected);
+    }
+
+    #[test]
+    fn a_saved_amount_width_becomes_the_payment_and_deposit_widths() {
+        let storage =
+            storage_with(r#"(version: 1, column_widths: {"amount": 130.0, "memo": 210.0})"#);
+
+        let layout = Layout::load(Some(&storage));
+
+        let expected = ColumnWidths::from_saved(&BTreeMap::from([
+            ("payment".to_owned(), 130.0),
+            ("deposit".to_owned(), 130.0),
+            ("memo".to_owned(), 210.0),
+        ]));
         assert_eq!(layout.column_widths(), expected);
     }
 
