@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use rusqlite::{Connection, OpenFlags, TransactionBehavior};
 
-use crate::migration;
+use crate::migration::{self, MIGRATIONS, Migration, UpgradeError};
 
 /// The application ID stamped in every data file's header: ASCII `BLNC`.
 const APPLICATION_ID: u32 = u32::from_be_bytes(*b"BLNC");
@@ -47,6 +47,18 @@ pub enum OpenError {
     /// Another connection, in this program or another, holds the file.
     #[error("the data file is open elsewhere")]
     Locked,
+    /// The file is from an older Balanced, and the backup taken before upgrading it
+    /// couldn't be written, so it wasn't upgraded.
+    #[error("the data file couldn't be backed up before its upgrade")]
+    BackupFailed(#[source] StoreError),
+    /// Upgrading the file from an older Balanced failed, so it was left at its old
+    /// version. The backup taken first stays at `backup`.
+    #[error("the data file couldn't be upgraded; its backup is at {backup:?}")]
+    UpgradeFailed {
+        backup: PathBuf,
+        #[source]
+        source: UpgradeError,
+    },
     /// SQLite failed for a reason that isn't one of the refusals above.
     #[error("the data file couldn't be read")]
     Store(#[from] StoreError),
@@ -68,6 +80,25 @@ impl Store {
     /// code such as `"USD"`. Refuses a path that already holds a file, and leaves no file
     /// behind when creating fails.
     pub fn create(path: &Path, currency: &str) -> Result<Self, StoreError> {
+        Self::create_from(path, currency, MIGRATIONS)
+    }
+
+    /// [`Self::create`] with `migrations` in place of Balanced's own, for tests that build
+    /// a file at an older version or with steps of their own.
+    #[cfg(feature = "test-support")]
+    pub fn create_with_migrations(
+        path: &Path,
+        currency: &str,
+        migrations: &[Migration],
+    ) -> Result<Self, StoreError> {
+        Self::create_from(path, currency, migrations)
+    }
+
+    fn create_from(
+        path: &Path,
+        currency: &str,
+        migrations: &[Migration],
+    ) -> Result<Self, StoreError> {
         // Creating the file exclusively, before SQLite opens it, means the file this
         // removes on failure is always the one made here.
         File::create_new(path).map_err(|source| {
@@ -82,7 +113,7 @@ impl Store {
         })?;
         Connection::open(path)
             .map_err(StoreError::from)
-            .and_then(|connection| Self::write_schema(connection, currency))
+            .and_then(|connection| Self::write_schema(connection, currency, migrations))
             .and_then(|store| {
                 store
                     .connection
@@ -100,7 +131,7 @@ impl Store {
     /// An empty data file in memory, gone when the store is dropped, whose amounts are
     /// in `currency`.
     pub fn create_in_memory(currency: &str) -> Result<Self, StoreError> {
-        Self::write_schema(Connection::open_in_memory()?, currency)
+        Self::write_schema(Connection::open_in_memory()?, currency, MIGRATIONS)
     }
 
     /// Opens the data file at `path` for reading and writing, and holds it locked until
@@ -108,12 +139,23 @@ impl Store {
     /// damaged, comes from a newer Balanced, or that another connection holds, and writes
     /// nothing to a file it refuses.
     pub fn open(path: &Path) -> Result<Self, OpenError> {
+        Self::open_from(path, MIGRATIONS)
+    }
+
+    /// [`Self::open`] with `migrations` in place of Balanced's own, for tests that upgrade
+    /// a file through steps of their own.
+    #[cfg(feature = "test-support")]
+    pub fn open_with_migrations(path: &Path, migrations: &[Migration]) -> Result<Self, OpenError> {
+        Self::open_from(path, migrations)
+    }
+
+    fn open_from(path: &Path, migrations: &[Migration]) -> Result<Self, OpenError> {
         if fs::metadata(path).is_err_and(|error| error.kind() == io::ErrorKind::NotFound) {
             return Err(OpenError::Missing(path.to_owned()));
         }
         // Without `SQLITE_OPEN_CREATE`, a missing file is an error rather than a new,
         // empty database.
-        let connection = Connection::open_with_flags(
+        let mut connection = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
@@ -145,11 +187,16 @@ impl Store {
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(open_refusal)?;
-        let latest = migration::latest_version();
+        let latest = migration::latest_version(migrations);
         if version > latest {
             return Err(OpenError::Newer { version, latest });
         }
         lock(&connection).map_err(open_refusal)?;
+        if version < latest {
+            let backup = back_up(&connection, path, version).map_err(OpenError::BackupFailed)?;
+            migration::upgrade(&mut connection, migrations, version)
+                .map_err(|source| OpenError::UpgradeFailed { backup, source })?;
+        }
         Ok(Self { connection })
     }
 
@@ -175,11 +222,20 @@ impl Store {
 
     /// Fills the empty database `connection` holds with the latest schema and the file's currency, in
     /// one transaction.
-    fn write_schema(mut connection: Connection, currency: &str) -> Result<Self, StoreError> {
+    fn write_schema(
+        mut connection: Connection,
+        currency: &str,
+        migrations: &[Migration],
+    ) -> Result<Self, StoreError> {
         connection.pragma_update(None, "foreign_keys", true)?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.pragma_update(None, "application_id", APPLICATION_ID)?;
-        migration::migrate(&transaction, 0, migration::latest_version())?;
+        migration::migrate(&transaction, migrations, 0).map_err(|error| match error {
+            UpgradeError::Sqlite(error) => StoreError::Sqlite(error),
+            UpgradeError::ForeignKeys { .. } => {
+                unreachable!("an empty file's foreign keys have nothing to refer to")
+            }
+        })?;
         transaction.execute(
             "INSERT INTO data_file (id, currency) VALUES (1, ?1)",
             [currency],
@@ -198,6 +254,37 @@ fn quick_check(connection: &Connection) -> rusqlite::Result<Vec<String>> {
         .collect::<rusqlite::Result<Vec<String>>>()?;
     // A healthy file's report is the single row `ok`.
     Ok(if report == ["ok"] { Vec::new() } else { report })
+}
+
+/// Copies the data file `connection` holds at `path`, at schema `version`, to a new file
+/// beside it named `<name> (before upgrade, v<version>).balanced`, and returns the copy's
+/// path. The name gains a number when a file already holds it, so an earlier backup is
+/// never replaced.
+fn back_up(connection: &Connection, path: &Path, version: u32) -> Result<PathBuf, StoreError> {
+    let name = path.file_stem().unwrap_or_default().to_string_lossy();
+    let mut backup = path.with_file_name(format!("{name} (before upgrade, v{version}).balanced"));
+    let mut copy = 1;
+    while backup.try_exists().map_err(|source| StoreError::Io {
+        path: backup.clone(),
+        source,
+    })? {
+        copy += 1;
+        backup = path.with_file_name(format!(
+            "{name} (before upgrade, v{version}) {copy}.balanced"
+        ));
+    }
+    // SQLite takes the name as UTF-8 text, so a name that isn't would copy elsewhere.
+    let name = backup.to_str().ok_or_else(|| StoreError::Io {
+        path: backup.clone(),
+        source: io::Error::new(io::ErrorKind::InvalidFilename, "the name isn't UTF-8"),
+    })?;
+    connection
+        .execute("VACUUM INTO ?1", [name])
+        .inspect_err(|_| {
+            // The file didn't exist before, so whatever the failed copy left is its own.
+            fs::remove_file(&backup).ok();
+        })?;
+    Ok(backup)
 }
 
 /// Takes, on the file `connection` holds in exclusive locking mode, an exclusive lock it

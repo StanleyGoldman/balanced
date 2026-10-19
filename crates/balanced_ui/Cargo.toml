@@ -8,6 +8,8 @@ publish.workspace = true
 [dependencies]
 balanced_core.workspace = true
 balanced_i18n.workspace = true
+# Finds the Documents folder the save picker starts in.
+directories.workspace = true
 # `persistence` saves the window layout and geometry in eframe storage.
 eframe = { workspace = true, features = ["persistence"] }
 egui_extras.workspace = true
@@ -30,7 +32,8 @@ egui_kittest = { workspace = true, optional = true, features = ["snapshot", "wgp
 # `balanced_ui::testing`, for UI tests: unfolding the Account bar's rail, and for the
 # image snapshot tests the App on the lavapipe renderer and the snapshot check with the
 # project thresholds; and sending the Commands that create and open a data file, which the
-# native file picker sends in the app. `PreferencesFile::for_tests`, a preferences file in a
+# native file picker sends in the app. `App::on_ledger`, the App on a ledger with no data
+# file. `PreferencesFile::for_tests` and `RecentFilesFile::for_tests`, the files in a
 # temporary directory.
 test-support = ["dep:egui-wgpu", "dep:egui_kittest", "dep:tempfile", "balanced_i18n/test-support"]
 
@@ -113,6 +116,10 @@ required-features = ["test-support"]
 
 [[test]]
 name = "register"
+required-features = ["test-support"]
+
+[[test]]
+name = "startup"
 required-features = ["test-support"]
 
 [lints]

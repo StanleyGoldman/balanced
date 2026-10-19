@@ -24,7 +24,7 @@ fn app_on(today: Date<icu_calendar::Iso>) -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
-            App::new(
+            App::on_ledger(
                 cc,
                 Localizer::for_tests(),
                 Ledger::stub(),
@@ -142,7 +142,7 @@ fn add_transaction(harness: &mut Harness<'static, App>, date: &str, payee: &str,
 }
 
 /// Every payee in Everyday Checking, in date order, then the draft row's.
-const EVERYDAY: [&str; 11] = [
+const EVERYDAY: [&str; 14] = [
     "Opening Balance",
     "Acme Corp",
     "Maple Property Management",
@@ -153,6 +153,9 @@ const EVERYDAY: [&str; 11] = [
     "Shell",
     "Acme Corp",
     "Trattoria Roma",
+    "Daily Grind",
+    "Northside Water",
+    "Maple Property Management",
     "",
 ];
 
@@ -194,7 +197,10 @@ fn searching_matches_the_category_path() {
 
     search(&mut harness, "home:util");
 
-    assert_eq!(column(&harness, "Payee"), ["City Power & Light", ""]);
+    assert_eq!(
+        column(&harness, "Payee"),
+        ["City Power & Light", "Northside Water", ""]
+    );
 }
 
 #[test]
@@ -203,14 +209,21 @@ fn searching_matches_a_memo() {
 
     search(&mut harness, "Rent");
 
-    assert_eq!(column(&harness, "Payee"), ["Maple Property Management", ""]);
+    // September's rent and November's.
+    assert_eq!(
+        column(&harness, "Payee"),
+        ["Maple Property Management", "Maple Property Management", ""]
+    );
 }
 
 #[test]
 fn last_30_days_starts_29_days_before_today() {
     let harness = everyday_on((2026, 10, 5), "Last 30 days");
 
-    assert_eq!(column(&harness, "Payee"), &EVERYDAY[4..]);
+    assert_eq!(
+        column(&harness, "Payee"),
+        [&EVERYDAY[4..10], &EVERYDAY[13..]].concat()
+    );
 }
 
 #[test]
@@ -219,7 +232,7 @@ fn last_30_days_ends_today() {
 
     assert_eq!(
         column(&harness, "Payee"),
-        [&EVERYDAY[1..8], &EVERYDAY[10..]].concat()
+        [&EVERYDAY[1..8], &EVERYDAY[13..]].concat()
     );
 }
 
@@ -277,6 +290,9 @@ fn payments_shows_only_money_out() {
             "Costco",
             "Shell",
             "Trattoria Roma",
+            "Daily Grind",
+            "Northside Water",
+            "Maple Property Management",
             "",
         ]
     );
@@ -313,7 +329,10 @@ fn search_dates_and_type_combine() {
 
     // Shell is a payment in range without "in"; Acme Corp (Income:Salary) is a deposit
     // in range with it; Fresh Market (Food & Dining:Groceries) a payment out of range.
-    assert_eq!(column(&harness, "Payee"), ["Trattoria Roma", ""]);
+    assert_eq!(
+        column(&harness, "Payee"),
+        ["Trattoria Roma", "Daily Grind", ""]
+    );
 }
 
 #[test]
@@ -322,7 +341,7 @@ fn a_set_filter_counts_the_rows_it_shows() {
 
     search(&mut harness, "acme");
 
-    assert_eq!(count(&harness).as_deref(), Some("2 of 10 shown"));
+    assert_eq!(count(&harness).as_deref(), Some("2 of 13 shown"));
 }
 
 #[test]
@@ -331,7 +350,7 @@ fn a_filter_matching_nothing_counts_0_and_keeps_the_draft_row() {
 
     search(&mut harness, "zzz");
 
-    assert_eq!(count(&harness).as_deref(), Some("0 of 10 shown"));
+    assert_eq!(count(&harness).as_deref(), Some("0 of 13 shown"));
     assert_eq!(column(&harness, "Payee"), [""]);
 }
 

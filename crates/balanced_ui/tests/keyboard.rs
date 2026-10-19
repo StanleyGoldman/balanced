@@ -16,7 +16,7 @@ fn app() -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
-            App::new(
+            App::on_ledger(
                 cc,
                 Localizer::for_tests(),
                 Ledger::stub(),
@@ -130,6 +130,20 @@ fn typing_a_letter_in_the_account_bar_jumps_to_the_next_account_with_it() {
     type_text(&mut harness, "e");
 
     assert_eq!(focused(&harness).as_deref(), Some("Emergency Fund"));
+}
+
+#[test]
+fn tab_after_the_last_heading_reaches_add_account() {
+    let mut harness = app();
+    press(&mut harness, Modifiers::NONE, Key::F6);
+    // Mortgage is the last account shown, above the folded Closed heading.
+    type_text(&mut harness, "m");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    assert_eq!(focused(&harness).as_deref(), Some("Closed"));
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(focused(&harness).as_deref(), Some("+ Add Account"));
 }
 
 #[test]

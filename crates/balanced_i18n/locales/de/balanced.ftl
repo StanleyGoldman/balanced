@@ -18,6 +18,7 @@ menu-file-new-data-file = Neue Datendatei …
 # Coined from "Öffnen" (GnuCash) and "Datendatei", above.
 menu-file-open-data-file = Datendatei öffnen …
 menu-file-quit = Beenden
+menu-file-recent = { $number } { $file }
 menu-edit = Bearbeiten
 menu-edit-undo = Rückgängig
 menu-edit-redo = Wiederherstellen
@@ -66,7 +67,7 @@ account-bar-unfold = { -account-bar } ausklappen
 account-bar-open-register = { -register } öffnen
 account-bar-reconcile = Abgleichen
 account-bar-manage-accounts = Konten verwalten …
-account-bar-new-account = + Konto
+account-bar-new-account = + Konto hinzufügen
 
 ## Register
 
@@ -77,6 +78,8 @@ register-column-category = Kategorie
 register-column-memo = Notiz
 register-column-balance = Saldo
 register-new-transaction = + Buchung
+register-current-balance = Aktuell { $amount }
+register-ending-balance = Endsaldo { $amount }
 register-transaction-count =
     { $count ->
         [one] { $count } Buchung
@@ -108,6 +111,10 @@ dialog-data-file-damaged = „{ $file }“ ist fehlerhaft. Stellen Sie die Datei
 dialog-data-file-newer = „{ $file }“ scheint von einer neueren Version von { -brand-name } zu sein. Sie brauchen eine neuere { -brand-name }-Version, um die Datei lesen zu können.
 # Coined.
 dialog-data-file-locked = „{ $file }“ ist in einem anderen Programm geöffnet. Schließen Sie die Datei dort und versuchen Sie es erneut.
+# Coined.
+dialog-data-file-backup-failed = { -brand-name } konnte vor der Aktualisierung keine Sicherungskopie von „{ $file }“ anlegen, deshalb wurde die Datei nicht verändert. Prüfen Sie, ob im Ordner genug Platz ist und Sie dort Dateien speichern dürfen, und versuchen Sie es erneut.
+# Coined.
+dialog-data-file-upgrade-failed = { -brand-name } konnte „{ $file }“ nicht aktualisieren, deshalb wurde die Datei nicht verändert. Daneben liegt eine vor der Aktualisierung angelegte Sicherungskopie namens „{ $backup }“.
 # Coined from GnuCash's "GnuCash konnte die verknüpfte Datei nicht öffnen".
 dialog-data-file-unreadable = { -brand-name } konnte „{ $file }“ nicht lesen.
 # Coined from the same.
@@ -118,3 +125,12 @@ dialog-data-file-open-not-replaced = „{ $file }“ ist die geöffnete Datendat
 dialog-data-file-suggested-name = { -brand-name }.balanced
 # Coined from GnuCash's "Nur Datenfiles".
 dialog-data-file-filter = { -brand-name }-Datendateien
+
+# Coined from "Datendatei", above.
+dialog-welcome-message = { -brand-name } speichert Ihre Finanzen in einer Datendatei.
+# Coined from "Neue Datendatei", above, and "Erstellen".
+dialog-welcome-create = Neue Datendatei erstellen …
+# Coined from "Datendatei öffnen", above, and "Vorhanden".
+dialog-welcome-open = Vorhandene Datendatei öffnen …
+dialog-welcome-continue = Weiter
+dialog-welcome-quit = Beenden

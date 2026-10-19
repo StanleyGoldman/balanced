@@ -160,3 +160,20 @@ fn entries(connection: &Connection, stack: Stack) -> rusqlite::Result<Vec<String
         .query_map([stack.name()], |row| row.get(0))?
         .collect()
 }
+
+#[cfg(feature = "test-support")]
+impl Store {
+    /// The balance of account `account_id` as of `date`, ISO date text, from the
+    /// `daily_balance` view: 0 before its first transaction.
+    pub fn balance_on(&self, account_id: u32, date: &str) -> Result<i64, StoreError> {
+        Ok(self.connection.query_row(
+            "SELECT coalesce(
+                 (SELECT balance FROM daily_balance
+                  WHERE account_id = ?1 AND date <= ?2
+                  ORDER BY date DESC LIMIT 1),
+                 0)",
+            rusqlite::params![account_id, date],
+            |row| row.get(0),
+        )?)
+    }
+}

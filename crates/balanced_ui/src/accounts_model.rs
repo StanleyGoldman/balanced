@@ -3,8 +3,11 @@
 
 use std::collections::HashMap;
 
-use balanced_core::{AccountGroup, AccountId, AccountKind, Generation, LedgerView};
+use balanced_core::{
+    AccountGroup, AccountId, AccountKind, AccountSummary, Generation, LedgerView, Money,
+};
 use balanced_i18n::{AmountStyle, Localizer};
+use icu_calendar::{Date, Iso};
 use icu_locale::Locale;
 
 use crate::formatted_amount::FormattedAmount;
@@ -97,6 +100,7 @@ impl SectionRows {
 struct Source {
     generation: Generation,
     formatting_locale: Locale,
+    today: Date<Iso>,
 }
 
 /// The accounts of one snapshot, laid out for the Account bar, with every balance
@@ -105,18 +109,21 @@ struct Source {
 pub(crate) struct AccountsModel {
     source: Source,
     sections: Vec<SectionRows>,
-    balances: HashMap<AccountId, FormattedAmount>,
+    /// Each account's balance with every transaction counted.
+    ending_balances: HashMap<AccountId, FormattedAmount>,
+    /// Each account's balance as of today.
+    current_balances: HashMap<AccountId, FormattedAmount>,
     /// Each section's total, for the sections whose sum doesn't overflow.
     totals: HashMap<Section, FormattedAmount>,
     net_worth: FormattedAmount,
 }
 
 impl AccountsModel {
-    /// The model of `view`, formatted by `i18n`.
+    /// The model of `view` on `today`, formatted by `i18n`.
     ///
-    /// Hidden accounts get no row, but keep a balance for the context header.
+    /// Hidden accounts get no row, but keep their balances for the context header.
     /// Closed accounts are listed in the Closed section, in group order.
-    pub(crate) fn new(view: &LedgerView, i18n: &Localizer) -> Self {
+    pub(crate) fn new(view: &LedgerView, i18n: &Localizer, today: Date<Iso>) -> Self {
         let mut sections: Vec<SectionRows> = Vec::new();
         let mut closed = SectionRows {
             section: Section::Closed,
@@ -159,18 +166,20 @@ impl AccountsModel {
         if !closed.rows.is_empty() {
             sections.push(closed);
         }
-        Self {
-            source: Self::source(view, i18n),
-            sections,
-            balances: view
-                .accounts()
+        let formatted = |balance: &dyn Fn(&AccountSummary) -> Money| {
+            view.accounts()
                 .iter()
                 .map(|summary| {
-                    let balance =
-                        FormattedAmount::new(i18n, summary.balance(), AmountStyle::Symbol);
-                    (summary.account().id(), balance)
+                    let amount = FormattedAmount::new(i18n, balance(summary), AmountStyle::Symbol);
+                    (summary.account().id(), amount)
                 })
-                .collect(),
+                .collect()
+        };
+        Self {
+            source: Self::source(view, i18n, today),
+            sections,
+            ending_balances: formatted(&AccountSummary::balance),
+            current_balances: formatted(&|summary| summary.balance_on(today)),
             totals: Section::ALL
                 .into_iter()
                 .filter_map(|section| {
@@ -194,15 +203,17 @@ impl AccountsModel {
         }
     }
 
-    /// Whether the model shows `view` as `i18n` formats it, so needs no rebuild.
-    pub(crate) fn is_current(&self, view: &LedgerView, i18n: &Localizer) -> bool {
-        self.source == Self::source(view, i18n)
+    /// Whether the model shows `view` on `today` as `i18n` formats it, so needs no
+    /// rebuild.
+    pub(crate) fn is_current(&self, view: &LedgerView, i18n: &Localizer, today: Date<Iso>) -> bool {
+        self.source == Self::source(view, i18n, today)
     }
 
-    fn source(view: &LedgerView, i18n: &Localizer) -> Source {
+    fn source(view: &LedgerView, i18n: &Localizer, today: Date<Iso>) -> Source {
         Source {
             generation: view.generation(),
             formatting_locale: i18n.formatting_locale().clone(),
+            today,
         }
     }
 
@@ -211,9 +222,16 @@ impl AccountsModel {
         &self.sections
     }
 
-    /// The balance of account `id`, or `None` when the snapshot lacks it.
-    pub(crate) fn balance(&self, id: AccountId) -> Option<&FormattedAmount> {
-        self.balances.get(&id)
+    /// The Ending balance of account `id`, every transaction counted, or `None` when
+    /// the snapshot lacks it.
+    pub(crate) fn ending_balance(&self, id: AccountId) -> Option<&FormattedAmount> {
+        self.ending_balances.get(&id)
+    }
+
+    /// The Current balance of account `id`, its transactions dated today or earlier
+    /// counted, or `None` when the snapshot lacks it.
+    pub(crate) fn current_balance(&self, id: AccountId) -> Option<&FormattedAmount> {
+        self.current_balances.get(&id)
     }
 
     /// The sum of the balances of `section`'s accounts, hidden accounts included, or

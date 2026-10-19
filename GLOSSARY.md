@@ -58,6 +58,10 @@ _Avoid_: Transaction list, ledger view
 The empty row at the bottom of a register where the user types a new transaction; it becomes a transaction when added.
 _Avoid_: New row, blank row, entry row
 
+**Today divider**:
+The labelled line in a register sorted by date between the rows dated today or earlier and the first row dated later. It is not a row, so the cell cursor never rests on it.
+_Avoid_: Today line, future separator
+
 **Actions column**:
 The untitled last column of a register, holding a menu of commands for its row (e.g. Split, Void, Delete).
 _Avoid_: Row menu, context column

@@ -15,6 +15,7 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 - Keep fixtures small and tests fast. Mutation testing runs the suite once for every mutant.
 - Test behaviour that could plausibly break, and skip trivial wiring.
 - Tests run against a real in-memory `Ledger`, not mocks.
+- A test that needs a write to fail breaks the path, not the permissions. CI runs as root, which writes through a read-only directory or file, so a `chmod` test passes locally and fails in CI. Make the name longer than the 255-byte limit, or put a directory where the file would go.
 - `unwrap()` belongs in a `#[test]` function. A helper function in test code writes `expect("why this can't fail")`. Review enforces this, not clippy: `allow-unwrap-in-tests` (`clippy.toml`) lets `unwrap()` through anywhere under `#[cfg(test)]`, helpers included.
 
 ## UI tests
@@ -29,6 +30,7 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 - `accesskit_node()` returns an `accesskit_consumer` node, whose `supports_action` takes a filter as well. To ask whether a widget accepts a click, read the raw node: `node.accesskit_node().data().supports_action(Action::Click)`.
 - Labels in tests use the pinned test locale, `en-US`. A test of another locale uses that locale's labels (see [i18n](i18n.md#tests)).
 - Double-clicks need `with_step_dt(0.01)`. With the default 0.25 s step, the second click arrives too late.
+- AccessKit carries no text colour. To check a colour (a negative amount), read the last frame's text shapes: `harness.output().shapes`, each `Shape::Text`'s galley sections and `override_text_color`. The theme's negative colour is `visuals.error_fg_color`. `amount_colours` in `crates/balanced_ui/tests/main_window.rs` does this.
 - Hover tooltips need the default step. After `node.hover()` and `run()` at 0.25 s, the tooltip shows as a `Label` and in a render. Under `with_step_dt(0.01)` it never rendered, even after `run_steps(100)`.
 - `egui_kittest` never calls `eframe::App::raw_input_hook`, so a key the hook takes (Tab in the Register) reaches egui's focus navigation in a test as it never does in the app. Send such keys through the hook: take the input with `std::mem::take(harness.input_mut())`, push the event, call `harness.state_mut().raw_input_hook(&ctx, &mut input)`, put the input back, then `step()`. The `send` helper in `crates/balanced_ui/tests/register.rs` does this.
 - `Harness::output()` holds only the last frame's output, and `run()` keeps stepping until repaints stop. Output that lasts one frame, such as a `ViewportCommand` sent from `App::logic`, is gone by the time `run()` returns. Step to that frame instead: after a `click()`, one `step()` plays the click, and the next runs the `logic()` that applies the Command it sent.
@@ -46,6 +48,7 @@ The tests live in `crates/balanced_ui/tests/snapshots.rs`, and the images in `cr
 - **A crash is not a diff:** a snapshot test can die with `SIGSEGV` (signal 11) inside lavapipe, with no image compared. nextest runs each test in its own process, so the crash fails only that test, reported as `SIGSEGV` rather than `FAIL`, and the rest still pass or fail on their images. Rerun `cargo xtask snapshots`. A test that crashes again is a bug to investigate.
 - **Reviewing a failure:** kittest writes `<name>.new.png` and `<name>.diff.png` beside the snapshot (both gitignored). Look at both images and name every changed region. A change the code was meant to make gets updated; anything else is a bug to fix.
 - **Updating:** `UPDATE_SNAPSHOTS=1 cargo xtask snapshots` rewrites the failing snapshots. Commit each new PNG with the code that changed it, and say in the PR which views changed and why. A snapshot that fails on noise is fixed in the test setup; the thresholds stay put.
+- **A merge conflict:** git can't merge a PNG, so a snapshot that both sides redrew stops a merge whenever `main` moves. Check out either side (`git checkout --theirs <png>`), regenerate it with `UPDATE_SNAPSHOTS=1 cargo xtask snapshots`, and open the new image to confirm it shows both sides' changes before you `git add` it. A PR whose snapshots overlap a busy area of `main`, such as the Register, can conflict again after each merge, so check `gh pr view <n> --json mergeable` after pushing.
 
 ## Mutation testing
 

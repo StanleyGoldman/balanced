@@ -1,5 +1,5 @@
 //! The Account bar: the accounts in their fixed groups with their balances, group
-//! headings that fold, and Net Worth in a footer.
+//! headings that fold, and a footer with Net Worth and + Add Account.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -7,8 +7,8 @@ use std::sync::Arc;
 use balanced_core::AccountId;
 use balanced_i18n::Localizer;
 use eframe::egui::{
-    self, CentralPanel, Color32, Event, Frame, Galley, Id, Panel, PanelState, Rect, Response,
-    RichText, ScrollArea, Sense, Shape, Stroke, StrokeKind, TextStyle, TextWrapMode, WidgetInfo,
+    self, Button, Color32, Event, Frame, Galley, Id, Panel, PanelState, Rect, Response, RichText,
+    ScrollArea, Sense, Shape, Stroke, StrokeKind, TextStyle, TextWrapMode, UiBuilder, WidgetInfo,
     WidgetText, WidgetType, pos2, vec2,
 };
 
@@ -41,6 +41,8 @@ pub(crate) struct AccountBar {
     focus_requested: bool,
     /// Whether one of the Account bar's widgets held keyboard focus in the last frame.
     has_focus: bool,
+    /// The footer's height in the last frame, kept free for it under the sections.
+    footer_height: f32,
 }
 
 impl AccountBar {
@@ -57,6 +59,7 @@ impl AccountBar {
             folded: layout.folded_sections(),
             focus_requested: false,
             has_focus: false,
+            footer_height: 0.0,
         }
     }
 
@@ -133,17 +136,11 @@ impl AccountBar {
         }
     }
 
-    /// The open Account bar: the fold and + Account buttons, the sections and the Net
-    /// Worth footer. Returns whether the fold button was clicked.
+    /// The open Account bar: the fold button, the sections, and a footer holding Net
+    /// Worth when the Preferences put it there and the + Add Account button. Returns
+    /// whether the fold button was clicked.
     fn open_bar(&mut self, ui: &mut egui::Ui, frame: &BarFrame<'_>, focus: &mut Focus) -> bool {
-        let BarFrame {
-            i18n,
-            theme,
-            commands,
-            model,
-            preferences,
-            ..
-        } = *frame;
+        let i18n = frame.i18n;
         let fold = Panel::top("account_bar_header")
             .frame(Frame::NONE)
             .show_separator_line(false)
@@ -152,30 +149,71 @@ impl AccountBar {
                     let button =
                         triangle_button(ui, fl!(i18n, "account-bar-fold"), Direction::Left);
                     focus.note(&button, Candidate::Fallback);
-                    let new_account = ui.small_button(fl!(i18n, "account-bar-new-account"));
-                    focus.note(&new_account, Candidate::Fallback);
-                    if new_account.clicked() {
-                        commands.send(UserAction::NewAccount.command());
-                    }
                     button.clicked()
                 })
                 .inner
             })
             .inner;
-        match preferences.net_worth_placement {
-            NetWorthPlacement::AccountBar => {
-                Panel::bottom("net_worth")
-                    .frame(theme.footer_frame())
-                    .show(ui, |ui| Self::net_worth(ui, i18n, theme, model.net_worth()));
-            }
-            NetWorthPlacement::StatusBar => {}
-        }
-        CentralPanel::default().frame(Frame::NONE).show(ui, |ui| {
-            ScrollArea::vertical().show(ui, |ui| {
-                self.sections(ui, frame, focus);
-            });
+        // The footer is drawn after the sections, into room kept for it at the bottom,
+        // so that Tab reaches it after the last account. The room is the footer's
+        // height in the last frame; when that changes, the frame is drawn again.
+        let rest = ui.available_rect_before_wrap();
+        let footer_top = (rest.bottom() - self.footer_height).max(rest.top());
+        let list = Rect::from_min_max(rest.min, pos2(rest.right(), footer_top));
+        ui.scope_builder(UiBuilder::new().max_rect(list), |ui| {
+            ScrollArea::vertical()
+                .min_scrolled_height(0.0)
+                .show(ui, |ui| self.sections(ui, frame, focus));
         });
+        let footer = Rect::from_min_max(pos2(rest.left(), footer_top), rest.max);
+        let height = ui
+            .scope_builder(UiBuilder::new().max_rect(footer), |ui| {
+                Self::footer(ui, frame, focus);
+            })
+            .response
+            .rect
+            .height();
+        if (height - self.footer_height).abs() > f32::EPSILON {
+            self.footer_height = height;
+            ui.ctx()
+                .request_discard("the Account bar's footer changed height");
+        }
         fold
+    }
+
+    /// The footer under the sections, the full width of the Account bar and ruled off
+    /// above: Net Worth when the Preferences put it there, then the + Add Account button.
+    fn footer(ui: &mut egui::Ui, frame: &BarFrame<'_>, focus: &mut Focus) {
+        let BarFrame {
+            i18n,
+            theme,
+            commands,
+            model,
+            preferences,
+            ..
+        } = *frame;
+        let response = theme
+            .footer_frame()
+            .show(ui, |ui| {
+                match preferences.net_worth_placement {
+                    NetWorthPlacement::AccountBar => {
+                        Self::net_worth(ui, i18n, theme, model.net_worth());
+                    }
+                    NetWorthPlacement::StatusBar => {}
+                }
+                let new_account = ui.add(
+                    Button::new(fl!(i18n, "account-bar-new-account"))
+                        .min_size(vec2(ui.available_width(), 0.0)),
+                );
+                focus.note(&new_account, Candidate::Fallback);
+                if new_account.clicked() {
+                    commands.send(UserAction::NewAccount.command());
+                }
+            })
+            .response;
+        let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+        let rule_y = response.rect.top() + stroke.width / 2.0;
+        ui.painter().hline(response.rect.x_range(), rule_y, stroke);
     }
 
     /// The rail the Account bar folds to: only the button that opens it again.
@@ -222,7 +260,7 @@ impl AccountBar {
             }
             for row in section_rows.rows() {
                 let balance = model
-                    .balance(row.id())
+                    .ending_balance(row.id())
                     .expect("the model formats a balance for every account it lists");
                 let is_selected = selected == Some(row.id());
                 let response = account_row(ui, theme, row, balance, is_selected);

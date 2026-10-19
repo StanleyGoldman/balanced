@@ -114,6 +114,16 @@ FROM account AS ac
 JOIN account_balance AS b ON b.account_id = ac.id
 WHERE ac.closed = 1
 
+view daily_balance on daily_balance
+CREATE VIEW daily_balance AS
+SELECT
+    t.account_id,
+    t.date,
+    sum(sum(a.amount)) OVER (PARTITION BY t.account_id ORDER BY t.date) AS balance
+FROM "transaction" AS t
+JOIN transaction_amount AS a ON a.transaction_id = t.id
+GROUP BY t.account_id, t.date
+
 view group_total on group_total
 CREATE VIEW group_total AS
 WITH kind_group (kind, account_group) AS (

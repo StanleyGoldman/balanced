@@ -339,6 +339,16 @@ impl RegisterSort {
     }
 }
 
+/// Whether the Register sets its rows dated after today apart with the Today divider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TodayDivider {
+    Hidden,
+    /// Drawn above the first row dated after `today`, under a sort by date.
+    Shown {
+        today: Date<Iso>,
+    },
+}
+
 /// What the model was built from. It is rebuilt when any of it changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Source {
@@ -348,6 +358,7 @@ struct Source {
     filter: RegisterFilter,
     /// Today's date, which the filter's date ranges count from.
     today: Date<Iso>,
+    today_divider: TodayDivider,
     text_language: LanguageIdentifier,
     formatting_locale: Locale,
 }
@@ -359,20 +370,24 @@ pub(crate) struct RegisterModel {
     rows: Vec<RegisterRow>,
     /// Every transaction in the account, shown or not.
     transactions: HashSet<TransactionId>,
+    /// The index of the row the Today divider sits above, while it is drawn.
+    divider: Option<usize>,
 }
 
-/// What a [`RegisterModel`] shows: its sort, its filter and today's date.
+/// What a [`RegisterModel`] shows: its sort, its filter, today's date and whether the
+/// Today divider is drawn.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Showing<'a> {
     pub(crate) sort: RegisterSort,
     pub(crate) filter: &'a RegisterFilter,
     pub(crate) today: Date<Iso>,
+    pub(crate) today_divider: TodayDivider,
 }
 
 impl RegisterModel {
     /// The Register of `summary`, an account in `view`, formatted by `i18n`, narrowed
-    /// and ordered as `shown` says. Each row's balance is the account's running
-    /// balance, whichever rows the filter hides.
+    /// and ordered as `shown` says, with the Today divider placed as it says. Each
+    /// row's balance is the account's running balance, whichever rows the filter hides.
     pub(crate) fn new(
         summary: &AccountSummary,
         view: &LedgerView,
@@ -383,6 +398,7 @@ impl RegisterModel {
             sort,
             filter,
             today,
+            today_divider,
         } = shown;
         let matcher = filter.matcher(today);
         let mut paths = CategoryPaths {
@@ -445,10 +461,15 @@ impl RegisterModel {
             })
             .collect();
         rows.sort_by(|a, b| sort.compare(i18n, a, b));
+        let divider = match today_divider {
+            TodayDivider::Shown { today } if shows_balance => divider(&rows, sort.direction, today),
+            TodayDivider::Shown { .. } | TodayDivider::Hidden => None,
+        };
         Self {
             source: Self::source(summary.account().id(), view, shown, i18n),
             rows,
             transactions: transaction_ids(summary).collect(),
+            divider,
         }
     }
 
@@ -476,6 +497,7 @@ impl RegisterModel {
             sort: shown.sort,
             filter: shown.filter.clone(),
             today: shown.today,
+            today_divider: shown.today_divider,
             text_language: i18n.text_language().clone(),
             formatting_locale: i18n.formatting_locale().clone(),
         }
@@ -504,6 +526,14 @@ impl RegisterModel {
     ) -> impl Iterator<Item = TransactionId> + 'a {
         transaction_ids(summary).filter(|id| !self.transactions.contains(id))
     }
+
+    /// The index of the row the Today divider sits above: the first row dated after
+    /// today, or under a descending sort the first row dated today or earlier. `None`
+    /// while the divider is hidden, under a sort other than by date, or when no row is
+    /// dated after today.
+    pub(crate) fn divider(&self) -> Option<usize> {
+        self.divider
+    }
 }
 
 /// The ids of `summary`'s transactions, in date order.
@@ -512,6 +542,21 @@ fn transaction_ids(summary: &AccountSummary) -> impl Iterator<Item = Transaction
         .register()
         .iter()
         .map(|entry| entry.transaction().id())
+}
+
+/// The index of the row the Today divider sits above in `rows`, sorted by date in
+/// `direction`, unless no row is dated after `today`.
+fn divider(rows: &[RegisterRow], direction: SortDirection, today: Date<Iso>) -> Option<usize> {
+    let scheduled = |row: &RegisterRow| row.saved_date.is_some_and(|date| date > today);
+    match direction {
+        SortDirection::Ascending => rows.iter().position(scheduled),
+        // The scheduled rows come first, so there are some only if the first is one.
+        SortDirection::Descending => scheduled(rows.first()?).then(|| {
+            rows.iter()
+                .position(|row| !scheduled(row))
+                .unwrap_or(rows.len())
+        }),
+    }
 }
 
 /// Category paths, each built once while a model is built.
