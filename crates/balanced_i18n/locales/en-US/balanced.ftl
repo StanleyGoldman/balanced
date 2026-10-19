@@ -251,6 +251,9 @@ dialog-data-file-not-balanced = “{ $file }” isn't a { -brand-name } data fil
 dialog-data-file-damaged = “{ $file }” is damaged. Restore it from a backup.
 dialog-data-file-newer = “{ $file }” was made by a newer version of { -brand-name }. Update { -brand-name } to open it.
 dialog-data-file-locked = “{ $file }” is open in another program. Close it there, then try again.
+dialog-data-file-backup-failed = { -brand-name } couldn't make a backup copy of “{ $file }” before upgrading it, so it was left as it was. Check that its folder has room and lets you save files there, then try again.
+# $backup is the name of the copy made beside the file before the upgrade began.
+dialog-data-file-upgrade-failed = { -brand-name } couldn't upgrade “{ $file }”, so it was left as it was. A backup copy made before the upgrade is beside it, named “{ $backup }”.
 dialog-data-file-unreadable = { -brand-name } couldn't read “{ $file }”.
 dialog-data-file-not-created = { -brand-name } couldn't create “{ $file }”.
 # New Data File… picked the data file that is open.

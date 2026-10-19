@@ -108,6 +108,10 @@ dialog-data-file-damaged = „{ $file }“ ist fehlerhaft. Stellen Sie die Datei
 dialog-data-file-newer = „{ $file }“ scheint von einer neueren Version von { -brand-name } zu sein. Sie brauchen eine neuere { -brand-name }-Version, um die Datei lesen zu können.
 # Coined.
 dialog-data-file-locked = „{ $file }“ ist in einem anderen Programm geöffnet. Schließen Sie die Datei dort und versuchen Sie es erneut.
+# Coined.
+dialog-data-file-backup-failed = { -brand-name } konnte vor der Aktualisierung keine Sicherungskopie von „{ $file }“ anlegen, deshalb wurde die Datei nicht verändert. Prüfen Sie, ob im Ordner genug Platz ist und Sie dort Dateien speichern dürfen, und versuchen Sie es erneut.
+# Coined.
+dialog-data-file-upgrade-failed = { -brand-name } konnte „{ $file }“ nicht aktualisieren, deshalb wurde die Datei nicht verändert. Daneben liegt eine vor der Aktualisierung angelegte Sicherungskopie namens „{ $backup }“.
 # Coined from GnuCash's "GnuCash konnte die verknüpfte Datei nicht öffnen".
 dialog-data-file-unreadable = { -brand-name } konnte „{ $file }“ nicht lesen.
 # Coined from the same.
