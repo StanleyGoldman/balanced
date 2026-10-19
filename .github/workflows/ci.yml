@@ -11,6 +11,11 @@
 # Linux only. Release builds are made locally. Don't add a job that assumes
 # Windows or macOS.
 #
+# Every job names its runner image, `ubuntu-26.04`, rather than
+# `ubuntu-latest`, so GitHub doesn't move it on its own schedule. The checks
+# run in the CI image, whose Ubuntu matches the snapshot machine (ADR 0004);
+# the runner only supplies Docker. Move both together.
+#
 # Keep the workflow and its last job named `ci`. The `main` ruleset requires
 # that job's check, which passes only when every other job passed or was
 # skipped: renamed, every pull request waits for a check that never arrives
@@ -67,7 +72,7 @@ jobs:
   # skips the filter, so `code` is empty and everything runs. The workflow
   # decides this, never `cargo xtask ci`, which doesn't look at the diff.
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
@@ -87,7 +92,7 @@ jobs:
   # The checks that compile nothing of the workspace.
   checks:
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       # Full history: `dco` walks every commit since its cutoff. On a pull
       # request this checks out GitHub's merge of the branch into its target,
@@ -130,7 +135,7 @@ jobs:
   clippy:
     needs: changes
     if: needs.changes.outputs.code != 'false'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/ci-setup
@@ -142,7 +147,7 @@ jobs:
   test:
     needs: changes
     if: needs.changes.outputs.code != 'false'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/ci-setup
@@ -189,7 +194,7 @@ jobs:
   ci:
     needs: [changes, checks, clippy, test]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: every job passed or was skipped
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')

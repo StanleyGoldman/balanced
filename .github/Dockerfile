@@ -7,7 +7,8 @@
 # Ubuntu, not an official `rust:` image: the image snapshots compare pixels
 # drawn by lavapipe, and the committed ones are drawn on an Ubuntu 26.04
 # machine. The `rust:` images are Debian and ship a different Mesa, which draws
-# different pixels. Move this line when the snapshot machine moves release.
+# different pixels. Move this line when the snapshot machine moves release,
+# along with the runners (`runs-on`) in .github/workflows/.
 FROM ubuntu:26.04
 
 # - build-essential: the C linker rustc calls, and cc for build scripts.
