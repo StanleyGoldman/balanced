@@ -126,6 +126,10 @@ impl PreferencesForm {
             &mut draft.alternating_rows,
             fl!(i18n, "dialog-preferences-alternating-rows"),
         );
+        ui.checkbox(
+            &mut draft.today_divider,
+            fl!(i18n, "dialog-preferences-today-divider"),
+        );
         ui.label(fl!(i18n, "dialog-preferences-gridlines"));
         ui.horizontal(|ui| {
             for gridlines in Gridlines::ALL {

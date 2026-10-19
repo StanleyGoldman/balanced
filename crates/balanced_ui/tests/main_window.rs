@@ -12,7 +12,7 @@ use icu_calendar::Date;
 /// The App on stub data, in the test locale.
 fn app() -> Harness<'static, App> {
     let mut harness = Harness::new_eframe(|cc| {
-        App::new(
+        App::on_ledger(
             cc,
             Localizer::for_tests(),
             Ledger::stub(),
@@ -127,7 +127,7 @@ fn selecting_an_account_opens_it_under_the_accounts_tab() {
     let accounts = harness.get_by_role_and_label(Role::Button, "Accounts");
     assert_eq!(accounts.accesskit_node().toggled(), Some(Toggled::True));
     harness.get_by_role_and_label(Role::Label, "Everyday Checking");
-    harness.get_by_role_and_label(Role::Label, "Ending $4,108.81");
+    harness.get_by_role_and_label(Role::Label, "Ending $4,071.81");
 }
 
 #[test]
@@ -194,7 +194,7 @@ fn hidden_accounts_are_left_out_but_count_in_net_worth() {
 
     assert!(holiday_fund.is_none());
     // The stub's Net Worth with the hidden Holiday Fund's $800.00 in it.
-    harness.get_by_role_and_label(Role::Label, "$286,959.06");
+    harness.get_by_role_and_label(Role::Label, "$286,922.06");
 }
 
 /// The text of every `Label` on screen, which holds a tooltip's text as its value.
@@ -238,7 +238,7 @@ fn add_account_sits_below_net_worth() {
     let harness = app();
 
     let add_account = harness.get_by_role_and_label(Role::Button, "+ Add Account");
-    let net_worth = harness.get_by_role_and_label(Role::Label, "$286,959.06");
+    let net_worth = harness.get_by_role_and_label(Role::Label, "$286,922.06");
 
     assert!(add_account.rect().top() >= net_worth.rect().bottom());
 }
@@ -281,15 +281,15 @@ fn the_context_header_shows_the_current_balance_without_future_rows_and_the_endi
 
     open_account(&mut harness, "Everyday Checking");
 
-    // Today is 14 October 2026; the payments of 30 October and 1 November count only
+    // Today is 14 October 2026; the payments of 20 October and 1 November count only
     // in Ending.
     let values = label_values(&harness);
     assert!(
-        values.contains(&"Current $5,647.46".to_owned()),
+        values.contains(&"Current $5,642.21".to_owned()),
         "{values:?}"
     );
     assert!(
-        values.contains(&"Ending $4,108.81".to_owned()),
+        values.contains(&"Ending $4,071.81".to_owned()),
         "{values:?}"
     );
 }
@@ -381,8 +381,8 @@ fn a_narrow_window_cuts_the_account_name_short_and_keeps_the_balances_and_button
     open_account(&mut harness, "Everyday Checking");
     let header_widths = |harness: &Harness<'static, App>| {
         [
-            label(harness, "Current $5,647.46").rect(),
-            label(harness, "Ending $4,108.81").rect(),
+            label(harness, "Current $5,642.21").rect(),
+            label(harness, "Ending $4,071.81").rect(),
             harness
                 .get_by_role_and_label(Role::Button, "+ Transaction")
                 .rect(),

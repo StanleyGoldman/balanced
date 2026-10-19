@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use balanced_core::{AccountKind, CurrencyCode, DomainCommand, Ledger, Money};
+use balanced_core::{CurrencyCode, Ledger};
 use balanced_i18n::Localizer;
 use balanced_ui::testing;
 use balanced_ui::{App, Clock, PreferencesFile};
@@ -19,7 +19,7 @@ fn app() -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .build_eframe(|cc| {
-            App::new(
+            App::on_ledger(
                 cc,
                 Localizer::for_tests(),
                 Ledger::stub(),
@@ -35,23 +35,9 @@ fn usd() -> CurrencyCode {
     CurrencyCode::new("USD").expect("USD is an ISO 4217 currency")
 }
 
-/// A closed data file at `name` in `dir`, holding checking accounts with `accounts`,
-/// created in that order, so the last one is the change Undo reverses first.
+/// A closed data file named `name` in `dir`, as [`testing::data_file`] makes it.
 fn data_file(dir: &TempDir, name: &str, accounts: &[&str]) -> PathBuf {
-    let path = dir.path().join(name);
-    let mut ledger = Ledger::create(&path, usd()).expect("a new path takes a data file");
-    for account in accounts {
-        ledger
-            .apply(DomainCommand::CreateAccount {
-                name: (*account).to_owned(),
-                kind: AccountKind::Checking,
-                opened: Date::try_new_iso(2026, 9, 1).expect("1 September 2026 is a date"),
-                opening_balance: Money::new("10.00".parse().expect("10.00 is a number"), usd())
-                    .expect("10.00 has two decimal places"),
-            })
-            .expect("a new file takes a new account");
-    }
-    path
+    testing::data_file(dir.path(), name, accounts)
 }
 
 /// The names of the accounts in the data file at `path`, opened afresh.
@@ -201,6 +187,48 @@ fn a_file_from_a_newer_balanced_is_refused_with_a_dialog() {
         &path,
         "“Household.balanced” was made by a newer version of Balanced. \
          Update Balanced to open it.",
+    );
+}
+
+/// Marks the data file at `path` as from before Balanced's first migration, so opening
+/// it runs that migration again over the tables it already has, which fails. The SQLite
+/// header holds the schema version, `user_version`, at offset 60, big-endian.
+fn make_version_0(path: &Path) {
+    rewrite(path, |bytes| {
+        bytes[60..64].copy_from_slice(&0_u32.to_be_bytes());
+    });
+}
+
+#[test]
+fn a_file_whose_upgrade_fails_is_refused_with_a_dialog_naming_its_backup() {
+    let dir = tempfile::tempdir().expect("the temp dir is writable");
+    let path = data_file(&dir, "Household.balanced", &["Everyday"]);
+    make_version_0(&path);
+
+    assert_refused(
+        &path,
+        "Balanced couldn't upgrade “Household.balanced”, so it was left as it was. \
+         A backup copy made before the upgrade is beside it, named \
+         “Household (before upgrade, v0).balanced”.",
+    );
+}
+
+#[test]
+fn a_file_whose_backup_cant_be_written_is_refused_with_a_dialog() {
+    let dir = tempfile::tempdir().expect("the temp dir is writable");
+    // The file's name fits the usual 255-byte limit, but its backup's longer name
+    // doesn't, so the backup can't be written even by root, as the tests run in CI.
+    let name = format!("{}.balanced", "H".repeat(230));
+    let path = data_file(&dir, &name, &["Everyday"]);
+    make_version_0(&path);
+
+    assert_refused(
+        &path,
+        &format!(
+            "Balanced couldn't make a backup copy of “{name}” before upgrading it, so it \
+             was left as it was. Check that its folder has room and lets you save files \
+             there, then try again."
+        ),
     );
 }
 

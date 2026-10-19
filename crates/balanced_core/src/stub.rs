@@ -107,8 +107,8 @@ fn date(year: i32, month: u8, day: u8) -> Date<Iso> {
 impl Ledger {
     /// The in-memory data Balanced runs on until it reads data files: accounts in
     /// every sub-group, with one closed account and one hidden one, a category tree,
-    /// a split transaction, two future-dated transactions, and one generated account
-    /// with 20,000 transactions.
+    /// a split transaction, transactions scheduled after mid-October 2026, and one
+    /// generated account with 20,000 transactions.
     pub fn stub() -> Self {
         let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
         let money = |amount: &str| {
@@ -155,7 +155,7 @@ impl Ledger {
                 paid(20, "Trattoria Roma", StubCategory::Restaurants, "-64.80")
                     .memo("Anniversary dinner"),
             ])
-            .with_transactions(scheduled_payments(money));
+            .with_transactions(october_transactions(money));
         // Emptied, then closed: its read-only Register shows its history.
         let old_checking = NewAccount::new(
             "Old Checking",
@@ -202,22 +202,29 @@ impl Ledger {
     }
 }
 
-/// Everyday Checking's scheduled payments, dated after the tests' fixed today, 14 October
-/// 2026, so the account's Current and Ending balances differ.
-fn scheduled_payments(money: impl Fn(&str) -> Money) -> [NewTransaction; 2] {
+/// Everyday Checking's transactions from mid-October 2026: one on the tests' fixed
+/// today, 14 October, then two scheduled for later dates, so the account's Current and
+/// Ending balances differ.
+fn october_transactions(money: impl Fn(&str) -> Money) -> [NewTransaction; 3] {
     [
         NewTransaction::new(
-            date(2026, 10, 30),
-            "City Power & Light",
+            date(2026, 10, 14),
+            "Daily Grind",
+            StubCategory::CoffeeShops.id(),
+            money("-5.25"),
+        ),
+        NewTransaction::new(
+            date(2026, 10, 20),
+            "Northside Water",
             StubCategory::Utilities.id(),
-            money("-88.65"),
+            money("-95.40"),
         )
         .number("1043"),
         NewTransaction::new(
             date(2026, 11, 1),
             "Maple Property Management",
             StubCategory::Home.id(),
-            money("-1450.00"),
+            money("-1475.00"),
         )
         .number("1044")
         .memo("November rent"),

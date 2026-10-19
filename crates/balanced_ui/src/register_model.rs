@@ -338,12 +338,23 @@ impl RegisterSort {
     }
 }
 
+/// Whether the Register sets its rows dated after today apart with the Today divider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TodayDivider {
+    Hidden,
+    /// Drawn above the first row dated after `today`, under a sort by date.
+    Shown {
+        today: Date<Iso>,
+    },
+}
+
 /// What the model was built from. It is rebuilt when any of it changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Source {
     account: AccountId,
     generation: Generation,
     sort: RegisterSort,
+    today_divider: TodayDivider,
     text_language: LanguageIdentifier,
     formatting_locale: Locale,
 }
@@ -353,15 +364,18 @@ struct Source {
 pub(crate) struct RegisterModel {
     source: Source,
     rows: Vec<RegisterRow>,
+    /// The index of the row the Today divider sits above, while it is drawn.
+    divider: Option<usize>,
 }
 
 impl RegisterModel {
     /// The Register of `summary`, an account in `view`, formatted by `i18n` and
-    /// ordered by `sort`.
+    /// ordered by `sort`, with the Today divider placed as `today_divider` says.
     pub(crate) fn new(
         summary: &AccountSummary,
         view: &LedgerView,
         sort: RegisterSort,
+        today_divider: TodayDivider,
         i18n: &Localizer,
     ) -> Self {
         let mut paths = CategoryPaths {
@@ -413,34 +427,43 @@ impl RegisterModel {
             })
             .collect();
         rows.sort_by(|a, b| sort.compare(i18n, a, b));
+        let divider = match today_divider {
+            TodayDivider::Shown { today } if shows_balance => divider(&rows, sort.direction, today),
+            TodayDivider::Shown { .. } | TodayDivider::Hidden => None,
+        };
         Self {
-            source: Self::source(summary.account().id(), view, sort, i18n),
+            source: Self::source(summary.account().id(), view, sort, today_divider, i18n),
             rows,
+            divider,
         }
     }
 
-    /// Whether the model shows account `account` of `view` ordered by `sort`, as `i18n`
-    /// formats it, so needs no rebuild.
+    /// Whether the model shows account `account` of `view` ordered by `sort`, with
+    /// the Today divider as `today_divider` says, as `i18n` formats it, so needs no
+    /// rebuild.
     pub(crate) fn is_current(
         &self,
         account: AccountId,
         view: &LedgerView,
         sort: RegisterSort,
+        today_divider: TodayDivider,
         i18n: &Localizer,
     ) -> bool {
-        self.source == Self::source(account, view, sort, i18n)
+        self.source == Self::source(account, view, sort, today_divider, i18n)
     }
 
     fn source(
         account: AccountId,
         view: &LedgerView,
         sort: RegisterSort,
+        today_divider: TodayDivider,
         i18n: &Localizer,
     ) -> Source {
         Source {
             account,
             generation: view.generation(),
             sort,
+            today_divider,
             text_language: i18n.text_language().clone(),
             formatting_locale: i18n.formatting_locale().clone(),
         }
@@ -454,6 +477,29 @@ impl RegisterModel {
     /// The rows, in the order of the model's sort.
     pub(crate) fn rows(&self) -> &[RegisterRow] {
         &self.rows
+    }
+
+    /// The index of the row the Today divider sits above: the first row dated after
+    /// today, or under a descending sort the first row dated today or earlier. `None`
+    /// while the divider is hidden, under a sort other than by date, or when no row is
+    /// dated after today.
+    pub(crate) fn divider(&self) -> Option<usize> {
+        self.divider
+    }
+}
+
+/// The index of the row the Today divider sits above in `rows`, sorted by date in
+/// `direction`, unless no row is dated after `today`.
+fn divider(rows: &[RegisterRow], direction: SortDirection, today: Date<Iso>) -> Option<usize> {
+    let scheduled = |row: &RegisterRow| row.saved_date.is_some_and(|date| date > today);
+    match direction {
+        SortDirection::Ascending => rows.iter().position(scheduled),
+        // The scheduled rows come first, so there are some only if the first is one.
+        SortDirection::Descending => scheduled(rows.first()?).then(|| {
+            rows.iter()
+                .position(|row| !scheduled(row))
+                .unwrap_or(rows.len())
+        }),
     }
 }
 

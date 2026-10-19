@@ -16,12 +16,18 @@ sqllogictest.workspace = true
 tempfile.workspace = true
 
 [features]
-# `Store::balance_on`, for `balanced_core`'s tests of the balance as of a date.
+# `Store::balance_on`, for `balanced_core`'s tests of the balance as of a date;
+# `Store::create_with_migrations`, `Store::open_with_migrations` and the migrations
+# themselves, for tests that upgrade a file through steps of their own.
 test-support = []
 
 [[test]]
 name = "slt"
 harness = false
+
+[[test]]
+name = "upgrade"
+required-features = ["test-support"]
 
 [lints]
 workspace = true

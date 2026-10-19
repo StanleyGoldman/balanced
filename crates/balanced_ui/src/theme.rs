@@ -361,18 +361,9 @@ impl Theme {
         Stroke::new(1.0, self.palette.negative)
     }
 
-    /// Whether the Register stripes alternate rows: pass it to `TableBuilder::striped`.
-    /// Only the Register stripes, so the style leaves `Visuals::striped` off.
-    pub(crate) fn alternating_rows(&self) -> bool {
-        self.settings.alternating_rows
-    }
-
-    /// The fill behind row `row` of a list laid out by hand, counting from 0 at the top:
-    /// the even rows, as `egui_extras` stripes them. Paint it before the row's gridlines.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "no list is laid out by hand yet")
-    )]
+    /// The fill behind Register row `row`, counting from 0 at the top: the even rows,
+    /// while rows alternate. Paint it before the row's content and gridlines. Only the
+    /// Register stripes, so the style leaves `Visuals::striped` off.
     pub(crate) fn stripe(&self, row: usize) -> Option<Color32> {
         (self.settings.alternating_rows && row.is_multiple_of(2)).then_some(self.palette.stripe)
     }
@@ -439,6 +430,26 @@ impl Theme {
             x_range,
             snap_to_pixel_centre(y, pixels_per_point),
             self.grid_stroke(pixels_per_point),
+        )
+    }
+
+    /// The colour of the Today divider's label and rule.
+    pub(crate) fn today_divider(&self) -> Color32 {
+        self.palette.accent
+    }
+
+    /// The Today divider's rule across `x_range`, at `y` (the middle of its line),
+    /// given the display's pixels per point. It is one point wide, on a pixel centre.
+    pub(crate) fn today_divider_rule(
+        &self,
+        x_range: Rangef,
+        y: f32,
+        pixels_per_point: f32,
+    ) -> Shape {
+        Shape::hline(
+            x_range,
+            snap_to_pixel_centre(y, pixels_per_point),
+            Stroke::new(1.0, self.palette.accent),
         )
     }
 

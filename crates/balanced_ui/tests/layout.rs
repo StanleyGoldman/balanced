@@ -39,7 +39,7 @@ fn app(storage: &MemoryStorage) -> Harness<'_, App> {
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
             cc.storage = Some(storage);
-            App::new(
+            App::on_ledger(
                 cc,
                 Localizer::for_tests(),
                 Ledger::stub(),

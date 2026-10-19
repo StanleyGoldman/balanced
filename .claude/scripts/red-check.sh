@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Proves a test can go red: breaks the code it covers, runs the tests, then puts the
-# file back exactly as it was.
+# Proves a test can go red: runs the tests on the code as it is, which must pass,
+# then breaks the code they cover, runs them again, and puts the file back exactly as
+# it was. A test that already fails would read as red from any break.
 #
 # Usage: red-check.sh <file> <old> <new> <test command...>
 #   <file>  the source file to break.
@@ -34,7 +35,8 @@
 #          the broken code; a record that fails in setup proves nothing.
 #          Only a red result carries "panics".
 #   green: the tests pass against the broken code; they miss this break.
-#   error: bad arguments, or <old> not found exactly once (the file is untouched);
+#   error: bad arguments, or <old> not found exactly once, or the tests fail before
+#          the break, with their names in "failed" (the file is untouched in all three);
 #          or the test command failed with no `FAIL` line, usually a break
 #          that doesn't compile (the file is restored; "restored" says so). No test
 #          ran red, so make a break that compiles.
@@ -53,6 +55,22 @@ saved=$(mktemp)
 log=$(mktemp)
 trap 'rm -f "$saved" "$log"' EXIT
 cp -- "$file" "$saved"
+
+# nextest prints each `FAIL [<time>] (<n>/<total>) <binary> <test>` line twice: as the
+# test fails, and again in the closing summary.
+# The counter is right-aligned to the total's width: `( 1/11)`.
+fail_line='^ +FAIL \[ *[0-9.]+s\] \( *[0-9]+/[0-9]+\) [^ ]+ [^ ]+$'
+failed_tests() {
+  { grep -E "$fail_line" "$log" || true; } | awk '{print $NF}' | awk '!seen[$0]++' |
+    jq -R . | jq -sc .
+}
+
+# The tests must pass before the break, or the break proves nothing.
+if ! "$@" >"$log" 2>&1; then
+  jq -nc --argjson failed "$(failed_tests)" '{status: "error", failed: $failed, restored: true,
+    next: "the tests fail on the unbroken code: make them pass first, then run this again"}'
+  exit 2
+fi
 
 # Break the file: replace the one occurrence of <old>.
 if ! python3 -I -c '
@@ -78,12 +96,7 @@ cat -- "$saved" >"$file"
 restored=false
 cmp -s -- "$saved" "$file" && restored=true
 
-# nextest prints each `FAIL [<time>] (<n>/<total>) <binary> <test>` line twice: as the
-# test fails, and again in the closing summary.
-# The counter is right-aligned to the total's width: `( 1/11)`.
-fail_line='^ +FAIL \[ *[0-9.]+s\] \( *[0-9]+/[0-9]+\) [^ ]+ [^ ]+$'
-failed=$({ grep -E "$fail_line" "$log" || true; } | awk '{print $NF}' | awk '!seen[$0]++' |
-  jq -R . | jq -sc .)
+failed=$(failed_tests)
 if [[ $code -ne 0 && $failed == "[]" ]]; then
   jq -nc --argjson restored "$restored" '{status: "error", failed: [], restored: $restored,
     next: "the break did not compile, a test crashed or timed out, or the command was not `cargo nextest run`: rerun the command to read its output, make a break that compiles and fails an assertion, then run this again"}'
