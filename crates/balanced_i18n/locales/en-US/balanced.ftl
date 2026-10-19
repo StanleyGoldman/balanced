@@ -142,6 +142,25 @@ register-draft-category-missing = Category is missing
 register-draft-amount-missing = Amount is missing
 # Beside a closed account's name, above its Register.
 register-closed-read-only = Closed — read-only
+
+# The filter bar above the Register. Its controls show no label, so screen readers
+# read these names.
+register-filter-search = Search
+    .placeholder = Search payee, category, memo
+register-filter-dates = Dates
+register-filter-dates-all = All dates
+register-filter-dates-last-30-days = Last 30 days
+register-filter-dates-last-12-months = Last 12 months
+register-filter-dates-this-year = This year
+register-filter-dates-last-year = Last year
+register-filter-type = Transaction type
+register-filter-type-all = All transactions
+register-filter-type-payments = Payments
+register-filter-type-deposits = Deposits
+register-filter-type-flagged = Flagged
+register-filter-reset = Reset
+# How many of the account's transactions the filter bar lets the Register show.
+register-filter-count = { $shown } of { $total } shown
 register-transaction-count =
     { $count ->
         [one] { $count } transaction

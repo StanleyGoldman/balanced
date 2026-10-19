@@ -79,6 +79,13 @@ fn editor(harness: &Harness<'static, App>, column: &str) -> Option<String> {
         .map(|node| node.accesskit_node().value().unwrap_or_default())
 }
 
+/// Whether a cell editor is open: a text field other than the filter bar's search box.
+fn editing(harness: &Harness<'static, App>) -> bool {
+    harness
+        .query_all_by_role(Role::TextInput)
+        .any(|node| node.accesskit_node().label().as_deref() != Some("Search"))
+}
+
 /// The label of the cell under the cell cursor.
 fn cursor(harness: &Harness<'static, App>) -> String {
     let mut cursors = harness
@@ -575,7 +582,7 @@ fn enter_commits_and_moves_right_without_opening_the_next_cell() {
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
     harness.get_by_role_and_label(Role::Cell, "Fresh Market Downtown");
-    assert!(harness.query_by_role(Role::TextInput).is_none());
+    assert!(!editing(&harness));
     assert_eq!(cursor(&harness), "Food & Dining:Groceries");
 }
 
@@ -633,7 +640,7 @@ fn escape_cancels_the_edit_and_restores_the_saved_text() {
 
     press(&mut harness, Modifiers::NONE, Key::Escape);
 
-    assert!(harness.query_by_role(Role::TextInput).is_none());
+    assert!(!editing(&harness));
     assert_eq!(cursor(&harness), "Fresh Market");
 }
 
@@ -647,7 +654,7 @@ fn clicking_another_cell_commits_the_edit() {
     click_cell(&mut harness, "Costco");
 
     harness.get_by_role_and_label(Role::Cell, "Corner Shop");
-    assert!(harness.query_by_role(Role::TextInput).is_none());
+    assert!(!editing(&harness));
 }
 
 #[test]
@@ -702,7 +709,7 @@ fn a_closed_accounts_cells_do_not_open_for_editing() {
 
     type_text(&mut harness, "x");
 
-    assert!(harness.query_by_role(Role::TextInput).is_none());
+    assert!(!editing(&harness));
     harness.get_by_label("This account is closed, so its transactions can't be changed.");
 }
 
@@ -783,7 +790,7 @@ fn tab_on_the_draft_rows_last_cell_commits_and_closes_it() {
             .take(9)
             .any(|cell| cell == "70.00")
     );
-    assert!(harness.query_by_role(Role::TextInput).is_none());
+    assert!(!editing(&harness));
 }
 
 #[test]

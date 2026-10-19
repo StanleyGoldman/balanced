@@ -28,8 +28,9 @@ use crate::draft_row::{Draft, Missing};
 use crate::formatted_amount::i18n_currency;
 use crate::i18n::fl;
 use crate::register_columns::{RegisterColumn, RegisterColumns};
+use crate::register_filter::{self, RegisterFilter};
 use crate::register_model::{
-    AmountSide, RegisterModel, RegisterRow, RegisterSort, RowId, SortDirection, SortKey,
+    AmountSide, RegisterModel, RegisterRow, RegisterSort, RowId, Showing, SortDirection, SortKey,
 };
 use crate::theme::Theme;
 
@@ -703,15 +704,17 @@ impl RowsInView {
     }
 }
 
-/// The open account's Register: its cached rows, its sort, the cell cursor, the cell
-/// being edited, and the draft row. The cursor's row is the selected row. Opening
-/// another account sorts it by date, empties the draft row and puts the cursor on it.
-/// None of it outlives the run.
+/// The open account's Register: its cached rows, its sort and filter, the cell cursor,
+/// the cell being edited, and the draft row. The cursor's row is the selected row.
+/// Opening another account sorts it by date, clears the filter, empties the draft row
+/// and puts the cursor on it. None of it outlives the run.
 #[derive(Debug, Default)]
 pub(crate) struct Register {
     /// The rows of the last account shown, rebuilt when they are out of date.
     model: Option<RegisterModel>,
     sort: RegisterSort,
+    /// What the filter bar is set to.
+    filter: RegisterFilter,
     /// Whether the sort changed since the rows were last shown, so the cursor's row,
     /// if any, scrolls to the middle of the Register.
     centre_pending: bool,
@@ -792,19 +795,28 @@ impl Register {
             .and_then(|cursor| rows.position(cursor.row))
     }
 
-    /// Catches up with what changed since the last frame: another account, `account`,
+    /// Catches up with what changed since the last frame: another account, `summary`'s,
     /// starts the Register over with the cell cursor on its draft row, unless it is
-    /// `closed`; and a post that `view` shows applied empties the draft row.
-    fn catch_up(&mut self, account: AccountId, closed: bool, view: &LedgerView) {
+    /// closed; and a post that `view` shows applied empties the draft row, and stays in
+    /// view until the filter changes.
+    fn catch_up(&mut self, summary: &AccountSummary, view: &LedgerView) {
+        let account = summary.account().id();
         if self.model.as_ref().map(RegisterModel::account) != Some(account) {
             self.start_over();
-            if !closed {
+            if !summary.account().is_closed() {
                 self.go_to_draft_row();
             }
         }
         if let Some(sent_at) = self.posted_at.take()
             && view.generation() != sent_at
         {
+            if let Some(model) = self.model.as_ref().filter(|_| self.filter.is_set()) {
+                let ids = summary
+                    .register()
+                    .iter()
+                    .map(|entry| entry.transaction().id());
+                self.filter.keep(ids.filter(|&id| !model.holds(id)));
+            }
             self.draft = Draft::default();
             self.missing = None;
             self.go_to_draft_row();
@@ -826,10 +838,11 @@ impl Register {
         self.refresh_draft_row(draft_frame, false);
     }
 
-    /// Starts the Register over for another account: sorted by date, with no cell
-    /// cursor and an empty draft row.
+    /// Starts the Register over for another account: sorted by date and unfiltered,
+    /// with no cell cursor and an empty draft row.
     fn start_over(&mut self) {
         self.sort = RegisterSort::default();
+        self.filter = RegisterFilter::default();
         self.centre_pending = false;
         self.cursor = None;
         self.edit = None;
@@ -984,11 +997,9 @@ impl Register {
         self.show_columns(columns);
         let account = summary.account().id();
         let closed = summary.account().is_closed();
-        self.catch_up(account, closed, view);
-        let (model, rebuilt) = match self.model.take() {
-            Some(model) if model.is_current(account, view, self.sort, i18n) => (model, false),
-            _ => (RegisterModel::new(summary, view, self.sort, i18n), true),
-        };
+        self.catch_up(summary, view);
+        let (model, rebuilt) = self.take_model(summary, view, today, i18n);
+        self.filter_bar(ui, i18n, &model);
         let choices = match self.choices.take() {
             Some(choices) if choices.is_current(view, i18n) => choices,
             _ => FieldChoices::new(view, i18n),
@@ -1081,6 +1092,46 @@ impl Register {
         self.end_frame(draft_row, draft_frame);
         self.model = Some(model);
         self.choices = Some(choices);
+    }
+
+    /// Takes the model of `summary`'s rows, an account in `view`, as of `today`,
+    /// rebuilt if it is out of date, and whether it was.
+    fn take_model(
+        &mut self,
+        summary: &AccountSummary,
+        view: &LedgerView,
+        today: Date<Iso>,
+        i18n: &Localizer,
+    ) -> (RegisterModel, bool) {
+        let shown = Showing {
+            sort: self.sort,
+            filter: &self.filter,
+            today,
+        };
+        match self.model.take() {
+            Some(model) if model.is_current(summary.account().id(), view, shown, i18n) => {
+                (model, false)
+            }
+            _ => (RegisterModel::new(summary, view, shown, i18n), true),
+        }
+    }
+
+    /// Draws the filter bar above the Register, counting `model`'s rows. A change to
+    /// the filter filters and scrolls the rows on the next frame.
+    fn filter_bar(&mut self, ui: &mut egui::Ui, i18n: &Localizer, model: &RegisterModel) {
+        let mut filter = self.filter.clone();
+        register_filter::show(
+            ui,
+            i18n,
+            &mut filter,
+            model.rows().len(),
+            model.transaction_count(),
+        );
+        if filter != self.filter {
+            self.filter.change_to(filter);
+            self.centre_pending = true;
+            ui.ctx().request_repaint();
+        }
     }
 
     /// Draws `heading` in its cell `ui`, with the column's resize handle, and the

@@ -65,3 +65,7 @@ _Avoid_: Row menu, context column
 **Column chooser**:
 The control at the right end of a register's header that shows, hides and reorders the register's columns.
 _Avoid_: Column picker, column settings
+
+**Filter bar**:
+The row above a register's column headings that narrows the rows it shows by search text, date range and transaction type; it never changes a row's running balance.
+_Avoid_: Search bar, filter panel

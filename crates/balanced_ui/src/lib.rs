@@ -24,6 +24,7 @@ mod preferences;
 mod preferences_dialog;
 mod register;
 mod register_columns;
+mod register_filter;
 mod register_model;
 mod route;
 #[cfg(feature = "test-support")]

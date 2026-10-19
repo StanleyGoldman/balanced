@@ -2,7 +2,7 @@
 //! cell's text already formatted.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use balanced_core::{
     AccountId, AccountSummary, Allocation, CategoryId, CurrencyCode, Generation, LedgerView, Money,
@@ -16,6 +16,7 @@ use icu_locale::Locale;
 use crate::draft_row::Draft;
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
+use crate::register_filter::RegisterFilter;
 
 /// Separates a category from the one it sits under: `Food & Dining:Groceries`.
 pub(crate) const CATEGORY_SEPARATOR: &str = ":";
@@ -344,26 +345,46 @@ struct Source {
     account: AccountId,
     generation: Generation,
     sort: RegisterSort,
+    filter: RegisterFilter,
+    /// Today's date, which the filter's date ranges count from.
+    today: Date<Iso>,
     text_language: LanguageIdentifier,
     formatting_locale: Locale,
 }
 
-/// One account's Register rows, in the order of its sort.
+/// One account's Register rows that its filter shows, in the order of its sort.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisterModel {
     source: Source,
     rows: Vec<RegisterRow>,
+    /// Every transaction in the account, shown or not.
+    transactions: HashSet<TransactionId>,
+}
+
+/// What a [`RegisterModel`] shows: its sort, its filter and today's date.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Showing<'a> {
+    pub(crate) sort: RegisterSort,
+    pub(crate) filter: &'a RegisterFilter,
+    pub(crate) today: Date<Iso>,
 }
 
 impl RegisterModel {
-    /// The Register of `summary`, an account in `view`, formatted by `i18n` and
-    /// ordered by `sort`.
+    /// The Register of `summary`, an account in `view`, formatted by `i18n`, narrowed
+    /// and ordered as `shown` says. Each row's balance is the account's running
+    /// balance, whichever rows the filter hides.
     pub(crate) fn new(
         summary: &AccountSummary,
         view: &LedgerView,
-        sort: RegisterSort,
+        shown: Showing<'_>,
         i18n: &Localizer,
     ) -> Self {
+        let Showing {
+            sort,
+            filter,
+            today,
+        } = shown;
+        let matcher = filter.matcher(today);
         let mut paths = CategoryPaths {
             view,
             paths: HashMap::new(),
@@ -375,7 +396,7 @@ impl RegisterModel {
             .register()
             .iter()
             .enumerate()
-            .map(|(place, entry)| {
+            .filter_map(|(place, entry)| {
                 let transaction = entry.transaction();
                 let (kind, payee, category) = match transaction.allocation() {
                     Allocation::OpeningBalance => (
@@ -394,7 +415,7 @@ impl RegisterModel {
                         split.clone(),
                     ),
                 };
-                RegisterRow {
+                let row = RegisterRow {
                     id: RowId::Transaction(transaction.id()),
                     place,
                     kind,
@@ -409,38 +430,56 @@ impl RegisterModel {
                     balance: shows_balance
                         .then(|| FormattedAmount::new(i18n, entry.balance(), AmountStyle::Bare)),
                     flagged: transaction.is_flagged(),
-                }
+                };
+                let split_lines = match transaction.allocation() {
+                    Allocation::Split(lines) => lines.as_slice(),
+                    Allocation::OpeningBalance | Allocation::Category(_) => &[],
+                };
+                let split_categories: Vec<String> = split_lines
+                    .iter()
+                    .map(|line| paths.path(line.category()).to_owned())
+                    .collect();
+                matcher
+                    .shows(&row, split_categories.iter().map(String::as_str))
+                    .then_some(row)
             })
             .collect();
         rows.sort_by(|a, b| sort.compare(i18n, a, b));
         Self {
-            source: Self::source(summary.account().id(), view, sort, i18n),
+            source: Self::source(summary.account().id(), view, shown, i18n),
             rows,
+            transactions: summary
+                .register()
+                .iter()
+                .map(|entry| entry.transaction().id())
+                .collect(),
         }
     }
 
-    /// Whether the model shows account `account` of `view` ordered by `sort`, as `i18n`
+    /// Whether the model shows account `account` of `view` as `shown` says, as `i18n`
     /// formats it, so needs no rebuild.
     pub(crate) fn is_current(
         &self,
         account: AccountId,
         view: &LedgerView,
-        sort: RegisterSort,
+        shown: Showing<'_>,
         i18n: &Localizer,
     ) -> bool {
-        self.source == Self::source(account, view, sort, i18n)
+        self.source == Self::source(account, view, shown, i18n)
     }
 
     fn source(
         account: AccountId,
         view: &LedgerView,
-        sort: RegisterSort,
+        shown: Showing<'_>,
         i18n: &Localizer,
     ) -> Source {
         Source {
             account,
             generation: view.generation(),
-            sort,
+            sort: shown.sort,
+            filter: shown.filter.clone(),
+            today: shown.today,
             text_language: i18n.text_language().clone(),
             formatting_locale: i18n.formatting_locale().clone(),
         }
@@ -451,9 +490,19 @@ impl RegisterModel {
         self.source.account
     }
 
-    /// The rows, in the order of the model's sort.
+    /// The rows the filter shows, in the order of the model's sort.
     pub(crate) fn rows(&self) -> &[RegisterRow] {
         &self.rows
+    }
+
+    /// How many transactions the account has, shown or not.
+    pub(crate) fn transaction_count(&self) -> usize {
+        self.transactions.len()
+    }
+
+    /// Whether transaction `id` was in the account when the model was built.
+    pub(crate) fn holds(&self, id: TransactionId) -> bool {
+        self.transactions.contains(&id)
     }
 }
 

@@ -198,6 +198,9 @@ impl Theme {
     /// The width of each Name field in Manage Accounts.
     pub(crate) const MANAGE_ACCOUNTS_NAME_WIDTH: f32 = 200.0;
 
+    /// The width of the filter bar's search box.
+    pub(crate) const SEARCH_BOX_WIDTH: f32 = 240.0;
+
     pub(crate) fn new(settings: ThemeSettings) -> Self {
         Self {
             settings,
