@@ -311,7 +311,7 @@ impl Row {
                 );
             }
         });
-        match model.balance(self.id) {
+        match model.ending_balance(self.id) {
             Some(balance) => ui.label(balance.styled(theme)),
             None => ui.label(""),
         };
@@ -496,7 +496,7 @@ fn show_confirm(
     let (message, accept) = match confirm {
         Confirm::Close(_) => {
             let balance = model
-                .balance(id)
+                .ending_balance(id)
                 .filter(|balance| !balance.money().amount().is_zero());
             let message = match balance {
                 None => fl!(i18n, "dialog-close-account-message", name = name),

@@ -109,7 +109,8 @@ struct Source {
 pub(crate) struct AccountsModel {
     source: Source,
     sections: Vec<SectionRows>,
-    balances: HashMap<AccountId, FormattedAmount>,
+    /// Each account's balance with every transaction counted.
+    ending_balances: HashMap<AccountId, FormattedAmount>,
     /// Each account's balance as of today.
     current_balances: HashMap<AccountId, FormattedAmount>,
     /// Each section's total, for the sections whose sum doesn't overflow.
@@ -177,7 +178,7 @@ impl AccountsModel {
         Self {
             source: Self::source(view, i18n, today),
             sections,
-            balances: formatted(&AccountSummary::balance),
+            ending_balances: formatted(&AccountSummary::balance),
             current_balances: formatted(&|summary| summary.balance_on(today)),
             totals: Section::ALL
                 .into_iter()
@@ -223,8 +224,8 @@ impl AccountsModel {
 
     /// The Ending balance of account `id`, every transaction counted, or `None` when
     /// the snapshot lacks it.
-    pub(crate) fn balance(&self, id: AccountId) -> Option<&FormattedAmount> {
-        self.balances.get(&id)
+    pub(crate) fn ending_balance(&self, id: AccountId) -> Option<&FormattedAmount> {
+        self.ending_balances.get(&id)
     }
 
     /// The Current balance of account `id`, its transactions dated today or earlier

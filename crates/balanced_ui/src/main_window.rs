@@ -16,6 +16,7 @@ use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::data_file::DataFileRefusal;
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
+use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
 use crate::layout::Layout;
@@ -711,7 +712,7 @@ impl MainWindow {
         let account = summary.account();
         let missing = "the model formats both balances of every account in its snapshot";
         let current = accounts.current_balance(account.id()).expect(missing);
-        let ending = accounts.balance(account.id()).expect(missing);
+        let ending = accounts.ending_balance(account.id()).expect(missing);
         let closed = account.is_closed();
         Sides::new().shrink_left().truncate().show(
             ui,
@@ -728,24 +729,18 @@ impl MainWindow {
                 if ui.add_enabled(!closed, add).clicked() {
                     commands.send(AppCommand::GoToDraftRow);
                 }
-                for (label, balance) in [
-                    (fl!(i18n, "register-ending-balance"), ending),
-                    (fl!(i18n, "register-current-balance"), current),
+                for (message, balance) in [
+                    (
+                        fl!(i18n, "register-ending-balance", amount = ending.text()),
+                        ending,
+                    ),
+                    (
+                        fl!(i18n, "register-current-balance", amount = current.text()),
+                        current,
+                    ),
                 ] {
                     // One Label each, so a screen reader reads the name with its amount.
-                    let mut text = LayoutJob::default();
-                    for part in [
-                        RichText::new(format!("{label} ")).small().weak(),
-                        balance.styled(theme).small(),
-                    ] {
-                        part.append_to(
-                            &mut text,
-                            ui.style(),
-                            FontSelection::Default,
-                            Align::Center,
-                        );
-                    }
-                    ui.label(text);
+                    ui.label(header_balance(ui, theme, &message, balance));
                 }
             },
         );
@@ -831,4 +826,29 @@ impl MainWindow {
             }
         });
     }
+}
+
+/// `message`, a context header balance such as "Current $5,647.46", as small, weak text
+/// with `balance`'s amount in it styled by `theme` for its sign.
+fn header_balance(
+    ui: &egui::Ui,
+    theme: &Theme,
+    message: &str,
+    balance: &FormattedAmount,
+) -> LayoutJob {
+    let (before, amount, after) = match message.split_once(balance.text()) {
+        Some((before, after)) => (before, Some(balance.styled(theme)), after),
+        None => (message, None, ""),
+    };
+    let mut text = LayoutJob::default();
+    let parts = [
+        Some(RichText::new(before).weak()),
+        amount,
+        Some(RichText::new(after).weak()),
+    ];
+    for part in parts.into_iter().flatten() {
+        part.small()
+            .append_to(&mut text, ui.style(), FontSelection::Default, Align::Center);
+    }
+    text
 }
