@@ -354,7 +354,8 @@ fn transaction(
         row.memo,
         allocation,
         amount,
-    ))
+    )
+    .with_flag(row.flagged))
 }
 
 /// The row for `account`, at `position` in its kind.
@@ -413,6 +414,7 @@ pub(crate) fn transaction_row(
         payee: transaction.payee().to_owned(),
         memo: transaction.memo().to_owned(),
         allocation,
+        flagged: transaction.is_flagged(),
     })
 }
 

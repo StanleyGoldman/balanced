@@ -51,6 +51,10 @@ pub(crate) enum Command {
         transaction: u32,
         edit: TransactionEdit,
     },
+    SetFlagged {
+        transaction: u32,
+        flagged: bool,
+    },
     DeleteTransaction {
         transaction: u32,
     },
@@ -120,12 +124,15 @@ pub(crate) struct Category {
     pub(crate) parent: Option<u32>,
 }
 
-/// A transaction with its id: a [`NewTransaction`]'s fields after `id`, in one object.
+/// A transaction with its id: a [`NewTransaction`]'s fields after `id`, in one object,
+/// then `flagged`, which an unflagged transaction leaves out.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Transaction {
     pub(crate) id: u32,
     #[serde(flatten)]
     pub(crate) transaction: NewTransaction,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) flagged: bool,
 }
 
 /// A transaction to post, which the ledger gives an id. A split's amount is the sum of
