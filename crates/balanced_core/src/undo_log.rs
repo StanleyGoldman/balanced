@@ -192,7 +192,7 @@ fn transaction_to_wire(transaction: &Transaction) -> Result<v1::Transaction, Wri
     let amount = || minor_units(transaction.amount());
     Ok(v1::Transaction {
         id: transaction.id().raw(),
-        transaction: v1::NewTransaction {
+        fields: v1::NewTransaction {
             date: date_text(transaction.date()),
             number: transaction.number().map(str::to_owned),
             payee: transaction.payee().to_owned(),
@@ -409,11 +409,9 @@ fn transaction_from_wire(
     transaction: v1::Transaction,
     currency: CurrencyCode,
 ) -> Result<Transaction, UndoEntryError> {
-    Ok(
-        new_transaction_from_wire(transaction.transaction, currency)?
-            .into_transaction(TransactionId::new(transaction.id), currency)?
-            .with_flag(transaction.flagged),
-    )
+    Ok(new_transaction_from_wire(transaction.fields, currency)?
+        .into_transaction(TransactionId::new(transaction.id), currency)?
+        .with_flag(transaction.flagged))
 }
 
 fn split_from_wire(lines: Vec<v1::SplitLine>, currency: CurrencyCode) -> Vec<SplitLine> {
@@ -635,6 +633,15 @@ mod tests {
                 account,
                 transaction: restored.with_flag(true),
             },
+        ]
+        .into_iter()
+        .chain(category_commands())
+        .collect()
+    }
+
+    /// One of every category Command, every field set and unset.
+    fn category_commands() -> [DomainCommand; 4] {
+        [
             DomainCommand::CreateCategory {
                 name: "Fuel".to_owned(),
                 parent: Some(CategoryId::new(5)),

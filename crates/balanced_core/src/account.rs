@@ -207,8 +207,9 @@ pub(crate) struct NewAccount {
     name: String,
     kind: AccountKind,
     currency: CurrencyCode,
-    /// The opening balance first, then the rest in the order given.
-    transactions: Vec<NewTransaction>,
+    /// The opening balance first, then the rest in the order given, each with whether
+    /// it starts flagged.
+    transactions: Vec<(NewTransaction, bool)>,
     hidden: bool,
     closed: bool,
 }
@@ -225,7 +226,10 @@ impl NewAccount {
             name: name.to_owned(),
             kind,
             currency: opening_balance.currency(),
-            transactions: vec![NewTransaction::opening_balance(opened, opening_balance)],
+            transactions: vec![(
+                NewTransaction::opening_balance(opened, opening_balance),
+                false,
+            )],
             hidden: false,
             closed: false,
         }
@@ -236,7 +240,17 @@ impl NewAccount {
         mut self,
         transactions: impl IntoIterator<Item = NewTransaction>,
     ) -> Self {
-        self.transactions.extend(transactions);
+        self.transactions.extend(
+            transactions
+                .into_iter()
+                .map(|transaction| (transaction, false)),
+        );
+        self
+    }
+
+    /// The same account, with `transaction` posted after the rest, flagged.
+    pub(crate) fn with_flagged_transaction(mut self, transaction: NewTransaction) -> Self {
+        self.transactions.push((transaction, true));
         self
     }
 
@@ -261,8 +275,8 @@ impl NewAccount {
     }
 
     /// The account, with `id`, in its opening balance's currency, and the transactions
-    /// to post to it, opening balance first.
-    pub(crate) fn into_account(self, id: AccountId) -> (Account, Vec<NewTransaction>) {
+    /// to post to it, opening balance first, each with whether it starts flagged.
+    pub(crate) fn into_account(self, id: AccountId) -> (Account, Vec<(NewTransaction, bool)>) {
         let account = Account {
             id,
             name: self.name,

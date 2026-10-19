@@ -130,7 +130,7 @@ pub(crate) struct Category {
 pub(crate) struct Transaction {
     pub(crate) id: u32,
     #[serde(flatten)]
-    pub(crate) transaction: NewTransaction,
+    pub(crate) fields: NewTransaction,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) flagged: bool,
 }
