@@ -20,17 +20,18 @@ The workspace is flat. Each crate sits in `crates/<name>/`, except `xtask/`.
 - **`balanced`**: the binary. It installs the `tracing` subscriber, calls `eframe::run_native`, and turns startup failures into `anyhow` errors. It holds no logic of its own.
 - **`balanced_ui`**: everything egui. It holds the Main window and its panels, the Register view, Dialogs, Detached windows, the theme (the one place that builds colours), `AppCommand`, and the user-action list that feeds the Menu bar and shortcuts. Behind its `test-support` feature, `testing` draws the App for image snapshots.
 - **`balanced_core`**: the financial domain. It holds accounts, transactions, money, `DomainCommand`, the `Ledger` (`apply` and `snapshot`), undo and redo, and `DomainError`.
+- **`balanced_store`**: persistence, below `balanced_core`. It owns all SQL: creating, opening and migrating the data file, the views that serve as the test oracle for `Ledger`'s derived numbers, and reading and writing it for the `Ledger`. Its API speaks in primitive rows (integer ids, minor units, ISO date text). Today it only creates a data file, and nothing uses it yet.
 - **`balanced_i18n`**: message lookup, the locale fallback chain, and locale-aware formatting of numbers, dates and money.
 - **`balanced_prototype_harness`**: tooling for prototypes, not part of the app. It provides the event log, screenshots, F2/F3 notes and markers, and the agent's control file (see `docs/agents/prototypes.md`). It depends on egui but knows nothing of Balanced's domain. Only prototype examples use it, as a dev-dependency.
-- **`balanced_store`**: the data file, a SQLite database. It creates the file, runs the migrations that build its schema, and holds all of Balanced's SQL, including the views that serve as the test oracle for `Ledger`'s derived numbers. It depends on no workspace crate, and its API speaks in primitive rows (integer ids, minor units, ISO date text). Nothing uses it yet; `balanced_core` will sit on it.
 - **`xtask`**: repo automation, run as `cargo xtask <task>`, including every check (`cargo xtask ci`).
 
 ## Invariants
 
 - **`balanced_core` and `balanced_i18n` don't depend on egui or eframe.** `deny.toml` bans both crates, and lists in `wrappers` the only crates allowed to depend on them directly.
 - **`balanced_core` and `balanced_i18n` are siblings.** Neither depends on the other. `balanced_ui` formats core values through `balanced_i18n`.
-- **Dependencies point down only:** `balanced` → `balanced_ui` → {`balanced_core` → `balanced_store`, `balanced_i18n`}. `balanced_store` depends on no workspace crate. Nothing checks the `balanced_store` edges yet: the `xtask` layer check over `cargo metadata` comes with #237.
+- **Dependencies point down only:** `balanced` → `balanced_ui` → {`balanced_core` → `balanced_store`, `balanced_i18n`}. A crate may depend on any crate below it, not only the next layer down. `xtask` stands apart: it depends on no workspace crate, and none depends on it. `cargo xtask layers`, part of `cargo xtask ci`, enforces this rule over `cargo metadata`, and fails on a workspace crate missing from its `LAYERS` table.
+- **Only `balanced_store` uses `rusqlite`.** No other crate depends on it, so all SQL stays in one place. `cargo xtask layers` enforces this too.
 - **The domain changes only inside `Ledger::apply`, `Ledger::undo` and `Ledger::redo`.** No UI code holds `&mut` access to domain data.
-- **`balanced_prototype_harness` stays out of the app.** Only `examples/` take it, as a dev-dependency. No crate lists it under `[dependencies]`.
+- **`balanced_prototype_harness` stays out of the app.** Only `examples/` take it, as a dev-dependency. No crate lists it under `[dependencies]`, and `cargo xtask layers` allows it only as a dev-dependency of `balanced` or `balanced_ui`.
 - **Only the binary installs a tracing subscriber.** `anyhow` appears only in `balanced` and `xtask`.
 - **Colours are built only in the theme module.**
