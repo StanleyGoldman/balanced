@@ -28,7 +28,7 @@ use crate::draft_row::{Draft, Missing};
 use crate::formatted_amount::i18n_currency;
 use crate::i18n::fl;
 use crate::register_columns::{RegisterColumn, RegisterColumns};
-use crate::register_filter::{self, RegisterFilter};
+use crate::register_filter::RegisterFilter;
 use crate::register_model::{
     AmountSide, RegisterModel, RegisterRow, RegisterSort, RowId, Showing, SortDirection, SortKey,
 };
@@ -810,12 +810,10 @@ impl Register {
         if let Some(sent_at) = self.posted_at.take()
             && view.generation() != sent_at
         {
-            if let Some(model) = self.model.as_ref().filter(|_| self.filter.is_set()) {
-                let ids = summary
-                    .register()
-                    .iter()
-                    .map(|entry| entry.transaction().id());
-                self.filter.keep(ids.filter(|&id| !model.holds(id)));
+            if self.filter.is_set()
+                && let Some(model) = &self.model
+            {
+                self.filter.keep(model.added(summary));
             }
             self.draft = Draft::default();
             self.missing = None;
@@ -1119,16 +1117,7 @@ impl Register {
     /// Draws the filter bar above the Register, counting `model`'s rows. A change to
     /// the filter filters and scrolls the rows on the next frame.
     fn filter_bar(&mut self, ui: &mut egui::Ui, i18n: &Localizer, model: &RegisterModel) {
-        let mut filter = self.filter.clone();
-        register_filter::show(
-            ui,
-            i18n,
-            &mut filter,
-            model.rows().len(),
-            model.transaction_count(),
-        );
-        if filter != self.filter {
-            self.filter.change_to(filter);
+        if self.filter.show(ui, i18n, model) {
             self.centre_pending = true;
             ui.ctx().request_repaint();
         }

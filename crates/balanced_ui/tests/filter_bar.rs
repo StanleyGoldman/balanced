@@ -430,3 +430,36 @@ fn tab_reaches_the_search_box_and_the_filter_combos() {
 
     assert_eq!(seen, ["Search", "Dates", "Transaction type"]);
 }
+
+#[test]
+fn tab_reaches_reset_once_a_filter_is_set() {
+    let mut harness = app_showing("Everyday Checking");
+    choose(&mut harness, "Transaction type", "Payments");
+    harness
+        .get_by_role_and_label(Role::Button, "+ Transaction")
+        .focus();
+    harness.run();
+
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+        seen.push(focused(&harness).unwrap_or_default());
+    }
+
+    assert_eq!(seen, ["Search", "Dates", "Transaction type", "Reset"]);
+}
+
+#[test]
+fn a_search_of_only_spaces_sets_no_filter() {
+    let mut harness = app_showing("Everyday Checking");
+
+    search(&mut harness, "  ");
+
+    assert_eq!(count(&harness), None);
+    assert!(
+        harness
+            .get_by_role_and_label(Role::Button, "Reset")
+            .accesskit_node()
+            .is_disabled()
+    );
+}

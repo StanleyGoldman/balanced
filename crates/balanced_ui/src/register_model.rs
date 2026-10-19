@@ -448,11 +448,7 @@ impl RegisterModel {
         Self {
             source: Self::source(summary.account().id(), view, shown, i18n),
             rows,
-            transactions: summary
-                .register()
-                .iter()
-                .map(|entry| entry.transaction().id())
-                .collect(),
+            transactions: transaction_ids(summary).collect(),
         }
     }
 
@@ -500,10 +496,22 @@ impl RegisterModel {
         self.transactions.len()
     }
 
-    /// Whether transaction `id` was in the account when the model was built.
-    pub(crate) fn holds(&self, id: TransactionId) -> bool {
-        self.transactions.contains(&id)
+    /// The transactions in `summary`, the model's account as it is now, that were
+    /// not in it when the model was built.
+    pub(crate) fn added<'a>(
+        &'a self,
+        summary: &'a AccountSummary,
+    ) -> impl Iterator<Item = TransactionId> + 'a {
+        transaction_ids(summary).filter(|id| !self.transactions.contains(id))
     }
+}
+
+/// The ids of `summary`'s transactions, in date order.
+fn transaction_ids(summary: &AccountSummary) -> impl Iterator<Item = TransactionId> + '_ {
+    summary
+        .register()
+        .iter()
+        .map(|entry| entry.transaction().id())
 }
 
 /// Category paths, each built once while a model is built.

@@ -11,7 +11,7 @@ use jiff::ToSpan as _;
 
 use crate::clock::{to_civil, to_iso};
 use crate::i18n::fl;
-use crate::register_model::{AmountSide, RegisterRow};
+use crate::register_model::{AmountSide, RegisterModel, RegisterRow};
 use crate::theme::Theme;
 
 /// The dates the Register shows, relative to today.
@@ -30,7 +30,7 @@ pub(crate) enum DateRange {
 }
 
 impl DateRange {
-    pub(crate) const ALL: [Self; 5] = [
+    const ALL: [Self; 5] = [
         Self::All,
         Self::Last30Days,
         Self::Last12Months,
@@ -40,7 +40,7 @@ impl DateRange {
 
     /// The first and last dates of the range as of `today`, or `None` for every date,
     /// or when today is beyond the years dates can be worked out in.
-    fn bounds(self, today: Date<Iso>) -> Option<(Date<Iso>, Date<Iso>)> {
+    fn bounds(self, today: Date<Iso>) -> Option<DateBounds> {
         let today = to_civil(today)?;
         let (first, last) = match self {
             Self::All => return None,
@@ -58,7 +58,33 @@ impl DateRange {
                 (last_year.first_of_year(), last_year.last_of_year())
             }
         };
-        Some((to_iso(first), to_iso(last)))
+        Some(DateBounds {
+            first: to_iso(first),
+            last: to_iso(last),
+        })
+    }
+
+    fn label(self, i18n: &Localizer) -> String {
+        match self {
+            Self::All => fl!(i18n, "register-filter-dates-all"),
+            Self::Last30Days => fl!(i18n, "register-filter-dates-last-30-days"),
+            Self::Last12Months => fl!(i18n, "register-filter-dates-last-12-months"),
+            Self::ThisYear => fl!(i18n, "register-filter-dates-this-year"),
+            Self::LastYear => fl!(i18n, "register-filter-dates-last-year"),
+        }
+    }
+}
+
+/// The first and last dates of a [`DateRange`], both in it.
+#[derive(Debug, Clone, Copy)]
+struct DateBounds {
+    first: Date<Iso>,
+    last: Date<Iso>,
+}
+
+impl DateBounds {
+    fn contains(self, date: Date<Iso>) -> bool {
+        (self.first.to_rata_die()..=self.last.to_rata_die()).contains(&date.to_rata_die())
     }
 }
 
@@ -75,7 +101,7 @@ pub(crate) enum TransactionType {
 }
 
 impl TransactionType {
-    pub(crate) const ALL: [Self; 4] = [Self::All, Self::Payments, Self::Deposits, Self::Flagged];
+    const ALL: [Self; 4] = [Self::All, Self::Payments, Self::Deposits, Self::Flagged];
 
     fn shows(self, row: &RegisterRow) -> bool {
         let side = row.amount().map(AmountSide::of);
@@ -86,6 +112,15 @@ impl TransactionType {
             Self::Flagged => row.is_flagged(),
         }
     }
+
+    fn label(self, i18n: &Localizer) -> String {
+        match self {
+            Self::All => fl!(i18n, "register-filter-type-all"),
+            Self::Payments => fl!(i18n, "register-filter-type-payments"),
+            Self::Deposits => fl!(i18n, "register-filter-type-deposits"),
+            Self::Flagged => fl!(i18n, "register-filter-type-flagged"),
+        }
+    }
 }
 
 /// What the filter bar is set to, and the transactions added since it was last
@@ -94,27 +129,19 @@ impl TransactionType {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct RegisterFilter {
     /// The search box's text.
-    pub(crate) search: String,
-    pub(crate) dates: DateRange,
-    pub(crate) kind: TransactionType,
+    search: String,
+    dates: DateRange,
+    kind: TransactionType,
     kept: BTreeSet<TransactionId>,
 }
 
 impl RegisterFilter {
-    /// Whether any control is set to narrow the rows.
+    /// Whether any control is set to narrow the rows. Search text of only spaces
+    /// narrows nothing.
     pub(crate) fn is_set(&self) -> bool {
-        !self.search.is_empty() || self.dates != DateRange::All || self.kind != TransactionType::All
-    }
-
-    /// Takes the settings of `changed`, a copy of this filter with its controls
-    /// changed, and stops keeping the transactions added under the old settings.
-    pub(crate) fn change_to(&mut self, changed: Self) {
-        if changed != *self {
-            *self = Self {
-                kept: BTreeSet::new(),
-                ..changed
-            };
-        }
+        !self.search.trim().is_empty()
+            || self.dates != DateRange::All
+            || self.kind != TransactionType::All
     }
 
     /// Keeps `added`, transactions just added, in view until the filter changes.
@@ -137,7 +164,7 @@ impl RegisterFilter {
 pub(crate) struct Matcher<'a> {
     /// The search text in lower case.
     search: String,
-    dates: Option<(Date<Iso>, Date<Iso>)>,
+    dates: Option<DateBounds>,
     kind: TransactionType,
     kept: &'a BTreeSet<TransactionId>,
 }
@@ -159,61 +186,67 @@ impl Matcher<'_> {
             || found(row.category())
             || found(row.memo())
             || split_categories.into_iter().any(found);
-        let dated = self.dates.is_none_or(|(first, last)| {
-            row.saved_date().is_some_and(|date| {
-                (first.to_rata_die()..=last.to_rata_die()).contains(&date.to_rata_die())
-            })
-        });
+        let dated = self
+            .dates
+            .is_none_or(|bounds| row.saved_date().is_some_and(|date| bounds.contains(date)));
         searched && dated && self.kind.shows(row)
     }
 }
 
-/// Draws the filter bar, a row of its own above the Register, setting `filter` from
-/// its controls. With any control set, it says that `shown` of the account's `total`
-/// transactions are shown.
-pub(crate) fn show(
-    ui: &mut egui::Ui,
-    i18n: &Localizer,
-    filter: &mut RegisterFilter,
-    shown: usize,
-    total: usize,
-) {
-    ui.horizontal(|ui| {
-        let search = ui.add(
-            TextEdit::singleline(&mut filter.search)
-                .hint_text(fl!(i18n, "register-filter-search", "placeholder"))
-                .desired_width(Theme::SEARCH_BOX_WIDTH),
-        );
-        name_for_screen_readers(&search, fl!(i18n, "register-filter-search"));
-        let dates = ComboBox::from_id_salt("register_filter_dates")
-            .selected_text(date_range_label(i18n, filter.dates))
-            .show_ui(ui, |ui| {
-                for range in DateRange::ALL {
-                    ui.selectable_value(&mut filter.dates, range, date_range_label(i18n, range));
-                }
-            });
-        name_for_screen_readers(&dates.response, fl!(i18n, "register-filter-dates"));
-        let kind = ComboBox::from_id_salt("register_filter_type")
-            .selected_text(type_label(i18n, filter.kind))
-            .show_ui(ui, |ui| {
-                for kind in TransactionType::ALL {
-                    ui.selectable_value(&mut filter.kind, kind, type_label(i18n, kind));
-                }
-            });
-        name_for_screen_readers(&kind.response, fl!(i18n, "register-filter-type"));
-        let reset = Button::new(fl!(i18n, "register-filter-reset"));
-        if ui.add_enabled(filter.is_set(), reset).clicked() {
-            *filter = RegisterFilter::default();
+impl RegisterFilter {
+    /// Draws the filter bar, a row of its own above the Register, and sets the filter
+    /// from its controls. With any control set, it counts how many of `model`'s
+    /// account's transactions are shown. Returns whether a control changed, which
+    /// stops keeping the transactions added under the old settings.
+    pub(crate) fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        model: &RegisterModel,
+    ) -> bool {
+        let before = (self.search.clone(), self.dates, self.kind);
+        ui.horizontal(|ui| {
+            let search = ui.add(
+                TextEdit::singleline(&mut self.search)
+                    .hint_text(fl!(i18n, "register-filter-search", "placeholder"))
+                    .desired_width(Theme::SEARCH_BOX_WIDTH),
+            );
+            name_for_screen_readers(&search, fl!(i18n, "register-filter-search"));
+            let dates = ComboBox::from_id_salt("register_filter_dates")
+                .selected_text(self.dates.label(i18n))
+                .show_ui(ui, |ui| {
+                    for range in DateRange::ALL {
+                        ui.selectable_value(&mut self.dates, range, range.label(i18n));
+                    }
+                });
+            name_for_screen_readers(&dates.response, fl!(i18n, "register-filter-dates"));
+            let kind = ComboBox::from_id_salt("register_filter_type")
+                .selected_text(self.kind.label(i18n))
+                .show_ui(ui, |ui| {
+                    for kind in TransactionType::ALL {
+                        ui.selectable_value(&mut self.kind, kind, kind.label(i18n));
+                    }
+                });
+            name_for_screen_readers(&kind.response, fl!(i18n, "register-filter-type"));
+            let reset = Button::new(fl!(i18n, "register-filter-reset"));
+            if ui.add_enabled(self.is_set(), reset).clicked() {
+                *self = Self::default();
+            }
+            if self.is_set() {
+                ui.weak(fl!(
+                    i18n,
+                    "register-filter-count",
+                    shown = model.rows().len(),
+                    total = model.transaction_count()
+                ));
+            }
+        });
+        let changed = before != (self.search.clone(), self.dates, self.kind);
+        if changed {
+            self.kept.clear();
         }
-        if filter.is_set() {
-            ui.weak(fl!(
-                i18n,
-                "register-filter-count",
-                shown = shown,
-                total = total
-            ));
-        }
-    });
+        changed
+    }
 }
 
 /// Gives `response`'s widget `label` as its name for screen readers, since the filter
@@ -222,23 +255,4 @@ fn name_for_screen_readers(response: &Response, label: String) {
     response
         .ctx
         .accesskit_node_builder(response.id, |node| node.set_label(label));
-}
-
-fn date_range_label(i18n: &Localizer, range: DateRange) -> String {
-    match range {
-        DateRange::All => fl!(i18n, "register-filter-dates-all"),
-        DateRange::Last30Days => fl!(i18n, "register-filter-dates-last-30-days"),
-        DateRange::Last12Months => fl!(i18n, "register-filter-dates-last-12-months"),
-        DateRange::ThisYear => fl!(i18n, "register-filter-dates-this-year"),
-        DateRange::LastYear => fl!(i18n, "register-filter-dates-last-year"),
-    }
-}
-
-fn type_label(i18n: &Localizer, kind: TransactionType) -> String {
-    match kind {
-        TransactionType::All => fl!(i18n, "register-filter-type-all"),
-        TransactionType::Payments => fl!(i18n, "register-filter-type-payments"),
-        TransactionType::Deposits => fl!(i18n, "register-filter-type-deposits"),
-        TransactionType::Flagged => fl!(i18n, "register-filter-type-flagged"),
-    }
 }
