@@ -493,9 +493,12 @@ version = "0.0.0"
 dependencies = [
  "balanced_store",
  "icu_calendar",
+ "insta",
  "iso_currency",
  "rust_decimal",
  "rust_decimal_macros",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
 ]

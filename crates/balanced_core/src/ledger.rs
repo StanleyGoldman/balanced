@@ -3,13 +3,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use balanced_store::Store;
+use balanced_store::{Stack, Store};
 use icu_calendar::{Date, Iso};
 
 use crate::account::NewAccount;
 use crate::category::NewCategory;
 use crate::data_file::{account_row, category_row, transaction_row};
 use crate::transaction::{NewTransaction, TransactionId};
+use crate::undo_log;
 use crate::{
     Account, AccountGroup, AccountId, AccountKind, AccountStatus, Applied, Category, CategoryId,
     CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection, Transaction,
@@ -314,6 +315,17 @@ pub(crate) struct NextIds {
     pub(crate) category: CategoryId,
 }
 
+/// How many changes Undo keeps. Applying another drops the oldest.
+const UNDO_LIMIT: usize = 100;
+
+/// The Undo and Redo stacks a data file holds: the inverses of the changes each can
+/// make, the latest last.
+#[derive(Debug, Default)]
+pub(crate) struct History {
+    pub(crate) undo: Vec<DomainCommand>,
+    pub(crate) redo: Vec<DomainCommand>,
+}
+
 /// What [`Ledger::restore`] puts back: the ledger less its Undo and Redo history.
 #[derive(Debug)]
 struct Checkpoint {
@@ -443,6 +455,16 @@ impl Ledger {
         }
     }
 
+    /// The ledger with `history` to undo and redo.
+    pub(crate) fn with_history(mut self, history: History) -> Self {
+        History {
+            undo: self.undo_stack,
+            redo: self.redo_stack,
+        } = history;
+        self.publish_history();
+        self
+    }
+
     /// The current snapshot. It stays valid, unchanged, after the ledger changes.
     pub fn snapshot(&self) -> Arc<LedgerView> {
         Arc::clone(&self.view)
@@ -452,7 +474,20 @@ impl Ledger {
     /// rejects it and leaves the ledger as it was. An applied change can be undone,
     /// and nothing undone before it can be redone any more.
     pub fn apply(&mut self, command: DomainCommand) -> Result<Applied, DomainError> {
-        let applied = self.write(|ledger| ledger.apply_unrecorded(command))?;
+        let full = self.undo_stack.len() >= UNDO_LIMIT;
+        let applied = self.write(|ledger| {
+            let applied = ledger.apply_unrecorded(command)?;
+            let entry = undo_log::encode(applied.inverse())?;
+            ledger.store.push_entry(Stack::Undo, &entry)?;
+            if full {
+                ledger.store.drop_oldest_entry(Stack::Undo)?;
+            }
+            ledger.store.clear_stack(Stack::Redo)?;
+            Ok(applied)
+        })?;
+        if full {
+            self.undo_stack.remove(0);
+        }
         self.undo_stack.push(applied.inverse().clone());
         self.redo_stack.clear();
         self.publish_history();
@@ -466,7 +501,13 @@ impl Ledger {
         let Some(inverse) = self.undo_stack.last().cloned() else {
             return Ok(());
         };
-        let applied = self.write(|ledger| ledger.apply_unrecorded(inverse))?;
+        let applied = self.write(|ledger| {
+            let applied = ledger.apply_unrecorded(inverse)?;
+            let entry = undo_log::encode(applied.inverse())?;
+            ledger.store.pop_entry(Stack::Undo)?;
+            ledger.store.push_entry(Stack::Redo, &entry)?;
+            Ok(applied)
+        })?;
         self.undo_stack.pop();
         self.redo_stack.push(applied.into_inverse());
         self.publish_history();
@@ -480,7 +521,13 @@ impl Ledger {
         let Some(command) = self.redo_stack.last().cloned() else {
             return Ok(());
         };
-        let applied = self.write(|ledger| ledger.apply_unrecorded(command))?;
+        let applied = self.write(|ledger| {
+            let applied = ledger.apply_unrecorded(command)?;
+            let entry = undo_log::encode(applied.inverse())?;
+            ledger.store.pop_entry(Stack::Redo)?;
+            ledger.store.push_entry(Stack::Undo, &entry)?;
+            Ok(applied)
+        })?;
         self.redo_stack.pop();
         self.undo_stack.push(applied.into_inverse());
         self.publish_history();

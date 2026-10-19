@@ -9,7 +9,7 @@ mod store;
 mod write;
 
 pub use rows::{
-    AccountRow, AllocationRow, CategoryRow, Contents, LastIds, SplitLineRow, StoredAccount,
+    AccountRow, AllocationRow, CategoryRow, Contents, LastIds, SplitLineRow, Stack, StoredAccount,
     StoredTransaction, TransactionRow,
 };
 pub use store::{Damage, OpenError, Store, StoreError};

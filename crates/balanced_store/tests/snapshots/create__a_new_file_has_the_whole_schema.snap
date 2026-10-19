@@ -1,6 +1,5 @@
 ---
 source: crates/balanced_store/tests/create.rs
-assertion_line: 69
 expression: schema
 ---
 index category_parent_id on category
@@ -16,6 +15,9 @@ index sqlite_autoindex_account_1 on account
 (automatic)
 
 index sqlite_autoindex_split_line_1 on split_line
+(automatic)
+
+index sqlite_autoindex_undo_entry_1 on undo_entry
 (automatic)
 
 index transaction_category_id on transaction
@@ -87,6 +89,14 @@ CREATE TABLE "transaction" (
     CONSTRAINT transaction_amount_unless_split CHECK ((allocation = 'split') = (amount IS NULL)),
     CONSTRAINT transaction_category_when_category CHECK ((allocation = 'category') = (category_id IS NOT NULL)),
     CONSTRAINT transaction_opening_balance_no_payee CHECK (allocation <> 'opening_balance' OR payee = '')
+) STRICT
+
+table undo_entry on undo_entry
+CREATE TABLE undo_entry (
+    stack TEXT NOT NULL CONSTRAINT undo_entry_stack_known CHECK (stack IN ('undo', 'redo')),
+    position INTEGER NOT NULL,
+    command TEXT NOT NULL CONSTRAINT undo_entry_command_json CHECK (json_valid(command)),
+    CONSTRAINT undo_entry_stack_position UNIQUE (stack, position)
 ) STRICT
 
 view account_balance on account_balance

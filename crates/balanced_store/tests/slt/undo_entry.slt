@@ -1,0 +1,23 @@
+# The undo log: each entry sits on the undo or the redo stack, at a position of its own
+# there, and holds a Command as JSON.
+
+statement ok
+INSERT INTO undo_entry (stack, position, command) VALUES
+    ('undo', 0, '{"delete_account":{"account":0}}'),
+    ('undo', 1, '{"delete_account":{"account":1}}'),
+    ('redo', 0, '{"delete_account":{"account":2}}')
+
+statement error CHECK constraint failed: undo_entry_stack_known
+INSERT INTO undo_entry (stack, position, command) VALUES ('history', 0, '{}')
+
+statement error CHECK constraint failed: undo_entry_command_json
+INSERT INTO undo_entry (stack, position, command) VALUES ('undo', 2, 'not json')
+
+statement error UNIQUE constraint failed: undo_entry.stack, undo_entry.position
+INSERT INTO undo_entry (stack, position, command) VALUES ('undo', 1, '{}')
+
+statement error NOT NULL constraint failed: undo_entry.command
+INSERT INTO undo_entry (stack, position, command) VALUES ('undo', 2, NULL)
+
+statement error cannot store TEXT value in INTEGER column undo_entry.position
+INSERT INTO undo_entry (stack, position, command) VALUES ('undo', 'top', '{}')

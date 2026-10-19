@@ -217,7 +217,7 @@ impl Transaction {
 
 /// How a [`NewTransaction`]'s amount is given.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum NewAllocation {
+pub(crate) enum NewAllocation {
     OpeningBalance(Money),
     Category(CategoryId, Money),
     Split(Vec<SplitLine>),
@@ -226,11 +226,11 @@ enum NewAllocation {
 /// A transaction to post to an account, which gives it its id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewTransaction {
-    date: Date<Iso>,
-    number: Option<String>,
-    payee: String,
-    memo: String,
-    allocation: NewAllocation,
+    pub(crate) date: Date<Iso>,
+    pub(crate) number: Option<String>,
+    pub(crate) payee: String,
+    pub(crate) memo: String,
+    pub(crate) allocation: NewAllocation,
 }
 
 impl NewTransaction {

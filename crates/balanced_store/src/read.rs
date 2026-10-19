@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use rusqlite::{Connection, OptionalExtension, Row};
 
 use crate::rows::{
-    AccountRow, AllocationRow, CategoryRow, Contents, LastIds, SplitLineRow, StoredAccount,
+    AccountRow, AllocationRow, CategoryRow, Contents, LastIds, SplitLineRow, Stack, StoredAccount,
     StoredTransaction, TransactionRow,
 };
 use crate::{Store, StoreError};
@@ -34,6 +34,8 @@ impl Store {
                 category: last_id(connection, "category")?,
                 transaction: last_id(connection, "transaction")?,
             },
+            undo: entries(connection, Stack::Undo)?,
+            redo: entries(connection, Stack::Redo)?,
         })
     }
 }
@@ -148,4 +150,12 @@ fn last_id(connection: &Connection, table: &str) -> rusqlite::Result<Option<u32>
             |row| row.get(0),
         )
         .optional()
+}
+
+/// The entries on `stack`, oldest first.
+fn entries(connection: &Connection, stack: Stack) -> rusqlite::Result<Vec<String>> {
+    connection
+        .prepare("SELECT command FROM undo_entry WHERE stack = ?1 ORDER BY position")?
+        .query_map([stack.name()], |row| row.get(0))?
+        .collect()
 }

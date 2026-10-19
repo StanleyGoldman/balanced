@@ -1,0 +1,29 @@
+---
+source: crates/balanced_core/src/undo_log.rs
+expression: entries
+---
+{"create_account":{"name":"Everyday","kind":"credit_card","opened":"2026-09-01","opening_balance":-41230}}
+{"delete_account":{"account":7}}
+{"restore_account":{"account":{"id":7,"name":"Everyday","kind":"checking","visibility":"hidden","status":"closed"},"transactions":[{"id":11,"date":"2026-09-01","number":null,"payee":"","memo":"","allocation":{"opening_balance":{"amount":120000}}},{"id":13,"date":"2026-09-02","number":"1042","payee":"Costco","memo":"Weekly shop","allocation":{"split":[{"category":3,"memo":"Groceries","amount":-8000},{"category":4,"memo":"","amount":-2050}]}},{"id":12,"date":"2026-09-03","number":null,"payee":"Shell","memo":"","allocation":{"category":{"category":5,"amount":-4820}}}],"place":2}}
+{"rename_account":{"account":7,"name":"Joint"}}
+{"set_account_visibility":{"account":7,"visibility":"shown"}}
+{"set_account_status":{"account":7,"status":"open"}}
+{"move_account":{"account":7,"direction":"up"}}
+{"move_account":{"account":7,"direction":"down"}}
+{"compound":[{"rename_account":{"account":7,"name":"Joint"}},{"compound":[{"delete_transaction":{"transaction":12}}]},{"compound":[]}]}
+{"post_transaction":{"account":7,"transaction":{"date":"2026-09-04","number":"1043","payee":"Shell","memo":"Fill up","allocation":{"category":{"category":5,"amount":-4820}}}}}
+{"post_transaction":{"account":7,"transaction":{"date":"2026-09-04","number":null,"payee":"Costco","memo":"","allocation":{"split":[{"category":3,"memo":"Groceries","amount":-8000}]}}}}
+{"post_transaction":{"account":7,"transaction":{"date":"2026-09-01","number":null,"payee":"","memo":"","allocation":{"opening_balance":{"amount":0}}}}}
+{"edit_transaction":{"transaction":12,"edit":{"date":"2026-09-09"}}}
+{"edit_transaction":{"transaction":12,"edit":{"number":"1044"}}}
+{"edit_transaction":{"transaction":12,"edit":{"number":null}}}
+{"edit_transaction":{"transaction":12,"edit":{"payee":"Fresh Market"}}}
+{"edit_transaction":{"transaction":12,"edit":{"memo":"Weekly shop"}}}
+{"edit_transaction":{"transaction":12,"edit":{"category":6}}}
+{"edit_transaction":{"transaction":12,"edit":{"amount":-9000}}}
+{"delete_transaction":{"transaction":12}}
+{"restore_transaction":{"account":7,"transaction":{"id":13,"date":"2026-09-02","number":"1042","payee":"Costco","memo":"Weekly shop","allocation":{"split":[{"category":3,"memo":"Groceries","amount":-8000},{"category":4,"memo":"","amount":-2050}]}}}}
+{"create_category":{"name":"Fuel","parent":5}}
+{"create_category":{"name":"Coffee","parent":null}}
+{"delete_category":{"category":6}}
+{"restore_category":{"category":{"id":6,"name":"Fuel","parent":null}}}

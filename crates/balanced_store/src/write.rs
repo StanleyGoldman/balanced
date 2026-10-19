@@ -2,7 +2,7 @@
 
 use rusqlite::params;
 
-use crate::rows::{AccountRow, AllocationRow, CategoryRow, TransactionRow};
+use crate::rows::{AccountRow, AllocationRow, CategoryRow, Stack, TransactionRow};
 use crate::{Store, StoreError};
 
 impl Store {
@@ -161,6 +161,47 @@ impl Store {
             .execute("DELETE FROM split_line WHERE transaction_id = ?1", [id])?;
         self.connection
             .execute("DELETE FROM \"transaction\" WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Puts `command`, a Command as JSON, on top of `stack`.
+    pub fn push_entry(&self, stack: Stack, command: &str) -> Result<(), StoreError> {
+        self.connection
+            .prepare_cached(
+                "INSERT INTO undo_entry (stack, position, command)
+                 SELECT ?1, coalesce(max(position) + 1, 0), ?2 FROM undo_entry WHERE stack = ?1",
+            )?
+            .execute(params![stack.name(), command])?;
+        Ok(())
+    }
+
+    /// Takes the latest entry off `stack`. Does nothing when it is empty.
+    pub fn pop_entry(&self, stack: Stack) -> Result<(), StoreError> {
+        self.connection
+            .prepare_cached(
+                "DELETE FROM undo_entry WHERE stack = ?1
+                 AND position = (SELECT max(position) FROM undo_entry WHERE stack = ?1)",
+            )?
+            .execute([stack.name()])?;
+        Ok(())
+    }
+
+    /// Takes the oldest entry off `stack`. Does nothing when it is empty.
+    pub fn drop_oldest_entry(&self, stack: Stack) -> Result<(), StoreError> {
+        self.connection
+            .prepare_cached(
+                "DELETE FROM undo_entry WHERE stack = ?1
+                 AND position = (SELECT min(position) FROM undo_entry WHERE stack = ?1)",
+            )?
+            .execute([stack.name()])?;
+        Ok(())
+    }
+
+    /// Takes every entry off `stack`.
+    pub fn clear_stack(&self, stack: Stack) -> Result<(), StoreError> {
+        self.connection
+            .prepare_cached("DELETE FROM undo_entry WHERE stack = ?1")?
+            .execute([stack.name()])?;
         Ok(())
     }
 

@@ -8,14 +8,15 @@ use std::sync::Arc;
 
 use balanced_store::OpenError as StoreOpenError;
 use balanced_store::{
-    AccountRow, AllocationRow, CategoryRow, Contents, Damage, SplitLineRow, Store, StoreError,
+    AccountRow, AllocationRow, CategoryRow, Contents, SplitLineRow, Store, StoreError,
     TransactionRow,
 };
 use icu_calendar::{Date, Iso};
 use rust_decimal::Decimal;
 
-use crate::ledger::{AccountSummary, NextIds, RegisterEntry, Totals};
+use crate::ledger::{AccountSummary, History, NextIds, RegisterEntry, Totals};
 use crate::transaction::SplitLine;
+use crate::undo_log::{self, UndoEntryError};
 use crate::{
     Account, AccountGroup, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId,
     CurrencyCode, DomainError, Ledger, Money, MoneyError, Transaction, TransactionId, Visibility,
@@ -31,7 +32,8 @@ pub enum OpenError {
     /// The file isn't SQLite, or another program's SQLite file.
     #[error("the file isn't a Balanced data file")]
     NotBalanced,
-    /// The file fails SQLite's integrity check.
+    /// The file fails SQLite's integrity check, or holds an undo log entry Balanced
+    /// can't read.
     #[error("the data file is damaged")]
     Damaged(#[source] Damage),
     /// The file's schema is from a newer Balanced than this one.
@@ -62,12 +64,23 @@ impl From<StoreOpenError> for OpenError {
         match error {
             StoreOpenError::Missing(path) => Self::Missing(path),
             StoreOpenError::NotBalanced => Self::NotBalanced,
-            StoreOpenError::Damaged(damage) => Self::Damaged(damage),
+            StoreOpenError::Damaged(damage) => Self::Damaged(Damage::File(damage)),
             StoreOpenError::Newer { version, latest } => Self::Newer { version, latest },
             StoreOpenError::Locked => Self::Locked,
             StoreOpenError::Store(error) => Self::Store(error),
         }
     }
+}
+
+/// What is wrong with a damaged data file.
+#[derive(Debug, thiserror::Error)]
+pub enum Damage {
+    /// SQLite found the file damaged.
+    #[error(transparent)]
+    File(balanced_store::Damage),
+    /// An entry in the undo log isn't a Command this Balanced can read.
+    #[error("an undo log entry can't be read")]
+    UndoEntry(#[source] UndoEntryError),
 }
 
 /// Why the data file couldn't take a change.
@@ -207,6 +220,17 @@ impl Ledger {
             group_totals[group(&name)?.index()] = money(total);
         }
         let next = |last: Option<u32>| last.map_or(0, |id| id + 1);
+        let decode = |entries: Vec<String>| {
+            entries
+                .iter()
+                .map(|entry| undo_log::decode(entry, currency))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| OpenError::Damaged(Damage::UndoEntry(error)))
+        };
+        let history = History {
+            undo: decode(contents.undo)?,
+            redo: decode(contents.redo)?,
+        };
         Ok(Self::from_parts(
             store,
             accounts,
@@ -218,12 +242,13 @@ impl Ledger {
                 transaction: TransactionId::new(next(contents.last_ids.transaction)),
                 category: CategoryId::new(next(contents.last_ids.category)),
             },
-        ))
+        )
+        .with_history(history))
     }
 }
 
 /// `minor_units` of `currency`: cents, for USD.
-fn money(minor_units: i64, currency: CurrencyCode) -> Money {
+pub(crate) fn money(minor_units: i64, currency: CurrencyCode) -> Money {
     Money::new(
         Decimal::new(minor_units, currency.decimal_places()),
         currency,
@@ -281,7 +306,7 @@ fn kind(name: &str) -> Result<AccountKind, OpenError> {
 }
 
 /// `date` as ISO `YYYY-MM-DD` text.
-fn date_text(date: Date<Iso>) -> String {
+pub(crate) fn date_text(date: Date<Iso>) -> String {
     format!(
         "{:04}-{:02}-{:02}",
         date.year().extended_year(),

@@ -140,3 +140,13 @@ WHERE ac.closed = 1;
 CREATE VIEW net_worth AS
 SELECT coalesce(sum(balance), 0) AS total
 FROM account_balance;
+
+-- The undo log: the inverses of the changes Undo and Redo can make, as `Ledger` holds
+-- them on its two stacks. Each stack's latest entry has its highest `position`. `command`
+-- is a Command in `balanced_core`'s JSON wire format, which this schema version fixes.
+CREATE TABLE undo_entry (
+    stack TEXT NOT NULL CONSTRAINT undo_entry_stack_known CHECK (stack IN ('undo', 'redo')),
+    position INTEGER NOT NULL,
+    command TEXT NOT NULL CONSTRAINT undo_entry_command_json CHECK (json_valid(command)),
+    CONSTRAINT undo_entry_stack_position UNIQUE (stack, position)
+) STRICT;

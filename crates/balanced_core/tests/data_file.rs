@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 
 use balanced_core::{
     AccountGroup, AccountId, AccountKind, AccountStatus, AccountSummary, Category, CategoryId,
-    CurrencyCode, DomainCommand, DomainError, Ledger, LedgerView, Money, MoneyError, MoveDirection,
-    NewTransaction, OpenError, SplitLine, TransactionEdit, TransactionId, Visibility, WriteError,
+    CurrencyCode, Damage, DomainCommand, DomainError, Ledger, LedgerView, Money, MoneyError,
+    MoveDirection, NewTransaction, OpenError, SplitLine, TransactionEdit, TransactionId,
+    Visibility, WriteError,
 };
 use icu_calendar::{Date, Iso};
 use tempfile::TempDir;
@@ -862,4 +863,160 @@ fn dropping_a_ledger_lets_its_file_open_again() {
     let result = Ledger::open(&path);
 
     assert!(result.is_ok(), "{result:?}");
+}
+
+/// Whether Undo and Redo can act on `ledger`.
+fn history(ledger: &Ledger) -> (bool, bool) {
+    let view = ledger.snapshot();
+    (view.can_undo(), view.can_redo())
+}
+
+#[test]
+fn every_command_undoes_and_redoes_after_a_reopen_as_without_one() {
+    let count = every_command(&household(&mut new_file().2)).len();
+    for index in 0..count {
+        // The same changes, undone and redone with no reopen.
+        let (_dir, _path, mut live) = new_file();
+        let h = household(&mut live);
+        apply(&mut live, every_command(&h).swap_remove(index));
+        live.undo().expect("the command undoes");
+        let undone = contents(&live.snapshot());
+        live.redo().expect("the command redoes");
+        let redone = contents(&live.snapshot());
+
+        let (_dir, path, mut ledger) = new_file();
+        let h = household(&mut ledger);
+        apply(&mut ledger, every_command(&h).swap_remove(index));
+        let mut ledger = reopen(ledger, &path);
+        assert_eq!(history(&ledger), (true, false), "command {index}");
+        ledger.undo().expect("the command undoes after a reopen");
+        assert_eq!(contents(&ledger.snapshot()), undone, "command {index}");
+        assert_eq!(history(&ledger), (true, true), "command {index}");
+        ledger.redo().expect("the command redoes");
+        assert_eq!(contents(&ledger.snapshot()), redone, "command {index}");
+    }
+}
+
+#[test]
+fn a_new_file_has_nothing_to_undo_or_redo() {
+    let (_dir, path, ledger) = new_file();
+
+    let reopened = reopen(ledger, &path);
+
+    assert_eq!(history(&reopened), (false, false));
+}
+
+#[test]
+fn redo_is_kept_across_a_reopen() {
+    let (_dir, path, mut ledger) = new_file();
+    create_checking(&mut ledger, &["Everyday", "Joint"]);
+    let both = names(&ledger);
+    ledger.undo().expect("the create undoes");
+    let mut ledger = reopen(ledger, &path);
+    assert_eq!(history(&ledger), (true, true));
+
+    ledger
+        .redo()
+        .expect("the undone create redoes after a reopen");
+
+    assert_eq!(names(&ledger), both);
+    assert_eq!(history(&ledger), (true, false));
+}
+
+#[test]
+fn a_redone_change_undoes_after_a_reopen() {
+    let (_dir, path, mut ledger) = new_file();
+    create_checking(&mut ledger, &["Everyday", "Joint"]);
+    ledger.undo().expect("the create undoes");
+    ledger.redo().expect("the undone create redoes");
+    let mut ledger = reopen(ledger, &path);
+    assert_eq!(history(&ledger), (true, false));
+
+    ledger.undo().expect("the redone create undoes");
+    ledger.undo().expect("the first create undoes");
+
+    assert_eq!(names(&ledger), Vec::<String>::new());
+    assert_eq!(history(&ledger), (false, true));
+}
+
+#[test]
+fn a_command_after_a_reopen_clears_redo() {
+    let (_dir, path, mut ledger) = new_file();
+    create_checking(&mut ledger, &["Everyday", "Joint"]);
+    ledger.undo().expect("the create undoes");
+    let mut ledger = reopen(ledger, &path);
+
+    create_checking(&mut ledger, &["Savings"]);
+    let ledger = reopen(ledger, &path);
+
+    assert_eq!(history(&ledger), (true, false));
+}
+
+#[test]
+fn undo_keeps_the_latest_100_changes_with_or_without_a_reopen() {
+    for reopened in [false, true] {
+        let (_dir, path, mut ledger) = new_file();
+        for n in 0..101 {
+            create_category(&mut ledger, &format!("Category {n}"));
+        }
+        if reopened {
+            ledger = reopen(ledger, &path);
+        }
+
+        for _ in 0..100 {
+            ledger
+                .undo()
+                .expect("each of the latest 100 creates undoes");
+        }
+
+        assert_eq!(history(&ledger), (false, true), "reopened: {reopened}");
+        let left: Vec<String> = ledger
+            .snapshot()
+            .categories()
+            .iter()
+            .map(|category| category.name().to_owned())
+            .collect();
+        assert_eq!(left, ["Category 0"], "reopened: {reopened}");
+    }
+}
+
+#[test]
+fn a_write_the_file_refuses_keeps_undo_and_redo_in_the_file() {
+    let (_dir, path, mut ledger) = new_file();
+    create_checking(&mut ledger, &["Everyday", "Joint"]);
+    ledger.undo().expect("the create undoes");
+    // 10^17 dollars is 10^19 cents, more than an i64 holds.
+    let too_large = create("Vault", AccountKind::Asset, "100000000000000000.00");
+
+    let result = ledger.apply(too_large);
+
+    assert!(matches!(result, Err(DomainError::Store(_))), "{result:?}");
+    assert_eq!(history(&ledger), (true, true));
+    let mut ledger = reopen(ledger, &path);
+    ledger.redo().expect("the undone create still redoes");
+    assert_eq!(names(&ledger), ["Everyday", "Joint"]);
+    ledger.undo().expect("the redone create undoes");
+    ledger.undo().expect("the first create undoes");
+    assert_eq!(history(&ledger), (false, true));
+}
+
+#[test]
+fn an_undo_entry_that_doesnt_decode_is_refused_as_damaged() {
+    let (_dir, path, mut ledger) = new_file();
+    create_checking(&mut ledger, &["Everyday"]);
+    drop(ledger);
+    let store = balanced_store::Store::open(&path).unwrap();
+    store
+        .push_entry(balanced_store::Stack::Redo, r#"{"launch_rocket":{}}"#)
+        .unwrap();
+    drop(store);
+    let before = std::fs::read(&path).unwrap();
+
+    let result = Ledger::open(&path);
+
+    assert!(
+        matches!(result, Err(OpenError::Damaged(Damage::UndoEntry(_)))),
+        "{result:?}"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before);
 }
