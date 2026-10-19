@@ -18,7 +18,7 @@ fn app() -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
-            App::new(
+            App::on_ledger(
                 cc,
                 Localizer::for_tests_in(&langid!("de"), &locale!("de-DE"))
                     .expect("the embedded de messages and de-DE formatting data load"),

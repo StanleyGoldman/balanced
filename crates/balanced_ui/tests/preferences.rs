@@ -18,7 +18,7 @@ use tempfile::TempDir;
 fn app_in(config_dir: &Path) -> Harness<'static, App> {
     let file = PreferencesFile::in_dir(config_dir);
     let mut harness = Harness::new_eframe(move |cc| {
-        App::new(
+        App::on_ledger(
             cc,
             Localizer::for_tests(),
             Ledger::stub(),

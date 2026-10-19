@@ -15,7 +15,7 @@ use icu_calendar::Date;
 /// The App on stub data, in the test locale, in a window of `size`.
 fn app(size: Vec2) -> Harness<'static, App> {
     let mut harness = Harness::builder().with_size(size).build_eframe(|cc| {
-        App::new(
+        App::on_ledger(
             cc,
             Localizer::for_tests(),
             Ledger::stub(),

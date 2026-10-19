@@ -1,4 +1,5 @@
-//! [`App`]: the eframe application, which owns the ledger and the Main window.
+//! [`App`]: the eframe application, which owns the open data file's ledger, the Main
+//! window and the welcome screen.
 
 use std::fs;
 use std::io;
@@ -17,15 +18,17 @@ use crate::i18n::fl;
 use crate::layout::Layout;
 use crate::main_window::{MainWindow, WindowFrame};
 use crate::preferences::{Preferences, PreferencesFile};
+use crate::recent_files::{RecentFiles, RecentFilesFile};
 use crate::theme::{Theme, ThemeSettings};
+use crate::welcome::Welcome;
 
 /// Balanced's eframe application.
 #[derive(Debug)]
 pub struct App {
     i18n: Localizer,
-    ledger: Ledger,
-    /// Where the open data file is, or `None` while the App runs on data with no file.
-    data_file: Option<PathBuf>,
+    session: Session,
+    recent_files_file: RecentFilesFile,
+    recent_files: RecentFiles,
     preferences_file: PreferencesFile,
     /// The Preferences in use.
     preferences: Preferences,
@@ -38,18 +41,77 @@ pub struct App {
     main_window: MainWindow,
 }
 
+/// What the App shows: a data file, or the welcome screen asking for one.
+#[derive(Debug)]
+enum Session {
+    Open {
+        ledger: Ledger,
+        /// Where the data file is, or `None` while tests run the App on data with no
+        /// file.
+        path: Option<PathBuf>,
+    },
+    Welcome(Welcome),
+}
+
 impl App {
-    /// The App over `ledger`, showing text through `i18n`, reading today's date from
-    /// `clock` and keeping the Preferences in `preferences_file`.
+    /// The App on the data file opened last, as `recent_files_file` lists it, showing
+    /// text through `i18n`, reading today's date from `clock` and keeping the
+    /// Preferences in `preferences_file`. With no Recent files, or when the newest is
+    /// refused, it starts on the welcome screen, after the refusal.
     ///
     /// A preferences file that can't be read is renamed to `preferences.toml.broken`,
     /// and the App starts from the default Preferences and says so in the Status bar.
+    /// A recent files file that can't be read counts as no Recent files.
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         i18n: Localizer,
-        ledger: Ledger,
         clock: Clock,
         preferences_file: PreferencesFile,
+        recent_files_file: RecentFilesFile,
+    ) -> Self {
+        let recent_files = recent_files_file.load().unwrap_or_else(|error| {
+            tracing::warn!(
+                ?error,
+                "the recent files file can't be read; starting with none"
+            );
+            RecentFiles::default()
+        });
+        let ctx = &cc.egui_ctx;
+        let session = match recent_files.newest() {
+            None => Session::Welcome(Welcome::new(ctx)),
+            Some(path) => match Ledger::open(path) {
+                Ok(ledger) => Session::Open {
+                    ledger,
+                    path: Some(path.to_owned()),
+                },
+                Err(error) => {
+                    tracing::info!(?error, ?path, "the data file opened last was refused");
+                    let mut welcome = Welcome::new(ctx);
+                    welcome.refuse(ctx, DataFileRefusal::open(path, &error));
+                    Session::Welcome(welcome)
+                }
+            },
+        };
+        Self::start(
+            cc,
+            i18n,
+            session,
+            clock,
+            preferences_file,
+            recent_files_file,
+            recent_files,
+        )
+    }
+
+    /// The App started on `session`, with the rest as [`App::new`] takes it.
+    fn start(
+        cc: &eframe::CreationContext<'_>,
+        i18n: Localizer,
+        session: Session,
+        clock: Clock,
+        preferences_file: PreferencesFile,
+        recent_files_file: RecentFilesFile,
+        recent_files: RecentFiles,
     ) -> Self {
         let (preferences, problem) = match preferences_file.load() {
             Ok(preferences) => (preferences, None),
@@ -86,8 +148,9 @@ impl App {
         }
         Self {
             i18n,
-            ledger,
-            data_file: None,
+            session,
+            recent_files_file,
+            recent_files,
             preferences_file,
             preferences,
             theme,
@@ -121,7 +184,10 @@ impl App {
     /// Whether `path` names the open data file, through whatever links or relative
     /// parts it takes.
     fn is_open_file(&self, path: &Path) -> bool {
-        let Some(open) = &self.data_file else {
+        let Session::Open {
+            path: Some(open), ..
+        } = &self.session
+        else {
             return false;
         };
         match (fs::canonicalize(open), fs::canonicalize(path)) {
@@ -132,27 +198,43 @@ impl App {
     }
 
     /// Puts `ledger`, over the data file at `path`, in place of the open one, which
-    /// closes it, and shows the new file from scratch.
+    /// closes it, or of the welcome screen, and shows the new file from scratch. The
+    /// file goes to the top of the Recent files.
     fn switch_data_file(&mut self, ledger: Ledger, path: PathBuf) {
-        self.ledger = ledger;
-        self.data_file = Some(path);
+        // The file is open, so it resolves, unless it has just been moved.
+        let listed = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        self.recent_files.opened(listed);
+        if let Err(error) = self.recent_files_file.save(&self.recent_files) {
+            tracing::warn!(?error, "saving the Recent files failed");
+        }
+        self.session = Session::Open {
+            ledger,
+            path: Some(path),
+        };
         self.main_window.data_file_switched();
+    }
+
+    /// Shows why a data file was refused, over the Main window, or before the welcome
+    /// Dialog when no file is open.
+    fn refuse_data_file(&mut self, ctx: &egui::Context, refusal: DataFileRefusal) {
+        match &mut self.session {
+            Session::Open { .. } => self.main_window.refuse_data_file(ctx, refusal),
+            Session::Welcome(welcome) => welcome.refuse(ctx, refusal),
+        }
     }
 
     /// Creates an empty data file at `path` and switches to it, replacing any other
     /// file there, or shows why it can't.
     fn new_data_file(&mut self, ctx: &egui::Context, path: PathBuf) {
         if self.is_open_file(&path) {
-            self.main_window
-                .refuse_data_file(ctx, DataFileRefusal::open_file_not_replaced(&path));
+            self.refuse_data_file(ctx, DataFileRefusal::open_file_not_replaced(&path));
             return;
         }
         match create_replacing(&path) {
             Ok(ledger) => self.switch_data_file(ledger, path),
             Err(error) => {
                 tracing::warn!(?error, ?path, "creating the data file failed");
-                self.main_window
-                    .refuse_data_file(ctx, DataFileRefusal::not_created(&path));
+                self.refuse_data_file(ctx, DataFileRefusal::not_created(&path));
             }
         }
     }
@@ -167,54 +249,67 @@ impl App {
             Ok(ledger) => self.switch_data_file(ledger, path),
             Err(error) => {
                 tracing::info!(?error, ?path, "the data file was refused");
-                self.main_window
-                    .refuse_data_file(ctx, DataFileRefusal::open(&path, &error));
+                self.refuse_data_file(ctx, DataFileRefusal::open(&path, &error));
             }
         }
     }
 
+    /// Applies `command`. A Command that acts on the open data file does nothing on the
+    /// welcome screen, which sends none.
     fn apply(&mut self, ctx: &egui::Context, command: AppCommand) {
+        let ledger = match &mut self.session {
+            Session::Open { ledger, .. } => Some(ledger),
+            Session::Welcome(_) => None,
+        };
         match command {
             AppCommand::Domain(command) => {
-                if let Err(error) = self.ledger.apply(command) {
+                if let Some(Err(error)) = ledger.map(|ledger| ledger.apply(command)) {
                     self.main_window.show_status(StatusMessage::Rejected(error));
                 }
             }
             AppCommand::SubmitForm(command) => {
-                let result = self.ledger.apply(command).map(drop);
-                self.main_window.form_applied(ctx, result);
+                if let Some(ledger) = ledger {
+                    let result = ledger.apply(command).map(drop);
+                    self.main_window.form_applied(ctx, result);
+                }
             }
             AppCommand::Undo => {
-                if let Err(error) = self.ledger.undo() {
+                if let Some(Err(error)) = ledger.map(Ledger::undo) {
                     self.main_window.show_status(StatusMessage::Rejected(error));
                 }
             }
             AppCommand::Redo => {
-                if let Err(error) = self.ledger.redo() {
+                if let Some(Err(error)) = ledger.map(Ledger::redo) {
                     self.main_window.show_status(StatusMessage::Rejected(error));
                 }
             }
             AppCommand::Navigate(route) => self.main_window.navigate(route),
-            AppCommand::GoToDraftRow => self
-                .main_window
-                .go_to_draft_row(ctx, &self.ledger.snapshot()),
+            AppCommand::GoToDraftRow => {
+                if let Some(ledger) = ledger {
+                    self.main_window.go_to_draft_row(ctx, &ledger.snapshot());
+                }
+            }
             AppCommand::OpenSplitView(_) => {
                 self.main_window.show_status(StatusMessage::NotAvailableYet);
             }
             AppCommand::SwitchPane => self.main_window.switch_pane(ctx),
             AppCommand::OpenDialog(kind) => {
-                self.main_window.open_dialog(
-                    ctx,
-                    &self.i18n,
-                    &kind,
-                    &self.ledger.snapshot(),
-                    self.clock.today(),
-                    &self.preferences,
-                );
+                if let Some(ledger) = ledger {
+                    self.main_window.open_dialog(
+                        ctx,
+                        &self.i18n,
+                        &kind,
+                        &ledger.snapshot(),
+                        self.clock.today(),
+                        &self.preferences,
+                    );
+                }
             }
             AppCommand::SubmitDialog(command) => {
-                let applied = self.ledger.apply(command).map(drop);
-                self.main_window.dialog_applied(ctx, applied);
+                if let Some(ledger) = ledger {
+                    let applied = ledger.apply(command).map(drop);
+                    self.main_window.dialog_applied(ctx, applied);
+                }
             }
             AppCommand::SetPreferences(preferences) => self.set_preferences(preferences),
             AppCommand::SetRegisterColumns(register_columns) => {
@@ -234,6 +329,26 @@ impl App {
 
 #[cfg(feature = "test-support")]
 impl App {
+    /// The App over `ledger`, a ledger with no data file such as `Ledger::stub()`, with
+    /// no Recent files, and the rest as [`App::new`] takes it.
+    pub fn on_ledger(
+        cc: &eframe::CreationContext<'_>,
+        i18n: Localizer,
+        ledger: Ledger,
+        clock: Clock,
+        preferences_file: PreferencesFile,
+    ) -> Self {
+        Self::start(
+            cc,
+            i18n,
+            Session::Open { ledger, path: None },
+            clock,
+            preferences_file,
+            RecentFilesFile::for_tests(),
+            RecentFiles::default(),
+        )
+    }
+
     /// Sends `command` to `App::logic`, as a widget or a worker would.
     pub(crate) fn send(&self, command: AppCommand) {
         self.commands.send(command);
@@ -298,7 +413,14 @@ impl eframe::App for App {
     /// Draws the Main window with the open Preferences Dialog's draft, or else the
     /// Preferences in use.
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let view = self.ledger.snapshot();
+        let ledger = match &mut self.session {
+            Session::Open { ledger, .. } => ledger,
+            Session::Welcome(welcome) => {
+                welcome.show(ui, &self.i18n, &self.theme, &self.commands);
+                return;
+            }
+        };
+        let view = ledger.snapshot();
         let today = self.clock.today();
         let preferences = self
             .main_window
@@ -312,6 +434,7 @@ impl eframe::App for App {
             commands: &self.commands,
             view: &view,
             today,
+            recent_files: self.recent_files.files(),
         };
         self.main_window.show(ui, &frame);
     }
@@ -398,7 +521,7 @@ mod tests {
     #[test]
     fn folding_a_group_saves_it_in_the_layout() {
         let mut harness = Harness::new_eframe(|cc| {
-            App::new(
+            App::on_ledger(
                 cc,
                 Localizer::for_tests(),
                 Ledger::stub(),

@@ -17,6 +17,9 @@ menu-file-new-account = New Account…
 menu-file-new-data-file = New Data File…
 menu-file-open-data-file = Open Data File…
 menu-file-quit = Quit
+# A Recent file in the File menu. $number counts from 1 at the newest, and $file is
+# the file's name, such as Household.balanced.
+menu-file-recent = { $number } { $file }
 menu-edit = Edit
 menu-edit-undo = Undo
 menu-edit-redo = Redo
@@ -245,7 +248,8 @@ dialog-new-account-review-name = Name: { $name }
 dialog-new-account-review-balance = Opening balance: { $amount } as of { $date }
 
 # Why a data file wasn't opened or created. $file is the file's name, such as
-# Household.balanced. The data file open before stays open.
+# Household.balanced. The data file open before stays open, or the welcome Dialog
+# follows when none is.
 dialog-data-file-missing = { -brand-name } can't find “{ $file }”. It may have been moved, renamed or deleted.
 dialog-data-file-not-balanced = “{ $file }” isn't a { -brand-name } data file.
 dialog-data-file-damaged = “{ $file }” is damaged. Restore it from a backup.
@@ -262,6 +266,14 @@ dialog-data-file-open-not-replaced = “{ $file }” is the data file you have o
 dialog-data-file-suggested-name = { -brand-name }.balanced
 # The file type the native file picker lists, for files ending in .balanced.
 dialog-data-file-filter = { -brand-name } data files
+
+# The welcome Dialog, shown while no data file is open: at first run, or when the data
+# file opened last can't be opened. Continue shows the picker for the choice made.
+dialog-welcome-message = { -brand-name } keeps your finances in a data file.
+dialog-welcome-create = Create a new data file…
+dialog-welcome-open = Open an existing data file…
+dialog-welcome-continue = Continue
+dialog-welcome-quit = Quit
 
 ## Amount field
 

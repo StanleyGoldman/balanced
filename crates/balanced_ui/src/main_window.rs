@@ -1,5 +1,7 @@
 //! The Main window: Menu bar, tab row, Account bar, Main view and Status bar.
 
+use std::path::PathBuf;
+
 use balanced_core::{
     AccountId, AccountSummary, DomainCommand, DomainError, LedgerView, TransactionId,
 };
@@ -11,7 +13,7 @@ use icu_calendar::{Date, Iso};
 use crate::account_bar::{AccountBar, BarFrame};
 use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
-use crate::data_file::DataFileRefusal;
+use crate::data_file::{DataFileRefusal, refusal_dialog};
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
@@ -68,6 +70,8 @@ pub(crate) struct WindowFrame<'a> {
     pub(crate) commands: &'a CommandSender,
     pub(crate) view: &'a LedgerView,
     pub(crate) today: Date<Iso>,
+    /// The Recent files, newest first.
+    pub(crate) recent_files: &'a [PathBuf],
 }
 
 /// The Register open under the Accounts tab and the account it shows.
@@ -407,6 +411,7 @@ impl MainWindow {
             commands,
             view,
             today,
+            recent_files,
         } = *frame;
         self.focus_return = self
             .focus_return
@@ -436,7 +441,7 @@ impl MainWindow {
         Panel::top("menu_bar")
             .frame(theme.chrome_frame())
             .show(ui, |ui| {
-                let drawn = self.menu_bar(ui, i18n, commands, view);
+                let drawn = self.menu_bar(ui, i18n, commands, view, recent_files);
                 self.menu_nav.drawn(ui.ctx(), drawn);
             });
         Panel::bottom("status_bar")
@@ -506,15 +511,7 @@ impl MainWindow {
         let Some(dialog) = &mut self.data_file_refusal else {
             return;
         };
-        let outcome = LightDialog::notice(
-            Id::new("data_file_refusal_dialog"),
-            fl!(i18n, "dialog-ok"),
-            theme,
-        )
-        .show(ctx, dialog, |ui, refusal| {
-            ui.label(refusal.message(i18n));
-        });
-        match outcome {
+        match refusal_dialog(ctx, i18n, theme, dialog) {
             DialogOutcome::Open => {}
             DialogOutcome::Accepted | DialogOutcome::Cancelled => {
                 self.close_dialog(ctx, |window| &mut window.data_file_refusal);
@@ -728,13 +725,15 @@ impl MainWindow {
         );
     }
 
-    /// Draws the Menu bar, and returns what it drew for the keyboard navigation.
+    /// Draws the Menu bar, with `recent_files` numbered in the File menu above Quit,
+    /// and returns what it drew for the keyboard navigation.
     fn menu_bar(
         &self,
         ui: &mut egui::Ui,
         i18n: &Localizer,
         commands: &CommandSender,
         view: &LedgerView,
+        recent_files: &[PathBuf],
     ) -> DrawnMenus {
         let item = |ui: &mut egui::Ui, drawn: &mut DrawnMenus, action| {
             self.menu_item(ui, i18n, commands, view, drawn, action);
@@ -747,6 +746,10 @@ impl MainWindow {
                 ui.separator();
                 item(ui, &mut drawn, UserAction::NewAccount);
                 ui.separator();
+                if !recent_files.is_empty() {
+                    Self::recent_file_items(ui, i18n, commands, &mut drawn, recent_files);
+                    ui.separator();
+                }
                 item(ui, &mut drawn, UserAction::Quit);
             });
             drawn.note_menu(&file.response);
@@ -770,6 +773,33 @@ impl MainWindow {
             drawn.note_menu(&help.response);
         });
         drawn
+    }
+
+    /// The File menu's items for `recent_files`, numbered from 1 at the newest, each
+    /// showing its file's name and, on hover, its path. Clicking one opens its file.
+    fn recent_file_items(
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        commands: &CommandSender,
+        drawn: &mut DrawnMenus,
+        recent_files: &[PathBuf],
+    ) {
+        for (number, path) in (1_u32..).zip(recent_files) {
+            let file = path
+                .file_name()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy()
+                .into_owned();
+            let item = ui
+                .button(fl!(i18n, "menu-file-recent", number = number, file = file))
+                .on_hover_text(path.display().to_string());
+            drawn.note_item(&item);
+            if item.clicked() {
+                commands.send(AppCommand::OpenDataFile(path.clone()));
+                // egui closes a menu on a pointer click only, not on Enter.
+                ui.close();
+            }
+        }
     }
 
     /// The menu item for `action`, with its Shortcut text, disabled while the action

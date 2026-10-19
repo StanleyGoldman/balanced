@@ -6,10 +6,13 @@ use std::thread;
 
 use balanced_core::OpenError;
 use balanced_i18n::Localizer;
+use eframe::egui::{self, Id};
 use rfd::{AsyncFileDialog, FileHandle};
 
 use crate::command::{AppCommand, CommandSender};
+use crate::dialog::{DialogOutcome, LightDialog, OpenDialog};
 use crate::i18n::fl;
+use crate::theme::Theme;
 
 /// The native file picker File → New Data File… or File → Open Data File… shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,7 +68,25 @@ fn wait_for(
     }
 }
 
-/// A data file the App refused to create or open, and why. The open file stays open.
+/// Draws the Dialog saying why a data file was refused, a notice that OK closes.
+pub(crate) fn refusal_dialog(
+    ctx: &egui::Context,
+    i18n: &Localizer,
+    theme: &Theme,
+    dialog: &mut OpenDialog<DataFileRefusal>,
+) -> DialogOutcome {
+    LightDialog::notice(
+        Id::new("data_file_refusal_dialog"),
+        fl!(i18n, "dialog-ok"),
+        theme,
+    )
+    .show(ctx, dialog, |ui, refusal| {
+        ui.label(refusal.message(i18n));
+    })
+}
+
+/// A data file the App refused to create or open, and why. The open file stays open,
+/// or the welcome Dialog follows when none is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DataFileRefusal {
     /// The refused file's name, without its folder.
