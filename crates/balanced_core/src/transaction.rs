@@ -30,7 +30,7 @@ impl TransactionId {
 /// Where a split line's part of the amount went.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitTarget {
-    /// A category.
+    /// The line's part of the amount is in this category.
     Category(CategoryId),
 }
 
