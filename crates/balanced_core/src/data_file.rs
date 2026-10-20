@@ -303,21 +303,30 @@ fn check_transfers(accounts: &[AccountSummary]) -> Result<(), OpenError> {
         .flat_map(AccountSummary::register)
         .map(|entry| (entry.transaction().id(), entry.transaction()))
         .collect();
-    let mut sides: Vec<(&Transaction, TransactionId)> = transactions
+    let mut sides: Vec<(&Transaction, Transaction)> = transactions
         .values()
-        .filter_map(|&side| side.other_side_id().map(|other_side| (side, other_side)))
+        .flat_map(|&side| {
+            side.other_sides()
+                .into_iter()
+                .map(move |expected| (side, expected))
+        })
         .collect();
-    sides.sort_by_key(|(side, _)| side.id());
-    for (side, other_side) in sides {
-        let agrees = transactions.get(&other_side).is_some_and(|other| {
-            other.other_side_id() == Some(side.id())
-                && other.date() == side.date()
-                && other.amount() == -side.amount()
+    sides.sort_by_key(|(side, expected)| (side.id(), expected.id()));
+    for (side, expected) in sides {
+        // The other side agrees when it is on the expected date and, among the other sides it
+        // names itself, the one pointing back at `side` carries this side's share, whether
+        // that share is the whole transaction or one split line.
+        let agrees = transactions.get(&expected.id()).is_some_and(|other| {
+            other.date() == expected.date()
+                && other
+                    .other_sides()
+                    .iter()
+                    .any(|back| back.id() == side.id() && back.amount() == -expected.amount())
         });
         if !agrees {
             return Err(OpenError::Damaged(Damage::TransferSides {
                 transaction: side.id(),
-                other_side,
+                other_side: expected.id(),
             }));
         }
     }
