@@ -19,7 +19,7 @@ pub use migration::UpgradeError;
 #[cfg(feature = "test-support")]
 pub use migration::{MIGRATIONS, Migration, UndoFormat};
 pub use rows::{
-    AccountRow, AllocationRow, CategoryRow, Contents, LastIds, SplitLineRow, Stack, StoredAccount,
-    StoredTransaction, TransactionRow,
+    AccountRow, AllocationRow, CategoryRow, Contents, LastIds, SplitLineRow, SplitTargetRow, Stack,
+    StoredAccount, StoredTransaction, TransactionRow,
 };
 pub use store::{Damage, OpenError, Store, StoreError};

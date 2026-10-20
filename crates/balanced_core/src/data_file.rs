@@ -10,14 +10,14 @@ use std::sync::Arc;
 
 use balanced_store::OpenError as StoreOpenError;
 use balanced_store::{
-    AccountRow, AllocationRow, CategoryRow, Contents, SplitLineRow, Store, StoreError,
-    TransactionRow, UpgradeError,
+    AccountRow, AllocationRow, CategoryRow, Contents, SplitLineRow, SplitTargetRow, Store,
+    StoreError, TransactionRow, UpgradeError,
 };
 use icu_calendar::{Date, Iso};
 use rust_decimal::Decimal;
 
 use crate::ledger::{AccountSummary, History, NextIds, RegisterEntry, Totals};
-use crate::transaction::SplitLine;
+use crate::transaction::{SplitLine, SplitTarget};
 use crate::undo_log::{self, UndoEntryError};
 use crate::{
     Account, AccountGroup, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId,
@@ -388,7 +388,11 @@ fn transaction(
                 .into_iter()
                 .map(|line| {
                     SplitLine::new(
-                        CategoryId::new(line.category_id),
+                        match line.target {
+                            SplitTargetRow::Category { category_id } => {
+                                SplitTarget::Category(CategoryId::new(category_id))
+                            }
+                        },
                         &line.memo,
                         money(line.amount, currency),
                     )
@@ -449,7 +453,11 @@ pub(crate) fn transaction_row(
                 .iter()
                 .map(|line| {
                     Ok(SplitLineRow {
-                        category_id: line.category().raw(),
+                        target: match line.target() {
+                            SplitTarget::Category(category) => SplitTargetRow::Category {
+                                category_id: category.raw(),
+                            },
+                        },
                         memo: line.memo().to_owned(),
                         amount: minor_units(line.amount())?,
                     })

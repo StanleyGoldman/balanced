@@ -59,9 +59,15 @@ pub enum AllocationRow {
 /// One line of a split transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SplitLineRow {
-    pub category_id: u32,
+    pub target: SplitTargetRow,
     pub memo: String,
     pub amount: i64,
+}
+
+/// Where a split line's part of the amount went.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitTargetRow {
+    Category { category_id: u32 },
 }
 
 /// An account as read back, with its balance from the `account_balance` view.

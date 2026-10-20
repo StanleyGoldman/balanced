@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use rusqlite::{Connection, OptionalExtension, Row};
 
 use crate::rows::{
-    AccountRow, AllocationRow, CategoryRow, Contents, LastIds, SplitLineRow, Stack, StoredAccount,
-    StoredTransaction, TransactionRow,
+    AccountRow, AllocationRow, CategoryRow, Contents, LastIds, SplitLineRow, SplitTargetRow, Stack,
+    StoredAccount, StoredTransaction, TransactionRow,
 };
 use crate::{Store, StoreError};
 
@@ -138,7 +138,9 @@ fn split_lines(connection: &Connection) -> rusqlite::Result<HashMap<u32, Vec<Spl
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
         lines.entry(row.get(0)?).or_default().push(SplitLineRow {
-            category_id: row.get(1)?,
+            target: SplitTargetRow::Category {
+                category_id: row.get(1)?,
+            },
             memo: row.get(2)?,
             amount: row.get(3)?,
         });

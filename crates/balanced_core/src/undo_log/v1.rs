@@ -169,9 +169,18 @@ pub(crate) enum Allocation {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SplitLine {
-    pub(crate) category: u32,
+    /// Written as the line's own key, `"category": 3`, beside its memo and amount.
+    #[serde(flatten)]
+    pub(crate) target: SplitTarget,
     pub(crate) memo: String,
     pub(crate) amount: i64,
+}
+
+/// Where a split line's part of the amount went.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SplitTarget {
+    Category(u32),
 }
 
 #[derive(Debug, Serialize, Deserialize)]

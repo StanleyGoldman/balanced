@@ -8,7 +8,7 @@ mod v1;
 use icu_calendar::{Date, Iso};
 
 use crate::data_file::{date_text, minor_units, money};
-use crate::transaction::{NewAllocation, NewTransactionParts, SplitLine};
+use crate::transaction::{NewAllocation, NewTransactionParts, SplitLine, SplitTarget};
 use crate::{
     Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId,
     ClearedStatus, CurrencyCode, DomainCommand, MoneyError, MoveDirection, NewTransaction,
@@ -230,7 +230,11 @@ fn split_to_wire(lines: &[SplitLine]) -> Result<v1::Allocation, WriteError> {
             .iter()
             .map(|line| {
                 Ok(v1::SplitLine {
-                    category: line.category().raw(),
+                    target: match line.target() {
+                        SplitTarget::Category(category) => {
+                            v1::SplitTarget::Category(category.raw())
+                        }
+                    },
                     memo: line.memo().to_owned(),
                     amount: minor_units(line.amount())?,
                 })
@@ -445,7 +449,11 @@ fn split_from_wire(lines: Vec<v1::SplitLine>, currency: CurrencyCode) -> Vec<Spl
         .into_iter()
         .map(|line| {
             SplitLine::new(
-                CategoryId::new(line.category),
+                match line.target {
+                    v1::SplitTarget::Category(category) => {
+                        SplitTarget::Category(CategoryId::new(category))
+                    }
+                },
                 &line.memo,
                 money(line.amount, currency),
             )
@@ -492,7 +500,7 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use super::*;
-    use crate::transaction::SplitLine;
+    use crate::transaction::{SplitLine, SplitTarget};
     use crate::{
         Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId, Money,
         MoveDirection, NewTransaction, Transaction, TransactionEdit, TransactionId, Visibility,
@@ -512,8 +520,16 @@ mod tests {
 
     fn costco() -> Allocation {
         Allocation::Split(vec![
-            SplitLine::new(CategoryId::new(3), "Groceries", usd(dec!(-80.00))),
-            SplitLine::new(CategoryId::new(4), "", usd(dec!(-20.50))),
+            SplitLine::new(
+                SplitTarget::Category(CategoryId::new(3)),
+                "Groceries",
+                usd(dec!(-80.00)),
+            ),
+            SplitLine::new(
+                SplitTarget::Category(CategoryId::new(4)),
+                "",
+                usd(dec!(-20.50)),
+            ),
         ])
     }
 
@@ -561,7 +577,7 @@ mod tests {
                 date(4),
                 "Costco",
                 vec![SplitLine::new(
-                    CategoryId::new(3),
+                    SplitTarget::Category(CategoryId::new(3)),
                     "Groceries",
                     usd(dec!(-80.00)),
                 )],

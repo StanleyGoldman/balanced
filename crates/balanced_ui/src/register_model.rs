@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use balanced_core::{
     AccountId, AccountSummary, Allocation, CategoryId, ClearedStatus, CurrencyCode, Generation,
-    LedgerView, Money, TransactionId,
+    LedgerView, Money, SplitTarget, TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
 use icu_calendar::{Date, Iso};
@@ -466,7 +466,9 @@ impl RegisterModel {
                 };
                 let split_categories: Vec<String> = split_lines
                     .iter()
-                    .map(|line| paths.path(line.category()).to_owned())
+                    .map(|line| match line.target() {
+                        SplitTarget::Category(category) => paths.path(category).to_owned(),
+                    })
                     .collect();
                 matcher
                     .shows(&row, split_categories.iter().map(String::as_str))

@@ -1,0 +1,47 @@
+{
+    // Needs the CodeLLDB extension (vadimcn.vscode-lldb); see extensions.json.
+    // Each entry builds the dev profile first, then starts the app against your real
+    // ~/.config/balanced preferences and recent files.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Balanced",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["build", "--package=balanced", "--bin=balanced"],
+                "filter": { "name": "balanced", "kind": "bin" }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "sourceLanguages": ["rust"]
+        },
+        {
+            "name": "Run Balanced",
+            "type": "lldb",
+            "request": "launch",
+            "noDebug": true,
+            "cargo": {
+                "args": ["build", "--package=balanced", "--bin=balanced"],
+                "filter": { "name": "balanced", "kind": "bin" }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            // en-XA is the pseudo-locale: it stretches and accents every string, so
+            // untranslated or clipped text stands out.
+            "name": "Debug Balanced (en-XA)",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["build", "--package=balanced", "--bin=balanced"],
+                "filter": { "name": "balanced", "kind": "bin" }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": { "BALANCED_LOCALE": "en-XA" },
+            "sourceLanguages": ["rust"]
+        }
+    ]
+}
