@@ -56,9 +56,6 @@ const ACTION_DOT_SPACING: f32 = 4.5;
 /// emoji-icon-font draws it.
 const FLAG_GLYPH: &str = "⚑";
 
-/// The Clr column's width, which fits its heading and its one-letter marks.
-const CLR_WIDTH: f32 = 40.0;
-
 /// The narrowest a combobox list gets, so its entries stay readable under a narrow cell.
 const LIST_MIN_WIDTH: f32 = 240.0;
 
@@ -142,7 +139,8 @@ impl RegisterColumn {
     fn width(self, theme: &Theme, widths: &ColumnWidths) -> Column {
         let column = match self {
             Self::Payee | Self::Category => Column::remainder().at_least(MIN_FLEX_WIDTH),
-            Self::Clr => Column::exact(CLR_WIDTH),
+            // Two rows' height fits the heading and its one-letter marks.
+            Self::Clr => Column::exact(2.0 * theme.row_height()),
             Self::Flag => Column::exact(theme.row_height()),
             Self::Actions => Column::exact(theme.row_height() + Theme::EDGE_INSET),
             Self::Date

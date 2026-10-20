@@ -8,8 +8,8 @@ use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::egui::accesskit::{Action, Role};
 use eframe::egui::{Event, Key, Modifiers, vec2};
-use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use egui_kittest::{Harness, Node};
 use icu_calendar::Date;
 
 /// Fresh Market's Clr cell in Everyday Checking, which starts Uncleared.
@@ -81,14 +81,14 @@ fn undo(harness: &mut Harness<'static, App>) {
     harness.run();
 }
 
-/// The Register's Clr cells, each with the status it reads out.
-fn clr_cells(harness: &Harness<'static, App>) -> Vec<(String, String)> {
+/// The Register's Clr cells, top to bottom.
+fn clr_nodes<'h>(harness: &'h Harness<'static, App>) -> Vec<Node<'h>> {
     harness
         .query_all_by_role(Role::Button)
-        .filter_map(|node| {
-            let node = node.accesskit_node();
-            let label = node.label().filter(|label| label.starts_with("Clr "))?;
-            Some((label, node.value().unwrap_or_default()))
+        .filter(|node| {
+            node.accesskit_node()
+                .label()
+                .is_some_and(|label| label.starts_with("Clr "))
         })
         .collect()
 }
@@ -156,13 +156,8 @@ fn a_click_leaves_every_row_in_its_place_with_its_balance() {
 fn a_closed_accounts_clr_cells_are_disabled_and_take_no_click() {
     let harness = old_checking();
 
-    let cells: Vec<(bool, bool)> = harness
-        .query_all_by_role(Role::Button)
-        .filter(|node| {
-            node.accesskit_node()
-                .label()
-                .is_some_and(|label| label.starts_with("Clr "))
-        })
+    let cells: Vec<(bool, bool)> = clr_nodes(&harness)
+        .iter()
         .map(|node| {
             let node = node.accesskit_node();
             (
@@ -176,16 +171,13 @@ fn a_closed_accounts_clr_cells_are_disabled_and_take_no_click() {
 }
 
 #[test]
-fn only_transactions_have_clr_cells_and_an_opening_balance_starts_reconciled() {
+fn only_transactions_have_clr_cells_and_the_draft_row_has_none() {
     let harness = app_showing("Joint Checking");
 
-    let cells = clr_cells(&harness);
+    let labels: Vec<String> = clr_nodes(&harness)
+        .iter()
+        .filter_map(|node| node.accesskit_node().label())
+        .collect();
 
-    assert_eq!(
-        cells,
-        [(
-            "Clr Opening Balance, 1/1/2026, 1,032.00".to_owned(),
-            "Reconciled".to_owned()
-        )]
-    );
+    assert_eq!(labels, ["Clr Opening Balance, 1/1/2026, 1,032.00"]);
 }

@@ -122,8 +122,8 @@ impl Ledger {
         let paid = |day, payee, category: StubCategory, amount: &str| {
             NewTransaction::new(date(2026, 9, day), payee, category.id(), money(amount))
         };
-        // Reconciled up to the rent, then partly cleared, so its Cleared balance differs
-        // from its Current and Ending balances.
+        // Reconciled up to the September rent, then partly cleared, a scheduled payment
+        // included.
         let everyday = account("Everyday Checking", AccountKind::Checking, "1200.00")
             .with_transactions_at(
                 ClearedStatus::Reconciled,
