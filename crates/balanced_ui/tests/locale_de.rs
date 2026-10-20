@@ -259,3 +259,20 @@ fn the_reconciled_amount_confirm_reads_german() {
     );
     harness.get_by_role_and_label(Role::Button, "Betrag ändern");
 }
+
+#[test]
+fn the_reconciled_delete_confirm_reads_german() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    harness
+        .get_by_role_and_label(Role::Cell, "1.450,00")
+        .click();
+    harness.run();
+
+    press(&mut harness, Modifiers::COMMAND, Key::D);
+
+    harness.get_by_label(
+        "Diese Buchung wurde abgeglichen. Trotzdem löschen? \
+         Maple Property Management, 03.09.2026, -1.450,00",
+    );
+}

@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use balanced_core::{
-    AccountId, AccountSummary, ClearedStatus, DomainCommand, DomainError, LedgerView, Money,
+    AccountId, AccountSummary, ClearedStatus, DomainCommand, DomainError, LedgerView,
     TransactionEdit, TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
@@ -99,12 +99,12 @@ struct DeleteTransactionForm {
 }
 
 /// The confirm for changing a Reconciled transaction's amount: which transaction, and
-/// the amount the cell edit would save. Like the delete confirm's, its question is
-/// formatted every frame from the Register's row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// the amount the cell edit would save, formatted as the Dialog opens. No Preferences
+/// change can reach it while it is open, so the text keeps up with the locale.
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ReconciledAmountForm {
     transaction: TransactionId,
-    amount: Money,
+    amount: FormattedAmount,
 }
 
 impl MainWindow {
@@ -357,7 +357,7 @@ impl MainWindow {
             } => {
                 let form = ReconciledAmountForm {
                     transaction,
-                    amount,
+                    amount: FormattedAmount::new(i18n, amount, AmountStyle::Bare),
                 };
                 self.reconciled_amount = Some(OpenDialog::new(ctx, form));
             }
@@ -673,6 +673,15 @@ impl MainWindow {
         }
     }
 
+    /// The Register's row for `transaction`, which a confirm open over the Register asks
+    /// about. The Register's rows can't change while the confirm blocks it, so the row
+    /// is there for as long as the confirm is open.
+    fn confirmed_row(&self, view: &LedgerView, transaction: TransactionId) -> &RegisterRow {
+        self.open_account(view)
+            .and_then(|summary| self.register()?.row(summary.account().id(), transaction))
+            .expect("the Register shows the transaction the confirm asks about")
+    }
+
     /// The delete transaction confirm, while it is open. Delete has first focus, so
     /// Enter deletes. For a Reconciled transaction the question says it is reconciled.
     fn delete_transaction_dialog(
@@ -686,34 +695,24 @@ impl MainWindow {
         let Some(form) = self.delete_transaction.as_ref().map(|dialog| dialog.form) else {
             return;
         };
-        // The Register's rows can't change while the Dialog blocks it, so the row is
-        // there for as long as the Dialog is open.
-        let question = self
-            .open_account(view)
-            .and_then(|summary| {
-                self.register()?
-                    .row(summary.account().id(), form.transaction)
-            })
-            .map(|row| {
-                let (payee, date, amount) = (row.payee(), row.date(), row.amount_text());
-                match row.cleared_status() {
-                    ClearedStatus::Reconciled => fl!(
-                        i18n,
-                        "dialog-delete-reconciled-transaction-message",
-                        payee = payee,
-                        date = date,
-                        amount = amount
-                    ),
-                    ClearedStatus::Uncleared | ClearedStatus::Cleared => fl!(
-                        i18n,
-                        "dialog-delete-transaction-message",
-                        payee = payee,
-                        date = date,
-                        amount = amount
-                    ),
-                }
-            })
-            .expect("the Register shows the transaction the confirm asks about");
+        let row = self.confirmed_row(view, form.transaction);
+        let (payee, date, amount) = (row.payee(), row.date(), row.amount_text());
+        let question = match row.cleared_status() {
+            ClearedStatus::Reconciled => fl!(
+                i18n,
+                "dialog-delete-reconciled-transaction-message",
+                payee = payee,
+                date = date,
+                amount = amount
+            ),
+            ClearedStatus::Uncleared | ClearedStatus::Cleared => fl!(
+                i18n,
+                "dialog-delete-transaction-message",
+                payee = payee,
+                date = date,
+                amount = amount
+            ),
+        };
         let Some(dialog) = &mut self.delete_transaction else {
             return;
         };
@@ -750,29 +749,22 @@ impl MainWindow {
         commands: &CommandSender,
         view: &LedgerView,
     ) {
-        let Some(form) = self.reconciled_amount.as_ref().map(|dialog| dialog.form) else {
+        let Some(form) = self
+            .reconciled_amount
+            .as_ref()
+            .map(|dialog| dialog.form.clone())
+        else {
             return;
         };
-        let new = FormattedAmount::new(i18n, form.amount, AmountStyle::Bare);
-        // The Register's rows can't change while the Dialog blocks it, so the row is
-        // there for as long as the Dialog is open.
-        let question = self
-            .open_account(view)
-            .and_then(|summary| {
-                self.register()?
-                    .row(summary.account().id(), form.transaction)
-            })
-            .map(|row| {
-                fl!(
-                    i18n,
-                    "dialog-reconciled-amount-message",
-                    new = new.text(),
-                    payee = row.payee(),
-                    date = row.date(),
-                    amount = row.amount_text()
-                )
-            })
-            .expect("the Register shows the transaction the confirm asks about");
+        let row = self.confirmed_row(view, form.transaction);
+        let question = fl!(
+            i18n,
+            "dialog-reconciled-amount-message",
+            new = form.amount.text(),
+            payee = row.payee(),
+            date = row.date(),
+            amount = row.amount_text()
+        );
         let Some(dialog) = &mut self.reconciled_amount else {
             return;
         };
@@ -790,7 +782,7 @@ impl MainWindow {
             DialogOutcome::Accepted => {
                 commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
                     transaction: form.transaction,
-                    edit: TransactionEdit::Amount(form.amount),
+                    edit: TransactionEdit::Amount(form.amount.money()),
                 }));
             }
             DialogOutcome::Cancelled => {}

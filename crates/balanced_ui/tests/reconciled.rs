@@ -129,15 +129,6 @@ fn asks(harness: &Harness<'static, App>, question: &str) -> bool {
     harness.query_by_label(question).is_some()
 }
 
-#[test]
-fn committing_a_reconciled_rows_payment_asks_first() {
-    let mut harness = everyday_checking();
-
-    commit(&mut harness, "Payment", "Maple Property Management", "1500");
-
-    assert!(asks(&harness, RENT_CONFIRM));
-}
-
 /// The status the Clr cell labelled `label` reads out.
 fn status(harness: &Harness<'static, App>, label: &str) -> String {
     harness
@@ -145,6 +136,42 @@ fn status(harness: &Harness<'static, App>, label: &str) -> String {
         .accesskit_node()
         .value()
         .expect("a Clr cell reads out its status")
+}
+
+/// Whether the cell cursor is on the cell under the heading `title` of the first row
+/// whose Payee is `payee`.
+fn cursor_on(harness: &Harness<'static, App>, title: &str, payee: &str) -> bool {
+    let mut cursors = harness
+        .query_all_by_role(Role::Cell)
+        .filter(|cell| cell.accesskit_node().is_selected() == Some(true));
+    let cursor = cursors.next().expect("a cell holds the cell cursor");
+    assert!(cursors.next().is_none(), "one cell holds the cell cursor");
+    let payees = heading(harness, "Payee");
+    let row = harness
+        .query_all_by_role(Role::Cell)
+        .filter(|cell| payees.contains(cell.rect().center().x))
+        .nth(row_of(harness, payee))
+        .expect("the Register lists the payee")
+        .rect()
+        .y_range();
+    let centre = cursor.rect().center();
+    heading(harness, title).contains(centre.x) && row.contains(centre.y)
+}
+
+/// Whether a cell editor is open: a text field other than the filter bar's search box.
+fn editing(harness: &Harness<'static, App>) -> bool {
+    harness
+        .query_all_by_role(Role::TextInput)
+        .any(|node| node.accesskit_node().label().as_deref() != Some("Search"))
+}
+
+#[test]
+fn committing_a_reconciled_rows_payment_asks_first() {
+    let mut harness = everyday_checking();
+
+    commit(&mut harness, "Payment", "Maple Property Management", "1500");
+
+    assert!(asks(&harness, RENT_CONFIRM));
 }
 
 #[test]
@@ -336,4 +363,17 @@ fn the_delete_confirm_for_an_uncleared_transaction_asks_as_usual() {
         &harness,
         "Delete this transaction? Fresh Market, 9/5/2026, -86.42"
     ));
+}
+
+#[test]
+fn tab_past_a_reconciled_amount_moves_the_cell_cursor_without_opening_a_cell() {
+    let mut harness = everyday_checking();
+    click_cell(&mut harness, "Payment", "Maple Property Management");
+    type_text(&mut harness, "1500");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert!(cursor_on(&harness, "Deposit", "Maple Property Management"));
+    assert!(!editing(&harness));
 }
