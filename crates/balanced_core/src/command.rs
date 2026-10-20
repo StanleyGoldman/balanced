@@ -154,8 +154,7 @@ impl MoveDirection {
 /// The new value of one field of a transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransactionEdit {
-    /// The date, which moves the transaction into date order in its register. A
-    /// transfer's other side takes the same date.
+    /// The date, which moves the transaction into date order in its register.
     Date(Date<Iso>),
     /// The cheque or reference number, or `None` to clear it.
     Number(Option<String>),
@@ -164,8 +163,7 @@ pub enum TransactionEdit {
     /// The one category the whole amount is in.
     Category(CategoryId),
     /// The whole amount, in the account's currency. A split transaction's amount is
-    /// the sum of its lines, so it can't be edited here. A transfer's other side takes
-    /// the amount with its sign flipped.
+    /// the sum of its lines, so it can't be edited here.
     Amount(Money),
     /// How far the transaction has been checked against the bank. Any status may
     /// follow any other.

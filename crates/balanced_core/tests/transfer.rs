@@ -545,24 +545,59 @@ fn changing_the_date_or_amount_when_the_other_side_is_closed_is_refused_naming_i
 
 #[test]
 fn changing_the_date_or_amount_of_a_side_in_a_closed_account_is_refused_naming_it() {
+    let edits = [
+        TransactionEdit::Date(date(12)),
+        TransactionEdit::Amount(usd("350.00")),
+    ];
+    for edit in edits {
+        let mut household = Household::new();
+        household.save_200();
+        let received = only(household.posted(household.savings)).id();
+        let savings = household.savings;
+        household.apply(DomainCommand::SetAccountStatus {
+            account: savings,
+            status: AccountStatus::Closed,
+        });
+        let before = household.ledger.snapshot();
+
+        let result = household.ledger.apply(DomainCommand::EditTransaction {
+            transaction: received,
+            edit: edit.clone(),
+        });
+
+        assert_eq!(
+            result.unwrap_err(),
+            DomainError::AccountClosed { account: savings },
+            "{edit:?}"
+        );
+        assert_eq!(
+            household.ledger.snapshot().accounts(),
+            before.accounts(),
+            "{edit:?}"
+        );
+    }
+}
+
+#[test]
+fn a_refused_change_leaves_both_sides_as_they_were_in_the_file() {
     let mut household = Household::new();
-    household.save_200();
-    let received = only(household.posted(household.savings)).id();
-    let savings = household.savings;
+    let sent = household.save_200();
     household.apply(DomainCommand::SetAccountStatus {
-        account: savings,
+        account: household.savings,
         status: AccountStatus::Closed,
     });
+    let before = household.ledger.snapshot();
+    household
+        .ledger
+        .apply(DomainCommand::EditTransaction {
+            transaction: sent,
+            edit: TransactionEdit::Amount(usd("-350.00")),
+        })
+        .expect_err("the other side is in a closed account");
 
-    let result = household.ledger.apply(DomainCommand::EditTransaction {
-        transaction: received,
-        edit: TransactionEdit::Amount(usd("350.00")),
-    });
+    let household = household.reopened();
 
-    assert_eq!(
-        result.unwrap_err(),
-        DomainError::AccountClosed { account: savings }
-    );
+    assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
 }
 
 #[test]
