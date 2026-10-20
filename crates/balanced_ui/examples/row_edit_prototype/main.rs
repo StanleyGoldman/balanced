@@ -16,7 +16,7 @@
 //!   B  Entry bar: the row is edited in a bar under the Register; the buttons sit in the bar
 //!   C  Both: edited in place with A's buttons, and the bar repeats the fields with Save, Cancel
 //!
-//! Toggles (1-6) switch the keyboard and flow details; see `TOGGLES`.
+//! Toggles (1-7) switch the keyboard and flow details; see `TOGGLES`.
 //!
 //! Run:
 //!   cargo run -p balanced_ui --example row_edit_prototype -- \
@@ -290,7 +290,10 @@ fn lines_total(lines: &[SplitLine]) -> i64 {
 /// Why a row can't be saved, and the cell to put the cursor in.
 fn validate(f: &Fields) -> Result<(), (usize, String)> {
     if parse_day(&f.cells[0]).is_none() {
-        return Err((0, "The date isn't a valid date (month/day/year).".to_owned()));
+        return Err((
+            0,
+            "The date isn't a valid date (month/day/year).".to_owned(),
+        ));
     }
     if parse_cents(&f.cells[5]).is_none() {
         return Err((5, "The payment isn't an amount.".to_owned()));
@@ -340,8 +343,16 @@ impl Txn {
         let day = parse_day(&f.cells[0]).unwrap_or(START);
         let total = f.total();
         f.cells[0] = fmt_day(day);
-        f.cells[5] = if total < 0 { fmt_cents(-total) } else { String::new() };
-        f.cells[6] = if total > 0 { fmt_cents(total) } else { String::new() };
+        f.cells[5] = if total < 0 {
+            fmt_cents(-total)
+        } else {
+            String::new()
+        };
+        f.cells[6] = if total > 0 {
+            fmt_cents(total)
+        } else {
+            String::new()
+        };
         if let Some(lines) = &mut f.splits {
             for l in lines.iter_mut() {
                 l.amount = fmt_cents(parse_cents(&l.amount).unwrap_or(0));
@@ -428,7 +439,16 @@ const SPENDING: &[(&str, &str, i64)] = &[
     ("Corner Bakery", "Dining", 900),
 ];
 
-const MEMOS: &[&str] = &["", "", "", "", "weekly", "gift", "for the trip", "reimbursable"];
+const MEMOS: &[&str] = &[
+    "",
+    "",
+    "",
+    "",
+    "weekly",
+    "gift",
+    "for the trip",
+    "reimbursable",
+];
 
 fn row_fields(
     day: i64,
@@ -480,11 +500,27 @@ fn generate() -> Vec<Account> {
     };
     push(
         &mut checking,
-        row_fields(START, "", "Opening Balance", "[Opening Balance]", "", 500_000, None),
+        row_fields(
+            START,
+            "",
+            "Opening Balance",
+            "[Opening Balance]",
+            "",
+            500_000,
+            None,
+        ),
     );
     push(
         &mut savings,
-        row_fields(START, "", "Opening Balance", "[Opening Balance]", "", 1_000_000, None),
+        row_fields(
+            START,
+            "",
+            "Opening Balance",
+            "[Opening Balance]",
+            "",
+            1_000_000,
+            None,
+        ),
     );
     let mut check_no = 1000;
     for day in START + 1..=TODAY {
@@ -493,7 +529,15 @@ fn generate() -> Vec<Account> {
             check_no += 1;
             push(
                 &mut checking,
-                row_fields(day, &check_no.to_string(), "Pinewood Apartments", "Housing:Rent", "", -145_000, None),
+                row_fields(
+                    day,
+                    &check_no.to_string(),
+                    "Pinewood Apartments",
+                    "Housing:Rent",
+                    "",
+                    -145_000,
+                    None,
+                ),
             );
         }
         if dom == 1 || dom == 15 {
@@ -506,18 +550,42 @@ fn generate() -> Vec<Account> {
         if dom == 3 {
             push(
                 &mut checking,
-                row_fields(day, "TXFR", "Transfer to Savings", "[Savings]", "", -70_000, None),
+                row_fields(
+                    day,
+                    "TXFR",
+                    "Transfer to Savings",
+                    "[Savings]",
+                    "",
+                    -70_000,
+                    None,
+                ),
             );
             push(
                 &mut savings,
-                row_fields(day, "TXFR", "Transfer from Checking", "[Checking]", "", 70_000, None),
+                row_fields(
+                    day,
+                    "TXFR",
+                    "Transfer from Checking",
+                    "[Checking]",
+                    "",
+                    70_000,
+                    None,
+                ),
             );
         }
         if dom == 28 {
             let interest = g.around(2_000);
             push(
                 &mut savings,
-                row_fields(day, "", "Bank Interest", "Interest Income", "", interest, None),
+                row_fields(
+                    day,
+                    "",
+                    "Bank Interest",
+                    "Interest Income",
+                    "",
+                    interest,
+                    None,
+                ),
             );
         }
         if dom == 10 && g.below(100) < 12 {
@@ -625,15 +693,45 @@ const NEXT_ROW: usize = 2;
 const ALWAYS_SAVE: usize = 3;
 const TRIM_MORE: usize = 4;
 const SPLIT_INLINE: usize = 5;
+const PROMPT_CONTINUE: usize = 6;
 
 /// (key, label, starting value); every toggle applies to all variants.
 const TOGGLES: &[(&str, &str, bool)] = &[
-    ("enter_any", "Enter saves from any cell (off: only the last)", false),
-    ("tab_buttons", "Tab leaves the last cell into the buttons (off: wraps)", true),
-    ("next_row", "After Save, edit the next row (off: stay on it)", false),
-    ("always_save", "Always save without asking (the Preference)", false),
-    ("trim_more", "More actions: trimmed menu (off: same as Actions)", false),
-    ("split_inline", "Split lines under the row (off: in a dialog)", true),
+    (
+        "enter_any",
+        "Enter saves from any cell (off: only the last)",
+        false,
+    ),
+    (
+        "tab_buttons",
+        "Tab leaves the last cell into the buttons (off: wraps)",
+        true,
+    ),
+    (
+        "next_row",
+        "After Save, edit the next row (off: stay on it)",
+        false,
+    ),
+    (
+        "always_save",
+        "Always save without asking (the Preference)",
+        false,
+    ),
+    (
+        "trim_more",
+        "More actions: trimmed menu (off: same as Actions)",
+        false,
+    ),
+    (
+        "split_inline",
+        "Split lines under the row (off: in a dialog)",
+        true,
+    ),
+    (
+        "prompt_continue",
+        "Leave prompt: Enter means Continue editing (GnuCash); off: Save",
+        false,
+    ),
 ];
 
 const TOGGLE_KEYS: [(Key, &str); 10] = [
@@ -760,7 +858,7 @@ struct Proto {
     accounts: Vec<Account>,
     current: usize,
     variant: Variant,
-    o: [bool; 6],
+    o: [bool; 7],
     theme: Theme,
     dock_open: bool,
     status: String,
@@ -785,7 +883,7 @@ impl Proto {
             .unwrap_or(Variant::A);
         let mut h = Harness::new(args);
         h.event("variant", json!({ "to": variant.key(), "via": "start" }));
-        let mut o = [false; 6];
+        let mut o = [false; 7];
         for (i, t) in TOGGLES.iter().enumerate() {
             o[i] = t.2;
         }
@@ -941,8 +1039,10 @@ impl Proto {
         self.edit = Some(e);
         self.selected = Some(t);
         self.scroll_to = self.base_index(t);
-        self.h
-            .event("edit_start", json!({ "target": format!("{t:?}"), "col": NAMES[col], "via": via }));
+        self.h.event(
+            "edit_start",
+            json!({ "target": format!("{t:?}"), "col": NAMES[col], "via": via }),
+        );
     }
 
     /// Begins editing `t` at `col`, asking first when a changed row would be left behind.
@@ -1040,7 +1140,10 @@ impl Proto {
         };
         if !e.dirty() {
             let target = e.target;
-            self.h.event("save", json!({ "target": format!("{target:?}"), "via": via, "unchanged": true }));
+            self.h.event(
+                "save",
+                json!({ "target": format!("{target:?}"), "via": via, "unchanged": true }),
+            );
             self.edit = None;
             return true;
         }
@@ -1117,7 +1220,9 @@ impl Proto {
                 "cancel",
                 json!({ "target": format!("{:?}", e.target), "via": via, "was_changed": e.dirty() }),
             );
-            self.selected = Some(e.target).filter(|t| *t != Target::Draft).or(self.selected);
+            self.selected = Some(e.target)
+                .filter(|t| *t != Target::Draft)
+                .or(self.selected);
             self.status = "Row edit cancelled".to_owned();
         }
     }
@@ -1131,7 +1236,11 @@ impl Proto {
             let first = SplitLine {
                 cat: e.fields.cells[3].clone(),
                 memo: e.fields.cells[4].clone(),
-                amount: if total == 0 { String::new() } else { fmt_cents(total) },
+                amount: if total == 0 {
+                    String::new()
+                } else {
+                    fmt_cents(total)
+                },
             };
             e.fields.splits = Some(vec![first, SplitLine::default()]);
             e.fields.cells[3] = SPLIT_LABEL.to_owned();
@@ -1141,7 +1250,8 @@ impl Proto {
         }
         let open = e.split_open;
         self.h.event("split", json!({ "open": open, "via": via }));
-        self.h.screenshot(if open { "split-open" } else { "split-closed" });
+        self.h
+            .screenshot(if open { "split-open" } else { "split-closed" });
     }
 
     fn remove_split(&mut self) {
@@ -1321,6 +1431,14 @@ impl eframe::App for Proto {
             self.set_dock(!self.dock_open, "key");
         }
 
+        // Ctrl+S opens Split from the editing row (Quicken's shortcut).
+        if self.leave_prompt.is_none()
+            && self.edit.is_some()
+            && ctx.input(|i| i.modifiers.command && i.key_pressed(Key::S))
+        {
+            self.toggle_split("Ctrl+S");
+        }
+
         // Esc cancels the whole row, from any of its widgets; with the Split dialog open it only
         // closes the dialog.
         if self.leave_prompt.is_none()
@@ -1462,7 +1580,7 @@ impl Proto {
                 ui.separator();
                 ui.label(
                     RichText::new(
-                        "A / B / C or left / right variant · 1–6 toggles · F2 note · F3 marker · F4 hide this dock · F5 spotlight · F6 prompt",
+                        "A / B / C or left / right variant · 1–7 toggles · F2 note · F3 marker · F4 hide this dock · F5 spotlight · F6 prompt",
                     )
                     .small()
                     .weak(),
@@ -1519,12 +1637,14 @@ impl Proto {
             ui.horizontal(|ui| {
                 let r = ui.add(Button::new("Save").min_size(vec2(90.0, 0.0)));
                 self.h.track(&r, "leave prompt: Save");
-                if r.clicked() || ctx.input(|i| i.key_pressed(Key::Enter)) {
+                let enter = ctx.input(|i| i.key_pressed(Key::Enter));
+                let to_continue = self.o[PROMPT_CONTINUE];
+                if r.clicked() || (enter && !to_continue) {
                     choice = Some(Choice::Save);
                 }
                 let r = ui.button("Continue editing");
                 self.h.track(&r, "leave prompt: Continue editing");
-                if r.clicked() {
+                if r.clicked() || (enter && to_continue) {
                     choice = Some(Choice::Continue);
                 }
                 let r = ui.button("Discard");
@@ -1560,8 +1680,7 @@ impl Proto {
                 }
             }
             Choice::Discard => {
-                self.h
-                    .event("leave_prompt", json!({ "choice": "discard" }));
+                self.h.event("leave_prompt", json!({ "choice": "discard" }));
                 self.edit = None;
                 self.perform(ctx, leave);
             }
@@ -1600,7 +1719,11 @@ impl Proto {
         }
         let mut h = BAR_BASE;
         if self.split_is_open() && matches!(self.split_view(), SplitView::Bar) {
-            let n = self.edit.as_ref().and_then(|e| e.fields.splits.as_ref()).map_or(0, Vec::len);
+            let n = self
+                .edit
+                .as_ref()
+                .and_then(|e| e.fields.splits.as_ref())
+                .map_or(0, Vec::len);
             h += 30.0 * (n as f32 + 2.0);
         }
         h
@@ -1610,10 +1733,8 @@ impl Proto {
         CentralPanel::default().show(ui, |ui| {
             let full = ui.available_rect_before_wrap();
             let bar_h = self.bar_height();
-            let table_rect = Rect::from_min_max(
-                full.min,
-                pos2(full.max.x, full.max.y - bar_h - STATUS_H),
-            );
+            let table_rect =
+                Rect::from_min_max(full.min, pos2(full.max.x, full.max.y - bar_h - STATUS_H));
             let status_rect = Rect::from_min_max(
                 pos2(full.min.x, table_rect.max.y),
                 pos2(full.max.x, table_rect.max.y + STATUS_H),
@@ -1639,7 +1760,11 @@ impl Proto {
         ui.horizontal_centered(|ui| {
             let error = self.edit.as_ref().and_then(|e| e.error.clone());
             if let Some((_, msg)) = error {
-                ui.label(RichText::new(format!("Can't save this row: {msg}")).color(RED).strong());
+                ui.label(
+                    RichText::new(format!("Can't save this row: {msg}"))
+                        .color(RED)
+                        .strong(),
+                );
             } else {
                 ui.label(RichText::new(&self.status).weak());
             }
@@ -1670,7 +1795,11 @@ impl Proto {
             .and_then(|e| self.base_index(e.target))
             .filter(|_| k > 0);
         let total = n + usize::from(has_draft) + k;
-        let actions_w = if self.variant == Variant::B { 44.0 } else { 300.0 };
+        let actions_w = if self.variant == Variant::B {
+            44.0
+        } else {
+            300.0
+        };
         let mut table = TableBuilder::new(ui)
             .id_salt(("register", self.current))
             .striped(self.theme.settings().alternating_rows)
@@ -1763,7 +1892,13 @@ impl Proto {
                         ui.label(RichText::new(SPLIT_LABEL).italics());
                     } else {
                         let w = ui.available_width();
-                        self.field(ui, Surface::Row, c, w, format!("{} cell, row {index} (editing)", NAMES[c]));
+                        self.field(
+                            ui,
+                            Surface::Row,
+                            c,
+                            w,
+                            format!("{} cell, row {index} (editing)", NAMES[c]),
+                        );
                     }
                 } else {
                     let text = if target == Target::Draft && c == 2 {
@@ -1781,7 +1916,8 @@ impl Proto {
                 }
             });
             if !in_place {
-                self.h.track(&resp, format!("{} cell, row {index}", NAMES[c]));
+                self.h
+                    .track(&resp, format!("{} cell, row {index}", NAMES[c]));
                 if resp.clicked() {
                     clicked = Some(c);
                 }
@@ -1819,7 +1955,8 @@ impl Proto {
                         }
                     }
                 });
-                self.h.track(&r.response, format!("actions cell, row {index}"));
+                self.h
+                    .track(&r.response, format!("actions cell, row {index}"));
             }
         });
         if !in_place && resp.clicked() && !selected {
@@ -1841,10 +1978,7 @@ impl Proto {
             .as_ref()
             .and_then(|e| e.fields.splits.as_ref())
             .map_or(0, Vec::len);
-        let pay = self
-            .edit
-            .as_ref()
-            .is_some_and(|e| e.fields.inn() == 0);
+        let pay = self.edit.as_ref().is_some_and(|e| e.fields.inn() == 0);
         let highlight = self.theme_highlight();
         let foot = j >= lines;
         for c in 0..9 {
@@ -1861,7 +1995,9 @@ impl Proto {
                         self.h.track(&r, format!("split line {j}: remove"));
                         self.edit_ids_now.insert(r.id);
                         if r.clicked() {
-                            if let Some(l) = self.edit.as_mut().and_then(|e| e.fields.splits.as_mut()) {
+                            if let Some(l) =
+                                self.edit.as_mut().and_then(|e| e.fields.splits.as_mut())
+                            {
                                 l.remove(j);
                             }
                         }
@@ -1871,7 +2007,9 @@ impl Proto {
                         self.h.track(&r, "split: add line");
                         self.edit_ids_now.insert(r.id);
                         if r.clicked() {
-                            if let Some(l) = self.edit.as_mut().and_then(|e| e.fields.splits.as_mut()) {
+                            if let Some(l) =
+                                self.edit.as_mut().and_then(|e| e.fields.splits.as_mut())
+                            {
                                 l.push(SplitLine::default());
                             }
                         }
@@ -1911,7 +2049,11 @@ impl Proto {
         let sum = e.fields.splits.as_deref().map_or(0, lines_total);
         let rem = total - sum;
         let text = RichText::new(format!("Remaining {}", fmt_cents(rem)));
-        if rem == 0 { text.weak() } else { text.color(RED) }
+        if rem == 0 {
+            text.weak()
+        } else {
+            text.color(RED)
+        }
     }
 
     /// The split lines as a grid, for the dialog and for the entry bar.
@@ -1922,28 +2064,30 @@ impl Proto {
             .as_ref()
             .and_then(|e| e.fields.splits.as_ref())
             .map_or(0, Vec::len);
-        egui::Grid::new(("split_grid", tag)).num_columns(4).show(ui, |ui| {
-            ui.strong("Category");
-            ui.strong("Memo");
-            ui.strong(if pay { "Payment" } else { "Deposit" });
-            ui.label("");
-            ui.end_row();
-            for j in 0..n {
-                self.split_cell(ui, j, 0, tag);
-                self.split_cell(ui, j, 1, tag);
-                self.split_cell(ui, j, 2, tag);
-                let r = ui.small_button("Remove line");
-                self.h.track(&r, format!("split line {j}: remove"));
-                self.edit_ids_now.insert(r.id);
-                if r.clicked() {
-                    if let Some(l) = self.edit.as_mut().and_then(|e| e.fields.splits.as_mut()) {
-                        l.remove(j);
-                    }
-                    break;
-                }
+        egui::Grid::new(("split_grid", tag))
+            .num_columns(4)
+            .show(ui, |ui| {
+                ui.strong("Category");
+                ui.strong("Memo");
+                ui.strong(if pay { "Payment" } else { "Deposit" });
+                ui.label("");
                 ui.end_row();
-            }
-        });
+                for j in 0..n {
+                    self.split_cell(ui, j, 0, tag);
+                    self.split_cell(ui, j, 1, tag);
+                    self.split_cell(ui, j, 2, tag);
+                    let r = ui.small_button("Remove line");
+                    self.h.track(&r, format!("split line {j}: remove"));
+                    self.edit_ids_now.insert(r.id);
+                    if r.clicked() {
+                        if let Some(l) = self.edit.as_mut().and_then(|e| e.fields.splits.as_mut()) {
+                            l.remove(j);
+                        }
+                        break;
+                    }
+                    ui.end_row();
+                }
+            });
         ui.horizontal(|ui| {
             let r = ui.button("Add line");
             self.h.track(&r, "split: add line");
@@ -1988,14 +2132,20 @@ impl Proto {
         };
         let mut te = TextEdit::singleline(&mut text)
             .id(id)
-            .desired_width(if tag == "table" { ui.available_width() } else { 150.0 });
+            .desired_width(if tag == "table" {
+                ui.available_width()
+            } else {
+                150.0
+            });
         if k == 2 {
             te = te.horizontal_align(Align::Max);
         }
         let r = ui.add(te);
         self.edit_ids_now.insert(id);
-        self.h
-            .track(&r, format!("split line {j} {}", ["category", "memo", "amount"][k]));
+        self.h.track(
+            &r,
+            format!("split line {j} {}", ["category", "memo", "amount"][k]),
+        );
         if r.changed() {
             if let Some(l) = self
                 .edit
@@ -2023,8 +2173,8 @@ impl Proto {
             .edit
             .as_ref()
             .map_or_else(String::new, |e| e.fields.cells[c].clone());
-        let focus_wanted = surface == self.active_surface()
-            && self.edit.as_ref().and_then(|e| e.focus) == Some(c);
+        let focus_wanted =
+            surface == self.active_surface() && self.edit.as_ref().and_then(|e| e.focus) == Some(c);
         if focus_wanted {
             ctx.memory_mut(|m| m.request_focus(id));
             if let Some(e) = &mut self.edit {
@@ -2040,10 +2190,12 @@ impl Proto {
         if focus_wanted {
             let mut state = out.state;
             let len = text.chars().count();
-            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
-                egui::text::CCursor::new(0),
-                egui::text::CCursor::new(len),
-            )));
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(len),
+                )));
             state.store(&ctx, id);
         }
         self.edit_ids_now.insert(id);
@@ -2076,7 +2228,8 @@ impl Proto {
         }
         if r.lost_focus() && ctx.input(|i| i.key_pressed(Key::Enter)) && self.leave_prompt.is_none()
         {
-            if self.o[ENTER_ANY] || c == LAST {
+            let ctrl = ctx.input(|i| i.modifiers.command);
+            if self.o[ENTER_ANY] || c == LAST || ctrl {
                 self.acts.push(Act::Save("Enter"));
             } else if let Some(e) = &mut self.edit {
                 e.focus = Some(c + 1);
@@ -2108,7 +2261,10 @@ impl Proto {
     }
 
     fn edit_buttons(&mut self, ui: &mut Ui, surface: Surface, which: Which) {
-        let draft = self.edit.as_ref().is_some_and(|e| e.target == Target::Draft);
+        let draft = self
+            .edit
+            .as_ref()
+            .is_some_and(|e| e.target == Target::Draft);
         let tag = match surface {
             Surface::Row => "actions cell",
             Surface::Bar => "entry bar",
@@ -2116,7 +2272,8 @@ impl Proto {
         let save = if draft { "Add" } else { "Save" };
         let r = ui.button(save);
         self.edit_ids_now.insert(r.id);
-        self.h.track(&r, format!("{} button ({tag})", save.to_lowercase()));
+        self.h
+            .track(&r, format!("{} button ({tag})", save.to_lowercase()));
         if r.clicked() {
             self.acts.push(Act::Save("button"));
         }
@@ -2149,15 +2306,19 @@ impl Proto {
                 }
             });
             self.edit_ids_now.insert(r.response.id);
-            self.h.track(&r.response, format!("more actions button ({tag})"));
+            self.h
+                .track(&r.response, format!("more actions button ({tag})"));
         }
     }
 
     fn entry_bar(&mut self, ui: &mut Ui, rect: Rect) {
         ui.painter()
             .rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
-        ui.painter()
-            .hline(rect.x_range(), rect.top(), Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color));
+        ui.painter().hline(
+            rect.x_range(),
+            rect.top(),
+            Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+        );
         let title = match &self.edit {
             None => "New transaction".to_owned(),
             Some(e) if e.target == Target::Draft => "New transaction".to_owned(),
@@ -2172,7 +2333,11 @@ impl Proto {
                 ui.label(RichText::new("· changed").weak());
             }
         });
-        let buttons_w = if self.variant == Variant::B { 330.0 } else { 150.0 };
+        let buttons_w = if self.variant == Variant::B {
+            330.0
+        } else {
+            150.0
+        };
         let fixed = [84.0, 54.0, 190.0, 160.0, 0.0, 92.0, 92.0];
         let gaps = 8.0 * 7.0;
         let memo_w = (rect.width() - 12.0 - fixed.iter().sum::<f32>() - gaps - buttons_w).max(80.0);
