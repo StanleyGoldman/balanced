@@ -56,6 +56,8 @@ CREATE TABLE "transaction" (
     amount INTEGER,
     category_id INTEGER REFERENCES category (id) ON DELETE RESTRICT,
     flagged INTEGER NOT NULL DEFAULT 0 CONSTRAINT transaction_flagged_flag CHECK (flagged IN (0, 1)),
+    cleared_status TEXT NOT NULL DEFAULT 'uncleared'
+        CONSTRAINT transaction_cleared_status_known CHECK (cleared_status IN ('uncleared', 'cleared', 'reconciled')),
     CONSTRAINT transaction_amount_unless_split CHECK ((allocation = 'split') = (amount IS NULL)),
     CONSTRAINT transaction_category_when_category CHECK ((allocation = 'category') = (category_id IS NOT NULL)),
     CONSTRAINT transaction_opening_balance_no_payee CHECK (allocation <> 'opening_balance' OR payee = '')

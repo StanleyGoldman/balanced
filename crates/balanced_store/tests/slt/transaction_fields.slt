@@ -1,6 +1,6 @@
 # A transaction's date is an ISO date, its number is NULL rather than empty, and its
 # allocation is one of the known kinds. A transaction starts unflagged, and its flag is 0 or
-# 1.
+# 1. It starts uncleared, and its cleared status is one of the known ones.
 
 statement ok
 INSERT INTO account (id, name, kind, position, hidden, closed) VALUES (0, 'Checking', 'checking', 0, 0, 0)
@@ -48,3 +48,21 @@ UPDATE "transaction" SET flagged = 1 WHERE id = 0
 
 statement error CHECK constraint failed: transaction_flagged_flag
 UPDATE "transaction" SET flagged = 2 WHERE id = 0
+
+query T
+SELECT cleared_status FROM "transaction" ORDER BY id
+----
+uncleared
+uncleared
+
+statement ok
+UPDATE "transaction" SET cleared_status = 'cleared' WHERE id = 0
+
+statement ok
+UPDATE "transaction" SET cleared_status = 'reconciled' WHERE id = 1
+
+statement error CHECK constraint failed: transaction_cleared_status_known
+UPDATE "transaction" SET cleared_status = 'pending' WHERE id = 0
+
+statement error NOT NULL constraint failed: transaction.cleared_status
+UPDATE "transaction" SET cleared_status = NULL WHERE id = 0

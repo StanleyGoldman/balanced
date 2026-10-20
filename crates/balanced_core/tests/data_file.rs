@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 
 use balanced_core::{
     AccountGroup, AccountId, AccountKind, AccountStatus, AccountSummary, Category, CategoryId,
-    CurrencyCode, Damage, DomainCommand, DomainError, Ledger, LedgerView, Money, MoneyError,
-    MoveDirection, NewTransaction, OpenError, SplitLine, TransactionEdit, TransactionId,
-    Visibility, WriteError,
+    ClearedStatus, CurrencyCode, Damage, DomainCommand, DomainError, Ledger, LedgerView, Money,
+    MoneyError, MoveDirection, NewTransaction, OpenError, RegisterEntry, SplitLine,
+    TransactionEdit, TransactionId, Visibility, WriteError,
 };
 use icu_calendar::{Date, Iso};
 use tempfile::TempDir;
@@ -451,6 +451,71 @@ fn a_flagged_transaction_stays_flagged_after_a_reopen() {
     });
 }
 
+/// Gives `transaction` `status`.
+fn mark(ledger: &mut Ledger, transaction: TransactionId, status: ClearedStatus) {
+    apply(
+        ledger,
+        DomainCommand::EditTransaction {
+            transaction,
+            edit: TransactionEdit::ClearedStatus(status),
+        },
+    );
+}
+
+/// The status of the transaction with `id`.
+fn status_of(ledger: &Ledger, id: TransactionId) -> ClearedStatus {
+    ledger
+        .snapshot()
+        .accounts()
+        .iter()
+        .flat_map(AccountSummary::register)
+        .map(RegisterEntry::transaction)
+        .find(|transaction| transaction.id() == id)
+        .expect("the test posted the transaction")
+        .cleared_status()
+}
+
+#[test]
+fn each_cleared_status_is_kept_after_a_reopen() {
+    assert_reopens_as_changed(|ledger| {
+        let (everyday, food) = everyday_and_food(ledger);
+        post(ledger, everyday, 2, "Bakery", food, "-4.10");
+        let shell = post(ledger, everyday, 3, "Shell", food, "-48.20");
+        let costco = post(ledger, everyday, 4, "Costco", food, "-100.00");
+        mark(ledger, shell, ClearedStatus::Cleared);
+        mark(ledger, costco, ClearedStatus::Reconciled);
+    });
+}
+
+#[test]
+fn a_status_edit_undoes_after_a_reopen() {
+    let (_dir, path, mut ledger) = new_file();
+    let (everyday, food) = everyday_and_food(&mut ledger);
+    let bakery = post(&mut ledger, everyday, 2, "Bakery", food, "-4.10");
+    mark(&mut ledger, bakery, ClearedStatus::Cleared);
+    let mut reopened = reopen(ledger, &path);
+
+    reopened.undo().expect("the status edit undoes");
+
+    assert_eq!(status_of(&reopened, bakery), ClearedStatus::Uncleared);
+}
+
+#[test]
+fn an_undeleted_cleared_transaction_is_cleared_after_a_reopen() {
+    assert_reopens_as_changed(|ledger| {
+        let (everyday, food) = everyday_and_food(ledger);
+        let bakery = post(ledger, everyday, 2, "Bakery", food, "-4.10");
+        mark(ledger, bakery, ClearedStatus::Cleared);
+        apply(
+            ledger,
+            DomainCommand::DeleteTransaction {
+                transaction: bakery,
+            },
+        );
+        ledger.undo().expect("the delete undoes");
+    });
+}
+
 #[test]
 fn an_undeleted_flagged_transaction_is_flagged_after_a_reopen() {
     assert_reopens_as_changed(|ledger| {
@@ -692,6 +757,8 @@ fn every_command(h: &Household) -> Vec<DomainCommand> {
             transaction: h.payments[1],
             flagged: true,
         },
+        edit(TransactionEdit::ClearedStatus(ClearedStatus::Cleared)),
+        edit(TransactionEdit::ClearedStatus(ClearedStatus::Reconciled)),
         // A split's lines stay with it through an edit to its other fields.
         DomainCommand::EditTransaction {
             transaction: h.split,

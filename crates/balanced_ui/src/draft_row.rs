@@ -54,6 +54,8 @@ impl Draft {
             TransactionEdit::Memo(memo) => self.memo = memo,
             TransactionEdit::Category(category) => self.category = Some(category),
             TransactionEdit::Amount(amount) => self.amount = Some(amount),
+            // The draft row's Clr cell is empty: a posted transaction starts uncleared.
+            TransactionEdit::ClearedStatus(_) => {}
         }
     }
 

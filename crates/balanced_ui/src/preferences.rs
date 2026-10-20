@@ -420,6 +420,7 @@ mod tests {
                 RegisterColumn::Category,
                 RegisterColumn::Memo,
                 RegisterColumn::Balance,
+                RegisterColumn::Clr,
                 RegisterColumn::Flag,
                 RegisterColumn::Actions,
             ]
@@ -484,6 +485,7 @@ mod tests {
                 RegisterColumn::Payment,
                 RegisterColumn::Deposit,
                 RegisterColumn::Balance,
+                RegisterColumn::Clr,
                 RegisterColumn::Flag,
                 RegisterColumn::Actions,
             ]
@@ -491,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn a_new_file_shows_flag_between_balance_and_actions() {
+    fn a_new_file_shows_clr_and_flag_between_balance_and_actions() {
         let (_dir, file) = file();
 
         let loaded = file.load().unwrap();
@@ -507,6 +509,7 @@ mod tests {
                 RegisterColumn::Payment,
                 RegisterColumn::Deposit,
                 RegisterColumn::Balance,
+                RegisterColumn::Clr,
                 RegisterColumn::Flag,
                 RegisterColumn::Actions,
             ]
@@ -536,6 +539,7 @@ mod tests {
                 RegisterColumn::Payment,
                 RegisterColumn::Deposit,
                 RegisterColumn::Balance,
+                RegisterColumn::Clr,
                 RegisterColumn::Flag,
                 RegisterColumn::Actions,
             ]
@@ -608,7 +612,7 @@ mod tests {
              gridlines = \"off\"\n\
              group_totals = false\n\
              net_worth_placement = \"account_bar\"\n\
-             register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"flag\"]\n\
+             register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
              hidden_register_columns = []\n"
         );
     }

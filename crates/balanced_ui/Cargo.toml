@@ -68,6 +68,10 @@ name = "filter_bar"
 required-features = ["test-support"]
 
 [[test]]
+name = "clr"
+required-features = ["test-support"]
+
+[[test]]
 name = "flag"
 required-features = ["test-support"]
 

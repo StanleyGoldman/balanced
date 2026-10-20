@@ -6,8 +6,8 @@
 use icu_calendar::{Date, Iso};
 
 use crate::{
-    Account, AccountId, AccountKind, AccountStatus, Category, CategoryId, Money, MoneyError,
-    NewTransaction, Transaction, TransactionId, Visibility, WriteError,
+    Account, AccountId, AccountKind, AccountStatus, Category, CategoryId, ClearedStatus, Money,
+    MoneyError, NewTransaction, Transaction, TransactionId, Visibility, WriteError,
 };
 
 /// A change to the ledger. `Ledger::apply` applies it, or rejects it with a
@@ -131,6 +131,9 @@ pub enum TransactionEdit {
     /// The whole amount, in the account's currency. A split transaction's amount is
     /// the sum of its lines, so it can't be edited here.
     Amount(Money),
+    /// How far the transaction has been checked against the bank. Any status may
+    /// follow any other.
+    ClearedStatus(ClearedStatus),
 }
 
 /// A [`DomainCommand`] the ledger applied, with the Command that undoes it.

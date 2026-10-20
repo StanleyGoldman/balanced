@@ -10,9 +10,9 @@ use icu_calendar::{Date, Iso};
 use crate::data_file::{date_text, minor_units, money};
 use crate::transaction::{NewAllocation, NewTransactionParts, SplitLine};
 use crate::{
-    Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId, CurrencyCode,
-    DomainCommand, MoneyError, MoveDirection, NewTransaction, Transaction, TransactionEdit,
-    TransactionId, Visibility, WriteError,
+    Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId,
+    ClearedStatus, CurrencyCode, DomainCommand, MoneyError, MoveDirection, NewTransaction,
+    Transaction, TransactionEdit, TransactionId, Visibility, WriteError,
 };
 
 /// Why an undo log entry couldn't be read back as a Command.
@@ -187,7 +187,18 @@ fn edit_to_wire(edit: &TransactionEdit) -> Result<v1::TransactionEdit, WriteErro
         TransactionEdit::Memo(memo) => v1::TransactionEdit::Memo(memo.clone()),
         TransactionEdit::Category(category) => v1::TransactionEdit::Category(category.raw()),
         TransactionEdit::Amount(amount) => v1::TransactionEdit::Amount(minor_units(*amount)?),
+        TransactionEdit::ClearedStatus(status) => {
+            v1::TransactionEdit::ClearedStatus(cleared_status_to_wire(*status))
+        }
     })
+}
+
+fn cleared_status_to_wire(status: ClearedStatus) -> v1::ClearedStatus {
+    match status {
+        ClearedStatus::Uncleared => v1::ClearedStatus::Uncleared,
+        ClearedStatus::Cleared => v1::ClearedStatus::Cleared,
+        ClearedStatus::Reconciled => v1::ClearedStatus::Reconciled,
+    }
 }
 
 fn transaction_to_wire(transaction: &Transaction) -> Result<v1::Transaction, WriteError> {
@@ -209,6 +220,7 @@ fn transaction_to_wire(transaction: &Transaction) -> Result<v1::Transaction, Wri
             },
         },
         flagged: transaction.is_flagged(),
+        cleared_status: cleared_status_to_wire(transaction.cleared_status()),
     })
 }
 
@@ -403,7 +415,18 @@ fn edit_from_wire(
             TransactionEdit::Category(CategoryId::new(category))
         }
         v1::TransactionEdit::Amount(amount) => TransactionEdit::Amount(money(amount, currency)),
+        v1::TransactionEdit::ClearedStatus(status) => {
+            TransactionEdit::ClearedStatus(cleared_status_from_wire(status))
+        }
     })
+}
+
+fn cleared_status_from_wire(status: v1::ClearedStatus) -> ClearedStatus {
+    match status {
+        v1::ClearedStatus::Uncleared => ClearedStatus::Uncleared,
+        v1::ClearedStatus::Cleared => ClearedStatus::Cleared,
+        v1::ClearedStatus::Reconciled => ClearedStatus::Reconciled,
+    }
 }
 
 /// The transaction `transaction` holds. A split's amount is the sum of its lines.
@@ -413,7 +436,8 @@ fn transaction_from_wire(
 ) -> Result<Transaction, UndoEntryError> {
     Ok(new_transaction_from_wire(transaction.fields, currency)?
         .into_transaction(TransactionId::new(transaction.id), currency)?
-        .with_flag(transaction.flagged))
+        .with_flag(transaction.flagged)
+        .with_cleared_status(cleared_status_from_wire(transaction.cleared_status)))
 }
 
 fn split_from_wire(lines: Vec<v1::SplitLine>, currency: CurrencyCode) -> Vec<SplitLine> {
@@ -618,6 +642,9 @@ mod tests {
             edit(TransactionEdit::Memo("Weekly shop".to_owned())),
             edit(TransactionEdit::Category(CategoryId::new(6))),
             edit(TransactionEdit::Amount(usd(dec!(-90.00)))),
+            edit(TransactionEdit::ClearedStatus(ClearedStatus::Uncleared)),
+            edit(TransactionEdit::ClearedStatus(ClearedStatus::Cleared)),
+            edit(TransactionEdit::ClearedStatus(ClearedStatus::Reconciled)),
             DomainCommand::SetFlagged {
                 transaction,
                 flagged: true,
@@ -633,7 +660,11 @@ mod tests {
             },
             DomainCommand::RestoreTransaction {
                 account,
-                transaction: restored.with_flag(true),
+                transaction: restored.clone().with_flag(true),
+            },
+            DomainCommand::RestoreTransaction {
+                account,
+                transaction: restored.with_cleared_status(ClearedStatus::Reconciled),
             },
         ]
         .into_iter()
@@ -700,6 +731,22 @@ mod tests {
 
             assert_eq!(decode(&entry, usd_code()).unwrap(), command, "{entry}");
         }
+    }
+
+    #[test]
+    fn a_transaction_written_without_a_status_reads_back_uncleared() {
+        let entry = r#"{"restore_transaction":{"account":7,"transaction":{"id":12,"date":"2026-09-03","number":null,"payee":"Shell","memo":"","allocation":{"category":{"category":5,"amount":-4820}}}}}"#;
+
+        let command = decode(entry, usd_code()).unwrap();
+
+        let [_, _, paid] = transactions();
+        assert_eq!(
+            command,
+            DomainCommand::RestoreTransaction {
+                account: AccountId::new(7),
+                transaction: paid,
+            }
+        );
     }
 
     #[test]

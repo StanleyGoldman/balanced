@@ -21,11 +21,15 @@ expression: entries
 {"edit_transaction":{"transaction":12,"edit":{"memo":"Weekly shop"}}}
 {"edit_transaction":{"transaction":12,"edit":{"category":6}}}
 {"edit_transaction":{"transaction":12,"edit":{"amount":-9000}}}
+{"edit_transaction":{"transaction":12,"edit":{"cleared_status":"uncleared"}}}
+{"edit_transaction":{"transaction":12,"edit":{"cleared_status":"cleared"}}}
+{"edit_transaction":{"transaction":12,"edit":{"cleared_status":"reconciled"}}}
 {"set_flagged":{"transaction":12,"flagged":true}}
 {"set_flagged":{"transaction":12,"flagged":false}}
 {"delete_transaction":{"transaction":12}}
 {"restore_transaction":{"account":7,"transaction":{"id":13,"date":"2026-09-02","number":"1042","payee":"Costco","memo":"Weekly shop","allocation":{"split":[{"category":3,"memo":"Groceries","amount":-8000},{"category":4,"memo":"","amount":-2050}]}}}}
 {"restore_transaction":{"account":7,"transaction":{"id":13,"date":"2026-09-02","number":"1042","payee":"Costco","memo":"Weekly shop","allocation":{"split":[{"category":3,"memo":"Groceries","amount":-8000},{"category":4,"memo":"","amount":-2050}]},"flagged":true}}}
+{"restore_transaction":{"account":7,"transaction":{"id":13,"date":"2026-09-02","number":"1042","payee":"Costco","memo":"Weekly shop","allocation":{"split":[{"category":3,"memo":"Groceries","amount":-8000},{"category":4,"memo":"","amount":-2050}]},"cleared_status":"reconciled"}}}
 {"create_category":{"name":"Fuel","parent":5}}
 {"create_category":{"name":"Coffee","parent":null}}
 {"delete_category":{"category":6}}
