@@ -85,3 +85,11 @@ _Avoid_: Account settings, gear menu
 **Filter bar**:
 The row above a register's column headings that narrows the rows it shows by search text, date range and transaction type; it never changes a row's running balance.
 _Avoid_: Search bar, filter panel
+
+**Transfer**:
+Money moved between two of the household's accounts, recorded as a transaction in each account's register. It's picked by choosing `[Account]` in the Category field, of a transaction or of a split line.
+_Avoid_: Journal entry
+
+**Other side**:
+The transaction a transfer records in the other account. The two sides share their date and amount, with the sign flipped; everything else belongs to each side.
+_Avoid_: Mirror transaction, linked transaction, counterpart
