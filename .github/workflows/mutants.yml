@@ -13,8 +13,12 @@
 # issue changes, since on a broken commit every mutant would look caught and
 # close its issue.
 #
-# No path filter, so a prose-only merge runs too: it finds no mutants, tests
-# nothing and still closes the issues of mutants no longer generated.
+# A merge that changes only prose or agent tooling starts no run: it can't
+# change which mutants are generated. Any run closes the issues of mutants no
+# longer generated across the whole tree, so the next one catches up on any a
+# skipped or dropped run would have closed. The skipped paths are `ci.yml`'s
+# list for its `changes` job; change both together. This workflow isn't a
+# required check, so a run that never starts holds nothing up.
 #
 # By hand, `gh workflow run mutants.yml -f task=mutants-shard -f shard=3` (or
 # `-f task=mutants-landed`) runs one on `main`'s tip.
@@ -38,6 +42,10 @@ run-name: >-
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".claude/**"
   schedule:
     - cron: "0 7 * * 0"
     - cron: "0 7 * * 1"
