@@ -61,7 +61,8 @@ pub enum DomainCommand {
         transaction: NewTransaction,
     },
     /// Change one field of an existing transaction. A new date or amount on one side of
-    /// a transfer changes its other side too.
+    /// a transfer changes its other side too, and a split's new date moves the other side
+    /// of each of its lines to an account.
     EditTransaction {
         transaction: TransactionId,
         edit: TransactionEdit,
@@ -72,15 +73,16 @@ pub enum DomainCommand {
         flagged: bool,
     },
     /// Delete a transaction, from whichever account holds it. Deleting one side of a
-    /// transfer deletes its other side too.
+    /// transfer deletes its other side too, and deleting a split deletes the other side of
+    /// each of its lines to an account.
     DeleteTransaction { transaction: TransactionId },
     /// Put a deleted transaction back into `account`, with its id, where it was in the
-    /// register, and a transfer's `other_side` back into its own: the inverse of
+    /// register, and each of its `other_sides` back into its own: the inverse of
     /// [`DomainCommand::DeleteTransaction`].
     RestoreTransaction {
         account: AccountId,
         transaction: Transaction,
-        other_side: Option<Box<OtherSide>>,
+        other_sides: Vec<OtherSide>,
     },
     /// Add a category named `name` under `parent`, or at the top of the tree. It takes
     /// the next category id.
@@ -95,7 +97,7 @@ pub enum DomainCommand {
     RestoreCategory { category: Category },
 }
 
-/// A transfer's other side, in the account that holds it.
+/// A transfer's other side, or a split line's, in the account that holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OtherSide {
     account: AccountId,
@@ -258,6 +260,10 @@ pub enum DomainError {
     /// another account, which is closed, so its history is read-only.
     #[error("the transfer's other account is closed: {account:?}")]
     TransferAccountClosed { account: AccountId },
+    /// The command would change the date or amount of a split line's other side, or
+    /// delete it. Those change only with the split, in `account`.
+    #[error("the transaction is a split line's other side; change the split in {account:?}")]
+    SplitLineOtherSide { account: AccountId },
     /// The command would delete an account that holds a side of a transfer, which
     /// would leave the other side in another account with nothing to point at. The
     /// account can be closed instead.

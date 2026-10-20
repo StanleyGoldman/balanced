@@ -31,6 +31,11 @@ test-support = ["balanced_store/test-support"]
 name = "data_file"
 required-features = ["test-support"]
 
+# Posts split transactions, which need `test-support`.
+[[test]]
+name = "split_transfer"
+required-features = ["test-support"]
+
 # Upgrades files through migrations of its own, which need `test-support`.
 [[test]]
 name = "upgrade"

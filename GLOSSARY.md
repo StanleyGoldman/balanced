@@ -91,5 +91,5 @@ Money moved between two of the household's accounts, recorded as a transaction i
 _Avoid_: Journal entry
 
 **Other side**:
-The transaction a transfer records in the other account. The two sides share their date and amount, with the sign flipped; everything else belongs to each side.
+The transaction a transfer records in the other account. The two sides share their date and amount, with the sign flipped; everything else belongs to each side. Each split line to an account has an other side of its own, which points back at the split and takes the line's memo; its date and amount change, and it is deleted, only from the split.
 _Avoid_: Mirror transaction, linked transaction, counterpart

@@ -140,17 +140,22 @@ fn allocation(row: &Row<'_>, lines: Vec<SplitLineRow>) -> rusqlite::Result<Alloc
 fn split_lines(connection: &Connection) -> rusqlite::Result<HashMap<u32, Vec<SplitLineRow>>> {
     let mut lines: HashMap<u32, Vec<SplitLineRow>> = HashMap::new();
     let mut statement = connection.prepare(
-        "SELECT transaction_id, category_id, memo, amount FROM split_line
+        "SELECT transaction_id, category_id, other_side_id, memo, amount FROM split_line
          ORDER BY transaction_id, position",
     )?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
-        lines.entry(row.get(0)?).or_default().push(SplitLineRow {
-            target: SplitTargetRow::Category {
-                category_id: row.get(1)?,
+        // The CHECK on `split_line` gives each line one of the two.
+        let target = match row.get(1)? {
+            Some(category_id) => SplitTargetRow::Category { category_id },
+            None => SplitTargetRow::Transfer {
+                other_side_id: row.get(2)?,
             },
-            memo: row.get(2)?,
-            amount: row.get(3)?,
+        };
+        lines.entry(row.get(0)?).or_default().push(SplitLineRow {
+            target,
+            memo: row.get(3)?,
+            amount: row.get(4)?,
         });
     }
     Ok(lines)

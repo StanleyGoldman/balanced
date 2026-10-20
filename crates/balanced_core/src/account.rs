@@ -336,9 +336,10 @@ impl NewAccountTransaction {
         self.transaction.categories()
     }
 
-    /// Whether the transaction is a transfer to or from another account.
+    /// Whether the transaction, or one of its split lines, is a transfer to or from
+    /// another account.
     pub(crate) fn is_transfer(&self) -> bool {
-        self.transaction.transfer_account().is_some()
+        !self.transaction.transfer_accounts().is_empty()
     }
 
     /// The transaction, with `id`, in an account in `currency`. Fails when an amount is

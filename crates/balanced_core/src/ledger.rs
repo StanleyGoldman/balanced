@@ -14,9 +14,9 @@ use crate::data_file::{account_row, category_row, transaction_row};
 use crate::transaction::{NewTransaction, TransactionId};
 use crate::undo_log;
 use crate::{
-    Account, AccountGroup, AccountId, AccountKind, AccountStatus, Applied, Category, CategoryId,
-    CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection, OtherSide,
-    Transaction, TransactionEdit, Visibility, WriteError,
+    Account, AccountGroup, AccountId, AccountKind, AccountStatus, Allocation, Applied, Category,
+    CategoryId, CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection,
+    OtherSide, Transaction, TransactionEdit, Visibility, WriteError,
 };
 
 /// Counts the changes applied to a [`Ledger`]. A window's view model rebuilds when
@@ -121,11 +121,12 @@ impl AccountSummary {
             .collect()
     }
 
-    /// Whether the account holds a side of a transfer.
+    /// Whether the account holds a side of a transfer, or a split with a line to another
+    /// account.
     fn holds_transfer(&self) -> bool {
         self.register
             .iter()
-            .any(|entry| entry.transaction.other_side_id().is_some())
+            .any(|entry| !entry.transaction.other_side_ids().is_empty())
     }
 
     pub fn account(&self) -> &Account {
@@ -235,6 +236,22 @@ impl LedgerView {
                     .position(|entry| entry.transaction.id() == id)
                     .map(|entry| TransactionPosition { account, entry })
             })
+    }
+
+    /// The account holding the split that `transaction` is a line's other side of, or
+    /// `None` when it is no split line's other side.
+    fn split_account(&self, transaction: &Transaction) -> Option<AccountId> {
+        let Allocation::Transfer(other_side) = transaction.allocation() else {
+            return None;
+        };
+        let position = self.find_transaction(*other_side)?;
+        // `find_transaction` returns indices in this same view.
+        let summary = &self.accounts[position.account];
+        matches!(
+            summary.register[position.entry].transaction.allocation(),
+            Allocation::Split(_)
+        )
+        .then(|| summary.account.id())
     }
 
     /// The indices in [`Self::accounts`] of the accounts of `kind`. Where there are
@@ -663,8 +680,8 @@ impl Ledger {
             DomainCommand::RestoreTransaction {
                 account,
                 transaction,
-                other_side,
-            } => self.restore_transaction(account, transaction, other_side)?,
+                other_sides,
+            } => self.restore_transaction(account, transaction, other_sides)?,
             DomainCommand::CreateCategory { name, parent } => {
                 self.create_category(&name, parent)?
             }
@@ -940,20 +957,28 @@ impl Ledger {
             return Err(DomainError::UnknownCategory { category });
         }
         let old = &self.view.accounts[position.account].register[position.entry].transaction;
+        if edit.for_other_side().is_some()
+            && let Some(account) = self.view.split_account(old)
+        {
+            return Err(DomainError::SplitLineOtherSide { account });
+        }
         // Undoing a date or amount edit on one side brings its other side back too,
         // since the two sides are always in step.
         let undo = old.undoing(&edit);
-        let other_side = old.other_side_id().zip(edit.for_other_side());
+        let other_sides = old.other_side_ids();
+        let other_side_edit = edit.for_other_side();
         let edited = old.edited(edit)?;
         self.rewrite_transaction(position, edited)?;
-        // A refused other side, in a closed account, rolls back both.
-        if let Some((other_side, edit)) = other_side {
-            let position = self.changeable_other_side(other_side)?;
-            // `changeable_other_side` found both indices in this same view.
-            let edited = self.view.accounts[position.account].register[position.entry]
-                .transaction
-                .edited(edit)?;
-            self.rewrite_transaction(position, edited)?;
+        // A refused other side, in a closed account, rolls back them all.
+        if let Some(edit) = other_side_edit {
+            for other_side in other_sides {
+                let position = self.changeable_other_side(other_side)?;
+                // `changeable_other_side` found both indices in this same view.
+                let edited = self.view.accounts[position.account].register[position.entry]
+                    .transaction
+                    .edited(edit.clone())?;
+                self.rewrite_transaction(position, edited)?;
+            }
         }
         Ok(DomainCommand::EditTransaction {
             transaction: id,
@@ -1033,19 +1058,20 @@ impl Ledger {
         {
             return Err(DomainError::UnknownCategory { category });
         }
-        let other_account = transaction
-            .transfer_account()
+        let other_accounts = transaction
+            .transfer_accounts()
+            .into_iter()
             .map(|other| self.transfer_target(account, other))
-            .transpose()?;
+            .collect::<Result<Vec<_>, _>>()?;
         let id = self.next_transaction;
         let currency = self.view.net_worth.currency();
         let transaction = transaction.into_transaction(id, currency)?;
-        let other_side = other_account
-            .zip(transaction.other_side_id())
-            .map(|(other, other_side)| (other, transaction.other_side(other_side)));
-        let next = other_side.as_ref().map_or(id, |(_, side)| side.id()).next();
+        // The other sides come in the order of their accounts, and took the ids after
+        // `id`.
+        let other_sides = transaction.other_sides();
+        let next = other_sides.last().map_or(id, Transaction::id).next();
         self.insert_transaction(index, transaction)?;
-        if let Some((other, other_side)) = other_side {
+        for (other, other_side) in other_accounts.into_iter().zip(other_sides) {
             self.insert_transaction(other, other_side)?;
         }
         self.next_transaction = next;
@@ -1094,23 +1120,25 @@ impl Ledger {
     fn delete_transaction(&mut self, id: TransactionId) -> Result<DomainCommand, DomainError> {
         let position = self.changeable(id)?;
         // `changeable` found both indices in this same view.
-        let other_side = self.view.accounts[position.account].register[position.entry]
-            .transaction
-            .other_side_id();
+        let deleted = &self.view.accounts[position.account].register[position.entry].transaction;
+        if let Some(account) = self.view.split_account(deleted) {
+            return Err(DomainError::SplitLineOtherSide { account });
+        }
+        let other_side_ids = deleted.other_side_ids();
         let (account, transaction) = self.remove_transaction(position)?;
-        // A refused other side, in a closed account, rolls back both.
-        let other_side = match other_side {
-            Some(other_side) => {
+        // A refused other side, in a closed account, rolls back them all.
+        let other_sides = other_side_ids
+            .into_iter()
+            .map(|other_side| {
                 let position = self.changeable_other_side(other_side)?;
                 let (account, transaction) = self.remove_transaction(position)?;
-                Some(Box::new(OtherSide::new(account, transaction)))
-            }
-            None => None,
-        };
+                Ok(OtherSide::new(account, transaction))
+            })
+            .collect::<Result<_, DomainError>>()?;
         Ok(DomainCommand::RestoreTransaction {
             account,
             transaction,
-            other_side,
+            other_sides,
         })
     }
 
@@ -1136,13 +1164,13 @@ impl Ledger {
         &mut self,
         account: AccountId,
         transaction: Transaction,
-        other_side: Option<Box<OtherSide>>,
+        other_sides: Vec<OtherSide>,
     ) -> Result<DomainCommand, DomainError> {
         let inverse = DomainCommand::DeleteTransaction {
             transaction: transaction.id(),
         };
         self.put_back(account, transaction)?;
-        if let Some(other_side) = other_side {
+        for other_side in other_sides {
             let (account, transaction) = other_side.into_parts();
             self.put_back(account, transaction)?;
         }
@@ -2317,7 +2345,7 @@ mod tests {
         let result = ledger.apply(DomainCommand::RestoreTransaction {
             account: unknown,
             transaction,
-            other_side: None,
+            other_sides: Vec::new(),
         });
 
         assert_eq!(

@@ -72,7 +72,13 @@ pub struct SplitLineRow {
 /// Where a split line's part of the amount went.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitTargetRow {
-    Category { category_id: u32 },
+    Category {
+        category_id: u32,
+    },
+    /// A transfer, whose other side is transaction `other_side_id`.
+    Transfer {
+        other_side_id: u32,
+    },
 }
 
 /// An account as read back, with its balance from the `account_balance` view and its

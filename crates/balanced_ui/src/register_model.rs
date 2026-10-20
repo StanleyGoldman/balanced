@@ -504,14 +504,17 @@ impl RegisterModel {
                     | Allocation::Category(_)
                     | Allocation::Transfer(_) => &[],
                 };
-                let split_categories: Vec<String> = split_lines
+                let split_targets: Vec<String> = split_lines
                     .iter()
                     .map(|line| match line.target() {
                         SplitTarget::Category(category) => paths.path(category).to_owned(),
+                        SplitTarget::Transfer(other_side) => {
+                            transfer_text(other_accounts.name(other_side))
+                        }
                     })
                     .collect();
                 matcher
-                    .shows(&row, split_categories.iter().map(String::as_str))
+                    .shows(&row, split_targets.iter().map(String::as_str))
                     .then_some(row)
             })
             .collect();

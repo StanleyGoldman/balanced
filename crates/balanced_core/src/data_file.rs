@@ -400,6 +400,9 @@ fn transaction(
                             SplitTargetRow::Category { category_id } => {
                                 SplitTarget::Category(CategoryId::new(category_id))
                             }
+                            SplitTargetRow::Transfer { other_side_id } => {
+                                SplitTarget::Transfer(TransactionId::new(other_side_id))
+                            }
                         },
                         &line.memo,
                         money(line.amount, currency),
@@ -468,6 +471,9 @@ pub(crate) fn transaction_row(
                         target: match line.target() {
                             SplitTarget::Category(category) => SplitTargetRow::Category {
                                 category_id: category.raw(),
+                            },
+                            SplitTarget::Transfer(other_side) => SplitTargetRow::Transfer {
+                                other_side_id: other_side.raw(),
                             },
                         },
                         memo: line.memo().to_owned(),

@@ -265,8 +265,11 @@ impl App {
         };
         match command {
             AppCommand::Domain(command) => {
-                if let Some(Err(error)) = ledger.map(|ledger| ledger.apply(command)) {
-                    self.main_window.show_status(StatusMessage::Rejected(error));
+                if let Some(ledger) = ledger
+                    && let Err(error) = ledger.apply(command)
+                {
+                    let message = StatusMessage::refusal(error, &ledger.snapshot());
+                    self.main_window.show_status(message);
                 }
             }
             AppCommand::SubmitForm(command) => {

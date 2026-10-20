@@ -17,7 +17,7 @@ index sqlite_autoindex_account_1 on account
 index sqlite_autoindex_split_line_1 on split_line
 (automatic)
 
-index sqlite_autoindex_transaction_1 on transaction
+index sqlite_autoindex_split_line_2 on split_line
 (automatic)
 
 index sqlite_autoindex_undo_entry_1 on undo_entry
@@ -29,6 +29,9 @@ CREATE INDEX transaction_category_id ON "transaction" (category_id)
 index transaction_one_opening_balance on transaction
 CREATE UNIQUE INDEX transaction_one_opening_balance ON "transaction" (account_id)
     WHERE allocation = 'opening_balance'
+
+index transaction_other_side_id on transaction
+CREATE INDEX transaction_other_side_id ON "transaction" (other_side_id)
 
 index transaction_register_order on transaction
 CREATE INDEX transaction_register_order ON "transaction" (account_id, date, id)
@@ -67,10 +70,12 @@ table split_line on split_line
 CREATE TABLE split_line (
     transaction_id INTEGER NOT NULL REFERENCES "transaction" (id) ON DELETE RESTRICT,
     position INTEGER NOT NULL,
-    category_id INTEGER NOT NULL REFERENCES category (id) ON DELETE RESTRICT,
+    category_id INTEGER REFERENCES category (id) ON DELETE RESTRICT,
+    other_side_id INTEGER UNIQUE REFERENCES "transaction" (id) DEFERRABLE INITIALLY DEFERRED,
     memo TEXT NOT NULL,
     amount INTEGER NOT NULL,
-    PRIMARY KEY (transaction_id, position)
+    PRIMARY KEY (transaction_id, position),
+    CONSTRAINT split_line_category_or_other_side CHECK ((category_id IS NULL) <> (other_side_id IS NULL))
 ) STRICT
 
 table sqlite_sequence on sqlite_sequence
@@ -89,7 +94,7 @@ CREATE TABLE "transaction" (
         CONSTRAINT transaction_allocation_known CHECK (allocation IN ('opening_balance', 'category', 'split', 'transfer')),
     amount INTEGER,
     category_id INTEGER REFERENCES category (id) ON DELETE RESTRICT,
-    other_side_id INTEGER UNIQUE REFERENCES "transaction" (id) DEFERRABLE INITIALLY DEFERRED
+    other_side_id INTEGER REFERENCES "transaction" (id) DEFERRABLE INITIALLY DEFERRED
         CONSTRAINT transaction_other_side_not_itself CHECK (other_side_id <> id),
     flagged INTEGER NOT NULL DEFAULT 0 CONSTRAINT transaction_flagged_flag CHECK (flagged IN (0, 1)),
     cleared_status TEXT NOT NULL DEFAULT 'uncleared'
