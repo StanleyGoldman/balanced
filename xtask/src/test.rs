@@ -23,6 +23,11 @@ pub(crate) fn run() -> Result<()> {
             "--all-features",
         ],
     )?;
+    doctests()
+}
+
+/// Runs the doctests, which nextest doesn't run.
+pub(crate) fn doctests() -> Result<()> {
     process::run(
         "cargo",
         &["test", "--locked", "--workspace", "--all-features", "--doc"],
