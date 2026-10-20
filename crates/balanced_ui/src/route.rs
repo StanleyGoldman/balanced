@@ -5,6 +5,7 @@
 
 use balanced_core::AccountId;
 use balanced_i18n::Localizer;
+use serde::{Deserialize, Serialize};
 
 use crate::i18n::fl;
 
@@ -17,8 +18,10 @@ pub(crate) enum Route {
     Account(AccountId),
 }
 
-/// A top-level tab in the Main window's tab row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// A top-level tab in the Main window's tab row. The Recent files keep it by its
+/// name in snake case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum TopLevelTab {
     #[default]
     Home,
