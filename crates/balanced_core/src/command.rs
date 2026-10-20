@@ -60,7 +60,8 @@ pub enum DomainCommand {
         account: AccountId,
         transaction: NewTransaction,
     },
-    /// Change one field of an existing transaction.
+    /// Change one field of an existing transaction. A new date or amount on one side of
+    /// a transfer changes its other side too.
     EditTransaction {
         transaction: TransactionId,
         edit: TransactionEdit,
@@ -174,6 +175,23 @@ pub enum TransactionEdit {
     ClearedStatus(ClearedStatus),
 }
 
+impl TransactionEdit {
+    /// The edit a transfer's other side takes along with this one: the same date, or
+    /// the amount with its sign flipped. The other fields belong to each side alone.
+    pub(crate) fn for_other_side(&self) -> Option<Self> {
+        match self {
+            Self::Date(date) => Some(Self::Date(*date)),
+            Self::Amount(amount) => Some(Self::Amount(-*amount)),
+            Self::Number(_)
+            | Self::Payee(_)
+            | Self::Memo(_)
+            | Self::Category(_)
+            | Self::Transfer(_)
+            | Self::ClearedStatus(_) => None,
+        }
+    }
+}
+
 /// A [`DomainCommand`] the ledger applied, with the Command that undoes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Applied {
@@ -246,6 +264,11 @@ pub enum DomainError {
     /// another account, which is closed, so its history is read-only.
     #[error("the transfer's other account is closed: {account:?}")]
     TransferAccountClosed { account: AccountId },
+    /// The command would delete an account that holds a side of a transfer, which
+    /// would leave the other side in another account with nothing to point at. The
+    /// account can be closed instead.
+    #[error("the account holds a transfer, so it can't be deleted: {account:?}")]
+    AccountHasTransfers { account: AccountId },
     /// The data file couldn't take the change.
     #[error(transparent)]
     Store(#[from] WriteError),

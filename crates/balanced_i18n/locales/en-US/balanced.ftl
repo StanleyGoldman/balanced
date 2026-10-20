@@ -136,8 +136,8 @@ register-actions-flag = Flag
 register-actions-unflag = Unflag
 # A Flag cell, which flags or unflags its transaction, as assistive technology reads it.
 register-flag = Flag { $payee }, { $date }, { $amount }
-# A Clr cell, which marks its transaction Cleared or Uncleared, as assistive technology
-# reads it.
+# A Clr cell, which marks its transaction Cleared or Uncleared, or asks before setting
+# a Reconciled one back to Cleared, as assistive technology reads it.
 register-clr = Clr { $payee }, { $date }, { $amount }
 # The Cleared statuses, as assistive technology reads a Clr cell's value. A Clr cell
 # shows each status's .mark, and an Uncleared transaction's cell is blank.
@@ -159,9 +159,11 @@ register-account-actions-register-preferences = { -register } preferences…
 register-account-actions-print-register = Print { -register }…
 register-account-actions-export-to-csv = Export to CSV…
 # The context header's balances, each with its formatted amount: Current counts the
-# transactions dated today or earlier, Ending counts every one, the future-dated ones too.
+# transactions dated today or earlier, Ending counts every one, the future-dated ones too,
+# and Cleared counts the Cleared and Reconciled ones, whatever their date.
 register-current-balance = Current { $amount }
 register-ending-balance = Ending { $amount }
+register-cleared-balance = Cleared { $amount }
 # Why the draft row at the bottom of the Register wasn't added, in a bubble below
 # the first empty cell the transaction needs.
 register-draft-date-missing = Date is missing
@@ -204,7 +206,18 @@ dialog-cancel = Cancel
 dialog-close = Close dialog
 # Asks before deleting the transaction the payee, date and amount describe.
 dialog-delete-transaction-message = Delete this transaction? { $payee }, { $date }, { $amount }
+# Asks before deleting a reconciled transaction, which the payee, date and amount
+# describe.
+dialog-delete-reconciled-transaction-message = This transaction is reconciled. Delete it anyway? { $payee }, { $date }, { $amount }
 dialog-delete-transaction-delete = Delete
+# Asks before saving a new amount, $new, on the reconciled transaction the payee,
+# date and amount describe.
+dialog-reconciled-amount-message = This transaction is reconciled. Change its amount to { $new }? { $payee }, { $date }, { $amount }
+dialog-reconciled-amount-change = Change Amount
+# Asks before setting the Reconciled transaction the payee, date and amount describe
+# back to Cleared.
+dialog-unreconcile-message = Un-reconcile this transaction? It has been matched against a statement, and will be marked Cleared. { $payee }, { $date }, { $amount }
+dialog-unreconcile-accept = Mark Cleared
 dialog-ok = OK
 dialog-new-category-title = New Category
 dialog-new-category-name = Name
@@ -362,6 +375,7 @@ status-no-such-category = No category has that name. Pick one from the list, or 
 status-account-closed = This account is closed, so its transactions can't be changed.
 status-transfer-account-closed = The other account of this transfer is closed, so the transfer can't be made, changed or deleted.
 status-transfer-to-own-account = A transfer moves money to another account. Pick an account other than this one.
+status-account-has-transfers = An account that holds a transfer can't be deleted, as the other account would keep its side. Close the account instead.
 # A change to a transaction that no longer exists, such as one just deleted.
 status-unknown-transaction = That transaction no longer exists.
 status-blank-account-name = Enter a name for the account.

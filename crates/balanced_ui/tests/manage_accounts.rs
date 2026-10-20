@@ -3,7 +3,9 @@
 //! Managing accounts through the Manage Accounts Dialog, driven through the AccessKit
 //! tree the way a user drives it.
 
-use balanced_core::Ledger;
+use balanced_core::{
+    AccountId, AccountSummary, CurrencyCode, DomainCommand, Ledger, Money, NewTransaction,
+};
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::egui::accesskit::Role;
@@ -14,13 +16,18 @@ use icu_calendar::Date;
 
 /// The App on stub data, in the test locale.
 fn app() -> Harness<'static, App> {
+    app_on(Ledger::stub())
+}
+
+/// The App on `ledger`, in the test locale.
+fn app_on(ledger: Ledger) -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .build_eframe(|cc| {
             App::on_ledger(
                 cc,
                 Localizer::for_tests(),
-                Ledger::stub(),
+                ledger,
                 Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
                 PreferencesFile::for_tests(),
             )
@@ -31,7 +38,13 @@ fn app() -> Harness<'static, App> {
 
 /// The App with Manage Accounts opened from Joint Checking's menu in the Account bar.
 fn manage_accounts() -> Harness<'static, App> {
-    let mut harness = app();
+    manage_accounts_on(Ledger::stub())
+}
+
+/// The App on `ledger`, with Manage Accounts opened from Joint Checking's menu in the
+/// Account bar.
+fn manage_accounts_on(ledger: Ledger) -> Harness<'static, App> {
+    let mut harness = app_on(ledger);
     harness
         .get_by_role_and_label(Role::Button, "Joint Checking")
         .click_secondary();
@@ -41,6 +54,18 @@ fn manage_accounts() -> Harness<'static, App> {
         .click();
     harness.run();
     harness
+}
+
+/// The id of the stub account named `name`.
+fn account(ledger: &Ledger, name: &str) -> AccountId {
+    ledger
+        .snapshot()
+        .accounts()
+        .iter()
+        .map(AccountSummary::account)
+        .find(|account| account.name() == name)
+        .expect("the stub has the account")
+        .id()
 }
 
 /// Replaces the name in the Name field showing `old` with `new`.
@@ -241,6 +266,35 @@ fn a_confirmed_delete_takes_the_account_out_on_ok() {
 
     assert!(asked);
     assert!(!listed(&harness, "Car"));
+}
+
+#[test]
+fn deleting_an_account_that_holds_a_transfer_says_to_close_it_instead() {
+    let mut ledger = Ledger::stub();
+    let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
+    let amount = Money::new("-200.00".parse().expect("a decimal"), usd).expect("an amount");
+    ledger
+        .apply(DomainCommand::PostTransaction {
+            account: account(&ledger, "Joint Checking"),
+            transaction: NewTransaction::transfer(
+                Date::try_new_iso(2026, 10, 1).expect("1 October 2026 is a date"),
+                "Car payment",
+                account(&ledger, "Car"),
+                amount,
+            ),
+        })
+        .expect("the stub takes the transfer");
+    let mut harness = manage_accounts_on(ledger);
+
+    click(&mut harness, "Delete Car…");
+    click(&mut harness, "Delete");
+    click(&mut harness, "OK");
+
+    assert!(shows(
+        &harness,
+        "An account that holds a transfer can't be deleted, as the other account would \
+         keep its side. Close the account instead."
+    ));
 }
 
 #[test]

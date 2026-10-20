@@ -101,6 +101,14 @@ pub enum ClearedStatus {
 impl ClearedStatus {
     /// Every status, in the order a transaction moves through them.
     pub(crate) const ALL: [Self; 3] = [Self::Uncleared, Self::Cleared, Self::Reconciled];
+
+    /// Whether a transaction at this status counts in its account's Cleared balance.
+    pub(crate) fn counts_as_cleared(self) -> bool {
+        match self {
+            Self::Uncleared => false,
+            Self::Cleared | Self::Reconciled => true,
+        }
+    }
 }
 
 /// A transaction in one account. A positive amount is money in, a negative one money out.

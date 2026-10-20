@@ -125,6 +125,16 @@ FROM account AS ac
 LEFT JOIN transaction_amount AS a ON a.account_id = ac.id
 GROUP BY ac.id;
 
+-- Each account's Cleared balance: the sum of its Cleared and Reconciled transactions,
+-- whatever their date. 0 for an account with none.
+CREATE VIEW cleared_balance AS
+SELECT ac.id AS account_id, coalesce(sum(a.amount), 0) AS balance
+FROM account AS ac
+LEFT JOIN "transaction" AS t
+    ON t.account_id = ac.id AND t.cleared_status IN ('cleared', 'reconciled')
+LEFT JOIN transaction_amount AS a ON a.transaction_id = t.id
+GROUP BY ac.id;
+
 -- Each account's balance at the end of each date it has a transaction on, counting every
 -- transaction dated that day or earlier. An account's balance as of any date is the row
 -- with the latest date on or before it, or 0 when there is none.

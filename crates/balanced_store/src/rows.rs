@@ -75,11 +75,13 @@ pub enum SplitTargetRow {
     Category { category_id: u32 },
 }
 
-/// An account as read back, with its balance from the `account_balance` view.
+/// An account as read back, with its balance from the `account_balance` view and its
+/// Cleared balance from the `cleared_balance` view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredAccount {
     pub row: AccountRow,
     pub balance: i64,
+    pub cleared_balance: i64,
 }
 
 /// A transaction as read back, with its amount and running balance from the

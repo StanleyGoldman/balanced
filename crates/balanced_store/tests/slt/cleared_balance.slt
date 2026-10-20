@@ -1,0 +1,32 @@
+# An account's Cleared balance is the sum of its Cleared and Reconciled transactions'
+# amounts, whatever their date, splits included; an account with none counts 0.
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES
+    (0, 'Checking', 'checking', 0, 0, 0),
+    (1, 'Savings', 'savings', 0, 0, 0),
+    (2, 'Empty', 'savings', 1, 0, 0)
+
+statement ok
+INSERT INTO category (id, parent_id, name) VALUES (0, NULL, 'Groceries')
+
+statement ok
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id, cleared_status) VALUES
+    (0, 0, '2026-01-01', NULL, '', '', 'opening_balance', 1000, NULL, 'reconciled'),
+    (1, 0, '2026-01-02', NULL, 'Grocer', '', 'category', -250, 0, 'cleared'),
+    (2, 0, '2026-01-03', NULL, 'Market', '', 'split', NULL, NULL, 'reconciled'),
+    (3, 0, '2026-01-04', NULL, 'Grocer', '', 'category', -100, 0, 'uncleared'),
+    (4, 0, '2099-12-31', NULL, 'Grocer', '', 'category', -7, 0, 'cleared'),
+    (5, 1, '2026-01-01', NULL, '', '', 'opening_balance', 40, NULL, 'uncleared')
+
+statement ok
+INSERT INTO split_line (transaction_id, position, category_id, memo, amount) VALUES
+    (2, 0, 0, '', -5),
+    (2, 1, 0, '', -6)
+
+query II rowsort
+SELECT account_id, balance FROM cleared_balance
+----
+0 732
+1 0
+2 0
