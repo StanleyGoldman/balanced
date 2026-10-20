@@ -91,6 +91,8 @@ register-clr-reconciled = Abgeglichen
 register-new-transaction = + Buchung
 register-current-balance = Aktuell { $amount }
 register-ending-balance = Endsaldo { $amount }
+# GnuCash's "Cleared", as the Cleared status above.
+register-cleared-balance = Bestätigt { $amount }
 register-transaction-count =
     { $count ->
         [one] { $count } Buchung

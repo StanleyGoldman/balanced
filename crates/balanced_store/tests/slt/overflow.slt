@@ -44,6 +44,12 @@ query error integer overflow
 SELECT balance FROM account_balance
 
 statement ok
+UPDATE "transaction" SET cleared_status = 'cleared' WHERE id IN (0, 2)
+
+query error integer overflow
+SELECT balance FROM cleared_balance
+
+statement ok
 INSERT INTO split_line (transaction_id, position, category_id, memo, amount) VALUES
     (3, 0, 0, '', 9223372036854775807),
     (3, 1, 0, '', 1)

@@ -113,6 +113,33 @@ fn clicking_an_uncleared_rows_clr_cell_marks_it_cleared() {
     assert_eq!(status(&harness, FRESH_MARKET), "Cleared");
 }
 
+/// The text of the context header's Cleared figure, the one Label starting `Cleared `.
+fn cleared_figure(harness: &Harness<'static, App>) -> String {
+    let figures: Vec<String> = harness
+        .query_all_by_role(Role::Label)
+        .filter_map(|label| label.accesskit_node().value())
+        .filter(|value| value.starts_with("Cleared "))
+        .collect();
+    let [figure] = <[String; 1]>::try_from(figures).expect("the header shows one Cleared figure");
+    figure
+}
+
+#[test]
+fn clicking_a_clr_cell_moves_the_cleared_balance_in_the_next_frame() {
+    let mut harness = app_showing("Everyday Checking");
+    assert_eq!(cleared_figure(&harness), "Cleared $2,643.58");
+
+    harness
+        .get_by_role_and_label(Role::Button, FRESH_MARKET)
+        .click();
+    // One frame takes the click and sends the edit; the next draws the header.
+    harness.step();
+    harness.step();
+
+    // Fresh Market's -86.42 now counts.
+    assert_eq!(cleared_figure(&harness), "Cleared $2,557.16");
+}
+
 #[test]
 fn clicking_a_cleared_rows_clr_cell_marks_it_uncleared() {
     let mut harness = app_showing("Everyday Checking");
