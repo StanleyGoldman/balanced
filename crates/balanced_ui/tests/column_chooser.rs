@@ -87,7 +87,7 @@ fn unticking_memo_hides_it_and_saves_it_as_hidden() {
     assert_eq!(
         headings(&harness),
         [
-            "Date", "Num", "Payee", "Category", "Payment", "Deposit", "Balance", "Flag", ""
+            "Date", "Num", "Payee", "Category", "Payment", "Deposit", "Balance", "Clr", "Flag", ""
         ]
     );
     assert_eq!(
@@ -103,7 +103,7 @@ fn unticking_memo_hides_it_and_saves_it_as_hidden() {
          gridlines = \"off\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"flag\"]\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
          hidden_register_columns = [\"memo\"]\n"
     );
 }
@@ -120,7 +120,8 @@ fn moving_payee_up_puts_it_before_num_and_saves_the_order() {
     assert_eq!(
         headings(&harness),
         [
-            "Date", "Payee", "Num", "Category", "Memo", "Payment", "Deposit", "Balance", "Flag", ""
+            "Date", "Payee", "Num", "Category", "Memo", "Payment", "Deposit", "Balance", "Clr",
+            "Flag", ""
         ]
     );
     assert_eq!(
@@ -136,7 +137,7 @@ fn moving_payee_up_puts_it_before_num_and_saves_the_order() {
          gridlines = \"off\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         register_columns = [\"date\", \"payee\", \"num\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"flag\"]\n\
+         register_columns = [\"date\", \"payee\", \"num\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
          hidden_register_columns = []\n"
     );
 }
@@ -154,7 +155,7 @@ fn the_chooser_stays_open_after_hiding_a_column() {
     assert_eq!(
         headings(&harness),
         [
-            "Date", "Payee", "Num", "Category", "Payment", "Deposit", "Balance", "Flag", ""
+            "Date", "Payee", "Num", "Category", "Payment", "Deposit", "Balance", "Clr", "Flag", ""
         ]
     );
 }
@@ -217,13 +218,30 @@ fn unticking_flag_hides_the_flag_column() {
     assert_eq!(
         headings(&harness),
         [
-            "Date", "Num", "Payee", "Category", "Memo", "Payment", "Deposit", "Balance", ""
+            "Date", "Num", "Payee", "Category", "Memo", "Payment", "Deposit", "Balance", "Clr", ""
         ]
     );
 }
 
 #[test]
-fn moving_flag_up_puts_it_before_balance() {
+fn unticking_clr_hides_the_clr_column() {
+    let dir = config_dir();
+    let mut harness = app_in(dir.path());
+    open(&mut harness, "Everyday Checking");
+    open_chooser(&mut harness);
+
+    click(&mut harness, Role::CheckBox, "Clr");
+
+    assert_eq!(
+        headings(&harness),
+        [
+            "Date", "Num", "Payee", "Category", "Memo", "Payment", "Deposit", "Balance", "Flag", ""
+        ]
+    );
+}
+
+#[test]
+fn moving_flag_up_puts_it_before_clr() {
     let dir = config_dir();
     let mut harness = app_in(dir.path());
     open(&mut harness, "Everyday Checking");
@@ -234,7 +252,8 @@ fn moving_flag_up_puts_it_before_balance() {
     assert_eq!(
         headings(&harness),
         [
-            "Date", "Num", "Payee", "Category", "Memo", "Payment", "Deposit", "Flag", "Balance", ""
+            "Date", "Num", "Payee", "Category", "Memo", "Payment", "Deposit", "Balance", "Flag",
+            "Clr", ""
         ]
     );
 }

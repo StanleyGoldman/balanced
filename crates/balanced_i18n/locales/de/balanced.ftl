@@ -77,6 +77,17 @@ register-column-payee = Zahlungsempfänger
 register-column-category = Kategorie
 register-column-memo = Notiz
 register-column-balance = Saldo
+# GnuCash's column header for clearing a transaction ("C" → "Abgl").
+register-column-clr = Abgl
+# Assembled from the heading above and the en-US pattern.
+register-clr = Abgl { $payee }, { $date }, { $amount }
+# GnuCash's "Not Cleared", "Cleared" and "Reconciled". The marks are GnuCash's cleared
+# flag ("c" → "b") and its column header for 'Reconciled' ("R" → "A").
+register-clr-uncleared = Unbestätigt
+register-clr-cleared = Bestätigt
+    .mark = b
+register-clr-reconciled = Abgeglichen
+    .mark = A
 register-new-transaction = + Buchung
 register-current-balance = Aktuell { $amount }
 register-ending-balance = Endsaldo { $amount }

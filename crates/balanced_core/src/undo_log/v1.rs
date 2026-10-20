@@ -127,7 +127,9 @@ pub(crate) struct Category {
 }
 
 /// A transaction with its id: a [`NewTransaction`]'s fields after `id`, in one object,
-/// then `flagged`, which an unflagged transaction leaves out.
+/// then `flagged`, which an unflagged transaction leaves out, and `cleared_status`,
+/// which an uncleared one leaves out. An entry written before the status existed has
+/// none, and reads as uncleared.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Transaction {
     pub(crate) id: u32,
@@ -135,6 +137,8 @@ pub(crate) struct Transaction {
     pub(crate) fields: NewTransaction,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) flagged: bool,
+    #[serde(default, skip_serializing_if = "ClearedStatus::is_uncleared")]
+    pub(crate) cleared_status: ClearedStatus,
 }
 
 /// A transaction to post, which the ledger gives an id. A split's amount is the sum of
@@ -188,4 +192,24 @@ pub(crate) enum TransactionEdit {
     Memo(String),
     Category(u32),
     Amount(i64),
+    ClearedStatus(ClearedStatus),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ClearedStatus {
+    #[default]
+    Uncleared,
+    Cleared,
+    Reconciled,
+}
+
+impl ClearedStatus {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes the field by reference"
+    )]
+    fn is_uncleared(&self) -> bool {
+        *self == Self::Uncleared
+    }
 }

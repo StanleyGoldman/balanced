@@ -227,3 +227,16 @@ fn a_heavy_dialogs_close_button_reads_german() {
 
     harness.get_by_role_and_label(Role::Button, "Dialog schließen");
 }
+
+#[test]
+fn a_clr_cell_reads_its_label_and_status_in_german() {
+    let mut harness = app();
+
+    open(&mut harness, "Everyday Checking");
+
+    let status = harness
+        .get_by_role_and_label(Role::Button, "Abgl Bean There, 06.09.2026, -4,75")
+        .accesskit_node()
+        .value();
+    assert_eq!(status.as_deref(), Some("Bestätigt"));
+}

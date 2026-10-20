@@ -7,7 +7,7 @@ use icu_calendar::{Date, Iso};
 use crate::account::NewAccount;
 use crate::category::NewCategory;
 use crate::transaction::{NewTransaction, SplitLine, SplitTarget};
-use crate::{AccountKind, CategoryId, CurrencyCode, Ledger, Money};
+use crate::{AccountKind, CategoryId, ClearedStatus, CurrencyCode, Ledger, Money};
 
 /// How many transactions the generated account holds, after its opening balance.
 const GENERATED_TRANSACTIONS: u16 = 20_000;
@@ -109,8 +109,8 @@ fn date(year: i32, month: u8, day: u8) -> Date<Iso> {
 impl Ledger {
     /// The in-memory data Balanced runs on until it reads data files: accounts in
     /// every sub-group, with one closed account and one hidden one, a category tree,
-    /// a split transaction, transactions scheduled after mid-October 2026, and one
-    /// generated account with 20,000 transactions.
+    /// a split transaction, transactions scheduled after mid-October 2026, a mix of
+    /// Cleared statuses, and one generated account with 20,000 transactions.
     pub fn stub() -> Self {
         let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
         let money = |amount: &str| {
@@ -119,71 +119,32 @@ impl Ledger {
         };
         let opened = date(2026, 1, 1);
         let account = |name, kind, amount: &str| NewAccount::new(name, kind, opened, money(amount));
-        let paid = |day, payee, category: StubCategory, amount: &str| {
-            NewTransaction::new(date(2026, 9, day), payee, category.id(), money(amount))
-        };
-        let everyday = account("Everyday Checking", AccountKind::Checking, "1200.00")
-            .with_transactions([
-                paid(1, "Acme Corp", StubCategory::Salary, "3200.00"),
-                paid(
-                    3,
-                    "Maple Property Management",
-                    StubCategory::Home,
-                    "-1450.00",
-                )
-                .number("1041")
-                .memo("September rent"),
-                paid(5, "Fresh Market", StubCategory::Groceries, "-86.42"),
-                paid(6, "Bean There", StubCategory::CoffeeShops, "-4.75"),
-            ])
-            .with_flagged_transaction(
-                paid(10, "City Power & Light", StubCategory::Utilities, "-92.10").number("1042"),
-            )
-            .with_transactions([
-                NewTransaction::split(
-                    date(2026, 9, 12),
-                    "Costco",
-                    vec![
-                        SplitLine::new(
-                            SplitTarget::Category(StubCategory::Groceries.id()),
-                            "Food",
-                            money("-142.37"),
-                        ),
-                        SplitLine::new(
-                            SplitTarget::Category(StubCategory::Household.id()),
-                            "Paper towels, detergent",
-                            money("-63.90"),
-                        ),
-                    ],
-                ),
-                paid(15, "Shell", StubCategory::Fuel, "-48.20"),
-                paid(18, "Acme Corp", StubCategory::Salary, "3200.00"),
-                paid(20, "Trattoria Roma", StubCategory::Restaurants, "-64.80")
-                    .memo("Anniversary dinner"),
-            ])
-            .with_transactions(october_transactions(money));
-        // Emptied, then closed: its read-only Register shows its history.
+        let everyday = everyday_checking(opened, money);
+        // Emptied, then closed: its read-only Register shows its history, all reconciled.
         let old_checking = NewAccount::new(
             "Old Checking",
             AccountKind::Checking,
             date(2020, 1, 1),
             money("250.00"),
         )
-        .with_transactions([
-            NewTransaction::new(
-                date(2020, 6, 30),
-                "First Savings Bank",
-                StubCategory::Interest.id(),
-                money("0.42"),
-            ),
-            NewTransaction::new(
-                date(2020, 7, 15),
-                "Cash withdrawal",
-                StubCategory::Shopping.id(),
-                money("-250.42"),
-            )
-            .memo("Closing the account"),
-        ])
+        .with_transactions_at(
+            ClearedStatus::Reconciled,
+            [
+                NewTransaction::new(
+                    date(2020, 6, 30),
+                    "First Savings Bank",
+                    StubCategory::Interest.id(),
+                    money("0.42"),
+                ),
+                NewTransaction::new(
+                    date(2020, 7, 15),
+                    "Cash withdrawal",
+                    StubCategory::Shopping.id(),
+                    money("-250.42"),
+                )
+                .memo("Closing the account"),
+            ],
+        )
         .closed();
         Self::with_accounts(
             usd,
@@ -208,33 +169,98 @@ impl Ledger {
     }
 }
 
-/// Everyday Checking's transactions from mid-October 2026: one on the tests' fixed
-/// today, 14 October, then two scheduled for later dates, so the account's Current and
-/// Ending balances differ.
-fn october_transactions(money: impl Fn(&str) -> Money) -> [NewTransaction; 3] {
-    [
-        NewTransaction::new(
+/// Everyday Checking, opened on `opened`: a month of September 2026, with the stub's
+/// split transaction and one flagged one, then [`with_october_transactions`]. It is
+/// Reconciled up to the September rent, then partly cleared, a scheduled payment
+/// included.
+fn everyday_checking(opened: Date<Iso>, money: impl Fn(&str) -> Money) -> NewAccount {
+    let paid = |day, payee, category: StubCategory, amount: &str| {
+        NewTransaction::new(date(2026, 9, day), payee, category.id(), money(amount))
+    };
+    let everyday = NewAccount::new(
+        "Everyday Checking",
+        AccountKind::Checking,
+        opened,
+        money("1200.00"),
+    )
+    .with_transactions_at(
+        ClearedStatus::Reconciled,
+        [
+            paid(1, "Acme Corp", StubCategory::Salary, "3200.00"),
+            paid(
+                3,
+                "Maple Property Management",
+                StubCategory::Home,
+                "-1450.00",
+            )
+            .number("1041")
+            .memo("September rent"),
+        ],
+    )
+    .with_transactions([paid(5, "Fresh Market", StubCategory::Groceries, "-86.42")])
+    .with_transactions_at(
+        ClearedStatus::Cleared,
+        [paid(6, "Bean There", StubCategory::CoffeeShops, "-4.75")],
+    )
+    .with_flagged_transaction(
+        paid(10, "City Power & Light", StubCategory::Utilities, "-92.10").number("1042"),
+    )
+    .with_transactions_at(
+        ClearedStatus::Cleared,
+        [NewTransaction::split(
+            date(2026, 9, 12),
+            "Costco",
+            vec![
+                SplitLine::new(
+                    SplitTarget::Category(StubCategory::Groceries.id()),
+                    "Food",
+                    money("-142.37"),
+                ),
+                SplitLine::new(
+                    SplitTarget::Category(StubCategory::Household.id()),
+                    "Paper towels, detergent",
+                    money("-63.90"),
+                ),
+            ],
+        )],
+    )
+    .with_transactions([
+        paid(15, "Shell", StubCategory::Fuel, "-48.20"),
+        paid(18, "Acme Corp", StubCategory::Salary, "3200.00"),
+        paid(20, "Trattoria Roma", StubCategory::Restaurants, "-64.80").memo("Anniversary dinner"),
+    ]);
+    with_october_transactions(everyday, &money)
+}
+
+/// `account`, with Everyday Checking's transactions from mid-October 2026: one on the
+/// tests' fixed today, 14 October, then two scheduled for later dates, so the account's
+/// Current and Ending balances differ. The first scheduled one is already cleared.
+fn with_october_transactions(account: NewAccount, money: impl Fn(&str) -> Money) -> NewAccount {
+    account
+        .with_transactions([NewTransaction::new(
             date(2026, 10, 14),
             "Daily Grind",
             StubCategory::CoffeeShops.id(),
             money("-5.25"),
-        ),
-        NewTransaction::new(
-            date(2026, 10, 20),
-            "Northside Water",
-            StubCategory::Utilities.id(),
-            money("-95.40"),
+        )])
+        .with_transactions_at(
+            ClearedStatus::Cleared,
+            [NewTransaction::new(
+                date(2026, 10, 20),
+                "Northside Water",
+                StubCategory::Utilities.id(),
+                money("-95.40"),
+            )
+            .number("1043")],
         )
-        .number("1043"),
-        NewTransaction::new(
+        .with_transactions([NewTransaction::new(
             date(2026, 11, 1),
             "Maple Property Management",
             StubCategory::Home.id(),
             money("-1475.00"),
         )
         .number("1044")
-        .memo("November rent"),
-    ]
+        .memo("November rent")])
 }
 
 /// An account with [`GENERATED_TRANSACTIONS`] transactions, four a day, so the
@@ -309,5 +335,39 @@ mod tests {
             .map(Transaction::payee)
             .collect();
         assert_eq!(flagged, ["City Power & Light"]);
+    }
+
+    #[test]
+    fn everyday_checking_is_reconciled_to_the_rent_then_partly_cleared() {
+        let ledger = Ledger::stub();
+
+        let view = ledger.snapshot();
+
+        let everyday = &view.accounts()[0];
+        assert_eq!(everyday.account().name(), "Everyday Checking");
+        let statuses: Vec<(&str, ClearedStatus)> = everyday
+            .register()
+            .iter()
+            .map(RegisterEntry::transaction)
+            .map(|transaction| (transaction.payee(), transaction.cleared_status()))
+            .collect();
+        assert_eq!(
+            statuses,
+            [
+                ("", ClearedStatus::Reconciled),
+                ("Acme Corp", ClearedStatus::Reconciled),
+                ("Maple Property Management", ClearedStatus::Reconciled),
+                ("Fresh Market", ClearedStatus::Uncleared),
+                ("Bean There", ClearedStatus::Cleared),
+                ("City Power & Light", ClearedStatus::Uncleared),
+                ("Costco", ClearedStatus::Cleared),
+                ("Shell", ClearedStatus::Uncleared),
+                ("Acme Corp", ClearedStatus::Uncleared),
+                ("Trattoria Roma", ClearedStatus::Uncleared),
+                ("Daily Grind", ClearedStatus::Uncleared),
+                ("Northside Water", ClearedStatus::Cleared),
+                ("Maple Property Management", ClearedStatus::Uncleared),
+            ]
+        );
     }
 }

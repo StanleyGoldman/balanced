@@ -83,6 +83,23 @@ pub enum Allocation {
     Split(Vec<SplitLine>),
 }
 
+/// How far a transaction has been checked against the bank: not yet, seen on the bank's
+/// records, or matched against a statement. It belongs to the whole transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ClearedStatus {
+    /// The bank hasn't shown the transaction yet.
+    Uncleared,
+    /// The bank has shown the transaction.
+    Cleared,
+    /// The transaction was matched against a statement.
+    Reconciled,
+}
+
+impl ClearedStatus {
+    /// Every status, in the order a transaction moves through them.
+    pub(crate) const ALL: [Self; 3] = [Self::Uncleared, Self::Cleared, Self::Reconciled];
+}
+
 /// A transaction in one account. A positive amount is money in, a negative one money out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transaction {
@@ -95,6 +112,7 @@ pub struct Transaction {
     amount: Money,
     /// Whether the user marked it to come back to.
     flagged: bool,
+    cleared_status: ClearedStatus,
 }
 
 impl Transaction {
@@ -118,6 +136,7 @@ impl Transaction {
             allocation,
             amount,
             flagged: false,
+            cleared_status: ClearedStatus::Uncleared,
         }
     }
 
@@ -125,6 +144,15 @@ impl Transaction {
     #[must_use]
     pub(crate) fn with_flag(self, flagged: bool) -> Self {
         Self { flagged, ..self }
+    }
+
+    /// The same transaction, with `cleared_status`.
+    #[must_use]
+    pub(crate) fn with_cleared_status(self, cleared_status: ClearedStatus) -> Self {
+        Self {
+            cleared_status,
+            ..self
+        }
     }
 
     pub fn id(&self) -> TransactionId {
@@ -160,6 +188,11 @@ impl Transaction {
     /// Whether the user marked the transaction to come back to.
     pub fn is_flagged(&self) -> bool {
         self.flagged
+    }
+
+    /// How far the transaction has been checked against the bank.
+    pub fn cleared_status(&self) -> ClearedStatus {
+        self.cleared_status
     }
 
     /// The transaction with `edit` made. Fails when the edit gives the opening balance
@@ -199,6 +232,7 @@ impl Transaction {
                 }
                 edited.amount = amount;
             }
+            TransactionEdit::ClearedStatus(status) => edited.cleared_status = status,
         }
         Ok(edited)
     }
@@ -219,6 +253,9 @@ impl Transaction {
                 }
             },
             TransactionEdit::Amount(_) => TransactionEdit::Amount(self.amount),
+            TransactionEdit::ClearedStatus(_) => {
+                TransactionEdit::ClearedStatus(self.cleared_status)
+            }
         }
     }
 
@@ -353,6 +390,15 @@ impl NewTransaction {
         }
     }
 
+    /// The status the transaction starts with: an opening balance comes from a
+    /// statement, so it starts Reconciled, and the rest start Uncleared.
+    pub(crate) fn starting_status(&self) -> ClearedStatus {
+        match self.allocation {
+            NewAllocation::OpeningBalance(_) => ClearedStatus::Reconciled,
+            NewAllocation::Category(..) | NewAllocation::Split(_) => ClearedStatus::Uncleared,
+        }
+    }
+
     /// The categories the transaction names.
     pub(crate) fn categories(&self) -> Vec<CategoryId> {
         match &self.allocation {
@@ -374,6 +420,7 @@ impl NewTransaction {
         id: TransactionId,
         currency: crate::CurrencyCode,
     ) -> Result<Transaction, MoneyError> {
+        let cleared_status = self.starting_status();
         let (allocation, amount) = match self.allocation {
             NewAllocation::OpeningBalance(amount) => (Allocation::OpeningBalance, amount),
             NewAllocation::Category(category, amount) => (Allocation::Category(category), amount),
@@ -399,6 +446,7 @@ impl NewTransaction {
             allocation,
             amount,
             flagged: false,
+            cleared_status,
         })
     }
 }
