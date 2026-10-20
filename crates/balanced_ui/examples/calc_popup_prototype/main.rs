@@ -1457,7 +1457,9 @@ impl Proto {
                     pressed = Some(p);
                 }
                 if let Some(ok) = ok_label {
-                    if let Some(p) = press(ui, &mut self.h, ok, vec2(84.0, 30.0)) {
+                    // Two keys wide plus the gap between them, so it lines up with `−` and `=`.
+                    let w = 80.0 + ui.spacing().item_spacing.x;
+                    if let Some(p) = press(ui, &mut self.h, ok, vec2(w, 30.0)) {
                         pressed = Some(p);
                     }
                 }
