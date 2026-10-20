@@ -394,4 +394,11 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn an_id_converted_to_a_number_keeps_its_value() {
+        let number = u32::from(AccountId::from(7));
+
+        assert_eq!(number, 7);
+    }
 }
