@@ -1659,7 +1659,7 @@ impl Proto {
         }
     }
 
-    fn table(&mut self, ui: &mut Ui, ctx: &Context) {
+    fn table(&mut self, ui: &mut Ui, _ctx: &Context) {
         let row_h = self.theme.row_height();
         let n = self.accounts[self.current].txns.len();
         let has_draft = self.variant != Variant::B;
@@ -1673,7 +1673,7 @@ impl Proto {
         let actions_w = if self.variant == Variant::B { 44.0 } else { 300.0 };
         let mut table = TableBuilder::new(ui)
             .id_salt(("register", self.current))
-            .striped(self.theme.alternating_rows())
+            .striped(self.theme.settings().alternating_rows)
             .resizable(false)
             .sense(Sense::click())
             .cell_layout(Layout::left_to_right(Align::Center))
