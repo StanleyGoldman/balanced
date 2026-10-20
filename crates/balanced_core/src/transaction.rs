@@ -233,6 +233,9 @@ impl Transaction {
 
     /// The transaction with `edit` made. Fails when the edit gives the opening balance
     /// a payee, or gives a split transaction or an amount in another currency.
+    ///
+    /// Panics on [`TransactionEdit::Transfer`], whose other side only the ledger can
+    /// make.
     pub(crate) fn edited(&self, edit: TransactionEdit) -> Result<Self, DomainError> {
         let mut edited = self.clone();
         match edit {
@@ -255,6 +258,9 @@ impl Transaction {
                 }
                 edited.allocation = Allocation::Category(category);
             }
+            TransactionEdit::Transfer(_) => panic!(
+                "the ledger makes a transfer's other side, so it changes the target with `retargeted`"
+            ),
             TransactionEdit::Amount(amount) => {
                 if matches!(self.allocation, Allocation::Split(_)) {
                     return Err(DomainError::SplitAmount {
@@ -273,8 +279,25 @@ impl Transaction {
         Ok(edited)
     }
 
+    /// The transaction with its whole amount moved to `allocation`, a category or a
+    /// transfer. Fails when it is the opening balance or split.
+    pub(crate) fn retargeted(&self, allocation: Allocation) -> Result<Self, DomainError> {
+        match self.allocation {
+            Allocation::Category(_) | Allocation::Transfer(_) => Ok(Self {
+                allocation,
+                ..self.clone()
+            }),
+            Allocation::OpeningBalance | Allocation::Split(_) => {
+                Err(DomainError::NotInOneCategory {
+                    transaction: self.id,
+                })
+            }
+        }
+    }
+
     /// The edit that undoes `edit`: the same field, with this transaction's value.
-    /// Only meaningful for an edit [`Transaction::edited`] accepts.
+    /// Only meaningful for an edit [`Transaction::edited`] accepts, so panics on
+    /// [`TransactionEdit::Transfer`].
     pub(crate) fn undoing(&self, edit: &TransactionEdit) -> TransactionEdit {
         match edit {
             TransactionEdit::Number(_) => TransactionEdit::Number(self.number.clone()),
@@ -288,6 +311,9 @@ impl Transaction {
                     TransactionEdit::Category(*category)
                 }
             },
+            TransactionEdit::Transfer(_) => {
+                panic!("the ledger undoes a change of target by putting the transaction back whole")
+            }
             TransactionEdit::Amount(_) => TransactionEdit::Amount(self.amount),
             TransactionEdit::ClearedStatus(_) => {
                 TransactionEdit::ClearedStatus(self.cleared_status)

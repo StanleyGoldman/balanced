@@ -286,6 +286,11 @@ impl App {
                 }
             }
             AppCommand::Navigate(route) => self.main_window.navigate(route),
+            AppCommand::GoToTransaction {
+                account,
+                transaction,
+            } => self.main_window.go_to_transaction(account, transaction),
+            AppCommand::GoToOtherSide => self.main_window.go_to_other_side(),
             AppCommand::GoToDraftRow => {
                 if let Some(ledger) = ledger {
                     self.main_window.go_to_draft_row(ctx, &ledger.snapshot());

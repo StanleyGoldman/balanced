@@ -14,10 +14,19 @@ use crate::data_file::{account_row, category_row, transaction_row};
 use crate::transaction::{NewTransaction, TransactionId};
 use crate::undo_log;
 use crate::{
-    Account, AccountGroup, AccountId, AccountKind, AccountStatus, Applied, Category, CategoryId,
-    CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection, OtherSide,
-    Transaction, TransactionEdit, Visibility, WriteError,
+    Account, AccountGroup, AccountId, AccountKind, AccountStatus, Allocation, Applied, Category,
+    CategoryId, CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection,
+    OtherSide, Transaction, TransactionEdit, Visibility, WriteError,
 };
+
+/// Where [`TransactionEdit::Category`] or [`TransactionEdit::Transfer`] moves a
+/// transaction's whole amount.
+#[derive(Debug, Clone, Copy)]
+enum Target {
+    Category(CategoryId),
+    /// Another account, which makes the transaction a transfer.
+    Account(AccountId),
+}
 
 /// Counts the changes applied to a [`Ledger`]. A window's view model rebuilds when
 /// the generation of the snapshot it reads changes.
@@ -933,13 +942,28 @@ impl Ledger {
         edit: TransactionEdit,
     ) -> Result<DomainCommand, DomainError> {
         let position = self.changeable(id)?;
-        // Both indices were just found in this same view.
         if let TransactionEdit::Category(category) = edit
             && self.view.category(category).is_none()
         {
             return Err(DomainError::UnknownCategory { category });
         }
+        // Both indices were just found in this same view.
         let old = &self.view.accounts[position.account].register[position.entry].transaction;
+        match edit {
+            TransactionEdit::Transfer(account) => {
+                return self.change_target(position, Target::Account(account));
+            }
+            TransactionEdit::Category(category) if old.other_side_id().is_some() => {
+                return self.change_target(position, Target::Category(category));
+            }
+            TransactionEdit::Date(_)
+            | TransactionEdit::Number(_)
+            | TransactionEdit::Payee(_)
+            | TransactionEdit::Memo(_)
+            | TransactionEdit::Category(_)
+            | TransactionEdit::Amount(_)
+            | TransactionEdit::ClearedStatus(_) => {}
+        }
         // Undoing a date or amount edit on one side brings its other side back too,
         // since the two sides are always in step.
         let undo = old.undoing(&edit);
@@ -987,6 +1011,77 @@ impl Ledger {
         // The row is checked only now, so the ledger's own errors come first.
         self.store.update_transaction(&row?)?;
         Ok(())
+    }
+
+    /// Moves the whole amount of the transaction at `position` to `target`, a category
+    /// the ledger holds or an account. The other side it had is deleted, and a transfer
+    /// gets a new one in the account it names. The Command that undoes it deletes the
+    /// transaction and puts it back as it was, with its old other side. A transfer
+    /// moved to the account it already names is left as it is.
+    fn change_target(
+        &mut self,
+        position: TransactionPosition,
+        target: Target,
+    ) -> Result<DomainCommand, DomainError> {
+        // `position` was found in this same view.
+        let account = self.view.accounts[position.account].account.id();
+        let old = self.view.accounts[position.account].register[position.entry]
+            .transaction
+            .clone();
+        let id = self.next_transaction;
+        let (allocation, other) = match target {
+            Target::Category(category) => (Allocation::Category(category), None),
+            Target::Account(other) => (
+                Allocation::Transfer(id),
+                Some(self.transfer_target(account, other)?),
+            ),
+        };
+        let edited = old.retargeted(allocation)?;
+        if let Some(other) = other
+            && let Some(old_side) = old.other_side_id()
+            && self
+                .view
+                .find_transaction(old_side)
+                .map(|side| side.account)
+                == Some(other)
+        {
+            return Ok(DomainCommand::EditTransaction {
+                transaction: old.id(),
+                edit: TransactionEdit::Transfer(self.view.accounts[other].account.id()),
+            });
+        }
+        let old_side = self.remove_other_side(&old)?;
+        let new_side = other.map(|other| (other, edited.other_side(id)));
+        // The old side was in another account, so the transaction is still at `position`.
+        self.rewrite_transaction(position, edited)?;
+        if let Some((other, new_side)) = new_side {
+            self.insert_transaction(other, new_side)?;
+            self.next_transaction = id.next();
+        }
+        Ok(DomainCommand::Compound(vec![
+            DomainCommand::DeleteTransaction {
+                transaction: old.id(),
+            },
+            DomainCommand::RestoreTransaction {
+                account,
+                transaction: old,
+                other_side: old_side,
+            },
+        ]))
+    }
+
+    /// Takes `transaction`'s other side, when it is a transfer, out of its account.
+    /// Fails when that account is closed.
+    fn remove_other_side(
+        &mut self,
+        transaction: &Transaction,
+    ) -> Result<Option<Box<OtherSide>>, DomainError> {
+        let Some(other_side) = transaction.other_side_id() else {
+            return Ok(None);
+        };
+        let position = self.changeable_other_side(other_side)?;
+        let (account, transaction) = self.remove_transaction(position)?;
+        Ok(Some(Box::new(OtherSide::new(account, transaction))))
     }
 
     fn set_flagged(
@@ -1094,19 +1189,9 @@ impl Ledger {
     fn delete_transaction(&mut self, id: TransactionId) -> Result<DomainCommand, DomainError> {
         let position = self.changeable(id)?;
         // `changeable` found both indices in this same view.
-        let other_side = self.view.accounts[position.account].register[position.entry]
-            .transaction
-            .other_side_id();
         let (account, transaction) = self.remove_transaction(position)?;
         // A refused other side, in a closed account, rolls back both.
-        let other_side = match other_side {
-            Some(other_side) => {
-                let position = self.changeable_other_side(other_side)?;
-                let (account, transaction) = self.remove_transaction(position)?;
-                Some(Box::new(OtherSide::new(account, transaction)))
-            }
-            None => None,
-        };
+        let other_side = self.remove_other_side(&transaction)?;
         Ok(DomainCommand::RestoreTransaction {
             account,
             transaction,
