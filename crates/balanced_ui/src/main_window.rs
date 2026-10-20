@@ -11,7 +11,8 @@ use balanced_i18n::Localizer;
 use eframe::egui::accesskit::Role;
 use eframe::egui::text::LayoutJob;
 use eframe::egui::{
-    self, Align, Button, CentralPanel, FontSelection, Id, Label, MenuBar, Panel, RichText, Sides,
+    self, Align, Button, CentralPanel, FontSelection, Id, Label, MenuBar, Panel, Response,
+    RichText, Sides,
 };
 use icu_calendar::{Date, Iso};
 
@@ -170,7 +171,10 @@ impl MainWindow {
         match action {
             UserAction::Undo => view.can_undo(),
             UserAction::Redo => view.can_redo(),
-            UserAction::NewTransaction | UserAction::DeleteTransaction => self.shows_register(),
+            UserAction::NewTransaction
+            | UserAction::DeleteTransaction
+            | UserAction::PrintRegister
+            | UserAction::ExportToCsv => self.shows_register(),
             UserAction::SwitchPane
             | UserAction::NewDataFile
             | UserAction::OpenDataFile
@@ -178,7 +182,12 @@ impl MainWindow {
             | UserAction::ManageAccounts
             | UserAction::Quit
             | UserAction::Preferences
-            | UserAction::About => true,
+            | UserAction::About
+            | UserAction::EditAccountDetails
+            | UserAction::RegisterPreferences => true,
+            UserAction::Reconcile => self
+                .open_account(view)
+                .is_some_and(|summary| !summary.account().is_closed()),
         }
     }
 
@@ -484,7 +493,7 @@ impl MainWindow {
         self.account_bar.show(ui, &bar_frame);
         CentralPanel::default().show(ui, |ui| match self.open_account(view) {
             Some(summary) => {
-                Self::context_header(ui, i18n, theme, commands, summary, &accounts);
+                self.context_header(ui, i18n, theme, commands, view, summary, &accounts);
                 if let Some(OpenRegister { register, .. }) = &mut self.open_register {
                     register.show(
                         ui,
@@ -693,14 +702,21 @@ impl MainWindow {
         self.close_dialog(ctx, |window| &mut window.delete_transaction);
     }
 
-    /// The open account's name above its Register, with its Current and Ending balances
-    /// and + Transaction on the right. A closed account's header says it is read-only,
-    /// and + Transaction is disabled. The name clips when the Main view is narrow.
+    /// The open account's name above its Register, with its Current and Ending balances,
+    /// the + Transaction button and the Account Actions menu on the right. A closed
+    /// account's header says it is read-only, and + Transaction is disabled. The name
+    /// clips when the Main view is narrow.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the Account Actions menu items need `view` and `commands` beside the header's own drawing context"
+    )]
     fn context_header(
+        &self,
         ui: &mut egui::Ui,
         i18n: &Localizer,
         theme: &Theme,
         commands: &CommandSender,
+        view: &LedgerView,
         summary: &AccountSummary,
         accounts: &AccountsModel,
     ) {
@@ -720,6 +736,17 @@ impl MainWindow {
             |ui| {
                 // Sides lays the right side out from the right edge, so the last added
                 // shows first.
+                ui.menu_button(fl!(i18n, "register-account-actions"), |ui| {
+                    for action in [
+                        UserAction::Reconcile,
+                        UserAction::EditAccountDetails,
+                        UserAction::RegisterPreferences,
+                        UserAction::PrintRegister,
+                        UserAction::ExportToCsv,
+                    ] {
+                        self.action_item(ui, i18n, commands, view, action);
+                    }
+                });
                 let add = Button::new(fl!(i18n, "register-new-transaction"));
                 if ui.add_enabled(!closed, add).clicked() {
                     commands.send(AppCommand::GoToDraftRow);
@@ -814,8 +841,7 @@ impl MainWindow {
         }
     }
 
-    /// The menu item for `action`, with its Shortcut text, disabled while the action
-    /// can't act on `view`.
+    /// The Menu bar item for `action`, noted in `drawn` for the keyboard navigation.
     fn menu_item(
         &self,
         ui: &mut egui::Ui,
@@ -825,17 +851,31 @@ impl MainWindow {
         drawn: &mut DrawnMenus,
         action: UserAction,
     ) {
+        let item = self.action_item(ui, i18n, commands, view, action);
+        drawn.note_item(&item);
+    }
+
+    /// The menu item for `action`, with its Shortcut text, disabled while the action
+    /// can't act on `view`. Clicking it sends the action's Command and closes the menu.
+    fn action_item(
+        &self,
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        commands: &CommandSender,
+        view: &LedgerView,
+        action: UserAction,
+    ) -> Response {
         let mut button = egui::Button::new(action.label(i18n));
         if let Some(chord) = keymap::chord(action) {
             button = button.shortcut_text(keymap::shortcut_text(chord, i18n, ui.ctx().os()));
         }
         let item = ui.add_enabled(self.can_act(action, view), button);
-        drawn.note_item(&item);
         if item.clicked() {
             commands.send(action.command());
             // egui closes a menu on a pointer click only, not on Enter.
             ui.close();
         }
+        item
     }
 
     fn tab_row(&self, ui: &mut egui::Ui, i18n: &Localizer, commands: &CommandSender) {

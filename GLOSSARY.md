@@ -70,6 +70,10 @@ _Avoid_: Row menu, context column
 The control at the right end of a register's header that shows, hides and reorders the register's columns.
 _Avoid_: Column picker, column settings
 
+**Account Actions menu**:
+The ⚙ menu at the right end of a register's context header that starts the open account's tasks: Reconcile, editing its details, register preferences, printing and exporting.
+_Avoid_: Account settings, gear menu
+
 **Filter bar**:
 The row above a register's column headings that narrows the rows it shows by search text, date range and transaction type; it never changes a row's running balance.
 _Avoid_: Search bar, filter panel
