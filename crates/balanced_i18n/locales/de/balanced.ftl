@@ -103,6 +103,9 @@ dialog-cancel = Abbrechen
 dialog-close = Dialog schließen
 dialog-ok = OK
 dialog-delete-transaction-delete = Löschen
+# Coined. "Abgleich" and "Bestätigt" follow the Clr column's GnuCash terms.
+dialog-unreconcile-message = Abgleich dieser Buchung aufheben? Die Buchung wurde mit einem Kontoauszug abgeglichen und wird auf „Bestätigt“ gesetzt. { $payee }, { $date }, { $amount }
+dialog-unreconcile-accept = Auf „Bestätigt“ setzen
 dialog-close-account-close = Schließen
 dialog-delete-account-delete = Löschen
 dialog-new-account-back = Zurück
