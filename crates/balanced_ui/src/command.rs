@@ -132,6 +132,9 @@ impl StatusMessage {
                 DomainError::TransferToOwnAccount { .. } => {
                     fl!(i18n, "status-transfer-to-own-account")
                 }
+                DomainError::AccountHasTransfers { .. } => {
+                    fl!(i18n, "status-account-has-transfers")
+                }
                 DomainError::UnknownTransaction { .. } => {
                     fl!(i18n, "status-unknown-transaction")
                 }

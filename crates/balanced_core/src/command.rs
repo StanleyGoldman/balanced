@@ -258,6 +258,11 @@ pub enum DomainError {
     /// another account, which is closed, so its history is read-only.
     #[error("the transfer's other account is closed: {account:?}")]
     TransferAccountClosed { account: AccountId },
+    /// The command would delete an account that holds a side of a transfer, which
+    /// would leave the other side in another account with nothing to point at. The
+    /// account can be closed instead.
+    #[error("the account holds a transfer, so it can't be deleted: {account:?}")]
+    AccountHasTransfers { account: AccountId },
     /// The data file couldn't take the change.
     #[error(transparent)]
     Store(#[from] WriteError),

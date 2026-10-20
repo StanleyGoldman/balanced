@@ -121,6 +121,13 @@ impl AccountSummary {
             .collect()
     }
 
+    /// Whether the account holds a side of a transfer.
+    fn holds_transfer(&self) -> bool {
+        self.register
+            .iter()
+            .any(|entry| entry.transaction.other_side_id().is_some())
+    }
+
     pub fn account(&self) -> &Account {
         &self.account
     }
@@ -739,11 +746,11 @@ impl Ledger {
             .position(|summary| summary.account.id() == id)
             .ok_or(DomainError::UnknownAccount { account: id })?;
         // `position` found `index` in this same list of accounts.
-        let place = index
-            - self
-                .view
-                .sub_group(self.view.accounts[index].account.kind())
-                .start;
+        let deleted = &self.view.accounts[index];
+        if deleted.holds_transfer() {
+            return Err(DomainError::AccountHasTransfers { account: id });
+        }
+        let place = index - self.view.sub_group(deleted.account.kind()).start;
         let currency = self.view.net_worth.currency();
         let net_worth = self
             .view
