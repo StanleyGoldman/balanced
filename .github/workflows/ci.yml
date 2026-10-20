@@ -68,7 +68,8 @@ jobs:
   # so a file type nobody listed builds, and a diff git can't take counts as
   # code. A manual run has no changed files and skips the filter, so `code` is
   # empty and everything runs. The workflow decides this, never
-  # `cargo xtask ci`, which doesn't look at the diff.
+  # `cargo xtask ci`, which doesn't look at the diff. `mutants.yml` skips the
+  # same paths with `paths-ignore`; change both together.
   changes:
     runs-on: ubuntu-26.04
     outputs:
