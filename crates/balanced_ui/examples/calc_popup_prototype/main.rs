@@ -424,7 +424,7 @@ const TOGGLES: &[(&str, &str, &str, bool)] = &[
         "A B",
         true,
     ),
-    ("alt_down", "Alt+↓ opens the calculator", "A B", true),
+    ("alt_down", "Alt+Down opens the calculator", "A B", true),
     (
         "operator",
         "Typing + * / (or − after a number) opens it",
@@ -453,7 +453,7 @@ const TOGGLES: &[(&str, &str, &str, bool)] = &[
     ("today", "Calendar: Today button", "all", false),
     (
         "cal_keys",
-        "Calendar: ←→ day, ↑↓ week, Enter picks, Esc closes",
+        "Calendar: Left/Right day, Up/Down week, Enter picks, Esc closes",
         "all",
         false,
     ),
@@ -1051,7 +1051,7 @@ impl Proto {
                     }
                     if self.o[CAL_KEYS] {
                         ui.label(
-                            RichText::new("←→ day · ↑↓ week · PgUp/PgDn month · Enter · Esc")
+                            RichText::new("Left/Right day · Up/Down week · PgUp/PgDn month · Enter · Esc")
                                 .small()
                                 .weak(),
                         );
@@ -1555,7 +1555,7 @@ impl Proto {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     for f in [Field::Payment, Field::Deposit] {
-                        let label = format!("Paste → {}", f.label());
+                        let label = format!("Paste to {}", f.label());
                         let b = ui.add(Button::new(label).selected(self.last_amount == f));
                         self.h.track(&b, format!("window: paste {}", f.name()));
                         if b.clicked() {
@@ -1852,7 +1852,7 @@ impl Proto {
                         let r = ui.add(
                             TextEdit::singleline(&mut self.payee)
                                 .id(id_of("payee"))
-                                .desired_width(200.0),
+                                .desired_width(130.0),
                         );
                         self.h.track(&r, "payee field");
                         ui.label(RichText::new(" ").small());
@@ -1862,7 +1862,7 @@ impl Proto {
                         let r = ui.add(
                             TextEdit::singleline(&mut self.memo)
                                 .id(id_of("memo"))
-                                .desired_width(200.0),
+                                .desired_width(130.0),
                         );
                         self.h.track(&r, "memo field");
                         ui.label(RichText::new(" ").small());
@@ -2049,7 +2049,7 @@ impl Proto {
                 ui.separator();
                 ui.label(
                     RichText::new(
-                        "A–D or ←/→ variant · 1–9, 0 toggles · F2 note · F3 marker · F4 hide this dock · F5 spotlight · F6 prompt. Letters and numbers type into a focused field: press Esc or click away first.",
+                        "A–D or Left/Right variant · 1–9, 0 toggles · F2 note · F3 marker · F4 hide this dock · F5 spotlight · F6 prompt. Letters and numbers type into a focused field: press Esc or click away first.",
                     )
                     .small()
                     .weak(),
