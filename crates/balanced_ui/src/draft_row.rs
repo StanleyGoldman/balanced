@@ -3,10 +3,11 @@
 //! [`Draft`]: the transaction typed into the draft row at the bottom of a Register,
 //! before it is added.
 
-use balanced_core::{AccountId, CategoryId, DomainCommand, Money, NewTransaction, TransactionEdit};
+use balanced_core::{AccountId, DomainCommand, Money, NewTransaction, TransactionEdit};
 use balanced_i18n::Localizer;
 use icu_calendar::{Date, Iso};
 
+use crate::combobox::CategoryTarget;
 use crate::i18n::fl;
 
 /// What the draft row holds so far. Every cell starts empty.
@@ -15,7 +16,7 @@ pub(crate) struct Draft {
     date: Option<Date<Iso>>,
     number: String,
     payee: String,
-    category: Option<CategoryId>,
+    category: Option<CategoryTarget>,
     memo: String,
     amount: Option<Money>,
 }
@@ -33,7 +34,7 @@ impl Draft {
         &self.payee
     }
 
-    pub(crate) fn category(&self) -> Option<CategoryId> {
+    pub(crate) fn category(&self) -> Option<CategoryTarget> {
         self.category
     }
 
@@ -52,9 +53,16 @@ impl Draft {
             TransactionEdit::Number(number) => self.number = number.unwrap_or_default(),
             TransactionEdit::Payee(payee) => self.payee = payee,
             TransactionEdit::Memo(memo) => self.memo = memo,
-            TransactionEdit::Category(category) => self.category = Some(category),
+            TransactionEdit::Category(category) => {
+                self.category = Some(CategoryTarget::Category(category));
+            }
             TransactionEdit::Amount(amount) => self.amount = Some(amount),
         }
+    }
+
+    /// Makes the draft a transfer to or from `account`.
+    pub(crate) fn transfer(&mut self, account: AccountId) {
+        self.category = Some(CategoryTarget::Transfer(account));
     }
 
     /// Whether the cell `missing` names is still empty.
@@ -72,7 +80,14 @@ impl Draft {
         let date = self.date.ok_or(Missing::Date)?;
         let category = self.category.ok_or(Missing::Category)?;
         let amount = self.amount.ok_or(Missing::Amount)?;
-        let mut transaction = NewTransaction::new(date, &self.payee, category, amount);
+        let mut transaction = match category {
+            CategoryTarget::Category(category) => {
+                NewTransaction::new(date, &self.payee, category, amount)
+            }
+            CategoryTarget::Transfer(other) => {
+                NewTransaction::transfer(date, &self.payee, other, amount)
+            }
+        };
         if !self.number.is_empty() {
             transaction = transaction.number(&self.number);
         }

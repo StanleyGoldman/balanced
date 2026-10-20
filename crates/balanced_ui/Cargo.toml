@@ -124,6 +124,10 @@ name = "register"
 required-features = ["test-support"]
 
 [[test]]
+name = "transfer"
+required-features = ["test-support"]
+
+[[test]]
 name = "startup"
 required-features = ["test-support"]
 

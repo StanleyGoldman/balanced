@@ -52,6 +52,11 @@ pub enum AllocationRow {
     },
     /// The lines in order. The transaction's amount is their sum.
     Split(Vec<SplitLineRow>),
+    /// One side of a transfer, whose other side is transaction `other_side_id`.
+    Transfer {
+        other_side_id: u32,
+        amount: i64,
+    },
 }
 
 /// One line of a split transaction.

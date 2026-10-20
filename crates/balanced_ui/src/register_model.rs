@@ -8,13 +8,14 @@ use std::collections::{HashMap, HashSet};
 
 use balanced_core::{
     AccountId, AccountSummary, Allocation, CategoryId, CurrencyCode, Generation, LedgerView, Money,
-    SplitTarget, TransactionId,
+    RegisterEntry, SplitTarget, TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
 use icu_calendar::{Date, Iso};
 use icu_locale::LanguageIdentifier;
 use icu_locale::Locale;
 
+use crate::combobox::CategoryTarget;
 use crate::draft_row::Draft;
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
@@ -22,6 +23,13 @@ use crate::register_filter::RegisterFilter;
 
 /// Separates a category from the one it sits under: `Food & Dining:Groceries`.
 pub(crate) const CATEGORY_SEPARATOR: &str = ":";
+
+/// The Category field's name for a transfer to or from account `name`: `[Savings]`. The
+/// brackets are the field's notation, which typed text is matched against, so like
+/// [`CATEGORY_SEPARATOR`] they aren't translated.
+pub(crate) fn transfer_text(name: &str) -> String {
+    format!("[{name}]")
+}
 
 /// Which row of the Register a row is: a transaction's, or the draft row below them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -89,8 +97,10 @@ enum RowKind {
     /// The whole amount, in one category.
     Category(CategoryId),
     Split,
+    /// One side of a transfer.
+    Transfer,
     /// The draft row, with its category once one is typed.
-    Draft(Option<CategoryId>),
+    Draft(Option<CategoryTarget>),
 }
 
 /// One row of the Register, every cell formatted: a transaction's, or the draft row's.
@@ -137,7 +147,12 @@ impl RegisterRow {
             payee: draft.payee().to_owned(),
             category: draft
                 .category()
-                .and_then(|id| category_text(view, id))
+                .and_then(|target| match target {
+                    CategoryTarget::Category(id) => category_text(view, id),
+                    CategoryTarget::Transfer(account) => view
+                        .account(account)
+                        .map(|summary| transfer_text(summary.account().name())),
+                })
                 .unwrap_or_default(),
             memo: draft.memo().to_owned(),
             currency,
@@ -169,8 +184,23 @@ impl RegisterRow {
     /// or split, or the draft row before a category is typed.
     pub(crate) fn category_id(&self) -> Option<CategoryId> {
         match self.kind {
-            RowKind::Category(id) | RowKind::Draft(Some(id)) => Some(id),
-            RowKind::OpeningBalance | RowKind::Split | RowKind::Draft(None) => None,
+            RowKind::Category(id) | RowKind::Draft(Some(CategoryTarget::Category(id))) => Some(id),
+            RowKind::OpeningBalance
+            | RowKind::Split
+            | RowKind::Transfer
+            | RowKind::Draft(None | Some(CategoryTarget::Transfer(_))) => None,
+        }
+    }
+
+    /// The account the draft row transfers to or from, once one is typed.
+    pub(crate) fn transfer_account(&self) -> Option<AccountId> {
+        match self.kind {
+            RowKind::Draft(Some(CategoryTarget::Transfer(account))) => Some(account),
+            RowKind::OpeningBalance
+            | RowKind::Category(_)
+            | RowKind::Split
+            | RowKind::Transfer
+            | RowKind::Draft(None | Some(CategoryTarget::Category(_))) => None,
         }
     }
 
@@ -178,7 +208,8 @@ impl RegisterRow {
     pub(crate) fn takes_category(&self) -> bool {
         match self.kind {
             RowKind::Category(_) | RowKind::Draft(_) => true,
-            RowKind::OpeningBalance | RowKind::Split => false,
+            // TODO(#319): a transfer's Category cell changes its account.
+            RowKind::OpeningBalance | RowKind::Split | RowKind::Transfer => false,
         }
     }
 
@@ -407,6 +438,7 @@ impl RegisterModel {
             view,
             paths: HashMap::new(),
         };
+        let mut other_accounts = OtherAccounts { view, names: None };
         let split = fl!(i18n, "register-split");
         let opening_balance = fl!(i18n, "register-opening-balance");
         let shows_balance = sort.key == SortKey::Date;
@@ -432,6 +464,11 @@ impl RegisterModel {
                         transaction.payee().to_owned(),
                         split.clone(),
                     ),
+                    Allocation::Transfer(other_side) => (
+                        RowKind::Transfer,
+                        transaction.payee().to_owned(),
+                        transfer_text(other_accounts.name(*other_side)),
+                    ),
                 };
                 let row = RegisterRow {
                     id: RowId::Transaction(transaction.id()),
@@ -451,7 +488,9 @@ impl RegisterModel {
                 };
                 let split_lines = match transaction.allocation() {
                     Allocation::Split(lines) => lines.as_slice(),
-                    Allocation::OpeningBalance | Allocation::Category(_) => &[],
+                    Allocation::OpeningBalance
+                    | Allocation::Category(_)
+                    | Allocation::Transfer(_) => &[],
                 };
                 let split_categories: Vec<String> = split_lines
                     .iter()
@@ -576,6 +615,40 @@ impl CategoryPaths<'_> {
         self.paths.entry(id).or_insert_with(|| {
             category_text(view, id).expect("a transaction's categories are in its snapshot")
         })
+    }
+}
+
+/// The names of the accounts holding transfers' other sides, gathered the first time one
+/// is asked for while a model is built.
+struct OtherAccounts<'a> {
+    view: &'a LedgerView,
+    /// Each transfer side's account's name, by the side's id.
+    names: Option<HashMap<TransactionId, &'a str>>,
+}
+
+impl<'a> OtherAccounts<'a> {
+    /// The name of the account holding transaction `other_side`.
+    fn name(&mut self, other_side: TransactionId) -> &'a str {
+        let view = self.view;
+        let names = self.names.get_or_insert_with(|| {
+            view.accounts()
+                .iter()
+                .flat_map(|summary| {
+                    let name = summary.account().name();
+                    summary
+                        .register()
+                        .iter()
+                        .map(RegisterEntry::transaction)
+                        .filter(|transaction| {
+                            matches!(transaction.allocation(), Allocation::Transfer(_))
+                        })
+                        .map(move |transaction| (transaction.id(), name))
+                })
+                .collect()
+        });
+        names
+            .get(&other_side)
+            .expect("a transfer's other side is in its snapshot")
     }
 }
 

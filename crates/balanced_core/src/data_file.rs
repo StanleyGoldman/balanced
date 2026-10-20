@@ -363,6 +363,9 @@ fn transaction(
         AllocationRow::Category { category_id, .. } => {
             Allocation::Category(CategoryId::new(category_id))
         }
+        AllocationRow::Transfer { other_side_id, .. } => {
+            Allocation::Transfer(TransactionId::new(other_side_id))
+        }
         AllocationRow::Split(lines) => Allocation::Split(
             lines
                 .into_iter()
@@ -425,6 +428,10 @@ pub(crate) fn transaction_row(
         },
         Allocation::Category(category) => AllocationRow::Category {
             category_id: category.raw(),
+            amount: minor_units(transaction.amount())?,
+        },
+        Allocation::Transfer(other_side) => AllocationRow::Transfer {
+            other_side_id: other_side.raw(),
             amount: minor_units(transaction.amount())?,
         },
         Allocation::Split(lines) => AllocationRow::Split(

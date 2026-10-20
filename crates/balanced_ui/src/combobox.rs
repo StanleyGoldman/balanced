@@ -6,12 +6,13 @@
 use std::collections::BTreeSet;
 
 use balanced_core::{
-    AccountSummary, Allocation, CategoryId, Generation, LedgerView, RegisterEntry, Transaction,
+    AccountId, AccountSummary, Allocation, CategoryId, Generation, LedgerView, RegisterEntry,
+    Transaction,
 };
 use balanced_i18n::Localizer;
 use icu_locale::Locale;
 
-use crate::register_model::category_text;
+use crate::register_model::{category_text, transfer_text};
 
 /// One entry a combobox offers: the text it shows and enters, and the value it stands
 /// for.
@@ -64,6 +65,13 @@ impl<T> Choices<T> {
             .collect()
     }
 
+    /// These choices, then `later`'s, each in their own order.
+    #[must_use]
+    pub(crate) fn then(mut self, later: Self) -> Self {
+        self.choices.extend(later.choices);
+        self
+    }
+
     /// The choice named `text`, trimmed, ignoring case.
     pub(crate) fn named(&self, text: &str) -> Option<&Choice<T>> {
         let text = text.trim().to_lowercase();
@@ -96,21 +104,30 @@ impl<T> Choices<T> {
     }
 }
 
-/// What the Register's Payee and Category comboboxes offer: every payee and every
-/// category in a snapshot. It is rebuilt when the snapshot or the formatting locale
-/// changes.
+/// What a Category cell names: a category, or another account, for a transfer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CategoryTarget {
+    Category(CategoryId),
+    Transfer(AccountId),
+}
+
+/// What one account's Register offers in its Payee and Category comboboxes: every payee
+/// and every category in a snapshot, then the accounts it can transfer to. It is rebuilt
+/// when the snapshot, the account or the formatting locale changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FieldChoices {
     generation: Generation,
+    account: AccountId,
     formatting_locale: Locale,
     payees: Choices<()>,
-    categories: Choices<CategoryId>,
+    categories: Choices<CategoryTarget>,
 }
 
 impl FieldChoices {
-    /// The payees of every transaction in `view`, each once, and its categories by
-    /// their paths, sorted as `i18n` sorts text.
-    pub(crate) fn new(view: &LedgerView, i18n: &Localizer) -> Self {
+    /// The payees of every transaction in `view`, each once, its categories by their
+    /// paths, and then, as `[Name]`, every open account but `account`, hidden ones
+    /// included. Each part is sorted as `i18n` sorts text.
+    pub(crate) fn new(view: &LedgerView, account: AccountId, i18n: &Localizer) -> Self {
         let payees: BTreeSet<&str> = view
             .accounts()
             .iter()
@@ -123,27 +140,46 @@ impl FieldChoices {
         let categories = view.categories().iter().map(|category| {
             let text = category_text(view, category.id())
                 .expect("every category of a snapshot has a path in it");
-            (text, category.id())
+            (text, CategoryTarget::Category(category.id()))
         });
+        let accounts = view
+            .accounts()
+            .iter()
+            .map(AccountSummary::account)
+            .filter(|other| other.id() != account && !other.is_closed())
+            .map(|other| {
+                (
+                    transfer_text(other.name()),
+                    CategoryTarget::Transfer(other.id()),
+                )
+            });
         Self {
             generation: view.generation(),
+            account,
             formatting_locale: i18n.formatting_locale().clone(),
             payees: Choices::new(i18n, payees.into_iter().map(|payee| (payee.to_owned(), ()))),
-            categories: Choices::new(i18n, categories),
+            categories: Choices::new(i18n, categories).then(Choices::new(i18n, accounts)),
         }
     }
 
-    /// Whether these are the choices of `view`, sorted as `i18n` sorts text, so need
-    /// no rebuild.
-    pub(crate) fn is_current(&self, view: &LedgerView, i18n: &Localizer) -> bool {
-        self.generation == view.generation() && self.formatting_locale == *i18n.formatting_locale()
+    /// Whether these are the choices of `view` for `account`'s Register, sorted as
+    /// `i18n` sorts text, so need no rebuild.
+    pub(crate) fn is_current(
+        &self,
+        view: &LedgerView,
+        account: AccountId,
+        i18n: &Localizer,
+    ) -> bool {
+        self.generation == view.generation()
+            && self.account == account
+            && self.formatting_locale == *i18n.formatting_locale()
     }
 
     pub(crate) fn payees(&self) -> &Choices<()> {
         &self.payees
     }
 
-    pub(crate) fn categories(&self) -> &Choices<CategoryId> {
+    pub(crate) fn categories(&self) -> &Choices<CategoryTarget> {
         &self.categories
     }
 }

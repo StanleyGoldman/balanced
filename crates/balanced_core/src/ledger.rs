@@ -15,8 +15,8 @@ use crate::transaction::{NewTransaction, TransactionId};
 use crate::undo_log;
 use crate::{
     Account, AccountGroup, AccountId, AccountKind, AccountStatus, Applied, Category, CategoryId,
-    CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection, Transaction,
-    TransactionEdit, Visibility, WriteError,
+    CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection, OtherSide,
+    Transaction, TransactionEdit, Visibility, WriteError,
 };
 
 /// Counts the changes applied to a [`Ledger`]. A window's view model rebuilds when
@@ -374,8 +374,9 @@ impl Ledger {
     /// last in its sub-group. Fails when an amount is in another currency than the
     /// ledger, or when a balance overflows.
     ///
-    /// Panics when a category sits under one that isn't before it in `categories`, or
-    /// when a transaction names a category that isn't in `categories`.
+    /// Panics when a category sits under one that isn't before it in `categories`, when
+    /// a transaction names a category that isn't in `categories`, or when it is a
+    /// transfer.
     pub(crate) fn with_accounts(
         currency: CurrencyCode,
         categories: impl IntoIterator<Item = NewCategory>,
@@ -407,6 +408,10 @@ impl Ledger {
             let (account, transactions) = new.into_account(AccountId::new(id));
             let mut posted = Vec::new();
             for new in transactions {
+                assert!(
+                    !new.is_transfer(),
+                    "a new account's transactions hold no transfer; post one once both accounts exist"
+                );
                 for category in new.categories() {
                     assert!(
                         categories.iter().any(|known| known.id() == category),
@@ -633,7 +638,8 @@ impl Ledger {
             DomainCommand::RestoreTransaction {
                 account,
                 transaction,
-            } => self.restore_transaction(account, transaction)?,
+                other_side,
+            } => self.restore_transaction(account, transaction, other_side)?,
             DomainCommand::CreateCategory { name, parent } => {
                 self.create_category(&name, parent)?
             }
@@ -868,6 +874,16 @@ impl Ledger {
 
     /// Where transaction `id` is, when its account is open to changes.
     fn changeable(&self, id: TransactionId) -> Result<TransactionPosition, DomainError> {
+        self.changeable_or(id, |account| DomainError::AccountClosed { account })
+    }
+
+    /// Where transaction `id` is, when its account is open to changes; else `closed`
+    /// of its account.
+    fn changeable_or(
+        &self,
+        id: TransactionId,
+        closed: impl FnOnce(AccountId) -> DomainError,
+    ) -> Result<TransactionPosition, DomainError> {
         let position = self
             .view
             .find_transaction(id)
@@ -875,9 +891,7 @@ impl Ledger {
         // `find_transaction` returns the index of an account in the view.
         let account = &self.view.accounts[position.account].account;
         if account.is_closed() {
-            return Err(DomainError::AccountClosed {
-                account: account.id(),
-            });
+            return Err(closed(account.id()));
         }
         Ok(position)
     }
@@ -963,23 +977,89 @@ impl Ledger {
         {
             return Err(DomainError::UnknownCategory { category });
         }
+        let other_account = transaction
+            .transfer_account()
+            .map(|other| self.transfer_target(account, other))
+            .transpose()?;
         let id = self.next_transaction;
         let currency = self.view.net_worth.currency();
         let transaction = transaction.into_transaction(id, currency)?;
-        let row = transaction_row(account, &transaction);
+        // The other side takes the id after this one's.
+        let other_side = other_account.map(|other| (other, transaction.other_side(id.next())));
+        self.insert_posted(index, transaction)?;
+        let mut next = id.next();
+        if let Some((other, other_side)) = other_side {
+            self.insert_posted(other, other_side)?;
+            next = next.next();
+        }
+        self.next_transaction = next;
+        Ok(DomainCommand::DeleteTransaction { transaction: id })
+    }
+
+    /// The index in the view's accounts of account `other`, which a transfer from
+    /// `account` names. Fails when it is `account` itself, or closed.
+    fn transfer_target(&self, account: AccountId, other: AccountId) -> Result<usize, DomainError> {
+        if other == account {
+            return Err(DomainError::TransferToOwnAccount { account });
+        }
+        let index = self.account_index(other)?;
+        // `account_index` found `index` in this same list of accounts.
+        if self.view.accounts[index].account.is_closed() {
+            return Err(DomainError::TransferAccountClosed { account: other });
+        }
+        Ok(index)
+    }
+
+    /// Adds `transaction`, whose id is the largest yet, to the account at `index`, after
+    /// the rest of its date.
+    fn insert_posted(&mut self, index: usize, transaction: Transaction) -> Result<(), DomainError> {
+        let currency = self.view.net_worth.currency();
+        // `index` comes from a lookup in this same list of accounts.
+        let row = transaction_row(self.view.accounts[index].account.id(), &transaction);
         let (summary, ()) = self.view.edit_register(index, currency, |transactions| {
-            // The new id is the largest yet, so it goes after the rest of its date.
             let position = transactions.partition_point(|other| other.date() <= transaction.date());
             transactions.insert(position, transaction);
         })?;
         self.replace_account(index, summary)?;
+        // The row is checked only now, so the ledger's own errors come first.
         self.store.insert_transaction(&row?)?;
-        self.next_transaction = id.next();
-        Ok(DomainCommand::DeleteTransaction { transaction: id })
+        Ok(())
     }
 
     fn delete_transaction(&mut self, id: TransactionId) -> Result<DomainCommand, DomainError> {
         let position = self.changeable(id)?;
+        // `changeable` found both indices in this same view.
+        let other_side = self.view.accounts[position.account].register[position.entry]
+            .transaction
+            .other_side_id();
+        let (account, transaction) = self.remove_transaction(position)?;
+        // A refused other side, in a closed account, rolls back both.
+        let other_side = match other_side {
+            Some(other_side) => {
+                let position = self.changeable_or(other_side, |account| {
+                    DomainError::TransferAccountClosed { account }
+                })?;
+                let (account, transaction) = self.remove_transaction(position)?;
+                Some(Box::new(OtherSide {
+                    account,
+                    transaction,
+                }))
+            }
+            None => None,
+        };
+        Ok(DomainCommand::RestoreTransaction {
+            account,
+            transaction,
+            other_side,
+        })
+    }
+
+    /// Takes the transaction at `position` out of its account, returning the account's
+    /// id and the transaction.
+    fn remove_transaction(
+        &mut self,
+        position: TransactionPosition,
+    ) -> Result<(AccountId, Transaction), DomainError> {
         let currency = self.view.net_worth.currency();
         let (summary, transaction) =
             self.view
@@ -988,18 +1068,37 @@ impl Ledger {
                 })?;
         let account = summary.account.id();
         self.replace_account(position.account, summary)?;
-        self.store.delete_transaction(id.raw())?;
-        Ok(DomainCommand::RestoreTransaction {
-            account,
-            transaction,
-        })
+        self.store.delete_transaction(transaction.id().raw())?;
+        Ok((account, transaction))
     }
 
     fn restore_transaction(
         &mut self,
         account: AccountId,
         transaction: Transaction,
+        other_side: Option<Box<OtherSide>>,
     ) -> Result<DomainCommand, DomainError> {
+        let inverse = DomainCommand::DeleteTransaction {
+            transaction: transaction.id(),
+        };
+        self.put_back(account, transaction)?;
+        if let Some(other_side) = other_side {
+            let OtherSide {
+                account,
+                transaction,
+            } = *other_side;
+            self.put_back(account, transaction)?;
+        }
+        Ok(inverse)
+    }
+
+    /// Puts deleted `transaction` back into `account`, with its id, where it was in the
+    /// register.
+    fn put_back(
+        &mut self,
+        account: AccountId,
+        transaction: Transaction,
+    ) -> Result<(), DomainError> {
         debug_assert!(
             self.view.find_transaction(transaction.id()).is_none(),
             "a restored transaction's id is not in use"
@@ -1011,9 +1110,6 @@ impl Ledger {
             .position(|summary| summary.account.id() == account)
             .ok_or(DomainError::UnknownAccount { account })?;
         let currency = self.view.net_worth.currency();
-        let inverse = DomainCommand::DeleteTransaction {
-            transaction: transaction.id(),
-        };
         let row = transaction_row(account, &transaction);
         let (summary, ()) = self.view.edit_register(index, currency, |transactions| {
             let key = transaction.register_order();
@@ -1029,7 +1125,7 @@ impl Ledger {
         })?;
         self.replace_account(index, summary)?;
         self.store.insert_transaction(&row?)?;
-        Ok(inverse)
+        Ok(())
     }
 
     fn create_category(
@@ -2161,6 +2257,7 @@ mod tests {
         let result = ledger.apply(DomainCommand::RestoreTransaction {
             account: unknown,
             transaction,
+            other_side: None,
         });
 
         assert_eq!(

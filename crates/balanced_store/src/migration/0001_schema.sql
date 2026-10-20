@@ -1,7 +1,8 @@
 -- Version 1: the whole schema. Edited in place until the first release.
 --
--- Built-in SQL only, so any SQLite tool can read the file. Every foreign key is
--- ON DELETE RESTRICT: the store deletes child rows itself. Ids are assigned by `Ledger`
+-- Built-in SQL only, so any SQLite tool can read the file. Every foreign key but a
+-- transfer's link to its other side is ON DELETE RESTRICT: the store deletes child rows
+-- itself. Ids are assigned by `Ledger`
 -- and inserted explicitly; AUTOINCREMENT keeps the highest id ever used in
 -- `sqlite_sequence`, so a deleted row's id is never reused.
 
@@ -41,8 +42,13 @@ CREATE UNIQUE INDEX category_sibling_name ON category (coalesce(parent_id, -1), 
 CREATE INDEX category_parent_id ON category (parent_id);
 
 -- A transaction in one account. `amount` is in minor units. A split's amount is the sum
--- of its lines, so it stores neither an amount nor a category. Transactions on one date
--- are ordered by id.
+-- of its lines, so it stores neither an amount nor a category. A transfer stores its
+-- amount and `other_side_id`, the transaction it records in the other account, which
+-- points back at it. Transactions on one date are ordered by id.
+--
+-- Both sides of a transfer are written in one SQLite transaction, so their link is
+-- checked at commit. It is NO ACTION, not RESTRICT: SQLite checks RESTRICT as each row
+-- is deleted, deferred or not, so neither side of a pair could ever be deleted.
 CREATE TABLE "transaction" (
     id INTEGER PRIMARY KEY AUTOINCREMENT
         CONSTRAINT transaction_id_u32 CHECK (id BETWEEN 0 AND 4294967295),
@@ -52,12 +58,15 @@ CREATE TABLE "transaction" (
     payee TEXT NOT NULL,
     memo TEXT NOT NULL,
     allocation TEXT NOT NULL
-        CONSTRAINT transaction_allocation_known CHECK (allocation IN ('opening_balance', 'category', 'split')),
+        CONSTRAINT transaction_allocation_known CHECK (allocation IN ('opening_balance', 'category', 'split', 'transfer')),
     amount INTEGER,
     category_id INTEGER REFERENCES category (id) ON DELETE RESTRICT,
+    other_side_id INTEGER UNIQUE REFERENCES "transaction" (id) DEFERRABLE INITIALLY DEFERRED
+        CONSTRAINT transaction_other_side_not_itself CHECK (other_side_id <> id),
     flagged INTEGER NOT NULL DEFAULT 0 CONSTRAINT transaction_flagged_flag CHECK (flagged IN (0, 1)),
     CONSTRAINT transaction_amount_unless_split CHECK ((allocation = 'split') = (amount IS NULL)),
     CONSTRAINT transaction_category_when_category CHECK ((allocation = 'category') = (category_id IS NOT NULL)),
+    CONSTRAINT transaction_other_side_when_transfer CHECK ((allocation = 'transfer') = (other_side_id IS NOT NULL)),
     CONSTRAINT transaction_opening_balance_no_payee CHECK (allocation <> 'opening_balance' OR payee = '')
 ) STRICT;
 

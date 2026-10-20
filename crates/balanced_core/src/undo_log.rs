@@ -11,8 +11,8 @@ use crate::data_file::{date_text, minor_units, money};
 use crate::transaction::{NewAllocation, NewTransactionParts, SplitLine, SplitTarget};
 use crate::{
     Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId, CurrencyCode,
-    DomainCommand, MoneyError, MoveDirection, NewTransaction, Transaction, TransactionEdit,
-    TransactionId, Visibility, WriteError,
+    DomainCommand, MoneyError, MoveDirection, NewTransaction, OtherSide, Transaction,
+    TransactionEdit, TransactionId, Visibility, WriteError,
 };
 
 /// Why an undo log entry couldn't be read back as a Command.
@@ -122,9 +122,11 @@ fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
         DomainCommand::RestoreTransaction {
             account,
             transaction,
+            other_side,
         } => v1::Command::RestoreTransaction {
             account: account.raw(),
             transaction: transaction_to_wire(transaction)?,
+            other_side: other_side.as_deref().map(other_side_to_wire).transpose()?,
         },
         DomainCommand::CreateCategory { name, parent } => v1::Command::CreateCategory {
             name: name.clone(),
@@ -175,6 +177,10 @@ fn new_transaction_to_wire(transaction: &NewTransaction) -> Result<v1::NewTransa
                 amount: minor_units(*amount)?,
             },
             NewAllocation::Split(lines) => split_to_wire(lines)?,
+            NewAllocation::Transfer(account, amount) => v1::Allocation::Transfer(v1::TransferTo {
+                account: account.raw(),
+                amount: minor_units(*amount)?,
+            }),
         },
     })
 }
@@ -206,13 +212,24 @@ fn transaction_to_wire(transaction: &Transaction) -> Result<v1::Transaction, Wri
                     amount: amount()?,
                 },
                 Allocation::Split(lines) => split_to_wire(lines)?,
+                Allocation::Transfer(other_side) => v1::Allocation::Transfer(v1::TransferSide {
+                    other_side: other_side.raw(),
+                    amount: amount()?,
+                }),
             },
         },
         flagged: transaction.is_flagged(),
     })
 }
 
-fn split_to_wire(lines: &[SplitLine]) -> Result<v1::Allocation, WriteError> {
+fn other_side_to_wire(other_side: &OtherSide) -> Result<v1::OtherSide, WriteError> {
+    Ok(v1::OtherSide {
+        account: other_side.account.raw(),
+        transaction: transaction_to_wire(&other_side.transaction)?,
+    })
+}
+
+fn split_to_wire<T>(lines: &[SplitLine]) -> Result<v1::Allocation<T>, WriteError> {
     Ok(v1::Allocation::Split(
         lines
             .iter()
@@ -340,9 +357,13 @@ fn from_wire(
         v1::Command::RestoreTransaction {
             account,
             transaction,
+            other_side,
         } => DomainCommand::RestoreTransaction {
             account: AccountId::new(account),
             transaction: transaction_from_wire(transaction, currency)?,
+            other_side: other_side
+                .map(|other_side| other_side_from_wire(other_side, currency).map(Box::new))
+                .transpose()?,
         },
         v1::Command::CreateCategory { name, parent } => DomainCommand::CreateCategory {
             name,
@@ -352,13 +373,17 @@ fn from_wire(
             category: CategoryId::new(category),
         },
         v1::Command::RestoreCategory { category } => DomainCommand::RestoreCategory {
-            category: Category::new(
-                CategoryId::new(category.id),
-                category.name,
-                category.parent.map(CategoryId::new),
-            ),
+            category: category_from_wire(category),
         },
     })
+}
+
+fn category_from_wire(category: v1::Category) -> Category {
+    Category::new(
+        CategoryId::new(category.id),
+        category.name,
+        category.parent.map(CategoryId::new),
+    )
 }
 
 fn account_from_wire(account: v1::Account, currency: CurrencyCode) -> Account {
@@ -384,6 +409,9 @@ fn new_transaction_from_wire(
             NewAllocation::Category(CategoryId::new(category), money(amount, currency))
         }
         v1::Allocation::Split(lines) => NewAllocation::Split(split_from_wire(lines, currency)),
+        v1::Allocation::Transfer(to) => {
+            NewAllocation::Transfer(AccountId::new(to.account), money(to.amount, currency))
+        }
     };
     Ok(NewTransaction::from_parts(
         date(&transaction.date)?,
@@ -415,9 +443,53 @@ fn transaction_from_wire(
     transaction: v1::Transaction,
     currency: CurrencyCode,
 ) -> Result<Transaction, UndoEntryError> {
-    Ok(new_transaction_from_wire(transaction.fields, currency)?
-        .into_transaction(TransactionId::new(transaction.id), currency)?
+    let v1::NewTransaction {
+        date: date_text,
+        number,
+        payee,
+        memo,
+        allocation,
+    } = transaction.fields;
+    let id = TransactionId::new(transaction.id);
+    let allocation = match allocation {
+        v1::Allocation::Transfer(side) => {
+            return Ok(Transaction::from_parts(
+                id,
+                date(&date_text)?,
+                number,
+                payee,
+                memo,
+                Allocation::Transfer(TransactionId::new(side.other_side)),
+                money(side.amount, currency),
+            )
+            .with_flag(transaction.flagged));
+        }
+        v1::Allocation::OpeningBalance { amount } => v1::Allocation::OpeningBalance { amount },
+        v1::Allocation::Category { category, amount } => {
+            v1::Allocation::Category { category, amount }
+        }
+        v1::Allocation::Split(lines) => v1::Allocation::Split(lines),
+    };
+    let fields = v1::NewTransaction {
+        date: date_text,
+        number,
+        payee,
+        memo,
+        allocation,
+    };
+    Ok(new_transaction_from_wire(fields, currency)?
+        .into_transaction(id, currency)?
         .with_flag(transaction.flagged))
+}
+
+fn other_side_from_wire(
+    other_side: v1::OtherSide,
+    currency: CurrencyCode,
+) -> Result<OtherSide, UndoEntryError> {
+    Ok(OtherSide {
+        account: AccountId::new(other_side.account),
+        transaction: transaction_from_wire(other_side.transaction, currency)?,
+    })
 }
 
 fn split_from_wire(lines: Vec<v1::SplitLine>, currency: CurrencyCode) -> Vec<SplitLine> {
@@ -569,6 +641,7 @@ mod tests {
         let edit = |edit| DomainCommand::EditTransaction { transaction, edit };
         let [opening, restored, paid] = transactions();
         let [shell, split, opening_balance] = new_transactions();
+        let [post_transfer, restore_transfer] = transfer_commands();
         let rename = DomainCommand::RenameAccount {
             account,
             name: "Joint".to_owned(),
@@ -627,6 +700,7 @@ mod tests {
                 account,
                 transaction: opening_balance,
             },
+            post_transfer,
             edit(TransactionEdit::Date(date(9))),
             edit(TransactionEdit::Number(Some("1044".to_owned()))),
             edit(TransactionEdit::Number(None)),
@@ -646,15 +720,51 @@ mod tests {
             DomainCommand::RestoreTransaction {
                 account,
                 transaction: restored.clone(),
+                other_side: None,
             },
             DomainCommand::RestoreTransaction {
                 account,
                 transaction: restored.with_flag(true),
+                other_side: None,
             },
+            restore_transfer,
         ]
         .into_iter()
         .chain(category_commands())
         .collect()
+    }
+
+    /// A transfer posted, and one restored with its other side.
+    fn transfer_commands() -> [DomainCommand; 2] {
+        let sent = Transaction::from_parts(
+            TransactionId::new(14),
+            date(5),
+            Some("1045".to_owned()),
+            "Saving up".to_owned(),
+            "September".to_owned(),
+            Allocation::Transfer(TransactionId::new(15)),
+            usd(dec!(-200.00)),
+        );
+        let received = sent.other_side(TransactionId::new(15)).with_flag(true);
+        [
+            DomainCommand::PostTransaction {
+                account: AccountId::new(7),
+                transaction: NewTransaction::transfer(
+                    date(5),
+                    "Saving up",
+                    AccountId::new(8),
+                    usd(dec!(-200.00)),
+                ),
+            },
+            DomainCommand::RestoreTransaction {
+                account: AccountId::new(7),
+                transaction: sent,
+                other_side: Some(Box::new(OtherSide {
+                    account: AccountId::new(8),
+                    transaction: received,
+                })),
+            },
+        ]
     }
 
     /// One of every category Command, every field set and unset.

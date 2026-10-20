@@ -24,7 +24,7 @@ use egui_extras::{Column, TableBody, TableBuilder};
 use icu_calendar::{Date, Iso};
 
 use crate::amount_field::{self, Preview};
-use crate::combobox::{FieldChoices, ListRow};
+use crate::combobox::{CategoryTarget, FieldChoices, ListRow};
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::date_field::{self, DateEdit};
 use crate::draft_row::{Draft, Missing};
@@ -356,15 +356,16 @@ impl TextField {
         }
     }
 
-    /// The edit that saves `text`, already trimmed, in the field of `row`, or `None`
+    /// The change that saves `text`, already trimmed, in the field of `row`, or `None`
     /// when it changes nothing. An empty number clears it. A category is named by its
-    /// path, ignoring case, and fails when no category in `choices` has that name.
+    /// path, and an account by `[Name]`, ignoring case; it fails when no entry in
+    /// `choices` has that name.
     fn edit(
         self,
         row: &RegisterRow,
         text: &str,
         choices: &FieldChoices,
-    ) -> Result<Option<TransactionEdit>, NoSuchCategory> {
+    ) -> Result<Option<CellChange>, NoSuchCategory> {
         if text == self.saved(row) {
             return Ok(None);
         }
@@ -372,20 +373,36 @@ impl TextField {
             Self::Number => TransactionEdit::Number((!text.is_empty()).then(|| text.to_owned())),
             Self::Payee => TransactionEdit::Payee(text.to_owned()),
             Self::Memo => TransactionEdit::Memo(text.to_owned()),
-            Self::Category => {
-                let category = *choices
-                    .categories()
-                    .named(text)
-                    .ok_or(NoSuchCategory)?
-                    .value();
-                if row.category_id() == Some(category) {
+            Self::Category => match *choices
+                .categories()
+                .named(text)
+                .ok_or(NoSuchCategory)?
+                .value()
+            {
+                CategoryTarget::Category(category) if row.category_id() == Some(category) => {
                     return Ok(None);
                 }
-                TransactionEdit::Category(category)
-            }
+                CategoryTarget::Category(category) => TransactionEdit::Category(category),
+                CategoryTarget::Transfer(account) if row.transfer_account() == Some(account) => {
+                    return Ok(None);
+                }
+                CategoryTarget::Transfer(account) => {
+                    return Ok(Some(CellChange::Transfer(account)));
+                }
+            },
         };
-        Ok(Some(edit))
+        Ok(Some(CellChange::Edit(edit)))
     }
+}
+
+/// What saving a cell changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CellChange {
+    /// One field of the transaction.
+    Edit(TransactionEdit),
+    /// The Category cell names another account: the transaction is a transfer to or
+    /// from it.
+    Transfer(AccountId),
 }
 
 /// Why a Category cell's text can't be saved: no category has that name.
@@ -1048,8 +1065,8 @@ impl Register {
         let (model, rebuilt) = self.take_model(summary, view, today, today_divider, i18n);
         self.filter_bar(ui, i18n, &model);
         let choices = match self.choices.take() {
-            Some(choices) if choices.is_current(view, i18n) => choices,
-            _ => FieldChoices::new(view, i18n),
+            Some(choices) if choices.is_current(view, summary.account().id(), i18n) => choices,
+            _ => FieldChoices::new(view, summary.account().id(), i18n),
         };
         let currency = summary.account().currency();
         let draft_frame = DraftFrame {
@@ -2184,7 +2201,7 @@ fn commit(
             currency,
             side,
         } => match amount_edit(row, *side, text, reader, *currency) {
-            Ok(change) => change,
+            Ok(change) => change.map(CellChange::Edit),
             Err(error) => return Commit::Unreadable(error),
         },
     };
@@ -2194,17 +2211,22 @@ fn commit(
     Commit::Done
 }
 
-/// Saves `edit` in a cell of `row`: in `draft` on the draft row, else by sending one
+/// Saves `change` in a cell of `row`: in `draft` on the draft row, else by sending one
 /// edit Command.
-fn save(row: RowId, edit: TransactionEdit, commands: &CommandSender, draft: &mut Draft) {
-    match row {
-        RowId::Transaction(transaction) => {
+fn save(row: RowId, change: CellChange, commands: &CommandSender, draft: &mut Draft) {
+    match (row, change) {
+        (RowId::Transaction(transaction), CellChange::Edit(edit)) => {
             commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
                 transaction,
                 edit,
             }));
         }
-        RowId::Draft => draft.edit(edit),
+        // TODO(#319): make an existing transaction a transfer.
+        (RowId::Transaction(_), CellChange::Transfer(_)) => {
+            commands.send(AppCommand::ShowStatus(StatusMessage::NotAvailableYet));
+        }
+        (RowId::Draft, CellChange::Edit(edit)) => draft.edit(edit),
+        (RowId::Draft, CellChange::Transfer(account)) => draft.transfer(account),
     }
 }
 
@@ -2245,7 +2267,12 @@ fn commit_date(
     match edit.date.commit(i18n) {
         date_field::Commit::Unchanged => Commit::Done,
         date_field::Commit::Changed(date) => {
-            save(row.id(), TransactionEdit::Date(date), commands, draft);
+            save(
+                row.id(),
+                CellChange::Edit(TransactionEdit::Date(date)),
+                commands,
+                draft,
+            );
             Commit::Done
         }
         date_field::Commit::Rejected => Commit::Refused,

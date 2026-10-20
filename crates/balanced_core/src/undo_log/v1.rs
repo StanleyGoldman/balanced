@@ -60,9 +60,12 @@ pub(crate) enum Command {
     DeleteTransaction {
         transaction: u32,
     },
+    /// A transaction that isn't a transfer leaves `other_side` out.
     RestoreTransaction {
         account: u32,
         transaction: Transaction,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        other_side: Option<OtherSide>,
     },
     CreateCategory {
         name: String,
@@ -127,31 +130,41 @@ pub(crate) struct Category {
 }
 
 /// A transaction with its id: a [`NewTransaction`]'s fields after `id`, in one object,
-/// then `flagged`, which an unflagged transaction leaves out.
+/// a transfer naming its other side, then `flagged`, which an unflagged transaction
+/// leaves out.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Transaction {
     pub(crate) id: u32,
     #[serde(flatten)]
-    pub(crate) fields: NewTransaction,
+    pub(crate) fields: NewTransaction<TransferSide>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) flagged: bool,
 }
 
-/// A transaction to post, which the ledger gives an id. A split's amount is the sum of
-/// its lines.
+/// A transfer's other side, in account `account`.
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct NewTransaction {
+pub(crate) struct OtherSide {
+    pub(crate) account: u32,
+    pub(crate) transaction: Transaction,
+}
+
+/// A transaction to post, which the ledger gives an id. A split's amount is the sum of
+/// its lines. `T` is how a transfer is given: by the account it goes to, for a transaction
+/// to post.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct NewTransaction<T = TransferTo> {
     pub(crate) date: String,
     pub(crate) number: Option<String>,
     pub(crate) payee: String,
     pub(crate) memo: String,
-    pub(crate) allocation: Allocation,
+    pub(crate) allocation: Allocation<T>,
 }
 
-/// Where a transaction's amount went, with the amount where it isn't the lines' sum.
+/// Where a transaction's amount went, with the amount where it isn't the lines' sum. A
+/// transfer is a `T`.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum Allocation {
+pub(crate) enum Allocation<T> {
     OpeningBalance {
         amount: i64,
     },
@@ -161,6 +174,21 @@ pub(crate) enum Allocation {
     },
     /// The lines in order, as an array.
     Split(Vec<SplitLine>),
+    Transfer(T),
+}
+
+/// A transfer to post, to or from `account`.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct TransferTo {
+    pub(crate) account: u32,
+    pub(crate) amount: i64,
+}
+
+/// One side of a transfer, whose other side is transaction `other_side`.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct TransferSide {
+    pub(crate) other_side: u32,
+    pub(crate) amount: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
