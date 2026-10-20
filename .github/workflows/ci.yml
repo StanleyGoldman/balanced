@@ -250,6 +250,10 @@ jobs:
       - name: coverage
         if: github.event_name != 'pull_request'
         run: .github/in-image.sh cargo xtask coverage
+      # The container wrote the report as root, and the upload runs as the
+      # runner's user.
+      - name: make the report readable
+        run: sudo chmod -R a+rX target/coverage
       - name: job summary
         id: report
         run: |
