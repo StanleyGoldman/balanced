@@ -15,7 +15,7 @@ mod undo_log;
 
 pub use account::{Account, AccountGroup, AccountId, AccountKind, AccountStatus, Visibility};
 pub use category::{Category, CategoryId};
-pub use command::{Applied, DomainCommand, DomainError, MoveDirection, TransactionEdit};
+pub use command::{Applied, DomainCommand, DomainError, MoveDirection, OtherSide, TransactionEdit};
 pub use data_file::{Damage, OpenError, WriteError};
 pub use ledger::{AccountSummary, Generation, Ledger, LedgerView, RegisterEntry};
 pub use money::{CurrencyCode, Money, MoneyError, RoundingPolicy};

@@ -70,13 +70,16 @@ pub enum DomainCommand {
         transaction: TransactionId,
         flagged: bool,
     },
-    /// Delete a transaction, from whichever account holds it.
+    /// Delete a transaction, from whichever account holds it. Deleting one side of a
+    /// transfer deletes its other side too.
     DeleteTransaction { transaction: TransactionId },
     /// Put a deleted transaction back into `account`, with its id, where it was in the
-    /// register: the inverse of [`DomainCommand::DeleteTransaction`].
+    /// register, and a transfer's `other_side` back into its own: the inverse of
+    /// [`DomainCommand::DeleteTransaction`].
     RestoreTransaction {
         account: AccountId,
         transaction: Transaction,
+        other_side: Option<Box<OtherSide>>,
     },
     /// Add a category named `name` under `parent`, or at the top of the tree. It takes
     /// the next category id.
@@ -89,6 +92,36 @@ pub enum DomainCommand {
     /// Put a deleted category back, with its id: the inverse of
     /// [`DomainCommand::DeleteCategory`].
     RestoreCategory { category: Category },
+}
+
+/// A transfer's other side, in the account that holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OtherSide {
+    account: AccountId,
+    transaction: Transaction,
+}
+
+impl OtherSide {
+    pub(crate) fn new(account: AccountId, transaction: Transaction) -> Self {
+        Self {
+            account,
+            transaction,
+        }
+    }
+
+    /// The account that holds the other side.
+    pub fn account(&self) -> AccountId {
+        self.account
+    }
+
+    pub fn transaction(&self) -> &Transaction {
+        &self.transaction
+    }
+
+    /// The account and the transaction, taken apart.
+    pub(crate) fn into_parts(self) -> (AccountId, Transaction) {
+        (self.account, self.transaction)
+    }
 }
 
 /// Which way [`DomainCommand::MoveAccount`] moves an account.
@@ -201,6 +234,13 @@ pub enum DomainError {
     /// The command gave a transaction an amount in another currency than its account's.
     #[error("the amount is in another currency than the account: {transaction:?}")]
     CurrencyMismatch { transaction: TransactionId },
+    /// The command made a transfer to or from the account the transaction is in.
+    #[error("a transfer moves money to another account: {account:?}")]
+    TransferToOwnAccount { account: AccountId },
+    /// The command would post, change or delete the side of a transfer that is in
+    /// another account, which is closed, so its history is read-only.
+    #[error("the transfer's other account is closed: {account:?}")]
+    TransferAccountClosed { account: AccountId },
     /// The data file couldn't take the change.
     #[error(transparent)]
     Store(#[from] WriteError),

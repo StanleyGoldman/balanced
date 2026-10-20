@@ -17,6 +17,9 @@ index sqlite_autoindex_account_1 on account
 index sqlite_autoindex_split_line_1 on split_line
 (automatic)
 
+index sqlite_autoindex_transaction_1 on transaction
+(automatic)
+
 index sqlite_autoindex_undo_entry_1 on undo_entry
 (automatic)
 
@@ -83,14 +86,17 @@ CREATE TABLE "transaction" (
     payee TEXT NOT NULL,
     memo TEXT NOT NULL,
     allocation TEXT NOT NULL
-        CONSTRAINT transaction_allocation_known CHECK (allocation IN ('opening_balance', 'category', 'split')),
+        CONSTRAINT transaction_allocation_known CHECK (allocation IN ('opening_balance', 'category', 'split', 'transfer')),
     amount INTEGER,
     category_id INTEGER REFERENCES category (id) ON DELETE RESTRICT,
+    other_side_id INTEGER UNIQUE REFERENCES "transaction" (id) DEFERRABLE INITIALLY DEFERRED
+        CONSTRAINT transaction_other_side_not_itself CHECK (other_side_id <> id),
     flagged INTEGER NOT NULL DEFAULT 0 CONSTRAINT transaction_flagged_flag CHECK (flagged IN (0, 1)),
     cleared_status TEXT NOT NULL DEFAULT 'uncleared'
         CONSTRAINT transaction_cleared_status_known CHECK (cleared_status IN ('uncleared', 'cleared', 'reconciled')),
     CONSTRAINT transaction_amount_unless_split CHECK ((allocation = 'split') = (amount IS NULL)),
     CONSTRAINT transaction_category_when_category CHECK ((allocation = 'category') = (category_id IS NOT NULL)),
+    CONSTRAINT transaction_other_side_when_transfer CHECK ((allocation = 'transfer') = (other_side_id IS NOT NULL)),
     CONSTRAINT transaction_opening_balance_no_payee CHECK (allocation <> 'opening_balance' OR payee = '')
 ) STRICT
 
