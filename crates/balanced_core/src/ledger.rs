@@ -1186,7 +1186,7 @@ mod tests {
 
     use super::*;
     use crate::data_file::{date_text, money};
-    use crate::transaction::{NewTransaction, SplitLine};
+    use crate::transaction::{NewTransaction, SplitLine, SplitTarget};
     use crate::{
         AccountKind, AccountStatus, Allocation, MoveDirection, TransactionEdit, Visibility,
     };
@@ -1548,8 +1548,16 @@ mod tests {
                         date(12),
                         "Costco",
                         vec![
-                            SplitLine::new(groceries, "Food", usd(dec!(-142.37))),
-                            SplitLine::new(household, "Detergent", usd(dec!(-63.90))),
+                            SplitLine::new(
+                                SplitTarget::Category(groceries),
+                                "Food",
+                                usd(dec!(-142.37)),
+                            ),
+                            SplitLine::new(
+                                SplitTarget::Category(household),
+                                "Detergent",
+                                usd(dec!(-63.90)),
+                            ),
                         ],
                     ),
                     NewTransaction::new(date(15), "Fresh Market", groceries, usd(dec!(-10.00))),
@@ -1582,7 +1590,11 @@ mod tests {
                     NewTransaction::split(
                         date(12),
                         "Costco",
-                        vec![SplitLine::new(groceries, "Food", usd(dec!(-142.37)))],
+                        vec![SplitLine::new(
+                            SplitTarget::Category(groceries),
+                            "Food",
+                            usd(dec!(-142.37)),
+                        )],
                     ),
                 ]),
             ],
@@ -1608,9 +1620,12 @@ mod tests {
         };
         let lines: Vec<_> = lines
             .iter()
-            .map(|line| (line.category(), line.memo(), line.amount()))
+            .map(|line| (line.target(), line.memo(), line.amount()))
             .collect();
-        assert_eq!(lines, [(groceries, "Food", usd(dec!(-142.37)))]);
+        assert_eq!(
+            lines,
+            [(SplitTarget::Category(groceries), "Food", usd(dec!(-142.37)))]
+        );
         assert_eq!((costco.number(), costco.memo()), (None, ""));
     }
 
@@ -1868,8 +1883,16 @@ mod tests {
                         date(12),
                         "Costco",
                         vec![
-                            SplitLine::new(groceries, "Food", usd(dec!(-10.00))),
-                            SplitLine::new(groceries, "Snacks", usd(dec!(-5.00))),
+                            SplitLine::new(
+                                SplitTarget::Category(groceries),
+                                "Food",
+                                usd(dec!(-10.00)),
+                            ),
+                            SplitLine::new(
+                                SplitTarget::Category(groceries),
+                                "Snacks",
+                                usd(dec!(-5.00)),
+                            ),
                         ],
                     ),
                 ]),
@@ -2955,8 +2978,16 @@ mod tests {
                         date(12),
                         "Costco",
                         vec![
-                            SplitLine::new(groceries, "Food", usd(dec!(-10.00))),
-                            SplitLine::new(groceries, "Snacks", usd(dec!(-5.00))),
+                            SplitLine::new(
+                                SplitTarget::Category(groceries),
+                                "Food",
+                                usd(dec!(-10.00)),
+                            ),
+                            SplitLine::new(
+                                SplitTarget::Category(groceries),
+                                "Snacks",
+                                usd(dec!(-5.00)),
+                            ),
                         ],
                     ),
                 ]),
@@ -3072,7 +3103,11 @@ mod tests {
                     NewTransaction::split(
                         date(12),
                         "Costco",
-                        vec![SplitLine::new(groceries, "Food", usd(dec!(-142.37)))],
+                        vec![SplitLine::new(
+                            SplitTarget::Category(groceries),
+                            "Food",
+                            usd(dec!(-142.37)),
+                        )],
                     ),
                 ]),
             ],
