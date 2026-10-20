@@ -305,12 +305,15 @@ fn check_transfers(accounts: &[AccountSummary]) -> Result<(), OpenError> {
         .collect();
     let mut sides: Vec<(&Transaction, TransactionId)> = transactions
         .values()
-        .filter_map(|&side| side.other_side_id().map(|other_side| (side, other_side)))
+        .filter_map(|&side| match side.other_side_ids()[..] {
+            [other_side] => Some((side, other_side)),
+            _ => None,
+        })
         .collect();
     sides.sort_by_key(|(side, _)| side.id());
     for (side, other_side) in sides {
         let agrees = transactions.get(&other_side).is_some_and(|other| {
-            other.other_side_id() == Some(side.id())
+            other.other_side_ids() == [side.id()]
                 && other.date() == side.date()
                 && other.amount() == -side.amount()
         });
