@@ -896,6 +896,12 @@ impl Ledger {
         Ok(position)
     }
 
+    /// Where transaction `id`, a transfer's other side, is, when its account is open to
+    /// changes; else [`DomainError::TransferAccountClosed`] of its account.
+    fn changeable_other_side(&self, id: TransactionId) -> Result<TransactionPosition, DomainError> {
+        self.changeable_or(id, |account| DomainError::TransferAccountClosed { account })
+    }
+
     fn edit_transaction(
         &mut self,
         id: TransactionId,
@@ -909,8 +915,36 @@ impl Ledger {
             return Err(DomainError::UnknownCategory { category });
         }
         let old = &self.view.accounts[position.account].register[position.entry].transaction;
+        // Undoing a date or amount edit on one side brings its other side back too,
+        // since the two sides are always in step.
         let undo = old.undoing(&edit);
+        let other_side = old.other_side_id().zip(edit.for_other_side());
         let edited = old.edited(edit)?;
+        self.rewrite_transaction(position, edited)?;
+        // A refused other side, in a closed account, rolls back both.
+        if let Some((other_side, edit)) = other_side {
+            let position = self.changeable_other_side(other_side)?;
+            // `changeable_other_side` found both indices in this same view.
+            let edited = self.view.accounts[position.account].register[position.entry]
+                .transaction
+                .edited(edit)?;
+            self.rewrite_transaction(position, edited)?;
+        }
+        Ok(DomainCommand::EditTransaction {
+            transaction: id,
+            edit: undo,
+        })
+    }
+
+    /// Puts `edited` in place of the transaction at `position`, which has the same id.
+    /// Fails when a balance overflows or the data file refuses the row.
+    fn rewrite_transaction(
+        &mut self,
+        position: TransactionPosition,
+        edited: Transaction,
+    ) -> Result<(), DomainError> {
+        // `position` comes from a lookup in this same view.
+        let old = &self.view.accounts[position.account].register[position.entry].transaction;
         let row = transaction_row(self.view.accounts[position.account].account.id(), &edited);
         // The account is rebuilt, since a new amount moves every balance after it, and a
         // new date moves the transaction into date order.
@@ -927,10 +961,7 @@ impl Ledger {
         self.replace_account(position.account, summary)?;
         // The row is checked only now, so the ledger's own errors come first.
         self.store.update_transaction(&row?)?;
-        Ok(DomainCommand::EditTransaction {
-            transaction: id,
-            edit: undo,
-        })
+        Ok(())
     }
 
     fn set_flagged(
@@ -1045,9 +1076,7 @@ impl Ledger {
         // A refused other side, in a closed account, rolls back both.
         let other_side = match other_side {
             Some(other_side) => {
-                let position = self.changeable_or(other_side, |account| {
-                    DomainError::TransferAccountClosed { account }
-                })?;
+                let position = self.changeable_other_side(other_side)?;
                 let (account, transaction) = self.remove_transaction(position)?;
                 Some(Box::new(OtherSide::new(account, transaction)))
             }

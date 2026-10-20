@@ -60,7 +60,8 @@ pub enum DomainCommand {
         account: AccountId,
         transaction: NewTransaction,
     },
-    /// Change one field of an existing transaction.
+    /// Change one field of an existing transaction. A new date or amount on one side of
+    /// a transfer changes its other side too.
     EditTransaction {
         transaction: TransactionId,
         edit: TransactionEdit,
@@ -167,6 +168,22 @@ pub enum TransactionEdit {
     /// How far the transaction has been checked against the bank. Any status may
     /// follow any other.
     ClearedStatus(ClearedStatus),
+}
+
+impl TransactionEdit {
+    /// The edit a transfer's other side takes along with this one: the same date, or
+    /// the amount with its sign flipped. The other fields belong to each side alone.
+    pub(crate) fn for_other_side(&self) -> Option<Self> {
+        match self {
+            Self::Date(date) => Some(Self::Date(*date)),
+            Self::Amount(amount) => Some(Self::Amount(-*amount)),
+            Self::Number(_)
+            | Self::Payee(_)
+            | Self::Memo(_)
+            | Self::Category(_)
+            | Self::ClearedStatus(_) => None,
+        }
+    }
 }
 
 /// A [`DomainCommand`] the ledger applied, with the Command that undoes it.
