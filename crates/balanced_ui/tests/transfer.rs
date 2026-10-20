@@ -313,3 +313,54 @@ fn deleting_a_transfer_whose_other_account_is_closed_says_why_it_was_refused() {
         1
     );
 }
+
+/// Clicks the Register cell labelled `label`, which opens its editor.
+fn click_cell(harness: &mut Harness<'static, App>, label: &str) {
+    harness.get_by_role_and_label(Role::Cell, label).click();
+    harness.run();
+}
+
+/// Retypes the Category cell labelled `old` as `new`, and saves it with Enter.
+fn change_category(harness: &mut Harness<'static, App>, old: &str, new: &str) {
+    click_cell(harness, old);
+    press(harness, Modifiers::COMMAND, Key::A);
+    type_text(harness, new);
+    press(harness, Modifiers::NONE, Key::Enter);
+}
+
+#[test]
+fn picking_an_account_in_a_category_cell_makes_the_row_a_transfer() {
+    let mut harness = everyday();
+
+    change_category(&mut harness, "Auto & Transport:Fuel", "[Emergency Fund]");
+
+    assert_eq!(row_of(&harness, "Shell")[3], "[Emergency Fund]");
+    open(&mut harness, "Emergency Fund");
+    assert_eq!(row_of(&harness, "Shell")[3], "[Everyday Checking]");
+}
+
+#[test]
+fn picking_another_account_in_a_transfer_s_category_cell_moves_its_other_side() {
+    let mut harness = everyday();
+    add_transaction(&mut harness, "Saving up", "[Emergency Fund]", "200");
+
+    change_category(&mut harness, "[Emergency Fund]", "[Joint Checking]");
+
+    assert_eq!(row_of(&harness, "Saving up")[3], "[Joint Checking]");
+    open(&mut harness, "Joint Checking");
+    assert_eq!(row_of(&harness, "Saving up")[3], "[Everyday Checking]");
+    open(&mut harness, "Emergency Fund");
+    assert!(!column(&harness, "Payee").contains(&"Saving up".to_owned()));
+}
+
+#[test]
+fn picking_a_category_in_a_transfer_s_category_cell_deletes_its_other_side() {
+    let mut harness = everyday();
+    add_transaction(&mut harness, "Saving up", "[Emergency Fund]", "200");
+
+    change_category(&mut harness, "[Emergency Fund]", "Food & Dining:Groceries");
+
+    assert_eq!(row_of(&harness, "Saving up")[3], "Food & Dining:Groceries");
+    open(&mut harness, "Emergency Fund");
+    assert!(!column(&harness, "Payee").contains(&"Saving up".to_owned()));
+}

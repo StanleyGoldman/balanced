@@ -7,8 +7,8 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use balanced_core::{
-    AccountId, AccountSummary, Allocation, CategoryId, ClearedStatus, CurrencyCode, Generation,
-    LedgerView, Money, SplitTarget, TransactionId,
+    Account, AccountId, AccountSummary, Allocation, CategoryId, ClearedStatus, CurrencyCode,
+    Generation, LedgerView, Money, SplitTarget, TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
 use icu_calendar::{Date, Iso};
@@ -97,8 +97,8 @@ enum RowKind {
     /// The whole amount, in one category.
     Category(CategoryId),
     Split,
-    /// One side of a transfer.
-    Transfer,
+    /// One side of a transfer, to or from this other account.
+    Transfer(AccountId),
     /// The draft row, with its category once one is typed.
     Draft(Option<CategoryTarget>),
 }
@@ -191,30 +191,30 @@ impl RegisterRow {
             RowKind::Category(id) | RowKind::Draft(Some(CategoryTarget::Category(id))) => Some(id),
             RowKind::OpeningBalance
             | RowKind::Split
-            | RowKind::Transfer
+            | RowKind::Transfer(_)
             | RowKind::Draft(None | Some(CategoryTarget::Transfer(_))) => None,
         }
     }
 
-    /// The account the draft row transfers to or from, once one is typed. A posted
-    /// transfer's Category cell can't change yet, so it has none.
-    pub(crate) fn draft_transfer_account(&self) -> Option<AccountId> {
+    /// The other account the row's transfer moves its amount to or from, unless it
+    /// isn't a transfer, or is the draft row before an account is typed.
+    pub(crate) fn transfer_account(&self) -> Option<AccountId> {
         match self.kind {
-            RowKind::Draft(Some(CategoryTarget::Transfer(account))) => Some(account),
+            RowKind::Transfer(account)
+            | RowKind::Draft(Some(CategoryTarget::Transfer(account))) => Some(account),
             RowKind::OpeningBalance
             | RowKind::Category(_)
             | RowKind::Split
-            | RowKind::Transfer
             | RowKind::Draft(None | Some(CategoryTarget::Category(_))) => None,
         }
     }
 
-    /// Whether the whole amount goes in one category, which the Category cell edits.
+    /// Whether the whole amount goes in one category or to one other account, which
+    /// the Category cell edits.
     pub(crate) fn takes_category(&self) -> bool {
         match self.kind {
-            RowKind::Category(_) | RowKind::Draft(_) => true,
-            // TODO(#319): a transfer's Category cell changes its account.
-            RowKind::OpeningBalance | RowKind::Split | RowKind::Transfer => false,
+            RowKind::Category(_) | RowKind::Transfer(_) | RowKind::Draft(_) => true,
+            RowKind::OpeningBalance | RowKind::Split => false,
         }
     }
 
@@ -449,7 +449,10 @@ impl RegisterModel {
             view,
             paths: HashMap::new(),
         };
-        let mut other_accounts = OtherAccounts { view, names: None };
+        let mut other_accounts = OtherAccounts {
+            view,
+            accounts: None,
+        };
         let split = fl!(i18n, "register-split");
         let opening_balance = fl!(i18n, "register-opening-balance");
         let shows_balance = sort.key == SortKey::Date;
@@ -475,11 +478,14 @@ impl RegisterModel {
                         transaction.payee().to_owned(),
                         split.clone(),
                     ),
-                    Allocation::Transfer(other_side) => (
-                        RowKind::Transfer,
-                        transaction.payee().to_owned(),
-                        transfer_text(other_accounts.name(*other_side)),
-                    ),
+                    Allocation::Transfer(other_side) => {
+                        let other = other_accounts.account(*other_side);
+                        (
+                            RowKind::Transfer(other.id()),
+                            transaction.payee().to_owned(),
+                            transfer_text(other.name()),
+                        )
+                    }
                 };
                 let row = RegisterRow {
                     id: RowId::Transaction(transaction.id()),
@@ -630,33 +636,32 @@ impl CategoryPaths<'_> {
     }
 }
 
-/// The names of the accounts holding transfers' other sides, gathered the first time one
-/// is asked for while a model is built.
+/// The accounts holding transfers' other sides, gathered the first time one is asked
+/// for while a model is built.
 struct OtherAccounts<'a> {
     view: &'a LedgerView,
-    /// Each transaction's account's name, by the transaction's id. Every transaction is
-    /// in it, so a file whose transfer points at a transaction of another kind still
-    /// shows.
-    names: Option<HashMap<TransactionId, &'a str>>,
+    /// Each transaction's account, by the transaction's id. Every transaction is in it,
+    /// so a file whose transfer points at a transaction of another kind still shows.
+    accounts: Option<HashMap<TransactionId, &'a Account>>,
 }
 
 impl<'a> OtherAccounts<'a> {
-    /// The name of the account holding transaction `other_side`.
-    fn name(&mut self, other_side: TransactionId) -> &'a str {
+    /// The account holding transaction `other_side`.
+    fn account(&mut self, other_side: TransactionId) -> &'a Account {
         let view = self.view;
-        let names = self.names.get_or_insert_with(|| {
+        let accounts = self.accounts.get_or_insert_with(|| {
             view.accounts()
                 .iter()
                 .flat_map(|summary| {
-                    let name = summary.account().name();
+                    let account = summary.account();
                     summary
                         .register()
                         .iter()
-                        .map(move |entry| (entry.transaction().id(), name))
+                        .map(move |entry| (entry.transaction().id(), account))
                 })
                 .collect()
         });
-        names
+        accounts
             .get(&other_side)
             .expect("a transfer's other side is in its snapshot")
     }

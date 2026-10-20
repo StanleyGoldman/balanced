@@ -362,7 +362,7 @@ impl TextField {
         }
     }
 
-    /// The change that saves `text`, already trimmed, in the field of `row`, or `None`
+    /// The edit that saves `text`, already trimmed, in the field of `row`, or `None`
     /// when it changes nothing. An empty number clears it. A category is named by its
     /// path, and an account by `[Name]`, ignoring case; it fails when no entry in
     /// `choices` has that name.
@@ -371,7 +371,7 @@ impl TextField {
         row: &RegisterRow,
         text: &str,
         choices: &FieldChoices,
-    ) -> Result<Option<CellChange>, NoSuchCategory> {
+    ) -> Result<Option<TransactionEdit>, NoSuchCategory> {
         if text == self.saved(row) {
             return Ok(None);
         }
@@ -389,28 +389,14 @@ impl TextField {
                     return Ok(None);
                 }
                 CategoryTarget::Category(category) => TransactionEdit::Category(category),
-                CategoryTarget::Transfer(account)
-                    if row.draft_transfer_account() == Some(account) =>
-                {
+                CategoryTarget::Transfer(account) if row.transfer_account() == Some(account) => {
                     return Ok(None);
                 }
-                CategoryTarget::Transfer(account) => {
-                    return Ok(Some(CellChange::Transfer(account)));
-                }
+                CategoryTarget::Transfer(account) => TransactionEdit::Transfer(account),
             },
         };
-        Ok(Some(CellChange::Edit(edit)))
+        Ok(Some(edit))
     }
-}
-
-/// What saving a cell changes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum CellChange {
-    /// One field of the transaction.
-    Edit(TransactionEdit),
-    /// The Category cell names another account: the transaction is a transfer to or
-    /// from it.
-    Transfer(AccountId),
 }
 
 /// Why a Category cell's text can't be saved: no category has that name.
@@ -2217,7 +2203,7 @@ fn commit(
             currency,
             side,
         } => match amount_edit(row, *side, text, reader, *currency) {
-            Ok(change) => change.map(CellChange::Edit),
+            Ok(change) => change,
             Err(error) => return Commit::Unreadable(error),
         },
     };
@@ -2227,22 +2213,17 @@ fn commit(
     Commit::Done
 }
 
-/// Saves `change` in a cell of `row`: in `draft` on the draft row, else by sending one
+/// Saves `edit` in a cell of `row`: in `draft` on the draft row, else by sending one
 /// edit Command.
-fn save(row: RowId, change: CellChange, commands: &CommandSender, draft: &mut Draft) {
-    match (row, change) {
-        (RowId::Transaction(transaction), CellChange::Edit(edit)) => {
+fn save(row: RowId, edit: TransactionEdit, commands: &CommandSender, draft: &mut Draft) {
+    match row {
+        RowId::Transaction(transaction) => {
             commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
                 transaction,
                 edit,
             }));
         }
-        // TODO(#319): make an existing transaction a transfer.
-        (RowId::Transaction(_), CellChange::Transfer(_)) => {
-            commands.send(AppCommand::ShowStatus(StatusMessage::NotAvailableYet));
-        }
-        (RowId::Draft, CellChange::Edit(edit)) => draft.edit(edit),
-        (RowId::Draft, CellChange::Transfer(account)) => draft.transfer(account),
+        RowId::Draft => draft.edit(edit),
     }
 }
 
@@ -2283,12 +2264,7 @@ fn commit_date(
     match edit.date.commit(i18n) {
         date_field::Commit::Unchanged => Commit::Done,
         date_field::Commit::Changed(date) => {
-            save(
-                row.id(),
-                CellChange::Edit(TransactionEdit::Date(date)),
-                commands,
-                draft,
-            );
+            save(row.id(), TransactionEdit::Date(date), commands, draft);
             Commit::Done
         }
         date_field::Commit::Rejected => Commit::Refused,
