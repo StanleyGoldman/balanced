@@ -1,7 +1,6 @@
 # A transfer is a transaction on each side, each pointing at the other. Each side stores
-# its amount and has no category. The link must point at a transaction, and no
-# transaction is the other side of two. Both sides go in within one SQLite transaction,
-# so the link is checked at commit, not row by row.
+# its amount and has no category. The link must point at a transaction. Both sides go in
+# within one SQLite transaction, so the link is checked at commit, not row by row.
 
 statement ok
 INSERT INTO account (id, name, kind, position, hidden, closed) VALUES
@@ -50,12 +49,6 @@ INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation
 statement error CHECK constraint failed: transaction_other_side_not_itself
 INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id, other_side_id) VALUES
     (2, 0, '2026-01-03', NULL, '', '', 'transfer', -1, NULL, 2)
-
-# No transaction is the other side of two.
-
-statement error UNIQUE constraint failed: transaction.other_side_id
-INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id, other_side_id) VALUES
-    (2, 0, '2026-01-03', NULL, '', '', 'transfer', -1, NULL, 1)
 
 # A link to a transaction that doesn't exist fails at commit.
 

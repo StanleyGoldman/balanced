@@ -265,8 +265,11 @@ impl App {
         };
         match command {
             AppCommand::Domain(command) => {
-                if let Some(Err(error)) = ledger.map(|ledger| ledger.apply(command)) {
-                    self.main_window.show_status(StatusMessage::Rejected(error));
+                if let Some(ledger) = ledger
+                    && let Err(error) = ledger.apply(command)
+                {
+                    let message = StatusMessage::refusal(error, &ledger.snapshot());
+                    self.main_window.show_status(message);
                 }
             }
             AppCommand::SubmitForm(command) => {
@@ -276,13 +279,19 @@ impl App {
                 }
             }
             AppCommand::Undo => {
-                if let Some(Err(error)) = ledger.map(Ledger::undo) {
-                    self.main_window.show_status(StatusMessage::Rejected(error));
+                if let Some(ledger) = ledger
+                    && let Err(error) = ledger.undo()
+                {
+                    let message = StatusMessage::refusal(error, &ledger.snapshot());
+                    self.main_window.show_status(message);
                 }
             }
             AppCommand::Redo => {
-                if let Some(Err(error)) = ledger.map(Ledger::redo) {
-                    self.main_window.show_status(StatusMessage::Rejected(error));
+                if let Some(ledger) = ledger
+                    && let Err(error) = ledger.redo()
+                {
+                    let message = StatusMessage::refusal(error, &ledger.snapshot());
+                    self.main_window.show_status(message);
                 }
             }
             AppCommand::Navigate(route) => self.main_window.navigate(route),

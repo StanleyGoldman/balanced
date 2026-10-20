@@ -5,7 +5,9 @@
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use balanced_core::{AccountId, DomainCommand, DomainError, Money, TransactionId, WriteError};
+use balanced_core::{
+    AccountId, DomainCommand, DomainError, LedgerView, Money, TransactionId, WriteError,
+};
 use balanced_i18n::Localizer;
 use eframe::egui;
 
@@ -122,9 +124,26 @@ pub(crate) enum StatusMessage {
     PreferencesNotSaved,
     /// Why the ledger refused a change.
     Rejected(DomainError),
+    /// Why the ledger refused to change the date or amount of a split line's other side,
+    /// or to delete it: those change only from the split, in the account named
+    /// `split_account`.
+    SplitLineOtherSide { split_account: String },
 }
 
 impl StatusMessage {
+    /// Why the ledger refused a change with `error`, naming from `view` the account the
+    /// refusal points to.
+    pub(crate) fn refusal(error: DomainError, view: &LedgerView) -> Self {
+        if let DomainError::SplitLineOtherSide { account } = error
+            && let Some(summary) = view.account(account)
+        {
+            return Self::SplitLineOtherSide {
+                split_account: summary.account().name().to_owned(),
+            };
+        }
+        Self::Rejected(error)
+    }
+
     pub(crate) fn text(&self, i18n: &Localizer) -> String {
         match self {
             Self::About => fl!(i18n, "status-about", version = env!("CARGO_PKG_VERSION")),
@@ -133,6 +152,11 @@ impl StatusMessage {
             Self::PreferencesReset => fl!(i18n, "status-preferences-reset"),
             Self::PreferencesUnreadable => fl!(i18n, "status-preferences-unreadable"),
             Self::PreferencesNotSaved => fl!(i18n, "status-preferences-not-saved"),
+            Self::SplitLineOtherSide { split_account } => fl!(
+                i18n,
+                "status-split-line-other-side-in",
+                account = split_account.clone()
+            ),
             Self::Rejected(error) => match error {
                 DomainError::AccountClosed { .. } => fl!(i18n, "status-account-closed"),
                 DomainError::TransferAccountClosed { .. } => {
@@ -140,6 +164,9 @@ impl StatusMessage {
                 }
                 DomainError::TransferToOwnAccount { .. } => {
                     fl!(i18n, "status-transfer-to-own-account")
+                }
+                DomainError::SplitLineOtherSide { .. } => {
+                    fl!(i18n, "status-split-line-other-side")
                 }
                 DomainError::AccountHasTransfers { .. } => {
                     fl!(i18n, "status-account-has-transfers")

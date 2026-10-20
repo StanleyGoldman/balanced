@@ -44,7 +44,10 @@ CREATE INDEX category_parent_id ON category (parent_id);
 -- A transaction in one account. `amount` is in minor units. A split's amount is the sum
 -- of its lines, so it stores neither an amount nor a category. A transfer stores its
 -- amount and `other_side_id`, the transaction it records in the other account, which
--- points back at it. Transactions on one date are ordered by id.
+-- points back at it, or the split whose line it records. `other_side_id` isn't UNIQUE,
+-- since each of a split's lines to an account has an other side pointing at the split,
+-- so the schema doesn't stop two transfers pointing at one transaction; `Ledger` does.
+-- Transactions on one date are ordered by id.
 --
 -- Both sides of a transfer are written in one SQLite transaction, so their link is
 -- checked at commit. It is NO ACTION, not RESTRICT: SQLite checks RESTRICT as each row
@@ -61,7 +64,7 @@ CREATE TABLE "transaction" (
         CONSTRAINT transaction_allocation_known CHECK (allocation IN ('opening_balance', 'category', 'split', 'transfer')),
     amount INTEGER,
     category_id INTEGER REFERENCES category (id) ON DELETE RESTRICT,
-    other_side_id INTEGER UNIQUE REFERENCES "transaction" (id) DEFERRABLE INITIALLY DEFERRED
+    other_side_id INTEGER REFERENCES "transaction" (id) DEFERRABLE INITIALLY DEFERRED
         CONSTRAINT transaction_other_side_not_itself CHECK (other_side_id <> id),
     flagged INTEGER NOT NULL DEFAULT 0 CONSTRAINT transaction_flagged_flag CHECK (flagged IN (0, 1)),
     cleared_status TEXT NOT NULL DEFAULT 'uncleared'
@@ -76,16 +79,21 @@ CREATE UNIQUE INDEX transaction_one_opening_balance ON "transaction" (account_id
     WHERE allocation = 'opening_balance';
 CREATE INDEX transaction_register_order ON "transaction" (account_id, date, id);
 CREATE INDEX transaction_category_id ON "transaction" (category_id);
+CREATE INDEX transaction_other_side_id ON "transaction" (other_side_id);
 
 -- One line of a split transaction, in the order the split lists them. The primary key
--- also serves as the index on `transaction_id`.
+-- also serves as the index on `transaction_id`. A line names a category, or is a transfer
+-- naming its own other side in the other account, a transaction pointing back at the
+-- split. That link is checked at commit and is NO ACTION, as a transfer's is.
 CREATE TABLE split_line (
     transaction_id INTEGER NOT NULL REFERENCES "transaction" (id) ON DELETE RESTRICT,
     position INTEGER NOT NULL,
-    category_id INTEGER NOT NULL REFERENCES category (id) ON DELETE RESTRICT,
+    category_id INTEGER REFERENCES category (id) ON DELETE RESTRICT,
+    other_side_id INTEGER UNIQUE REFERENCES "transaction" (id) DEFERRABLE INITIALLY DEFERRED,
     memo TEXT NOT NULL,
     amount INTEGER NOT NULL,
-    PRIMARY KEY (transaction_id, position)
+    PRIMARY KEY (transaction_id, position),
+    CONSTRAINT split_line_category_or_other_side CHECK ((category_id IS NULL) <> (other_side_id IS NULL))
 ) STRICT;
 
 CREATE INDEX split_line_category_id ON split_line (category_id);

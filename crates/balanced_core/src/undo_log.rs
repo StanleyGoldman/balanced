@@ -8,10 +8,12 @@ mod v1;
 use icu_calendar::{Date, Iso};
 
 use crate::data_file::{date_text, minor_units, money};
-use crate::transaction::{NewAllocation, NewTransactionParts, SplitLine, SplitTarget};
+use crate::transaction::{
+    NewAllocation, NewSplitLine, NewSplitTarget, NewTransactionParts, SplitLine, SplitTarget,
+};
 use crate::{
     Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId,
-    ClearedStatus, CurrencyCode, DomainCommand, MoneyError, MoveDirection, NewTransaction,
+    ClearedStatus, CurrencyCode, DomainCommand, Money, MoneyError, MoveDirection, NewTransaction,
     OtherSide, Transaction, TransactionEdit, TransactionId, Visibility, WriteError,
 };
 
@@ -122,11 +124,14 @@ fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
         DomainCommand::RestoreTransaction {
             account,
             transaction,
-            other_side,
+            other_sides,
         } => v1::Command::RestoreTransaction {
             account: account.raw(),
             transaction: transaction_to_wire(transaction)?,
-            other_side: other_side.as_deref().map(other_side_to_wire).transpose()?,
+            other_sides: other_sides
+                .iter()
+                .map(other_side_to_wire)
+                .collect::<Result<_, _>>()?,
         },
         DomainCommand::CreateCategory { name, parent } => v1::Command::CreateCategory {
             name: name.clone(),
@@ -176,7 +181,24 @@ fn new_transaction_to_wire(transaction: &NewTransaction) -> Result<v1::NewTransa
                 category: category.raw(),
                 amount: minor_units(*amount)?,
             },
-            NewAllocation::Split(lines) => split_to_wire(lines)?,
+            NewAllocation::Split(lines) => v1::Allocation::Split(
+                lines
+                    .iter()
+                    .map(|line| {
+                        let target = match line.target() {
+                            NewSplitTarget::Category(category) => {
+                                v1::SplitTarget::Category(category.raw())
+                            }
+                            NewSplitTarget::Transfer(account) => {
+                                v1::SplitTarget::Transfer(v1::LineTo {
+                                    account: account.raw(),
+                                })
+                            }
+                        };
+                        line_to_wire(target, line.memo(), line.amount())
+                    })
+                    .collect::<Result<_, _>>()?,
+            ),
             NewAllocation::Transfer(account, amount) => v1::Allocation::Transfer(v1::TransferTo {
                 account: account.raw(),
                 amount: minor_units(*amount)?,
@@ -223,7 +245,24 @@ fn transaction_to_wire(transaction: &Transaction) -> Result<v1::Transaction, Wri
                     category: category.raw(),
                     amount: amount()?,
                 },
-                Allocation::Split(lines) => split_to_wire(lines)?,
+                Allocation::Split(lines) => v1::Allocation::Split(
+                    lines
+                        .iter()
+                        .map(|line| {
+                            let target = match line.target() {
+                                SplitTarget::Category(category) => {
+                                    v1::SplitTarget::Category(category.raw())
+                                }
+                                SplitTarget::Transfer(other_side) => {
+                                    v1::SplitTarget::Transfer(v1::LineSide {
+                                        other_side: other_side.raw(),
+                                    })
+                                }
+                            };
+                            line_to_wire(target, line.memo(), line.amount())
+                        })
+                        .collect::<Result<_, _>>()?,
+                ),
                 Allocation::Transfer(other_side) => v1::Allocation::Transfer(v1::TransferSide {
                     other_side: other_side.raw(),
                     amount: amount()?,
@@ -242,23 +281,17 @@ fn other_side_to_wire(other_side: &OtherSide) -> Result<v1::OtherSide, WriteErro
     })
 }
 
-fn split_to_wire<T>(lines: &[SplitLine]) -> Result<v1::Allocation<T>, WriteError> {
-    Ok(v1::Allocation::Split(
-        lines
-            .iter()
-            .map(|line| {
-                Ok(v1::SplitLine {
-                    target: match line.target() {
-                        SplitTarget::Category(category) => {
-                            v1::SplitTarget::Category(category.raw())
-                        }
-                    },
-                    memo: line.memo().to_owned(),
-                    amount: minor_units(line.amount())?,
-                })
-            })
-            .collect::<Result<_, WriteError>>()?,
-    ))
+/// A split line going to `target`, on the wire.
+fn line_to_wire<L>(
+    target: v1::SplitTarget<L>,
+    memo: &str,
+    amount: Money,
+) -> Result<v1::SplitLine<L>, WriteError> {
+    Ok(v1::SplitLine {
+        target,
+        memo: memo.to_owned(),
+        amount: minor_units(amount)?,
+    })
 }
 
 fn kind_to_wire(kind: AccountKind) -> v1::AccountKind {
@@ -370,13 +403,14 @@ fn from_wire(
         v1::Command::RestoreTransaction {
             account,
             transaction,
-            other_side,
+            other_sides,
         } => DomainCommand::RestoreTransaction {
             account: AccountId::new(account),
             transaction: transaction_from_wire(transaction, currency)?,
-            other_side: other_side
-                .map(|other_side| other_side_from_wire(other_side, currency).map(Box::new))
-                .transpose()?,
+            other_sides: other_sides
+                .into_iter()
+                .map(|other_side| other_side_from_wire(other_side, currency))
+                .collect::<Result<_, _>>()?,
         },
         v1::Command::CreateCategory { name, parent } => DomainCommand::CreateCategory {
             name,
@@ -421,7 +455,22 @@ fn new_transaction_from_wire(
         v1::Allocation::Category { category, amount } => {
             NewAllocation::Category(CategoryId::new(category), money(amount, currency))
         }
-        v1::Allocation::Split(lines) => NewAllocation::Split(split_from_wire(lines, currency)),
+        v1::Allocation::Split(lines) => NewAllocation::Split(
+            lines
+                .into_iter()
+                .map(|line| {
+                    let target = match line.target {
+                        v1::SplitTarget::Category(category) => {
+                            NewSplitTarget::Category(CategoryId::new(category))
+                        }
+                        v1::SplitTarget::Transfer(to) => {
+                            NewSplitTarget::Transfer(AccountId::new(to.account))
+                        }
+                    };
+                    NewSplitLine::new(target, &line.memo, money(line.amount, currency))
+                })
+                .collect(),
+        ),
         v1::Allocation::Transfer(to) => {
             NewAllocation::Transfer(AccountId::new(to.account), money(to.amount, currency))
         }
@@ -477,39 +526,48 @@ fn transaction_from_wire(
         memo,
         allocation,
     } = transaction.fields;
-    let id = TransactionId::new(transaction.id);
-    let cleared_status = cleared_status_from_wire(transaction.cleared_status);
-    let allocation = match allocation {
-        v1::Allocation::Transfer(side) => {
-            return Ok(Transaction::from_parts(
-                id,
-                date(&date_text)?,
-                number,
-                payee,
-                memo,
-                Allocation::Transfer(TransactionId::new(side.other_side)),
-                money(side.amount, currency),
-            )
-            .with_flag(transaction.flagged)
-            .with_cleared_status(cleared_status));
+    let (allocation, amount) = match allocation {
+        v1::Allocation::OpeningBalance { amount } => {
+            (Allocation::OpeningBalance, money(amount, currency))
         }
-        v1::Allocation::OpeningBalance { amount } => v1::Allocation::OpeningBalance { amount },
-        v1::Allocation::Category { category, amount } => {
-            v1::Allocation::Category { category, amount }
+        v1::Allocation::Category { category, amount } => (
+            Allocation::Category(CategoryId::new(category)),
+            money(amount, currency),
+        ),
+        v1::Allocation::Split(lines) => {
+            let lines: Vec<SplitLine> = lines
+                .into_iter()
+                .map(|line| {
+                    let target = match line.target {
+                        v1::SplitTarget::Category(category) => {
+                            SplitTarget::Category(CategoryId::new(category))
+                        }
+                        v1::SplitTarget::Transfer(side) => {
+                            SplitTarget::Transfer(TransactionId::new(side.other_side))
+                        }
+                    };
+                    SplitLine::new(target, &line.memo, money(line.amount, currency))
+                })
+                .collect();
+            let amount = SplitLine::sum(&lines, currency)?;
+            (Allocation::Split(lines), amount)
         }
-        v1::Allocation::Split(lines) => v1::Allocation::Split(lines),
+        v1::Allocation::Transfer(side) => (
+            Allocation::Transfer(TransactionId::new(side.other_side)),
+            money(side.amount, currency),
+        ),
     };
-    let fields = v1::NewTransaction {
-        date: date_text,
+    Ok(Transaction::from_parts(
+        TransactionId::new(transaction.id),
+        date(&date_text)?,
         number,
         payee,
         memo,
         allocation,
-    };
-    Ok(new_transaction_from_wire(fields, currency)?
-        .into_transaction(id, currency)?
-        .with_flag(transaction.flagged)
-        .with_cleared_status(cleared_status))
+        amount,
+    )
+    .with_flag(transaction.flagged)
+    .with_cleared_status(cleared_status_from_wire(transaction.cleared_status)))
 }
 
 fn other_side_from_wire(
@@ -520,23 +578,6 @@ fn other_side_from_wire(
         AccountId::new(other_side.account),
         transaction_from_wire(other_side.transaction, currency)?,
     ))
-}
-
-fn split_from_wire(lines: Vec<v1::SplitLine>, currency: CurrencyCode) -> Vec<SplitLine> {
-    lines
-        .into_iter()
-        .map(|line| {
-            SplitLine::new(
-                match line.target {
-                    v1::SplitTarget::Category(category) => {
-                        SplitTarget::Category(CategoryId::new(category))
-                    }
-                },
-                &line.memo,
-                money(line.amount, currency),
-            )
-        })
-        .collect()
 }
 
 fn kind_from_wire(kind: v1::AccountKind) -> AccountKind {
@@ -578,7 +619,7 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use super::*;
-    use crate::transaction::{SplitLine, SplitTarget};
+    use crate::transaction::{NewSplitLine, NewSplitTarget, SplitLine, SplitTarget};
     use crate::{
         Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId, Money,
         MoveDirection, NewTransaction, Transaction, TransactionEdit, TransactionId, Visibility,
@@ -654,8 +695,8 @@ mod tests {
             NewTransaction::split(
                 date(4),
                 "Costco",
-                vec![SplitLine::new(
-                    SplitTarget::Category(CategoryId::new(3)),
+                vec![NewSplitLine::new(
+                    NewSplitTarget::Category(CategoryId::new(3)),
                     "Groceries",
                     usd(dec!(-80.00)),
                 )],
@@ -672,11 +713,11 @@ mod tests {
         let restore = |transaction| DomainCommand::RestoreTransaction {
             account,
             transaction,
-            other_side: None,
+            other_sides: Vec::new(),
         };
         let [opening, restored, paid] = transactions();
         let [shell, split, opening_balance] = new_transactions();
-        let [post_transfer, restore_transfer] = transfer_commands();
+        let [post_transfer, restore_transfer, post_split, restore_split] = transfer_commands();
         let rename = DomainCommand::RenameAccount {
             account,
             name: "Joint".to_owned(),
@@ -736,6 +777,7 @@ mod tests {
                 transaction: opening_balance,
             },
             post_transfer,
+            post_split,
             edit(TransactionEdit::Date(date(9))),
             edit(TransactionEdit::Number(Some("1044".to_owned()))),
             edit(TransactionEdit::Number(None)),
@@ -760,14 +802,16 @@ mod tests {
             restore(restored.clone().with_flag(true)),
             restore(restored.with_cleared_status(ClearedStatus::Reconciled)),
             restore_transfer,
+            restore_split,
         ]
         .into_iter()
         .chain(category_commands())
         .collect()
     }
 
-    /// A transfer posted, and one restored with its other side.
-    fn transfer_commands() -> [DomainCommand; 2] {
+    /// A transfer posted, and one restored with its other side; then a split with a line
+    /// to an account posted, and one restored with its line's other side.
+    fn transfer_commands() -> [DomainCommand; 4] {
         let sent = Transaction::from_parts(
             TransactionId::new(14),
             date(5),
@@ -778,6 +822,28 @@ mod tests {
             usd(dec!(-200.00)),
         );
         let received = sent.other_side(TransactionId::new(15)).with_flag(true);
+        let payday = Transaction::from_parts(
+            TransactionId::new(16),
+            date(6),
+            None,
+            "Payday".to_owned(),
+            String::new(),
+            Allocation::Split(vec![
+                SplitLine::new(
+                    SplitTarget::Category(CategoryId::new(3)),
+                    "Food",
+                    usd(dec!(-50.00)),
+                ),
+                SplitLine::new(
+                    SplitTarget::Transfer(TransactionId::new(17)),
+                    "Rainy day",
+                    usd(dec!(-200.00)),
+                ),
+            ]),
+            usd(dec!(-250.00)),
+        );
+        let [rainy_day] = <[Transaction; 1]>::try_from(payday.other_sides())
+            .expect("the split has one line to an account");
         [
             DomainCommand::PostTransaction {
                 account: AccountId::new(7),
@@ -791,7 +857,31 @@ mod tests {
             DomainCommand::RestoreTransaction {
                 account: AccountId::new(7),
                 transaction: sent,
-                other_side: Some(Box::new(OtherSide::new(AccountId::new(8), received))),
+                other_sides: vec![OtherSide::new(AccountId::new(8), received)],
+            },
+            DomainCommand::PostTransaction {
+                account: AccountId::new(7),
+                transaction: NewTransaction::split(
+                    date(6),
+                    "Payday",
+                    vec![
+                        NewSplitLine::new(
+                            NewSplitTarget::Category(CategoryId::new(3)),
+                            "Food",
+                            usd(dec!(-50.00)),
+                        ),
+                        NewSplitLine::new(
+                            NewSplitTarget::Transfer(AccountId::new(8)),
+                            "Rainy day",
+                            usd(dec!(-200.00)),
+                        ),
+                    ],
+                ),
+            },
+            DomainCommand::RestoreTransaction {
+                account: AccountId::new(7),
+                transaction: payday,
+                other_sides: vec![OtherSide::new(AccountId::new(8), rainy_day)],
             },
         ]
     }
@@ -869,7 +959,7 @@ mod tests {
             DomainCommand::RestoreTransaction {
                 account: AccountId::new(7),
                 transaction: paid,
-                other_side: None,
+                other_sides: Vec::new(),
             }
         );
     }

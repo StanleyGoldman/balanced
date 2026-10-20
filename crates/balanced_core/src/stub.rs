@@ -6,7 +6,7 @@ use icu_calendar::{Date, Iso};
 
 use crate::account::NewAccount;
 use crate::category::NewCategory;
-use crate::transaction::{NewTransaction, SplitLine, SplitTarget};
+use crate::transaction::{NewSplitLine, NewSplitTarget, NewTransaction};
 use crate::{AccountKind, CategoryId, ClearedStatus, CurrencyCode, Ledger, Money};
 
 /// How many transactions the generated account holds, after its opening balance.
@@ -211,13 +211,13 @@ fn everyday_checking(opened: Date<Iso>, money: impl Fn(&str) -> Money) -> NewAcc
             date(2026, 9, 12),
             "Costco",
             vec![
-                SplitLine::new(
-                    SplitTarget::Category(StubCategory::Groceries.id()),
+                NewSplitLine::new(
+                    NewSplitTarget::Category(StubCategory::Groceries.id()),
                     "Food",
                     money("-142.37"),
                 ),
-                SplitLine::new(
-                    SplitTarget::Category(StubCategory::Household.id()),
+                NewSplitLine::new(
+                    NewSplitTarget::Category(StubCategory::Household.id()),
                     "Paper towels, detergent",
                     money("-63.90"),
                 ),

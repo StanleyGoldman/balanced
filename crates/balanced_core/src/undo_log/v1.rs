@@ -60,12 +60,12 @@ pub(crate) enum Command {
     DeleteTransaction {
         transaction: u32,
     },
-    /// A transaction that isn't a transfer leaves `other_side` out.
+    /// A transaction with no other side leaves `other_sides` out.
     RestoreTransaction {
         account: u32,
         transaction: Transaction,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        other_side: Option<OtherSide>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        other_sides: Vec<OtherSide>,
     },
     CreateCategory {
         name: String,
@@ -130,21 +130,22 @@ pub(crate) struct Category {
 }
 
 /// A transaction with its id: a [`NewTransaction`]'s fields after `id`, in one object,
-/// a transfer naming its other side, then `flagged`, which an unflagged transaction
-/// leaves out, and `cleared_status`, which an uncleared one leaves out. An entry written
-/// before the status existed has none, and reads as uncleared.
+/// a transfer and a split line to an account naming its other side, then `flagged`,
+/// which an unflagged transaction leaves out, and `cleared_status`, which an uncleared
+/// one leaves out. An entry written before the status existed has none, and reads as
+/// uncleared.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Transaction {
     pub(crate) id: u32,
     #[serde(flatten)]
-    pub(crate) fields: NewTransaction<TransferSide>,
+    pub(crate) fields: NewTransaction<TransferSide, LineSide>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) flagged: bool,
     #[serde(default, skip_serializing_if = "ClearedStatus::is_uncleared")]
     pub(crate) cleared_status: ClearedStatus,
 }
 
-/// A transfer's other side, in account `account`.
+/// A transfer's other side, or a split line's, in account `account`.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct OtherSide {
     pub(crate) account: u32,
@@ -152,22 +153,22 @@ pub(crate) struct OtherSide {
 }
 
 /// A transaction to post, which the ledger gives an id. A split's amount is the sum of
-/// its lines. `T` is how a transfer is given: by the account it goes to, for a transaction
-/// to post.
+/// its lines. `T` is how a transfer is given, and `L` how a split line's transfer is: by
+/// the account it goes to, for a transaction to post.
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct NewTransaction<T = TransferTo> {
+pub(crate) struct NewTransaction<T = TransferTo, L = LineTo> {
     pub(crate) date: String,
     pub(crate) number: Option<String>,
     pub(crate) payee: String,
     pub(crate) memo: String,
-    pub(crate) allocation: Allocation<T>,
+    pub(crate) allocation: Allocation<T, L>,
 }
 
 /// Where a transaction's amount went, with the amount where it isn't the lines' sum. A
-/// transfer is a `T`.
+/// transfer is a `T`, and a split line's transfer an `L`.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum Allocation<T> {
+pub(crate) enum Allocation<T, L> {
     OpeningBalance {
         amount: i64,
     },
@@ -176,7 +177,7 @@ pub(crate) enum Allocation<T> {
         amount: i64,
     },
     /// The lines in order, as an array.
-    Split(Vec<SplitLine>),
+    Split(Vec<SplitLine<L>>),
     Transfer(T),
 }
 
@@ -194,20 +195,34 @@ pub(crate) struct TransferSide {
     pub(crate) amount: i64,
 }
 
+/// A split line to post's transfer, to or from `account`.
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct SplitLine {
-    /// Written as the line's own key, `"category": 3`, beside its memo and amount.
+pub(crate) struct LineTo {
+    pub(crate) account: u32,
+}
+
+/// A posted split line's transfer, whose other side is transaction `other_side`.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct LineSide {
+    pub(crate) other_side: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct SplitLine<L> {
+    /// Written as the line's own key, `"category": 3` or `"transfer": {…}`, beside its
+    /// memo and amount.
     #[serde(flatten)]
-    pub(crate) target: SplitTarget,
+    pub(crate) target: SplitTarget<L>,
     pub(crate) memo: String,
     pub(crate) amount: i64,
 }
 
-/// Where a split line's part of the amount went.
+/// Where a split line's part of the amount went. A transfer is an `L`.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum SplitTarget {
+pub(crate) enum SplitTarget<L> {
     Category(u32),
+    Transfer(L),
 }
 
 #[derive(Debug, Serialize, Deserialize)]

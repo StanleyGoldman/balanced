@@ -220,15 +220,20 @@ impl Store {
     fn insert_split_lines(&self, transaction: &TransactionRow) -> Result<(), StoreError> {
         if let AllocationRow::Split(lines) = &transaction.allocation {
             let mut insert = self.connection.prepare_cached(
-                "INSERT INTO split_line (transaction_id, position, category_id, memo, amount)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO split_line
+                 (transaction_id, position, category_id, other_side_id, memo, amount)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )?;
             for (position, line) in (0_i64..).zip(lines) {
-                let SplitTargetRow::Category { category_id } = line.target;
+                let (category_id, other_side_id) = match line.target {
+                    SplitTargetRow::Category { category_id } => (Some(category_id), None),
+                    SplitTargetRow::Transfer { other_side_id } => (None, Some(other_side_id)),
+                };
                 insert.execute(params![
                     transaction.id,
                     position,
                     category_id,
+                    other_side_id,
                     line.memo,
                     line.amount
                 ])?;

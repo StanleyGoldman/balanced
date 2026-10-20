@@ -1,0 +1,103 @@
+# A split line names a category or, as a transfer, its other side: a transaction in the
+# other account that points back at the split. Each such line has its own other side, so
+# two of a split's lines may go to one account, and a split may be the other side of
+# several transactions. The line's link is checked at commit, as a transfer's is.
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES
+    (0, 'Checking', 'checking', 0, 0, 0),
+    (1, 'Savings', 'savings', 0, 0, 0)
+
+statement ok
+INSERT INTO category (id, parent_id, name) VALUES (0, NULL, 'Groceries')
+
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id, other_side_id) VALUES
+    (0, 0, '2026-01-02', NULL, 'Payday', '', 'split', NULL, NULL, NULL)
+
+statement ok
+INSERT INTO split_line (transaction_id, position, category_id, other_side_id, memo, amount) VALUES
+    (0, 0, 0, NULL, 'Food', -50),
+    (0, 1, NULL, 1, 'Rainy day', -200),
+    (0, 2, NULL, 2, 'Holiday', -100)
+
+statement ok
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id, other_side_id) VALUES
+    (1, 1, '2026-01-02', NULL, 'Payday', 'Rainy day', 'transfer', 200, NULL, 0),
+    (2, 1, '2026-01-02', NULL, 'Payday', 'Holiday', 'transfer', 100, NULL, 0)
+
+statement ok
+COMMIT
+
+query II
+SELECT account_id, amount FROM transaction_amount ORDER BY transaction_id
+----
+0 -350
+1 200
+1 100
+
+# A line has exactly one of a category and an other side.
+
+statement error CHECK constraint failed: split_line_category_or_other_side
+INSERT INTO split_line (transaction_id, position, category_id, other_side_id, memo, amount) VALUES
+    (0, 3, 0, 1, '', -1)
+
+statement error CHECK constraint failed: split_line_category_or_other_side
+INSERT INTO split_line (transaction_id, position, category_id, other_side_id, memo, amount) VALUES
+    (0, 3, NULL, NULL, '', -1)
+
+# No transaction is the other side of two lines.
+
+statement error UNIQUE constraint failed: split_line.other_side_id
+INSERT INTO split_line (transaction_id, position, category_id, other_side_id, memo, amount) VALUES
+    (0, 3, NULL, 1, '', -1)
+
+# A line's link to a transaction that doesn't exist fails at commit.
+
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO split_line (transaction_id, position, category_id, other_side_id, memo, amount) VALUES
+    (0, 3, NULL, 99, '', -1)
+
+statement error FOREIGN KEY constraint failed
+COMMIT
+
+statement ok
+ROLLBACK
+
+# Deleting a line's other side alone fails at commit; deleting the split with its lines
+# and every other side in one transaction goes through.
+
+statement ok
+BEGIN
+
+statement ok
+DELETE FROM "transaction" WHERE id = 2
+
+statement error FOREIGN KEY constraint failed
+COMMIT
+
+statement ok
+ROLLBACK
+
+statement ok
+BEGIN
+
+statement ok
+DELETE FROM split_line WHERE transaction_id = 0
+
+statement ok
+DELETE FROM "transaction" WHERE id IN (0, 1, 2)
+
+statement ok
+COMMIT
+
+query I
+SELECT count(*) FROM "transaction"
+----
+0

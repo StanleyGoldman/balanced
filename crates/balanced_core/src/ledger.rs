@@ -130,11 +130,12 @@ impl AccountSummary {
             .collect()
     }
 
-    /// Whether the account holds a side of a transfer.
+    /// Whether the account holds a side of a transfer, or a split with a line to another
+    /// account.
     fn holds_transfer(&self) -> bool {
         self.register
             .iter()
-            .any(|entry| entry.transaction.other_side_id().is_some())
+            .any(|entry| !entry.transaction.other_side_ids().is_empty())
     }
 
     pub fn account(&self) -> &Account {
@@ -244,6 +245,22 @@ impl LedgerView {
                     .position(|entry| entry.transaction.id() == id)
                     .map(|entry| TransactionPosition { account, entry })
             })
+    }
+
+    /// The account holding the split that `transaction` is a line's other side of, or
+    /// `None` when it is no split line's other side.
+    fn account_of_split_for(&self, transaction: &Transaction) -> Option<AccountId> {
+        let Allocation::Transfer(other_side) = transaction.allocation() else {
+            return None;
+        };
+        let position = self.find_transaction(*other_side)?;
+        // `find_transaction` returns indices in this same view.
+        let summary = &self.accounts[position.account];
+        matches!(
+            summary.register[position.entry].transaction.allocation(),
+            Allocation::Split(_)
+        )
+        .then(|| summary.account.id())
     }
 
     /// The indices in [`Self::accounts`] of the accounts of `kind`. Where there are
@@ -672,8 +689,8 @@ impl Ledger {
             DomainCommand::RestoreTransaction {
                 account,
                 transaction,
-                other_side,
-            } => self.restore_transaction(account, transaction, other_side)?,
+                other_sides,
+            } => self.restore_transaction(account, transaction, other_sides)?,
             DomainCommand::CreateCategory { name, parent } => {
                 self.create_category(&name, parent)?
             }
@@ -949,11 +966,18 @@ impl Ledger {
         }
         // Both indices were just found in this same view.
         let old = &self.view.accounts[position.account].register[position.entry].transaction;
+        if edit.reaches_other_side()
+            && let Some(account) = self.view.account_of_split_for(old)
+        {
+            return Err(DomainError::SplitLineOtherSide { account });
+        }
         match edit {
             TransactionEdit::Transfer(account) => {
                 return self.change_target(position, Target::Account(account));
             }
-            TransactionEdit::Category(category) if old.other_side_id().is_some() => {
+            TransactionEdit::Category(category)
+                if matches!(old.allocation(), Allocation::Transfer(_)) =>
+            {
                 return self.change_target(position, Target::Category(category));
             }
             TransactionEdit::Date(_)
@@ -967,17 +991,20 @@ impl Ledger {
         // Undoing a date or amount edit on one side brings its other side back too,
         // since the two sides are always in step.
         let undo = old.undoing(&edit);
-        let other_side = old.other_side_id().zip(edit.for_other_side());
+        let other_sides = old.other_side_ids();
+        let other_side_edit = edit.for_other_side();
         let edited = old.edited(edit)?;
         self.rewrite_transaction(position, edited)?;
-        // A refused other side, in a closed account, rolls back both.
-        if let Some((other_side, edit)) = other_side {
-            let position = self.changeable_other_side(other_side)?;
-            // `changeable_other_side` found both indices in this same view.
-            let edited = self.view.accounts[position.account].register[position.entry]
-                .transaction
-                .edited(edit)?;
-            self.rewrite_transaction(position, edited)?;
+        // A refused other side, in a closed account, rolls back them all.
+        if let Some(edit) = other_side_edit {
+            for other_side in other_sides {
+                let position = self.changeable_other_side(other_side)?;
+                // `changeable_other_side` found both indices in this same view.
+                let edited = self.view.accounts[position.account].register[position.entry]
+                    .transaction
+                    .edited(edit.clone())?;
+                self.rewrite_transaction(position, edited)?;
+            }
         }
         Ok(DomainCommand::EditTransaction {
             transaction: id,
@@ -1038,7 +1065,7 @@ impl Ledger {
         };
         let edited = old.retargeted(allocation)?;
         if let Some(other) = other
-            && let Some(old_side) = old.other_side_id()
+            && let Allocation::Transfer(old_side) = *old.allocation()
             && self
                 .view
                 .find_transaction(old_side)
@@ -1050,7 +1077,7 @@ impl Ledger {
                 edit: TransactionEdit::Transfer(self.view.accounts[other].account.id()),
             });
         }
-        let old_side = self.remove_other_side(&old)?;
+        let old_sides = self.remove_other_sides(&old)?;
         let new_side = other.map(|other| (other, edited.other_side(id)));
         // The old side was in another account, so the transaction is still at `position`.
         self.rewrite_transaction(position, edited)?;
@@ -1065,23 +1092,26 @@ impl Ledger {
             DomainCommand::RestoreTransaction {
                 account,
                 transaction: old,
-                other_side: old_side,
+                other_sides: old_sides,
             },
         ]))
     }
 
-    /// Takes `transaction`'s other side, when it is a transfer, out of its account.
-    /// Fails when that account is closed.
-    fn remove_other_side(
+    /// Takes `transaction`'s other sides out of their accounts: a transfer's one, or
+    /// each of a split's lines to an account. Fails when one's account is closed.
+    fn remove_other_sides(
         &mut self,
         transaction: &Transaction,
-    ) -> Result<Option<Box<OtherSide>>, DomainError> {
-        let Some(other_side) = transaction.other_side_id() else {
-            return Ok(None);
-        };
-        let position = self.changeable_other_side(other_side)?;
-        let (account, transaction) = self.remove_transaction(position)?;
-        Ok(Some(Box::new(OtherSide::new(account, transaction))))
+    ) -> Result<Vec<OtherSide>, DomainError> {
+        transaction
+            .other_side_ids()
+            .into_iter()
+            .map(|other_side| {
+                let position = self.changeable_other_side(other_side)?;
+                let (account, transaction) = self.remove_transaction(position)?;
+                Ok(OtherSide::new(account, transaction))
+            })
+            .collect()
     }
 
     fn set_flagged(
@@ -1128,19 +1158,20 @@ impl Ledger {
         {
             return Err(DomainError::UnknownCategory { category });
         }
-        let other_account = transaction
-            .transfer_account()
+        let other_accounts = transaction
+            .transfer_accounts()
+            .into_iter()
             .map(|other| self.transfer_target(account, other))
-            .transpose()?;
+            .collect::<Result<Vec<_>, _>>()?;
         let id = self.next_transaction;
         let currency = self.view.net_worth.currency();
         let transaction = transaction.into_transaction(id, currency)?;
-        let other_side = other_account
-            .zip(transaction.other_side_id())
-            .map(|(other, other_side)| (other, transaction.other_side(other_side)));
-        let next = other_side.as_ref().map_or(id, |(_, side)| side.id()).next();
+        // The other sides come in the order of their accounts, and took the ids after
+        // `id`.
+        let other_sides = transaction.other_sides();
+        let next = other_sides.last().map_or(id, Transaction::id).next();
         self.insert_transaction(index, transaction)?;
-        if let Some((other, other_side)) = other_side {
+        for (other, other_side) in other_accounts.into_iter().zip(other_sides) {
             self.insert_transaction(other, other_side)?;
         }
         self.next_transaction = next;
@@ -1189,13 +1220,17 @@ impl Ledger {
     fn delete_transaction(&mut self, id: TransactionId) -> Result<DomainCommand, DomainError> {
         let position = self.changeable(id)?;
         // `changeable` found both indices in this same view.
+        let deleted = &self.view.accounts[position.account].register[position.entry].transaction;
+        if let Some(account) = self.view.account_of_split_for(deleted) {
+            return Err(DomainError::SplitLineOtherSide { account });
+        }
         let (account, transaction) = self.remove_transaction(position)?;
-        // A refused other side, in a closed account, rolls back both.
-        let other_side = self.remove_other_side(&transaction)?;
+        // A refused other side, in a closed account, rolls back them all.
+        let other_sides = self.remove_other_sides(&transaction)?;
         Ok(DomainCommand::RestoreTransaction {
             account,
             transaction,
-            other_side,
+            other_sides,
         })
     }
 
@@ -1221,13 +1256,13 @@ impl Ledger {
         &mut self,
         account: AccountId,
         transaction: Transaction,
-        other_side: Option<Box<OtherSide>>,
+        other_sides: Vec<OtherSide>,
     ) -> Result<DomainCommand, DomainError> {
         let inverse = DomainCommand::DeleteTransaction {
             transaction: transaction.id(),
         };
         self.put_back(account, transaction)?;
-        if let Some(other_side) = other_side {
+        for other_side in other_sides {
             let (account, transaction) = other_side.into_parts();
             self.put_back(account, transaction)?;
         }
@@ -1408,7 +1443,7 @@ mod tests {
 
     use super::*;
     use crate::data_file::{date_text, money};
-    use crate::transaction::{NewTransaction, SplitLine, SplitTarget};
+    use crate::transaction::{NewSplitLine, NewSplitTarget, NewTransaction, SplitTarget};
     use crate::{
         AccountKind, AccountStatus, Allocation, ClearedStatus, MoveDirection, TransactionEdit,
         Visibility,
@@ -1771,13 +1806,13 @@ mod tests {
                         date(12),
                         "Costco",
                         vec![
-                            SplitLine::new(
-                                SplitTarget::Category(groceries),
+                            NewSplitLine::new(
+                                NewSplitTarget::Category(groceries),
                                 "Food",
                                 usd(dec!(-142.37)),
                             ),
-                            SplitLine::new(
-                                SplitTarget::Category(household),
+                            NewSplitLine::new(
+                                NewSplitTarget::Category(household),
                                 "Detergent",
                                 usd(dec!(-63.90)),
                             ),
@@ -1813,8 +1848,8 @@ mod tests {
                     NewTransaction::split(
                         date(12),
                         "Costco",
-                        vec![SplitLine::new(
-                            SplitTarget::Category(groceries),
+                        vec![NewSplitLine::new(
+                            NewSplitTarget::Category(groceries),
                             "Food",
                             usd(dec!(-142.37)),
                         )],
@@ -2124,13 +2159,13 @@ mod tests {
                         date(12),
                         "Costco",
                         vec![
-                            SplitLine::new(
-                                SplitTarget::Category(groceries),
+                            NewSplitLine::new(
+                                NewSplitTarget::Category(groceries),
                                 "Food",
                                 usd(dec!(-10.00)),
                             ),
-                            SplitLine::new(
-                                SplitTarget::Category(groceries),
+                            NewSplitLine::new(
+                                NewSplitTarget::Category(groceries),
                                 "Snacks",
                                 usd(dec!(-5.00)),
                             ),
@@ -2402,7 +2437,7 @@ mod tests {
         let result = ledger.apply(DomainCommand::RestoreTransaction {
             account: unknown,
             transaction,
-            other_side: None,
+            other_sides: Vec::new(),
         });
 
         assert_eq!(
@@ -3120,13 +3155,13 @@ mod tests {
                             date(12),
                             "Costco",
                             vec![
-                                SplitLine::new(
-                                    SplitTarget::Category(groceries),
+                                NewSplitLine::new(
+                                    NewSplitTarget::Category(groceries),
                                     "Food",
                                     usd(dec!(-5.00)),
                                 ),
-                                SplitLine::new(
-                                    SplitTarget::Category(groceries),
+                                NewSplitLine::new(
+                                    NewSplitTarget::Category(groceries),
                                     "Snacks",
                                     usd(dec!(-6.00)),
                                 ),
@@ -3578,13 +3613,13 @@ mod tests {
                         date(12),
                         "Costco",
                         vec![
-                            SplitLine::new(
-                                SplitTarget::Category(groceries),
+                            NewSplitLine::new(
+                                NewSplitTarget::Category(groceries),
                                 "Food",
                                 usd(dec!(-10.00)),
                             ),
-                            SplitLine::new(
-                                SplitTarget::Category(groceries),
+                            NewSplitLine::new(
+                                NewSplitTarget::Category(groceries),
                                 "Snacks",
                                 usd(dec!(-5.00)),
                             ),
@@ -3703,8 +3738,8 @@ mod tests {
                     NewTransaction::split(
                         date(12),
                         "Costco",
-                        vec![SplitLine::new(
-                            SplitTarget::Category(groceries),
+                        vec![NewSplitLine::new(
+                            NewSplitTarget::Category(groceries),
                             "Food",
                             usd(dec!(-142.37)),
                         )],
