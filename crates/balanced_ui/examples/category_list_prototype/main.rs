@@ -987,7 +987,8 @@ impl Proto {
             None => self.h.event("command", json!({ "would_emit": name, "detail": detail, "source": source })),
         }
         self.status = label;
-        self.sel.retain(|id| self.work().cat(*id).is_some());
+        let alive: HashSet<u32> = self.work().cats.iter().map(|c| c.id).collect();
+        self.sel.retain(|id| alive.contains(id));
     }
 
     fn selection(&self) -> Vec<u32> {
@@ -1744,7 +1745,7 @@ impl Proto {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 6.0;
             let w = ui.available_width() - 8.0;
-            let mut b = |s: &mut Self, ui: &mut Ui, label: &str, enabled: bool, name: &str| -> bool {
+            let b = |s: &mut Self, ui: &mut Ui, label: &str, enabled: bool, name: &str| -> bool {
                 let r = ui.add_enabled(enabled, egui::Button::new(label).min_size(vec2(w, 0.0)));
                 s.h.track(&r, name);
                 r.clicked()
