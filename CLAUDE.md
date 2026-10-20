@@ -91,6 +91,7 @@ CI is GitHub Actions (`.github/workflows/`), read and driven with `gh run` and `
 - Run each slice red before green. A test that has only failed to compile, or was written after its code, has never been red: break the code it covers, watch the test fail, then restore the code. Do the break with `.claude/scripts/red-check.sh <file> <old> <new> <test command...>`, which restores the file byte for byte (contract in its header).
 - Restore broken code by editing it back, so its mtime moves forward. A file moved back from a backup copy keeps the copy's older mtime, so cargo skips the rebuild and the rerun still tests the broken build.
 - A red counts only when the failing assertion is the behaviour under test. Read the panic in the `cargo nextest run` output; a setup assertion failing, or a `get_by_role_and_label` that finds no node, proves nothing.
+- Break the code so the data stays valid: send the row to the wrong account, or change a copied field. A break that skips writing a linked row (a transfer's other side) fails SQLite's foreign keys at commit, so the Command's error panics in `apply` before the test's assertion runs.
 
 ### Pull requests
 
