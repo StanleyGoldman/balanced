@@ -45,7 +45,7 @@ pub(crate) enum AppCommand {
     GoToDraftRow,
     /// Do [`AppCommand::GoToTransaction`] on the other side of the transfer on the open
     /// Register's selected row. A row that isn't a transfer does nothing.
-    GoToTransfer,
+    GoToOtherSide,
     /// Move keyboard focus from the Account bar to the Main view, or from anywhere
     /// else to the Account bar.
     SwitchPane,

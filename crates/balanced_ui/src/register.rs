@@ -1357,24 +1357,9 @@ impl Register {
             access,
             viewport,
         };
-        let (response, action) = cell.show(ui, i18n, theme);
-        if column == RegisterColumn::Category
-            && let Some(OtherSide {
-                account,
-                transaction,
-            }) = row.other_side()
-        {
-            response.context_menu(|ui| {
-                let label = fl!(i18n, "register-actions-go-to", account = row.category());
-                if ui.button(label).clicked() {
-                    commands.send(AppCommand::GoToTransaction {
-                        account,
-                        transaction,
-                    });
-                    // Enter on a focused menu item leaves the menu open.
-                    ui.close();
-                }
-            });
+        let (response, mut action) = cell.show(ui, i18n, theme);
+        if column == RegisterColumn::Category && row.other_side().is_some() {
+            response.context_menu(|ui| action = action.or(go_to_item(ui, i18n, row)));
         }
         // A refused date keeps the cell cursor until it is fixed or cancelled.
         if response.clicked() && !self.edit.as_ref().is_some_and(Edit::is_rejected) {
@@ -3153,18 +3138,22 @@ fn actions_menu(
                 .add_enabled(editable, delete)
                 .clicked()
                 .then_some(RowAction::Delete);
-            let go_to = row.other_side().and_then(|other_side| {
-                let go_to = fl!(i18n, "register-actions-go-to", account = row.category());
-                let clicked = ui.button(go_to).clicked();
-                if clicked {
-                    // Enter on a focused menu item leaves the menu open.
-                    ui.close();
-                }
-                clicked.then_some(RowAction::GoTo(other_side))
-            });
-            flag.or(delete).or(go_to)
+            flag.or(delete).or(go_to_item(ui, i18n, row))
         })
         .and_then(|menu| menu.inner)
+}
+
+/// The Go to item of a menu on transfer `row`, which goes to its other side; no item
+/// on a row that isn't a transfer. Returns the command when it is picked.
+fn go_to_item(ui: &mut egui::Ui, i18n: &Localizer, row: &RegisterRow) -> Option<RowAction> {
+    let other_side = row.other_side()?;
+    let go_to = fl!(i18n, "register-actions-go-to", account = row.category());
+    let clicked = ui.button(go_to).clicked();
+    if clicked {
+        // Enter on a focused menu item leaves the menu open.
+        ui.close();
+    }
+    clicked.then_some(RowAction::GoTo(other_side))
 }
 
 /// The column chooser: a ⚙ button on the right of the Actions heading cell `ui`, which

@@ -195,7 +195,7 @@ impl MainWindow {
         match action {
             UserAction::Undo => view.can_undo(),
             UserAction::Redo => view.can_redo(),
-            UserAction::GoToTransfer => self.other_side().is_some(),
+            UserAction::GoToOtherSide => self.other_side().is_some(),
             UserAction::NewTransaction
             | UserAction::DeleteTransaction
             | UserAction::PrintRegister
@@ -271,7 +271,7 @@ impl MainWindow {
 
     /// Goes to the other side of the transfer on the open Register's selected row, as
     /// [`MainWindow::go_to_transaction`] does. A row that isn't a transfer does nothing.
-    pub(crate) fn go_to_transfer(&mut self) {
+    pub(crate) fn go_to_other_side(&mut self) {
         if let Some(OtherSide {
             account,
             transaction,
@@ -1000,7 +1000,7 @@ impl MainWindow {
                 item(ui, &mut drawn, UserAction::Undo);
                 item(ui, &mut drawn, UserAction::Redo);
                 ui.separator();
-                item(ui, &mut drawn, UserAction::GoToTransfer);
+                item(ui, &mut drawn, UserAction::GoToOtherSide);
             });
             drawn.note_menu(&edit.response);
             let view_menu = ui.menu_button(fl!(i18n, "menu-view"), |ui| {
