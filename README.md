@@ -12,6 +12,8 @@ cargo run -p balanced
 
 `rust-toolchain.toml` pins the toolchain, and rustup installs it on the first build.
 
+In VS Code, the Run and Debug view has Debug Balanced, Run Balanced and Debug Balanced (en-XA). They need the CodeLLDB extension, which VS Code offers to install from `.vscode/extensions.json`.
+
 On Linux, the window needs the X11 and Wayland development libraries. On Debian or Ubuntu:
 
 ```sh
