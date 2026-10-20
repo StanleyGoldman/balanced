@@ -21,7 +21,8 @@ use crate::transaction::{SplitLine, SplitTarget};
 use crate::undo_log::{self, UndoEntryError};
 use crate::{
     Account, AccountGroup, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId,
-    CurrencyCode, DomainError, Ledger, Money, MoneyError, Transaction, TransactionId, Visibility,
+    ClearedStatus, CurrencyCode, DomainError, Ledger, Money, MoneyError, Transaction,
+    TransactionId, Visibility,
 };
 
 /// Why a data file couldn't be created or opened. The refusals mirror
@@ -325,6 +326,25 @@ fn group(name: &str) -> Result<AccountGroup, OpenError> {
         })
 }
 
+/// The store's name for `status`.
+fn cleared_status_name(status: ClearedStatus) -> &'static str {
+    match status {
+        ClearedStatus::Uncleared => "uncleared",
+        ClearedStatus::Cleared => "cleared",
+        ClearedStatus::Reconciled => "reconciled",
+    }
+}
+
+fn cleared_status(name: &str) -> Result<ClearedStatus, OpenError> {
+    ClearedStatus::ALL
+        .into_iter()
+        .find(|&status| cleared_status_name(status) == name)
+        .ok_or_else(|| OpenError::Unknown {
+            what: "cleared status",
+            value: name.to_owned(),
+        })
+}
+
 fn kind(name: &str) -> Result<AccountKind, OpenError> {
     AccountKind::ALL
         .into_iter()
@@ -392,7 +412,8 @@ fn transaction(
         allocation,
         amount,
     )
-    .with_flag(row.flagged))
+    .with_flag(row.flagged)
+    .with_cleared_status(cleared_status(&row.cleared_status)?))
 }
 
 /// The row for `account`, at `position` in its kind.
@@ -460,6 +481,7 @@ pub(crate) fn transaction_row(
         memo: transaction.memo().to_owned(),
         allocation,
         flagged: transaction.is_flagged(),
+        cleared_status: cleared_status_name(transaction.cleared_status()).to_owned(),
     })
 }
 

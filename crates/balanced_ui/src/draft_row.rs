@@ -57,6 +57,8 @@ impl Draft {
                 self.category = Some(CategoryTarget::Category(category));
             }
             TransactionEdit::Amount(amount) => self.amount = Some(amount),
+            // The draft row's Clr cell is empty: a posted transaction starts uncleared.
+            TransactionEdit::ClearedStatus(_) => {}
         }
     }
 

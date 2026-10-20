@@ -7,8 +7,8 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use balanced_core::{
-    AccountId, AccountSummary, Allocation, CategoryId, CurrencyCode, Generation, LedgerView, Money,
-    SplitTarget, TransactionId,
+    AccountId, AccountSummary, Allocation, CategoryId, ClearedStatus, CurrencyCode, Generation,
+    LedgerView, Money, SplitTarget, TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
 use icu_calendar::{Date, Iso};
@@ -123,6 +123,9 @@ pub(crate) struct RegisterRow {
     balance: Option<FormattedAmount>,
     /// Whether the transaction is flagged. The draft row never is.
     flagged: bool,
+    /// How far the transaction has been checked against the bank. The draft row is
+    /// uncleared.
+    cleared_status: ClearedStatus,
 }
 
 impl RegisterRow {
@@ -159,6 +162,7 @@ impl RegisterRow {
             amount: draft.amount().map(|amount| RowAmount::new(i18n, amount)),
             balance: None,
             flagged: false,
+            cleared_status: ClearedStatus::Uncleared,
         }
     }
 
@@ -288,6 +292,12 @@ impl RegisterRow {
     /// Whether the transaction is flagged. The draft row never is.
     pub(crate) fn is_flagged(&self) -> bool {
         self.flagged
+    }
+
+    /// How far the transaction has been checked against the bank. The draft row is
+    /// uncleared.
+    pub(crate) fn cleared_status(&self) -> ClearedStatus {
+        self.cleared_status
     }
 
     /// Orders this row and `other` by `key`'s column alone.
@@ -486,6 +496,7 @@ impl RegisterModel {
                     balance: shows_balance
                         .then(|| FormattedAmount::new(i18n, entry.balance(), AmountStyle::Bare)),
                     flagged: transaction.is_flagged(),
+                    cleared_status: transaction.cleared_status(),
                 };
                 let split_lines = match transaction.allocation() {
                     Allocation::Split(lines) => lines.as_slice(),

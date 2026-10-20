@@ -38,6 +38,8 @@ pub struct TransactionRow {
     pub memo: String,
     pub allocation: AllocationRow,
     pub flagged: bool,
+    /// `uncleared`, `cleared` or `reconciled`.
+    pub cleared_status: String,
 }
 
 /// Where a transaction's amount went, with the amount where the row stores one.

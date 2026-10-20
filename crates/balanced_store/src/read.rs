@@ -83,7 +83,8 @@ fn transactions(connection: &Connection) -> rusqlite::Result<Vec<StoredTransacti
     connection
         .prepare(
             "SELECT t.id, t.account_id, t.date, t.number, t.payee, t.memo, t.allocation,
-                 t.amount, t.category_id, r.amount, r.balance, t.flagged, t.other_side_id
+                 t.amount, t.category_id, r.amount, r.balance, t.flagged,
+                 t.cleared_status, t.other_side_id
              FROM \"transaction\" AS t
              JOIN register_entry AS r ON r.transaction_id = t.id
              ORDER BY t.account_id, t.date, t.id",
@@ -101,6 +102,7 @@ fn transactions(connection: &Connection) -> rusqlite::Result<Vec<StoredTransacti
                     memo: row.get(5)?,
                     allocation,
                     flagged: row.get(11)?,
+                    cleared_status: row.get(12)?,
                 },
                 amount: row.get(9)?,
                 balance: row.get(10)?,
@@ -122,7 +124,7 @@ fn allocation(row: &Row<'_>, lines: Vec<SplitLineRow>) -> rusqlite::Result<Alloc
             amount: row.get(7)?,
         },
         "transfer" => AllocationRow::Transfer {
-            other_side_id: row.get(12)?,
+            other_side_id: row.get(13)?,
             amount: row.get(7)?,
         },
         // The CHECK on `allocation` admits no other value.

@@ -6,8 +6,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use balanced_core::{
-    Account, AccountId, AccountKind, AccountSummary, CurrencyCode, DomainCommand, DomainError,
-    Generation, LedgerView, Money, TransactionEdit, TransactionId,
+    Account, AccountId, AccountKind, AccountSummary, ClearedStatus, CurrencyCode, DomainCommand,
+    DomainError, Generation, LedgerView, Money, TransactionEdit, TransactionId,
 };
 use balanced_i18n::{AmountParseError, AmountReader, Localizer};
 use eframe::egui::accesskit::{self, Role};
@@ -70,8 +70,8 @@ const SORT_ARROW_GAP: f32 = 4.0;
 
 impl RegisterColumn {
     /// The column's width before the user resizes it, for a column that resizes.
-    /// Payee and Category share the width the others leave, and the Flag and Actions
-    /// columns fit their glyph and button, so none of them resizes.
+    /// Payee and Category share the width the others leave, and the Clr, Flag and
+    /// Actions columns fit their marks, glyph and button, so none of them resizes.
     fn default_width(self) -> Option<f32> {
         match self {
             Self::Date => Some(80.0),
@@ -79,7 +79,7 @@ impl RegisterColumn {
             Self::Memo => Some(140.0),
             Self::Payment | Self::Deposit => Some(90.0),
             Self::Balance => Some(100.0),
-            Self::Payee | Self::Category | Self::Flag | Self::Actions => None,
+            Self::Payee | Self::Category | Self::Clr | Self::Flag | Self::Actions => None,
         }
     }
 
@@ -95,6 +95,7 @@ impl RegisterColumn {
             Self::Payment => amount_title(i18n, AmountSide::Payment, kind),
             Self::Deposit => amount_title(i18n, AmountSide::Deposit, kind),
             Self::Balance => fl!(i18n, "register-column-balance"),
+            Self::Clr => fl!(i18n, "register-column-clr"),
             Self::Flag => fl!(i18n, "register-column-flag"),
             Self::Actions => String::new(),
         }
@@ -113,12 +114,13 @@ impl RegisterColumn {
             | Self::Payment
             | Self::Deposit
             | Self::Balance
+            | Self::Clr
             | Self::Actions => title,
         }
     }
 
-    /// What clicking the column's heading sorts by. Number, Balance, Flag and Actions
-    /// don't sort.
+    /// What clicking the column's heading sorts by. Number, Balance, Clr, Flag and
+    /// Actions don't sort.
     fn sort_key(self) -> Option<SortKey> {
         match self {
             Self::Date => Some(SortKey::Date),
@@ -127,7 +129,7 @@ impl RegisterColumn {
             Self::Memo => Some(SortKey::Memo),
             Self::Payment => Some(SortKey::Amount(AmountSide::Payment)),
             Self::Deposit => Some(SortKey::Amount(AmountSide::Deposit)),
-            Self::Number | Self::Balance | Self::Flag | Self::Actions => None,
+            Self::Number | Self::Balance | Self::Clr | Self::Flag | Self::Actions => None,
         }
     }
 
@@ -137,6 +139,8 @@ impl RegisterColumn {
     fn width(self, theme: &Theme, widths: &ColumnWidths) -> Column {
         let column = match self {
             Self::Payee | Self::Category => Column::remainder().at_least(MIN_FLEX_WIDTH),
+            // Two rows' height fits the heading and its one-letter marks.
+            Self::Clr => Column::exact(2.0 * theme.row_height()),
             Self::Flag => Column::exact(theme.row_height()),
             Self::Actions => Column::exact(theme.row_height() + Theme::EDGE_INSET),
             Self::Date
@@ -154,7 +158,7 @@ impl RegisterColumn {
     }
 
     /// Whether the cell cursor can rest in the column. Balance is worked out from the
-    /// other cells, Flag changes on a click, and Actions holds a menu.
+    /// other cells, Clr and Flag change on a click, and Actions holds a menu.
     fn holds_cursor(self) -> bool {
         match self {
             Self::Date
@@ -164,7 +168,7 @@ impl RegisterColumn {
             | Self::Memo
             | Self::Payment
             | Self::Deposit => true,
-            Self::Balance | Self::Flag | Self::Actions => false,
+            Self::Balance | Self::Clr | Self::Flag | Self::Actions => false,
         }
     }
 
@@ -187,6 +191,7 @@ impl RegisterColumn {
             | Self::Payment
             | Self::Deposit
             | Self::Balance
+            | Self::Clr
             | Self::Flag
             | Self::Actions => None,
         }
@@ -202,17 +207,18 @@ impl RegisterColumn {
             | Self::Category
             | Self::Memo
             | Self::Balance
+            | Self::Clr
             | Self::Flag
             | Self::Actions => false,
         }
     }
 
-    /// Where the column's text sits: amounts on the right, the flag in the middle, the
-    /// rest on the left.
+    /// Where the column's text sits: amounts on the right, the Cleared status and the
+    /// flag in the middle, the rest on the left.
     fn align(self) -> Align {
         match self {
             Self::Payment | Self::Deposit | Self::Balance => Align::Max,
-            Self::Flag => Align::Center,
+            Self::Clr | Self::Flag => Align::Center,
             Self::Date
             | Self::Number
             | Self::Payee
@@ -1005,6 +1011,12 @@ impl Register {
                 commands.send(AppCommand::Domain(DomainCommand::SetFlagged {
                     transaction: id,
                     flagged,
+                }));
+            }
+            RowAction::SetClearedStatus(status) => {
+                commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
+                    transaction: id,
+                    edit: TransactionEdit::ClearedStatus(status),
                 }));
             }
         }
@@ -2116,12 +2128,14 @@ impl Access {
     }
 }
 
-/// A command picked on a row, from its Actions menu or its Flag cell.
+/// A command picked on a row, from its Actions menu or its Clr or Flag cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RowAction {
     Delete,
     /// Flag the transaction, or take its flag off.
     SetFlagged(bool),
+    /// Give the transaction this Cleared status.
+    SetClearedStatus(ClearedStatus),
 }
 
 /// Whether `rect` lies wholly within `viewport` from top to bottom, give or take half a
@@ -2669,7 +2683,7 @@ struct Cell<'a> {
 
 impl Cell<'_> {
     /// Draws the cell, the whole of which is one click target, and returns the command
-    /// picked from its Actions menu or its Flag cell, if it has one.
+    /// picked from its Actions menu or its Clr or Flag cell, if it has one.
     fn show(
         &self,
         ui: &egui::Ui,
@@ -2704,6 +2718,7 @@ impl Cell<'_> {
             RegisterColumn::Balance => row
                 .balance()
                 .map_or_else(WidgetText::default, |balance| balance.styled(theme).into()),
+            RegisterColumn::Clr => return clr_cell(ui, i18n, row, &response, access),
             RegisterColumn::Flag => return flag_cell(ui, i18n, row, &response, access),
             RegisterColumn::Actions => {
                 // The row's band across the whole Register, for telling whether the
@@ -2881,6 +2896,74 @@ fn flag_cell(
         );
     }
     let action = (editable && response.clicked()).then_some(RowAction::SetFlagged(!flagged));
+    (response.clone(), action)
+}
+
+/// The Clr cell of `row`, whose click target is `response`: `c` on a Cleared
+/// transaction, `R` on a Reconciled one, and nothing on an Uncleared one. A click on an
+/// editable row's cell marks an Uncleared transaction Cleared and a Cleared one
+/// Uncleared. Assistive technology reads it as a button whose value is the status. The
+/// draft row's cell is empty and takes no click.
+fn clr_cell(
+    ui: &egui::Ui,
+    i18n: &Localizer,
+    row: &RegisterRow,
+    response: &Response,
+    access: Access,
+) -> (Response, Option<RowAction>) {
+    if row.id() == RowId::Draft {
+        cell_info(ui, response, false, "");
+        return (response.clone(), None);
+    }
+    let status = row.cleared_status();
+    let editable = access == Access::Editable;
+    let label = fl!(
+        i18n,
+        "register-clr",
+        payee = row.payee(),
+        date = row.date(),
+        amount = row.amount_text()
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, editable, &label));
+    let (name, mark) = match status {
+        ClearedStatus::Uncleared => (fl!(i18n, "register-clr-uncleared"), None),
+        ClearedStatus::Cleared => (
+            fl!(i18n, "register-clr-cleared"),
+            Some(fl!(i18n, "register-clr-cleared", "mark")),
+        ),
+        ClearedStatus::Reconciled => (
+            fl!(i18n, "register-clr-reconciled"),
+            Some(fl!(i18n, "register-clr-reconciled", "mark")),
+        ),
+    };
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_value(name);
+        if !editable {
+            // A read-only row's status shows but offers no click.
+            node.remove_action(accesskit::Action::Click);
+        }
+    });
+    let rect = response.rect;
+    if let Some(mark) = mark
+        && ui.is_rect_visible(rect)
+    {
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            mark,
+            TextStyle::Body.resolve(ui.style()),
+            ui.style().interact(response).text_color(),
+        );
+    }
+    // TODO(#314): a click on a Reconciled transaction confirms, then marks it Cleared.
+    let next = match status {
+        ClearedStatus::Uncleared => Some(ClearedStatus::Cleared),
+        ClearedStatus::Cleared => Some(ClearedStatus::Uncleared),
+        ClearedStatus::Reconciled => None,
+    };
+    let action = next
+        .filter(|_| editable && response.clicked())
+        .map(RowAction::SetClearedStatus);
     (response.clone(), action)
 }
 

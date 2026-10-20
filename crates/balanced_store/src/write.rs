@@ -139,8 +139,8 @@ impl Store {
             .prepare_cached(
                 "INSERT INTO \"transaction\"
                  (id, account_id, date, number, payee, memo, allocation, amount, category_id,
-                  flagged, other_side_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                  flagged, cleared_status, other_side_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             )?
             .execute(params![
                 transaction.id,
@@ -153,6 +153,7 @@ impl Store {
                 amount,
                 category_id,
                 transaction.flagged,
+                transaction.cleared_status,
                 other_side_id,
             ])?;
         self.insert_split_lines(transaction)

@@ -5,7 +5,9 @@
 use icu_calendar::{Date, Iso};
 
 use crate::transaction::NewTransaction;
-use crate::{CategoryId, CurrencyCode, Money, MoneyError, Transaction, TransactionId};
+use crate::{
+    CategoryId, ClearedStatus, CurrencyCode, Money, MoneyError, Transaction, TransactionId,
+};
 
 /// One of the fixed groups the Account bar lists accounts in, in Account bar order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -251,9 +253,27 @@ impl NewAccount {
     /// The same account, with `transaction` posted after the rest, flagged.
     pub(crate) fn with_flagged_transaction(mut self, transaction: NewTransaction) -> Self {
         self.transactions.push(NewAccountTransaction {
-            transaction,
             flagged: true,
+            ..NewAccountTransaction::unflagged(transaction)
         });
+        self
+    }
+
+    /// The same account, with `transactions` posted after the rest, each at `status`.
+    pub(crate) fn with_transactions_at(
+        mut self,
+        status: ClearedStatus,
+        transactions: impl IntoIterator<Item = NewTransaction>,
+    ) -> Self {
+        self.transactions
+            .extend(
+                transactions
+                    .into_iter()
+                    .map(|transaction| NewAccountTransaction {
+                        cleared_status: status,
+                        ..NewAccountTransaction::unflagged(transaction)
+                    }),
+            );
         self
     }
 
@@ -292,16 +312,20 @@ impl NewAccount {
     }
 }
 
-/// A transaction to post to a [`NewAccount`], which may start flagged.
+/// A transaction to post to a [`NewAccount`], which may start flagged, and at another
+/// status than a posted transaction starts at.
 #[derive(Debug, Clone)]
 pub(crate) struct NewAccountTransaction {
     transaction: NewTransaction,
     flagged: bool,
+    cleared_status: ClearedStatus,
 }
 
 impl NewAccountTransaction {
+    /// `transaction`, unflagged, at the status it starts at when posted.
     fn unflagged(transaction: NewTransaction) -> Self {
         Self {
+            cleared_status: transaction.starting_status(),
             transaction,
             flagged: false,
         }
@@ -327,7 +351,8 @@ impl NewAccountTransaction {
         Ok(self
             .transaction
             .into_transaction(id, currency)?
-            .with_flag(self.flagged))
+            .with_flag(self.flagged)
+            .with_cleared_status(self.cleared_status))
     }
 }
 

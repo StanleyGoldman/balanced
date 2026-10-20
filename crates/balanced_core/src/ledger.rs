@@ -1271,7 +1271,8 @@ mod tests {
     use crate::data_file::{date_text, money};
     use crate::transaction::{NewTransaction, SplitLine, SplitTarget};
     use crate::{
-        AccountKind, AccountStatus, Allocation, MoveDirection, TransactionEdit, Visibility,
+        AccountKind, AccountStatus, Allocation, ClearedStatus, MoveDirection, TransactionEdit,
+        Visibility,
     };
 
     fn usd_code() -> CurrencyCode {
@@ -2742,6 +2743,183 @@ mod tests {
         let fresh_market = transaction_id(&ledger, 1);
 
         let result = ledger.apply(set_flagged(fresh_market, true));
+
+        assert_eq!(result, Err(DomainError::AccountClosed { account: old }));
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn a_posted_transaction_starts_uncleared() {
+        let mut ledger = everyday();
+        let account = ledger.snapshot().accounts()[0].account().id();
+
+        ledger
+            .apply(DomainCommand::PostTransaction {
+                account,
+                transaction: NewTransaction::new(
+                    date(6),
+                    "Shell",
+                    CategoryId::new(0),
+                    usd(dec!(-20.00)),
+                ),
+            })
+            .unwrap();
+
+        assert_eq!(
+            nth_transaction(&ledger, 2).cleared_status(),
+            ClearedStatus::Uncleared
+        );
+    }
+
+    #[test]
+    fn a_created_accounts_opening_balance_starts_reconciled() {
+        let mut ledger = everyday();
+
+        ledger
+            .apply(create("Savings", AccountKind::Savings, usd(dec!(50.00))))
+            .unwrap();
+
+        let view = ledger.snapshot();
+        let savings = view.accounts().last().unwrap();
+        assert_eq!(
+            savings.register()[0].transaction().cleared_status(),
+            ClearedStatus::Reconciled
+        );
+    }
+
+    fn mark(transaction: TransactionId, status: ClearedStatus) -> DomainCommand {
+        edit(transaction, TransactionEdit::ClearedStatus(status))
+    }
+
+    #[test]
+    fn marking_a_transaction_cleared_shows_in_the_next_snapshot() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+
+        ledger
+            .apply(mark(fresh_market, ClearedStatus::Cleared))
+            .unwrap();
+
+        assert_eq!(
+            nth_transaction(&ledger, 1).cleared_status(),
+            ClearedStatus::Cleared
+        );
+    }
+
+    #[test]
+    fn any_status_can_follow_any_other() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        let mut statuses = Vec::new();
+
+        for status in [
+            ClearedStatus::Reconciled,
+            ClearedStatus::Uncleared,
+            ClearedStatus::Cleared,
+            ClearedStatus::Reconciled,
+            ClearedStatus::Cleared,
+            ClearedStatus::Uncleared,
+        ] {
+            ledger.apply(mark(fresh_market, status)).unwrap();
+            statuses.push(nth_transaction(&ledger, 1).cleared_status());
+        }
+
+        assert_eq!(
+            statuses,
+            [
+                ClearedStatus::Reconciled,
+                ClearedStatus::Uncleared,
+                ClearedStatus::Cleared,
+                ClearedStatus::Reconciled,
+                ClearedStatus::Cleared,
+                ClearedStatus::Uncleared,
+            ]
+        );
+    }
+
+    #[test]
+    fn undo_puts_back_the_old_status_and_redo_makes_the_new_one_again() {
+        let mut ledger = everyday();
+        let opening = transaction_id(&ledger, 0);
+        ledger.apply(mark(opening, ClearedStatus::Cleared)).unwrap();
+
+        ledger.undo().unwrap();
+        let undone = nth_transaction(&ledger, 0).cleared_status();
+        ledger.redo().unwrap();
+        let redone = nth_transaction(&ledger, 0).cleared_status();
+
+        assert_eq!(
+            (undone, redone),
+            (ClearedStatus::Reconciled, ClearedStatus::Cleared)
+        );
+    }
+
+    #[test]
+    fn every_other_edit_keeps_the_status() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        ledger
+            .apply(mark(fresh_market, ClearedStatus::Cleared))
+            .unwrap();
+        let mut statuses = Vec::new();
+
+        for other in [
+            TransactionEdit::Date(date(7)),
+            TransactionEdit::Number(Some("1042".to_owned())),
+            TransactionEdit::Payee("Corner Shop".to_owned()),
+            TransactionEdit::Memo("Top-up".to_owned()),
+            TransactionEdit::Category(CategoryId::new(1)),
+            TransactionEdit::Amount(usd(dec!(-12.00))),
+        ] {
+            ledger.apply(edit(fresh_market, other)).unwrap();
+            statuses.push(nth_transaction(&ledger, 1).cleared_status());
+        }
+
+        assert_eq!(statuses, [ClearedStatus::Cleared; 6]);
+    }
+
+    #[test]
+    fn undoing_a_delete_brings_the_transaction_back_with_its_status() {
+        let mut ledger = everyday();
+        let fresh_market = transaction_id(&ledger, 1);
+        ledger
+            .apply(mark(fresh_market, ClearedStatus::Cleared))
+            .unwrap();
+        ledger
+            .apply(DomainCommand::DeleteTransaction {
+                transaction: fresh_market,
+            })
+            .unwrap();
+
+        ledger.undo().unwrap();
+
+        assert_eq!(
+            nth_transaction(&ledger, 1).cleared_status(),
+            ClearedStatus::Cleared
+        );
+    }
+
+    #[test]
+    fn a_status_edit_in_a_closed_account_is_rejected() {
+        let groceries = CategoryId::new(0);
+        let mut ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [account("Old", AccountKind::Checking, usd(dec!(10.00)))
+                .with_transactions([NewTransaction::new(
+                    date(5),
+                    "Fresh Market",
+                    groceries,
+                    usd(dec!(-10.00)),
+                )])
+                .closed()],
+        )
+        .unwrap();
+        let before = ledger.snapshot();
+        let old = before.accounts()[0].account().id();
+        let fresh_market = transaction_id(&ledger, 1);
+
+        let result = ledger.apply(mark(fresh_market, ClearedStatus::Cleared));
 
         assert_eq!(result, Err(DomainError::AccountClosed { account: old }));
         assert_eq!(ledger.snapshot(), before);

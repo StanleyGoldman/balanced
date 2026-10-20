@@ -111,6 +111,9 @@ register-column-card-payment = Payment
 register-column-decrease = Decrease
 register-column-increase = Increase
 register-column-balance = Balance
+# The column showing how far each transaction has been checked against the bank: its
+# Cleared status.
+register-column-clr = Clr
 # The column showing which transactions are flagged to come back to.
 register-column-flag = Flag
 # The handle on a column heading's right edge that resizes the column.
@@ -133,6 +136,16 @@ register-actions-flag = Flag
 register-actions-unflag = Unflag
 # A Flag cell, which flags or unflags its transaction, as assistive technology reads it.
 register-flag = Flag { $payee }, { $date }, { $amount }
+# A Clr cell, which marks its transaction Cleared or Uncleared, as assistive technology
+# reads it.
+register-clr = Clr { $payee }, { $date }, { $amount }
+# The Cleared statuses, as assistive technology reads a Clr cell's value. A Clr cell
+# shows each status's .mark, and an Uncleared transaction's cell is blank.
+register-clr-uncleared = Uncleared
+register-clr-cleared = Cleared
+    .mark = c
+register-clr-reconciled = Reconciled
+    .mark = R
 # The ⏷ button beside the Category cell being edited, which lists every category.
 register-category-list = Show all categories
 # The row of the Category list that creates the category typed in the cell.

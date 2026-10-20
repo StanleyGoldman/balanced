@@ -101,6 +101,7 @@ CI is GitHub Actions (`.github/workflows/`), read and driven with `gh run` and `
 - Each worktree's `target/` grows to tens of GB and outlives the merge. Run `.claude/scripts/clean-merged-targets.sh` at the start of an `/implement` run, and whenever a build fails with `No space left on device`; it deletes `target/` only for worktrees whose PR merged or closed (contract in its header).
 - Before pushing to an existing PR's branch, check the PR is still open (`gh pr view <n> --json state`); once it has merged, put follow-ups on a fresh branch from `origin/main` and open a new PR.
 - Whenever you push to a pull request, update its title and description to cover everything it now contains.
+- Before each push, `git fetch origin main` and merge it into the branch, so a conflict with `main` shows up and is resolved locally (see **Merge conflicts** below) before the PR sees it. `cargo xtask ci` already stands in for the PR's checks. After the push, read `gh pr view <n> --json mergeable` once (`UNKNOWN` for a few seconds after a push, so ask again) and resolve a `CONFLICTING` before reporting the PR ready.
 - **Stack** a PR whose branch builds on another open PR's branch, with `gh stack`, and offer a stack when you foresee two PRs conflicting if merged one at a time. See `docs/agents/stacked-prs.md`.
 
 ### Merge conflicts

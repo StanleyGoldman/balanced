@@ -64,6 +64,8 @@ CREATE TABLE "transaction" (
     other_side_id INTEGER UNIQUE REFERENCES "transaction" (id) DEFERRABLE INITIALLY DEFERRED
         CONSTRAINT transaction_other_side_not_itself CHECK (other_side_id <> id),
     flagged INTEGER NOT NULL DEFAULT 0 CONSTRAINT transaction_flagged_flag CHECK (flagged IN (0, 1)),
+    cleared_status TEXT NOT NULL DEFAULT 'uncleared'
+        CONSTRAINT transaction_cleared_status_known CHECK (cleared_status IN ('uncleared', 'cleared', 'reconciled')),
     CONSTRAINT transaction_amount_unless_split CHECK ((allocation = 'split') = (amount IS NULL)),
     CONSTRAINT transaction_category_when_category CHECK ((allocation = 'category') = (category_id IS NOT NULL)),
     CONSTRAINT transaction_other_side_when_transfer CHECK ((allocation = 'transfer') = (other_side_id IS NOT NULL)),
