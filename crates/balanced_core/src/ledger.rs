@@ -911,6 +911,11 @@ impl Ledger {
         edit: TransactionEdit,
     ) -> Result<DomainCommand, DomainError> {
         let position = self.changeable(id)?;
+        if let TransactionEdit::Category(category) = edit
+            && self.view.category(category).is_none()
+        {
+            return Err(DomainError::UnknownCategory { category });
+        }
         // Both indices were just found in this same view.
         let old = &self.view.accounts[position.account].register[position.entry].transaction;
         match edit {
@@ -927,11 +932,6 @@ impl Ledger {
             | TransactionEdit::Category(_)
             | TransactionEdit::Amount(_)
             | TransactionEdit::ClearedStatus(_) => {}
-        }
-        if let TransactionEdit::Category(category) = edit
-            && self.view.category(category).is_none()
-        {
-            return Err(DomainError::UnknownCategory { category });
         }
         let undo = old.undoing(&edit);
         let edited = old.edited(edit)?;
@@ -969,10 +969,11 @@ impl Ledger {
         Ok(())
     }
 
-    /// Moves the whole amount of the transaction at `position` to `target`. The other
-    /// side it had is deleted, and a transfer gets a new one in the account it names.
-    /// The Command that undoes it deletes the transaction and puts it back as it was,
-    /// with its old other side.
+    /// Moves the whole amount of the transaction at `position` to `target`, a category
+    /// the ledger holds or an account. The other side it had is deleted, and a transfer
+    /// gets a new one in the account it names. The Command that undoes it deletes the
+    /// transaction and puts it back as it was, with its old other side. A transfer
+    /// moved to the account it already names is left as it is.
     fn change_target(
         &mut self,
         position: TransactionPosition,
@@ -983,30 +984,29 @@ impl Ledger {
         let old = self.view.accounts[position.account].register[position.entry]
             .transaction
             .clone();
-        let other = match target {
-            Target::Category(category) => {
-                if self.view.category(category).is_none() {
-                    return Err(DomainError::UnknownCategory { category });
-                }
-                None
-            }
-            Target::Account(other) => Some(self.transfer_target(account, other)?),
-        };
-        let old_side = match old.other_side_id() {
-            Some(old_side) => {
-                let old_side = self.changeable_or(old_side, |account| {
-                    DomainError::TransferAccountClosed { account }
-                })?;
-                let (account, transaction) = self.remove_transaction(old_side)?;
-                Some(Box::new(OtherSide::new(account, transaction)))
-            }
-            None => None,
-        };
         let id = self.next_transaction;
-        let edited = old.retargeted(match target {
-            Target::Category(category) => Allocation::Category(category),
-            Target::Account(_) => Allocation::Transfer(id),
-        })?;
+        let (allocation, other) = match target {
+            Target::Category(category) => (Allocation::Category(category), None),
+            Target::Account(other) => (
+                Allocation::Transfer(id),
+                Some(self.transfer_target(account, other)?),
+            ),
+        };
+        let edited = old.retargeted(allocation)?;
+        if let Some(other) = other
+            && let Some(old_side) = old.other_side_id()
+            && self
+                .view
+                .find_transaction(old_side)
+                .map(|side| side.account)
+                == Some(other)
+        {
+            return Ok(DomainCommand::EditTransaction {
+                transaction: old.id(),
+                edit: TransactionEdit::Transfer(self.view.accounts[other].account.id()),
+            });
+        }
+        let old_side = self.remove_other_side(&old)?;
         let new_side = other.map(|other| (other, edited.other_side(id)));
         // The old side was in another account, so the transaction is still at `position`.
         self.replace_transaction(position, edited)?;
@@ -1024,6 +1024,22 @@ impl Ledger {
                 other_side: old_side,
             },
         ]))
+    }
+
+    /// Takes `transaction`'s other side, when it is a transfer, out of its account.
+    /// Fails when that account is closed.
+    fn remove_other_side(
+        &mut self,
+        transaction: &Transaction,
+    ) -> Result<Option<Box<OtherSide>>, DomainError> {
+        let Some(other_side) = transaction.other_side_id() else {
+            return Ok(None);
+        };
+        let position = self.changeable_or(other_side, |account| {
+            DomainError::TransferAccountClosed { account }
+        })?;
+        let (account, transaction) = self.remove_transaction(position)?;
+        Ok(Some(Box::new(OtherSide::new(account, transaction))))
     }
 
     fn set_flagged(
@@ -1131,21 +1147,9 @@ impl Ledger {
     fn delete_transaction(&mut self, id: TransactionId) -> Result<DomainCommand, DomainError> {
         let position = self.changeable(id)?;
         // `changeable` found both indices in this same view.
-        let other_side = self.view.accounts[position.account].register[position.entry]
-            .transaction
-            .other_side_id();
         let (account, transaction) = self.remove_transaction(position)?;
         // A refused other side, in a closed account, rolls back both.
-        let other_side = match other_side {
-            Some(other_side) => {
-                let position = self.changeable_or(other_side, |account| {
-                    DomainError::TransferAccountClosed { account }
-                })?;
-                let (account, transaction) = self.remove_transaction(position)?;
-                Some(Box::new(OtherSide::new(account, transaction)))
-            }
-            None => None,
-        };
+        let other_side = self.remove_other_side(&transaction)?;
         Ok(DomainCommand::RestoreTransaction {
             account,
             transaction,

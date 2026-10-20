@@ -350,7 +350,7 @@ fn picking_another_account_in_a_transfer_s_category_cell_moves_its_other_side() 
     open(&mut harness, "Joint Checking");
     assert_eq!(row_of(&harness, "Saving up")[3], "[Everyday Checking]");
     open(&mut harness, "Emergency Fund");
-    assert!(!column(&harness, "Payee").contains(&"Saving up".to_owned()));
+    assert_eq!(column(&harness, "Payee"), ["Opening Balance", ""]);
 }
 
 #[test]
@@ -362,5 +362,5 @@ fn picking_a_category_in_a_transfer_s_category_cell_deletes_its_other_side() {
 
     assert_eq!(row_of(&harness, "Saving up")[3], "Food & Dining:Groceries");
     open(&mut harness, "Emergency Fund");
-    assert!(!column(&harness, "Payee").contains(&"Saving up".to_owned()));
+    assert_eq!(column(&harness, "Payee"), ["Opening Balance", ""]);
 }

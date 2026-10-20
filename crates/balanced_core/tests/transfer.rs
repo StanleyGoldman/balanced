@@ -169,6 +169,18 @@ fn last_posted(summary: &AccountSummary) -> TransactionId {
         .expect("the account has a transaction")
 }
 
+/// The id of the household's Groceries category.
+fn groceries(household: &Household) -> CategoryId {
+    household
+        .ledger
+        .snapshot()
+        .categories()
+        .iter()
+        .find(|category| category.name() == "Groceries")
+        .expect("the household has a Groceries category")
+        .id()
+}
+
 /// The one transaction `transactions` holds.
 fn only(transactions: Vec<Transaction>) -> Transaction {
     let [transaction] = <[Transaction; 1]>::try_from(transactions)
@@ -403,18 +415,6 @@ fn changing_a_transfers_account_moves_its_other_side_there() {
     assert_eq!(household.balance(visa), usd("1200.00"));
 }
 
-/// The id of the household's Groceries category.
-fn groceries(household: &Household) -> CategoryId {
-    household
-        .ledger
-        .snapshot()
-        .categories()
-        .iter()
-        .find(|category| category.name() == "Groceries")
-        .expect("the household has a Groceries category")
-        .id()
-}
-
 #[test]
 fn changing_a_transfer_to_a_category_deletes_its_other_side() {
     let mut household = Household::new();
@@ -451,7 +451,10 @@ fn changing_a_category_to_an_account_makes_the_transaction_a_transfer() {
     let received = only(household.posted(savings));
     assert_eq!(checking.allocation(), &Allocation::Transfer(received.id()));
     assert_eq!(received.allocation(), &Allocation::Transfer(paid));
-    assert_eq!((received.date(), received.amount()), (date(5), usd("200.00")));
+    assert_eq!(
+        (received.date(), received.amount()),
+        (date(5), usd("200.00"))
+    );
     assert_eq!(
         (received.payee(), received.memo()),
         ("Saving up", "September")
@@ -495,7 +498,10 @@ fn one_undo_puts_back_a_change_of_target_with_the_old_other_side_and_its_id() {
         let before = household.ledger.snapshot();
         household.apply(edit);
 
-        household.ledger.undo().expect("the change of target undoes");
+        household
+            .ledger
+            .undo()
+            .expect("the change of target undoes");
 
         assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
     }
@@ -508,9 +514,15 @@ fn redo_makes_a_change_of_target_again_with_the_same_ids() {
         let edit = change(&mut household);
         household.apply(edit);
         let changed = household.ledger.snapshot();
-        household.ledger.undo().expect("the change of target undoes");
+        household
+            .ledger
+            .undo()
+            .expect("the change of target undoes");
 
-        household.ledger.redo().expect("the change of target redoes");
+        household
+            .ledger
+            .redo()
+            .expect("the change of target redoes");
 
         assert_eq!(household.ledger.snapshot().accounts(), changed.accounts());
     }
@@ -525,7 +537,10 @@ fn undo_after_a_reopen_puts_back_a_change_of_target() {
         household.apply(edit);
         let mut household = household.reopened();
 
-        household.ledger.undo().expect("the change of target undoes");
+        household
+            .ledger
+            .undo()
+            .expect("the change of target undoes");
         let household = household.reopened();
 
         assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
@@ -534,12 +549,12 @@ fn undo_after_a_reopen_puts_back_a_change_of_target() {
 
 /// Applies `command` to `household`, expecting the ledger to refuse it with `error`
 /// and leave every account as it was.
-fn assert_refused(household: &mut Household, command: DomainCommand, error: DomainError) {
+fn assert_refused(household: &mut Household, command: DomainCommand, error: &DomainError) {
     let before = household.ledger.snapshot();
 
     let result = household.ledger.apply(command);
 
-    assert_eq!(result.unwrap_err(), error);
+    assert_eq!(&result.expect_err("the ledger refuses the command"), error);
     assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
 }
 
@@ -555,7 +570,7 @@ fn changing_a_transfer_to_its_own_account_is_refused() {
             transaction: sent,
             edit: TransactionEdit::Transfer(checking),
         },
-        DomainError::TransferToOwnAccount { account: checking },
+        &DomainError::TransferToOwnAccount { account: checking },
     );
 }
 
@@ -575,7 +590,7 @@ fn changing_a_transfer_to_a_closed_account_is_refused_naming_it() {
             transaction: sent,
             edit: TransactionEdit::Transfer(visa),
         },
-        DomainError::TransferAccountClosed { account: visa },
+        &DomainError::TransferAccountClosed { account: visa },
     );
 }
 
@@ -601,7 +616,7 @@ fn changing_a_transfer_away_from_a_closed_account_is_refused_naming_it() {
                 transaction: sent,
                 edit,
             },
-            DomainError::TransferAccountClosed { account: savings },
+            &DomainError::TransferAccountClosed { account: savings },
         );
     }
 }
@@ -620,8 +635,28 @@ fn the_opening_balance_can_not_become_a_transfer() {
             transaction: opening_balance,
             edit: TransactionEdit::Transfer(savings),
         },
-        DomainError::NotInOneCategory {
+        &DomainError::NotInOneCategory {
             transaction: opening_balance,
         },
     );
+}
+
+#[test]
+fn changing_a_transfer_to_the_account_it_already_names_changes_nothing() {
+    let mut household = Household::new();
+    let sent = household.save_200();
+    let received = only(household.posted(household.savings)).id();
+    let savings = household.savings;
+    household.apply(DomainCommand::SetFlagged {
+        transaction: received,
+        flagged: true,
+    });
+    let before = household.ledger.snapshot();
+
+    household.apply(DomainCommand::EditTransaction {
+        transaction: sent,
+        edit: TransactionEdit::Transfer(savings),
+    });
+
+    assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
 }

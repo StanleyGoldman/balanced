@@ -215,7 +215,7 @@ pub enum DomainError {
     OpeningBalancePayee { transaction: TransactionId },
     /// The command put the whole amount in one category or account, but the transaction
     /// is the opening balance, which has no category, or is split between categories.
-    #[error("the transaction isn't in one category: {transaction:?}")]
+    #[error("the transaction isn't in one category or account: {transaction:?}")]
     NotInOneCategory { transaction: TransactionId },
     /// No category has the id, perhaps because it was deleted.
     #[error("no such category: {category:?}")]
