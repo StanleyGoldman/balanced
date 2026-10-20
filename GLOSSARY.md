@@ -74,6 +74,18 @@ _Avoid_: Clr flag, cleared flag, check state
 The total of an account's Cleared and Reconciled transactions, whatever their date: what the bank should show once every cleared transaction has posted.
 _Avoid_: Bank balance, statement balance
 
+**Reconcile**:
+Matching an account's Cleared transactions against a Statement until the Statement's ending balance equals the Cleared balance, then marking them Reconciled.
+_Avoid_: Balance the account, match statement
+
+**Statement**:
+The bank's periodic record of an account, as far as Reconcile needs it: an ending date and an ending balance.
+_Avoid_: Bank statement, period
+
+**Balance adjustment**:
+A transaction Reconcile posts, at the user's request, for whatever difference remains between a Statement and the Cleared balance.
+_Avoid_: Correction, plug, fudge entry
+
 **Column chooser**:
 The control at the right end of a register's header that shows, hides and reorders the register's columns.
 _Avoid_: Column picker, column settings
