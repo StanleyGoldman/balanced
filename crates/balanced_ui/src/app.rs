@@ -290,6 +290,7 @@ impl App {
                 account,
                 transaction,
             } => self.main_window.go_to_transaction(account, transaction),
+            AppCommand::GoToTransfer => self.main_window.go_to_transfer(),
             AppCommand::GoToDraftRow => {
                 if let Some(ledger) = ledger {
                     self.main_window.go_to_draft_row(ctx, &ledger.snapshot());

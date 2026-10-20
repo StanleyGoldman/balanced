@@ -1358,6 +1358,24 @@ impl Register {
             viewport,
         };
         let (response, action) = cell.show(ui, i18n, theme);
+        if column == RegisterColumn::Category
+            && let Some(OtherSide {
+                account,
+                transaction,
+            }) = row.other_side()
+        {
+            response.context_menu(|ui| {
+                let label = fl!(i18n, "register-actions-go-to", account = row.category());
+                if ui.button(label).clicked() {
+                    commands.send(AppCommand::GoToTransaction {
+                        account,
+                        transaction,
+                    });
+                    // Enter on a focused menu item leaves the menu open.
+                    ui.close();
+                }
+            });
+        }
         // A refused date keeps the cell cursor until it is fixed or cancelled.
         if response.clicked() && !self.edit.as_ref().is_some_and(Edit::is_rejected) {
             self.place_cursor(row.id(), column);

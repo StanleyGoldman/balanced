@@ -33,7 +33,7 @@ use crate::new_category::NewCategoryForm;
 use crate::preferences::{NetWorthPlacement, Preferences};
 use crate::preferences_dialog::PreferencesForm;
 use crate::register::{ColumnWidths, Register};
-use crate::register_model::RegisterRow;
+use crate::register_model::{OtherSide, RegisterRow};
 use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
@@ -195,6 +195,7 @@ impl MainWindow {
         match action {
             UserAction::Undo => view.can_undo(),
             UserAction::Redo => view.can_redo(),
+            UserAction::GoToTransfer => self.other_side().is_some(),
             UserAction::NewTransaction
             | UserAction::DeleteTransaction
             | UserAction::PrintRegister
@@ -255,6 +256,28 @@ impl MainWindow {
         self.navigate(Route::Account(account));
         if let Some(register) = self.register_mut() {
             register.go_to(transaction);
+        }
+    }
+
+    /// The other side of the transfer on the open Register's selected row, while the
+    /// Register shows such a row.
+    fn other_side(&self) -> Option<OtherSide> {
+        if !self.shows_register() {
+            return None;
+        }
+        let account = self.open_account_id()?;
+        self.register()?.selected_row(account)?.other_side()
+    }
+
+    /// Goes to the other side of the transfer on the open Register's selected row, as
+    /// [`MainWindow::go_to_transaction`] does. A row that isn't a transfer does nothing.
+    pub(crate) fn go_to_transfer(&mut self) {
+        if let Some(OtherSide {
+            account,
+            transaction,
+        }) = self.other_side()
+        {
+            self.go_to_transaction(account, transaction);
         }
     }
 
@@ -976,6 +999,8 @@ impl MainWindow {
             let edit = ui.menu_button(fl!(i18n, "menu-edit"), |ui| {
                 item(ui, &mut drawn, UserAction::Undo);
                 item(ui, &mut drawn, UserAction::Redo);
+                ui.separator();
+                item(ui, &mut drawn, UserAction::GoToTransfer);
             });
             drawn.note_menu(&edit.response);
             let view_menu = ui.menu_button(fl!(i18n, "menu-view"), |ui| {

@@ -23,6 +23,7 @@ menu-file-recent = { $number } { $file }
 menu-edit = Edit
 menu-edit-undo = Undo
 menu-edit-redo = Redo
+menu-edit-go-to-transfer = Go to Transfer
 menu-view = View
 menu-view-switch-pane = Switch Pane
 menu-tools = Tools
