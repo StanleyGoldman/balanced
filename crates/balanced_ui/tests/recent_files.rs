@@ -50,15 +50,21 @@ fn recent_files(config: &Path, files: &[&Path]) {
     .expect("the temp dir is writable");
 }
 
-/// The files `recent-files.toml` in the config directory `config` lists, newest first.
-fn listed_in(config: &Path) -> Vec<PathBuf> {
+/// The entries of `recent-files.toml` in the config directory `config`, newest first.
+fn entries_in(config: &Path) -> Vec<toml::Value> {
     let text = std::fs::read_to_string(config.join("recent-files.toml"))
         .expect("the App wrote the recent files file");
-    let table: toml::Table = text.parse().expect("the App writes valid TOML");
+    let mut table: toml::Table = text.parse().expect("the App writes valid TOML");
     assert_eq!(table["version"].as_integer(), Some(2));
-    table["files"]
-        .as_array()
-        .expect("the files are an array")
+    match table.remove("files") {
+        Some(toml::Value::Array(files)) => files,
+        files => panic!("the files are an array: {files:?}"),
+    }
+}
+
+/// The files `recent-files.toml` in the config directory `config` lists, newest first.
+fn listed_in(config: &Path) -> Vec<PathBuf> {
+    entries_in(config)
         .iter()
         .map(|entry| PathBuf::from(entry["path"].as_str().expect("a path is text")))
         .collect()
@@ -221,13 +227,33 @@ fn click(harness: &mut Harness<'static, App>, label: &str) {
     harness.run();
 }
 
-/// Whether the tab row shows the tab labelled `tab` as the one selected.
-fn on_tab(harness: &Harness<'static, App>, tab: &str) -> bool {
-    harness
-        .get_by_role_and_label(Role::Button, tab)
-        .accesskit_node()
-        .toggled()
-        == Some(Toggled::True)
+/// The tabs in the tab row, in order.
+const TABS: [&str; 7] = [
+    "Home",
+    "Accounts",
+    "Bills",
+    "Spending",
+    "Planning",
+    "Investing",
+    "Property & Debt",
+];
+
+/// The label of the tab the tab row shows as selected.
+fn selected_tab(harness: &Harness<'static, App>) -> &'static str {
+    let selected: Vec<_> = TABS
+        .into_iter()
+        .filter(|tab| {
+            harness
+                .get_by_role_and_label(Role::Button, tab)
+                .accesskit_node()
+                .toggled()
+                == Some(Toggled::True)
+        })
+        .collect();
+    match selected[..] {
+        [tab] => tab,
+        _ => panic!("one tab is selected: {selected:?}"),
+    }
 }
 
 /// Whether the Main view shows the Register of the account named `account`, whose
@@ -252,7 +278,7 @@ fn a_file_reopens_on_the_account_it_was_left_on() {
 
     reopen(&mut harness, 2, &household);
 
-    assert!(on_tab(&harness, "Accounts"));
+    assert_eq!(selected_tab(&harness), "Accounts");
     assert!(shows_register(&harness, "Savings"));
 }
 
@@ -270,7 +296,7 @@ fn a_file_reopens_on_the_tab_it_was_left_on() {
 
     reopen(&mut harness, 2, &household);
 
-    assert!(on_tab(&harness, "Bills"));
+    assert_eq!(selected_tab(&harness), "Bills");
 }
 
 #[test]
@@ -285,7 +311,7 @@ fn a_file_with_no_saved_view_opens_on_the_tab_shown() {
     testing::open_data_file(&harness, &business);
     harness.run();
 
-    assert!(on_tab(&harness, "Accounts"));
+    assert_eq!(selected_tab(&harness), "Accounts");
     assert!(!shows_register(&harness, "Everyday"));
     assert!(!shows_register(&harness, "Payroll"));
 }
@@ -302,7 +328,7 @@ fn exiting_saves_where_the_file_was_left_for_the_next_start() {
     drop(harness);
     let harness = app(&dir);
 
-    assert!(on_tab(&harness, "Accounts"));
+    assert_eq!(selected_tab(&harness), "Accounts");
     assert!(shows_register(&harness, "Savings"));
 }
 
@@ -330,13 +356,10 @@ fn an_account_no_longer_in_the_file_opens_the_accounts_tab_with_no_register() {
 
     let mut harness = app(&dir);
 
-    assert!(on_tab(&harness, "Accounts"));
+    assert_eq!(selected_tab(&harness), "Accounts");
     harness.get_by_label("Select an account in the Account bar to open its Register.");
     eframe::App::on_exit(harness.state_mut(), None);
-    let text = std::fs::read_to_string(dir.join("recent-files.toml"))
-        .expect("the App wrote the recent files file");
-    let table: toml::Table = text.parse().expect("the App writes valid TOML");
-    let last_view = &table["files"][0]["last_view"];
+    let last_view = &entries_in(&dir)[0]["last_view"];
     assert_eq!(
         last_view.get("tab").and_then(|tab| tab.as_str()),
         Some("accounts")
@@ -373,7 +396,7 @@ fn a_closed_account_reopens_like_any_other() {
 
     let harness = app(&dir);
 
-    assert!(on_tab(&harness, "Accounts"));
+    assert_eq!(selected_tab(&harness), "Accounts");
     assert!(shows_register(&harness, "Old"));
 }
 
@@ -392,5 +415,5 @@ fn a_new_file_over_a_listed_one_forgets_its_saved_view() {
     testing::new_data_file(&harness, &household);
     harness.run();
 
-    assert!(on_tab(&harness, "Bills"));
+    assert_eq!(selected_tab(&harness), "Bills");
 }

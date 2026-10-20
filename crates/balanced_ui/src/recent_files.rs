@@ -38,16 +38,20 @@ impl RecentFiles {
     /// Saves `route` as the view the listed file at `path` closed on. A file not
     /// listed saves nothing.
     pub(crate) fn note_closed(&mut self, path: &Path, route: Route) {
-        if let Some(listed) = self.0.iter_mut().find(|listed| listed.path == path) {
-            listed.last_view = Some(route);
-        }
+        self.set_last_view(path, Some(route));
     }
 
     /// Forgets the view saved for the listed file at `path`, now that a new file has
     /// replaced it.
     pub(crate) fn note_replaced(&mut self, path: &Path) {
+        self.set_last_view(path, None);
+    }
+
+    /// Sets the view saved for the listed file at `path`. A file not listed saves
+    /// nothing.
+    fn set_last_view(&mut self, path: &Path, last_view: Option<Route>) {
         if let Some(listed) = self.0.iter_mut().find(|listed| listed.path == path) {
-            listed.last_view = None;
+            listed.last_view = last_view;
         }
     }
 
@@ -113,13 +117,16 @@ impl From<Route> for LastView {
     }
 }
 
-impl From<LastView> for Route {
-    /// An account on any tab but Accounts is ignored, since only the Accounts tab
+impl TryFrom<LastView> for Route {
+    type Error = LoadError;
+
+    /// An account on any tab but Accounts is an error, since only the Accounts tab
     /// shows a Register.
-    fn from(view: LastView) -> Self {
+    fn try_from(view: LastView) -> Result<Self, LoadError> {
         match (view.tab, view.account) {
-            (TopLevelTab::Accounts, Some(account)) => Self::Account(AccountId::from(account)),
-            (tab, _) => Self::Tab(tab),
+            (TopLevelTab::Accounts, Some(account)) => Ok(Self::Account(AccountId::from(account))),
+            (tab, None) => Ok(Self::Tab(tab)),
+            (tab, Some(_)) => Err(LoadError::AccountOffAccountsTab(tab)),
         }
     }
 }
@@ -195,14 +202,16 @@ impl RecentFilesFile {
             _ => return Err(LoadError::NoVersion),
         };
         let contents: Contents = migrate(table, version)?.try_into()?;
-        let mut files: Vec<_> = contents
+        let mut files = contents
             .files
             .into_iter()
-            .map(|entry| RecentFile {
-                path: entry.path,
-                last_view: entry.last_view.map(Route::from),
+            .map(|entry| {
+                Ok(RecentFile {
+                    path: entry.path,
+                    last_view: entry.last_view.map(Route::try_from).transpose()?,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, LoadError>>()?;
         files.truncate(RecentFiles::MAX);
         Ok(RecentFiles(files))
     }
@@ -242,6 +251,8 @@ pub(crate) enum LoadError {
     Invalid(#[from] toml::de::Error),
     #[error("the recent files file has no version")]
     NoVersion,
+    #[error("the recent files file saves an account on a tab other than Accounts: {0:?}")]
+    AccountOffAccountsTab(TopLevelTab),
     #[error("the recent files file has a version this build can't read: {0}")]
     UnknownVersion(i64),
 }
@@ -425,7 +436,7 @@ mod tests {
     }
 
     #[test]
-    fn an_account_on_a_tab_other_than_accounts_is_ignored() {
+    fn an_account_on_a_tab_other_than_accounts_is_an_error() {
         let (dir, file) = file();
         std::fs::write(
             dir.path().join("recent-files.toml"),
@@ -436,12 +447,12 @@ mod tests {
         )
         .unwrap();
 
-        let loaded = file.load().unwrap();
+        let loaded = file.load();
 
-        assert_eq!(
-            loaded.last_view(Path::new("/a.balanced")),
-            Some(Route::Tab(TopLevelTab::Bills))
-        );
+        assert!(matches!(
+            loaded,
+            Err(LoadError::AccountOffAccountsTab(TopLevelTab::Bills))
+        ));
     }
 
     #[test]
