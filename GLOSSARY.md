@@ -66,6 +66,14 @@ _Avoid_: Today line, future separator
 The untitled last column of a register, holding a menu of commands for its row (e.g. Split, Void, Delete).
 _Avoid_: Row menu, context column
 
+**Cleared status**:
+Whether a transaction has shown up on the bank's records. It is one of three states: Uncleared, Cleared (`c`: the bank has it) or Reconciled (`R`: matched against a statement in Reconcile). It is shown in the register's Clr column.
+_Avoid_: Clr flag, cleared flag, check state
+
+**Cleared balance**:
+The total of an account's Cleared and Reconciled transactions, whatever their date: what the bank should show once every cleared transaction has posted.
+_Avoid_: Bank balance, statement balance
+
 **Column chooser**:
 The control at the right end of a register's header that shows, hides and reorders the register's columns.
 _Avoid_: Column picker, column settings
