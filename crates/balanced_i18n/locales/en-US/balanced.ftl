@@ -136,8 +136,8 @@ register-actions-flag = Flag
 register-actions-unflag = Unflag
 # A Flag cell, which flags or unflags its transaction, as assistive technology reads it.
 register-flag = Flag { $payee }, { $date }, { $amount }
-# A Clr cell, which marks its transaction Cleared or Uncleared, as assistive technology
-# reads it.
+# A Clr cell, which marks its transaction Cleared or Uncleared, or asks before setting
+# a Reconciled one back to Cleared, as assistive technology reads it.
 register-clr = Clr { $payee }, { $date }, { $amount }
 # The Cleared statuses, as assistive technology reads a Clr cell's value. A Clr cell
 # shows each status's .mark, and an Uncleared transaction's cell is blank.
@@ -205,6 +205,10 @@ dialog-close = Close dialog
 # Asks before deleting the transaction the payee, date and amount describe.
 dialog-delete-transaction-message = Delete this transaction? { $payee }, { $date }, { $amount }
 dialog-delete-transaction-delete = Delete
+# Asks before setting the Reconciled transaction the payee, date and amount describe
+# back to Cleared.
+dialog-unreconcile-message = Un-reconcile this transaction? It has been matched against a statement, and will be marked Cleared. { $payee }, { $date }, { $amount }
+dialog-unreconcile-accept = Mark Cleared
 dialog-ok = OK
 dialog-new-category-title = New Category
 dialog-new-category-name = Name

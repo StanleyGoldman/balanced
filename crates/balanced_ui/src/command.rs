@@ -74,6 +74,10 @@ pub(crate) enum DialogKind {
     /// The confirm for deleting the Register's selected transaction. Nothing opens
     /// while no transaction is selected, or while its account is closed.
     DeleteTransaction,
+    /// The confirm for setting a Reconciled transaction back to Cleared. Nothing opens
+    /// unless the open Register shows the transaction as Reconciled, or while its
+    /// account is closed.
+    Unreconcile { transaction: TransactionId },
     /// The New Account wizard, on its first step.
     NewAccount,
     /// Manage Accounts, holding every account as the ledger has it.
