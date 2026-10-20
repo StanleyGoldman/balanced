@@ -80,6 +80,10 @@ pub(crate) enum DialogKind {
         transaction: TransactionId,
         amount: Money,
     },
+    /// The confirm for setting a Reconciled transaction back to Cleared. Nothing opens
+    /// unless the open Register shows the transaction as Reconciled, or while its
+    /// account is closed.
+    Unreconcile { transaction: TransactionId },
     /// The New Account wizard, on its first step.
     NewAccount,
     /// Manage Accounts, holding every account as the ledger has it.

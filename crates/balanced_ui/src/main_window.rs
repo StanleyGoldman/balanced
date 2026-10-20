@@ -55,6 +55,8 @@ pub(crate) struct MainWindow {
     delete_transaction: Option<OpenDialog<DeleteTransactionForm>>,
     /// The confirm for changing a Reconciled transaction's amount, while it is open.
     reconciled_amount: Option<OpenDialog<ReconciledAmountForm>>,
+    /// The un-reconcile confirm, while it is open.
+    unreconcile: Option<OpenDialog<UnreconcileForm>>,
     /// The New Account wizard, while it is open.
     new_account: Option<OpenDialog<NewAccountForm>>,
     /// The New Category Dialog, while it is open.
@@ -107,6 +109,14 @@ struct ReconciledAmountForm {
     amount: FormattedAmount,
 }
 
+/// The un-reconcile confirm's form: which Reconciled transaction it sets back to
+/// Cleared. Its question is formatted every frame from the Register's row, so it
+/// follows the locale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct UnreconcileForm {
+    transaction: TransactionId,
+}
+
 impl MainWindow {
     /// The Main window on Home, laid out as `layout` says.
     pub(crate) fn new(layout: &Layout) -> Self {
@@ -119,6 +129,7 @@ impl MainWindow {
             column_widths: layout.column_widths(),
             delete_transaction: None,
             reconciled_amount: None,
+            unreconcile: None,
             new_account: None,
             new_category: None,
             manage_accounts: None,
@@ -276,6 +287,7 @@ impl MainWindow {
             column_widths: _,
             delete_transaction,
             reconciled_amount,
+            unreconcile,
             new_account,
             new_category,
             manage_accounts,
@@ -290,6 +302,7 @@ impl MainWindow {
         *open_register = None;
         *delete_transaction = None;
         *reconciled_amount = None;
+        *unreconcile = None;
         *new_account = None;
         *new_category = None;
         *manage_accounts = None;
@@ -361,6 +374,25 @@ impl MainWindow {
                 };
                 self.reconciled_amount = Some(OpenDialog::new(ctx, form));
             }
+            DialogKind::Unreconcile { transaction } => {
+                let Some(summary) = self.open_account(view) else {
+                    return;
+                };
+                if summary.account().is_closed() {
+                    return;
+                }
+                let reconciled = self
+                    .register()
+                    .and_then(|register| register.row(summary.account().id(), *transaction))
+                    .is_some_and(|row| row.cleared_status() == ClearedStatus::Reconciled);
+                if !reconciled {
+                    return;
+                }
+                let form = UnreconcileForm {
+                    transaction: *transaction,
+                };
+                self.unreconcile = Some(OpenDialog::new(ctx, form));
+            }
             DialogKind::NewAccount => {
                 let form = NewAccountForm::new(i18n, view.net_worth().currency(), today);
                 self.new_account = Some(OpenDialog::new(ctx, form));
@@ -422,6 +454,7 @@ impl MainWindow {
     fn dialog_open(&self) -> bool {
         self.delete_transaction.is_some()
             || self.reconciled_amount.is_some()
+            || self.unreconcile.is_some()
             || self.new_account.is_some()
             || self.new_category.is_some()
             || self.manage_accounts.is_some()
@@ -541,6 +574,7 @@ impl MainWindow {
         self.accounts = Some(accounts);
         self.delete_transaction_dialog(ui.ctx(), i18n, theme, commands, view);
         self.reconciled_amount_dialog(ui.ctx(), i18n, theme, commands, view);
+        self.unreconcile_dialog(ui.ctx(), i18n, theme, commands, view);
         self.new_account_dialog(ui.ctx(), i18n, theme, commands, today);
         self.new_category_dialog(ui.ctx(), i18n, theme, commands, view);
         self.preferences_dialog(ui.ctx(), i18n, theme, commands);
@@ -789,6 +823,53 @@ impl MainWindow {
             DialogOutcome::Back => unreachable!("the amount confirm has no Back button"),
         }
         self.close_dialog(ctx, |window| &mut window.reconciled_amount);
+    }
+
+    /// The un-reconcile confirm, while it is open. Mark Cleared has first focus, so
+    /// Enter sets the transaction back to Cleared.
+    fn unreconcile_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        theme: &Theme,
+        commands: &CommandSender,
+        view: &LedgerView,
+    ) {
+        let Some(form) = self.unreconcile.as_ref().map(|dialog| dialog.form) else {
+            return;
+        };
+        let row = self.confirmed_row(view, form.transaction);
+        let question = fl!(
+            i18n,
+            "dialog-unreconcile-message",
+            payee = row.payee(),
+            date = row.date(),
+            amount = row.amount_text()
+        );
+        let Some(dialog) = &mut self.unreconcile else {
+            return;
+        };
+        let outcome = LightDialog::new(
+            Id::new("unreconcile_dialog"),
+            fl!(i18n, "dialog-unreconcile-accept"),
+            fl!(i18n, "dialog-cancel"),
+            theme,
+        )
+        .show(ctx, dialog, |ui, _form| {
+            ui.label(question);
+        });
+        match outcome {
+            DialogOutcome::Open => return,
+            DialogOutcome::Accepted => {
+                commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
+                    transaction: form.transaction,
+                    edit: TransactionEdit::ClearedStatus(ClearedStatus::Cleared),
+                }));
+            }
+            DialogOutcome::Cancelled => {}
+            DialogOutcome::Back => unreachable!("the un-reconcile confirm has no Back button"),
+        }
+        self.close_dialog(ctx, |window| &mut window.unreconcile);
     }
 
     /// The open account's name above its Register, with its Current and Ending balances,
