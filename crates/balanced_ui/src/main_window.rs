@@ -2,8 +2,6 @@
 
 //! The Main window: Menu bar, tab row, Account bar, Main view and Status bar.
 
-use std::path::PathBuf;
-
 use balanced_core::{
     AccountId, AccountSummary, ClearedStatus, DomainCommand, DomainError, LedgerView,
     TransactionEdit, TransactionId,
@@ -32,14 +30,15 @@ use crate::new_account::{self, NewAccountForm, WizardOutcome};
 use crate::new_category::NewCategoryForm;
 use crate::preferences::{NetWorthPlacement, Preferences};
 use crate::preferences_dialog::PreferencesForm;
+use crate::recent_files::RecentFiles;
 use crate::register::{ColumnWidths, Register};
 use crate::register_model::{OtherSide, RegisterRow};
 use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
 
-/// What the Main window shows. Only its [`Layout`] outlives the run: every run starts
-/// on Home, with no Register open.
+/// What the Main window shows. Only its [`Layout`] outlives the run. A data file opens
+/// on the view it last closed on, which the Recent files keep.
 #[derive(Debug)]
 pub(crate) struct MainWindow {
     tab: TopLevelTab,
@@ -83,7 +82,7 @@ pub(crate) struct WindowFrame<'a> {
     pub(crate) view: &'a LedgerView,
     pub(crate) today: Date<Iso>,
     /// The Recent files, newest first.
-    pub(crate) recent_files: &'a [PathBuf],
+    pub(crate) recent_files: &'a RecentFiles,
 }
 
 /// The Register open under the Accounts tab and the account it shows.
@@ -165,6 +164,27 @@ impl MainWindow {
                     });
                 }
             }
+        }
+    }
+
+    /// Where the Main view is: the open account's Register on the Accounts tab, or
+    /// else the tab shown.
+    pub(crate) fn route(&self) -> Route {
+        match self.open_account_id() {
+            Some(account) if self.tab == TopLevelTab::Accounts => Route::Account(account),
+            _ => Route::Tab(self.tab),
+        }
+    }
+
+    /// Shows `route`, the view a data file last closed on, now that the file is open
+    /// again as `view`. An account no longer in the file opens the Accounts tab with
+    /// no Register.
+    pub(crate) fn reopen(&mut self, route: Route, view: &LedgerView) {
+        match route {
+            Route::Account(account) if view.account(account).is_none() => {
+                self.navigate(Route::Tab(TopLevelTab::Accounts));
+            }
+            Route::Tab(_) | Route::Account(_) => self.navigate(route),
         }
     }
 
@@ -976,7 +996,7 @@ impl MainWindow {
         i18n: &Localizer,
         commands: &CommandSender,
         view: &LedgerView,
-        recent_files: &[PathBuf],
+        recent_files: &RecentFiles,
     ) -> DrawnMenus {
         let item = |ui: &mut egui::Ui, drawn: &mut DrawnMenus, action| {
             self.menu_item(ui, i18n, commands, view, drawn, action);
@@ -989,7 +1009,7 @@ impl MainWindow {
                 ui.separator();
                 item(ui, &mut drawn, UserAction::NewAccount);
                 ui.separator();
-                if !recent_files.is_empty() {
+                if recent_files.newest().is_some() {
                     Self::recent_file_items(ui, i18n, commands, &mut drawn, recent_files);
                     ui.separator();
                 }
@@ -1027,16 +1047,16 @@ impl MainWindow {
         i18n: &Localizer,
         commands: &CommandSender,
         drawn: &mut DrawnMenus,
-        recent_files: &[PathBuf],
+        recent_files: &RecentFiles,
     ) {
-        for (number, path) in (1_u32..).zip(recent_files) {
+        for (number, path) in (1_u32..).zip(recent_files.paths()) {
             let file = data_file::file_name(path);
             let item = ui
                 .button(fl!(i18n, "menu-file-recent", number = number, file = file))
                 .on_hover_text(path.display().to_string());
             drawn.note_item(&item);
             if item.clicked() {
-                commands.send(AppCommand::OpenDataFile(path.clone()));
+                commands.send(AppCommand::OpenDataFile(path.to_owned()));
                 // egui closes a menu on a pointer click only, not on Enter.
                 ui.close();
             }

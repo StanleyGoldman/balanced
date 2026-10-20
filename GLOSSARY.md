@@ -41,7 +41,7 @@ The one file that holds a household's finances: its accounts, transactions and u
 _Avoid_: Database, document, project, Quicken file
 
 **Recent files**:
-The data files the person using this computer has opened lately, newest first, listed in the File menu. The newest one opens at startup. Recent files are a record, not a Preference.
+The data files the person using this computer has opened lately, newest first, listed in the File menu. The newest one opens at startup. Each entry also remembers where the person left that file: the top-level tab and the account open when it last closed, which it reopens on. Recent files are a record, not a Preference.
 _Avoid_: MRU list, history
 
 **Shortcut**:
