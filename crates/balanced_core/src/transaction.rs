@@ -5,7 +5,7 @@
 
 use icu_calendar::{Date, Iso};
 
-use crate::{CategoryId, DomainError, Money, MoneyError, TransactionEdit};
+use crate::{AccountId, CategoryId, DomainError, Money, MoneyError, TransactionEdit};
 
 /// Identifies a transaction for as long as it exists. Ids are never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -81,6 +81,9 @@ pub enum Allocation {
     /// The amount divided between categories. The transaction's amount is the sum of
     /// the lines.
     Split(Vec<SplitLine>),
+    /// One side of a transfer: the whole amount moved to or from another account, where
+    /// the transaction with this id is its other side.
+    Transfer(TransactionId),
 }
 
 /// How far a transaction has been checked against the bank: not yet, seen on the bank's
@@ -190,6 +193,31 @@ impl Transaction {
         self.flagged
     }
 
+    /// The other side of this transfer, with `id`, in the other account: on the same
+    /// date, for the amount with its sign flipped, with the payee and memo copied, with
+    /// no number and no flag, and uncleared.
+    pub(crate) fn other_side(&self, id: TransactionId) -> Self {
+        Self {
+            id,
+            date: self.date,
+            number: None,
+            payee: self.payee.clone(),
+            memo: self.memo.clone(),
+            allocation: Allocation::Transfer(self.id),
+            amount: -self.amount,
+            flagged: false,
+            cleared_status: ClearedStatus::Uncleared,
+        }
+    }
+
+    /// The transaction's other side, when it is one side of a transfer.
+    pub(crate) fn other_side_id(&self) -> Option<TransactionId> {
+        match self.allocation {
+            Allocation::Transfer(other_side) => Some(other_side),
+            Allocation::OpeningBalance | Allocation::Category(_) | Allocation::Split(_) => None,
+        }
+    }
+
     /// How far the transaction has been checked against the bank.
     pub fn cleared_status(&self) -> ClearedStatus {
         self.cleared_status
@@ -248,7 +276,7 @@ impl Transaction {
             TransactionEdit::Category(category) => match self.allocation {
                 Allocation::Category(old) => TransactionEdit::Category(old),
                 // `edited` refuses a category for any other allocation.
-                Allocation::OpeningBalance | Allocation::Split(_) => {
+                Allocation::OpeningBalance | Allocation::Split(_) | Allocation::Transfer(_) => {
                     TransactionEdit::Category(*category)
                 }
             },
@@ -262,7 +290,7 @@ impl Transaction {
     /// Whether any of the transaction's amount is in `category`.
     pub(crate) fn uses_category(&self, category: CategoryId) -> bool {
         match &self.allocation {
-            Allocation::OpeningBalance => false,
+            Allocation::OpeningBalance | Allocation::Transfer(_) => false,
             Allocation::Category(own) => *own == category,
             Allocation::Split(lines) => lines.iter().any(|line| match line.target() {
                 SplitTarget::Category(own) => own == category,
@@ -283,6 +311,8 @@ pub(crate) enum NewAllocation {
     OpeningBalance(Money),
     Category(CategoryId, Money),
     Split(Vec<SplitLine>),
+    /// To or from another account.
+    Transfer(AccountId, Money),
 }
 
 /// A transaction to post to an account, which gives it its id.
@@ -314,6 +344,12 @@ impl NewTransaction {
     /// `amount` paid to or received from `payee`, all in `category`.
     pub fn new(date: Date<Iso>, payee: &str, category: CategoryId, amount: Money) -> Self {
         Self::with_allocation(date, payee, NewAllocation::Category(category, amount))
+    }
+
+    /// `amount` paid to or received from `payee`, moved from or to account `account`: a
+    /// transfer, whose other side the ledger records in that account.
+    pub fn transfer(date: Date<Iso>, payee: &str, account: AccountId, amount: Money) -> Self {
+        Self::with_allocation(date, payee, NewAllocation::Transfer(account, amount))
     }
 
     /// A transaction with `payee`, divided between `lines`.
@@ -395,14 +431,16 @@ impl NewTransaction {
     pub(crate) fn starting_status(&self) -> ClearedStatus {
         match self.allocation {
             NewAllocation::OpeningBalance(_) => ClearedStatus::Reconciled,
-            NewAllocation::Category(..) | NewAllocation::Split(_) => ClearedStatus::Uncleared,
+            NewAllocation::Category(..) | NewAllocation::Transfer(..) | NewAllocation::Split(_) => {
+                ClearedStatus::Uncleared
+            }
         }
     }
 
     /// The categories the transaction names.
     pub(crate) fn categories(&self) -> Vec<CategoryId> {
         match &self.allocation {
-            NewAllocation::OpeningBalance(_) => Vec::new(),
+            NewAllocation::OpeningBalance(_) | NewAllocation::Transfer(..) => Vec::new(),
             NewAllocation::Category(category, _) => vec![*category],
             NewAllocation::Split(lines) => lines
                 .iter()
@@ -413,8 +451,19 @@ impl NewTransaction {
         }
     }
 
-    /// The transaction, with `id`, in an account in `currency`. Fails when an amount is
-    /// in another currency, or when a split's lines overflow.
+    /// The account a transfer moves the amount to or from.
+    pub(crate) fn transfer_account(&self) -> Option<AccountId> {
+        match self.allocation {
+            NewAllocation::Transfer(account, _) => Some(account),
+            NewAllocation::OpeningBalance(_)
+            | NewAllocation::Category(..)
+            | NewAllocation::Split(_) => None,
+        }
+    }
+
+    /// The transaction, with `id`, in an account in `currency`. A transfer's other side
+    /// is to take the id after `id`. Fails when an amount is in another currency, or when
+    /// a split's lines overflow.
     pub(crate) fn into_transaction(
         self,
         id: TransactionId,
@@ -424,6 +473,7 @@ impl NewTransaction {
         let (allocation, amount) = match self.allocation {
             NewAllocation::OpeningBalance(amount) => (Allocation::OpeningBalance, amount),
             NewAllocation::Category(category, amount) => (Allocation::Category(category), amount),
+            NewAllocation::Transfer(_, amount) => (Allocation::Transfer(id.next()), amount),
             NewAllocation::Split(lines) => {
                 let amount = lines.iter().try_fold(Money::zero(currency), |sum, line| {
                     sum.checked_add(line.amount)

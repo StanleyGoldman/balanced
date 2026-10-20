@@ -122,6 +122,12 @@ impl StatusMessage {
             Self::PreferencesNotSaved => fl!(i18n, "status-preferences-not-saved"),
             Self::Rejected(error) => match error {
                 DomainError::AccountClosed { .. } => fl!(i18n, "status-account-closed"),
+                DomainError::TransferAccountClosed { .. } => {
+                    fl!(i18n, "status-transfer-account-closed")
+                }
+                DomainError::TransferToOwnAccount { .. } => {
+                    fl!(i18n, "status-transfer-to-own-account")
+                }
                 DomainError::UnknownTransaction { .. } => {
                     fl!(i18n, "status-unknown-transaction")
                 }

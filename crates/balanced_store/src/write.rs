@@ -129,13 +129,18 @@ impl Store {
 
     /// Adds a transaction, with its split lines.
     pub fn insert_transaction(&self, transaction: &TransactionRow) -> Result<(), StoreError> {
-        let (allocation, amount, category_id) = allocation_columns(&transaction.allocation);
+        let AllocationColumns {
+            allocation,
+            amount,
+            category_id,
+            other_side_id,
+        } = allocation_columns(&transaction.allocation);
         self.connection
             .prepare_cached(
                 "INSERT INTO \"transaction\"
                  (id, account_id, date, number, payee, memo, allocation, amount, category_id,
-                  flagged, cleared_status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                  flagged, cleared_status, other_side_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             )?
             .execute(params![
                 transaction.id,
@@ -149,6 +154,7 @@ impl Store {
                 category_id,
                 transaction.flagged,
                 transaction.cleared_status,
+                other_side_id,
             ])?;
         self.insert_split_lines(transaction)
     }
@@ -232,14 +238,34 @@ impl Store {
     }
 }
 
-/// The `allocation`, `amount` and `category_id` columns that hold `allocation`.
-fn allocation_columns(allocation: &AllocationRow) -> (&'static str, Option<i64>, Option<u32>) {
+/// The columns of the `transaction` table that hold its allocation.
+struct AllocationColumns {
+    allocation: &'static str,
+    amount: Option<i64>,
+    category_id: Option<u32>,
+    other_side_id: Option<u32>,
+}
+
+/// The columns that hold `allocation`.
+fn allocation_columns(allocation: &AllocationRow) -> AllocationColumns {
+    let columns = |allocation, amount, category_id, other_side_id| AllocationColumns {
+        allocation,
+        amount,
+        category_id,
+        other_side_id,
+    };
     match allocation {
-        AllocationRow::OpeningBalance { amount } => ("opening_balance", Some(*amount), None),
+        AllocationRow::OpeningBalance { amount } => {
+            columns("opening_balance", Some(*amount), None, None)
+        }
         AllocationRow::Category {
             category_id,
             amount,
-        } => ("category", Some(*amount), Some(*category_id)),
-        AllocationRow::Split(_) => ("split", None, None),
+        } => columns("category", Some(*amount), Some(*category_id), None),
+        AllocationRow::Split(_) => columns("split", None, None, None),
+        AllocationRow::Transfer {
+            other_side_id,
+            amount,
+        } => columns("transfer", Some(*amount), None, Some(*other_side_id)),
     }
 }

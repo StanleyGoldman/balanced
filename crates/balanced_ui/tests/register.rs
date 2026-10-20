@@ -1174,7 +1174,8 @@ fn moving_the_highlight_past_the_visible_rows_scrolls_the_list() {
     press(&mut harness, Modifiers::NONE, Key::Enter);
     press(&mut harness, Modifiers::ALT, Key::ArrowDown);
 
-    for _ in 0..14 {
+    // From Fuel, the second row, down to the fifteenth.
+    for _ in 0..13 {
         press(&mut harness, Modifiers::NONE, Key::ArrowDown);
     }
 

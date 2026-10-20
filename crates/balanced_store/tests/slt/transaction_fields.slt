@@ -35,7 +35,7 @@ INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation
 
 statement error CHECK constraint failed: transaction_allocation_known
 INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
-    (2, 0, '2026-01-01', NULL, 'Grocer', '', 'transfer', -1, NULL)
+    (2, 0, '2026-01-01', NULL, 'Grocer', '', 'journal', -1, NULL)
 
 query I
 SELECT flagged FROM "transaction" ORDER BY id
