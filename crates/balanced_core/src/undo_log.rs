@@ -224,8 +224,8 @@ fn transaction_to_wire(transaction: &Transaction) -> Result<v1::Transaction, Wri
 
 fn other_side_to_wire(other_side: &OtherSide) -> Result<v1::OtherSide, WriteError> {
     Ok(v1::OtherSide {
-        account: other_side.account.raw(),
-        transaction: transaction_to_wire(&other_side.transaction)?,
+        account: other_side.account().raw(),
+        transaction: transaction_to_wire(other_side.transaction())?,
     })
 }
 
@@ -486,10 +486,10 @@ fn other_side_from_wire(
     other_side: v1::OtherSide,
     currency: CurrencyCode,
 ) -> Result<OtherSide, UndoEntryError> {
-    Ok(OtherSide {
-        account: AccountId::new(other_side.account),
-        transaction: transaction_from_wire(other_side.transaction, currency)?,
-    })
+    Ok(OtherSide::new(
+        AccountId::new(other_side.account),
+        transaction_from_wire(other_side.transaction, currency)?,
+    ))
 }
 
 fn split_from_wire(lines: Vec<v1::SplitLine>, currency: CurrencyCode) -> Vec<SplitLine> {
@@ -759,10 +759,7 @@ mod tests {
             DomainCommand::RestoreTransaction {
                 account: AccountId::new(7),
                 transaction: sent,
-                other_side: Some(Box::new(OtherSide {
-                    account: AccountId::new(8),
-                    transaction: received,
-                })),
+                other_side: Some(Box::new(OtherSide::new(AccountId::new(8), received))),
             },
         ]
     }

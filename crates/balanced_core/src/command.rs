@@ -97,8 +97,31 @@ pub enum DomainCommand {
 /// A transfer's other side, in the account that holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OtherSide {
-    pub account: AccountId,
-    pub transaction: Transaction,
+    account: AccountId,
+    transaction: Transaction,
+}
+
+impl OtherSide {
+    pub(crate) fn new(account: AccountId, transaction: Transaction) -> Self {
+        Self {
+            account,
+            transaction,
+        }
+    }
+
+    /// The account that holds the other side.
+    pub fn account(&self) -> AccountId {
+        self.account
+    }
+
+    pub fn transaction(&self) -> &Transaction {
+        &self.transaction
+    }
+
+    /// The account and the transaction, taken apart.
+    pub(crate) fn into_parts(self) -> (AccountId, Transaction) {
+        (self.account, self.transaction)
+    }
 }
 
 /// Which way [`DomainCommand::MoveAccount`] moves an account.

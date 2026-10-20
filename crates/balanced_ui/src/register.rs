@@ -383,7 +383,9 @@ impl TextField {
                     return Ok(None);
                 }
                 CategoryTarget::Category(category) => TransactionEdit::Category(category),
-                CategoryTarget::Transfer(account) if row.transfer_account() == Some(account) => {
+                CategoryTarget::Transfer(account)
+                    if row.draft_transfer_account() == Some(account) =>
+                {
                     return Ok(None);
                 }
                 CategoryTarget::Transfer(account) => {

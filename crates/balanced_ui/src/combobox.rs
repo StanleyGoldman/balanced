@@ -67,7 +67,7 @@ impl<T> Choices<T> {
 
     /// These choices, then `later`'s, each in their own order.
     #[must_use]
-    pub(crate) fn then(mut self, later: Self) -> Self {
+    pub(crate) fn followed_by(mut self, later: Self) -> Self {
         self.choices.extend(later.choices);
         self
     }
@@ -158,7 +158,7 @@ impl FieldChoices {
             account,
             formatting_locale: i18n.formatting_locale().clone(),
             payees: Choices::new(i18n, payees.into_iter().map(|payee| (payee.to_owned(), ()))),
-            categories: Choices::new(i18n, categories).then(Choices::new(i18n, accounts)),
+            categories: Choices::new(i18n, categories).followed_by(Choices::new(i18n, accounts)),
         }
     }
 

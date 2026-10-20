@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use balanced_core::{
     AccountId, AccountSummary, Allocation, CategoryId, CurrencyCode, Generation, LedgerView, Money,
-    RegisterEntry, SplitTarget, TransactionId,
+    SplitTarget, TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
 use icu_calendar::{Date, Iso};
@@ -192,8 +192,9 @@ impl RegisterRow {
         }
     }
 
-    /// The account the draft row transfers to or from, once one is typed.
-    pub(crate) fn transfer_account(&self) -> Option<AccountId> {
+    /// The account the draft row transfers to or from, once one is typed. A posted
+    /// transfer's Category cell can't change yet, so it has none.
+    pub(crate) fn draft_transfer_account(&self) -> Option<AccountId> {
         match self.kind {
             RowKind::Draft(Some(CategoryTarget::Transfer(account))) => Some(account),
             RowKind::OpeningBalance
@@ -622,7 +623,9 @@ impl CategoryPaths<'_> {
 /// is asked for while a model is built.
 struct OtherAccounts<'a> {
     view: &'a LedgerView,
-    /// Each transfer side's account's name, by the side's id.
+    /// Each transaction's account's name, by the transaction's id. Every transaction is
+    /// in it, so a file whose transfer points at a transaction of another kind still
+    /// shows.
     names: Option<HashMap<TransactionId, &'a str>>,
 }
 
@@ -638,11 +641,7 @@ impl<'a> OtherAccounts<'a> {
                     summary
                         .register()
                         .iter()
-                        .map(RegisterEntry::transaction)
-                        .filter(|transaction| {
-                            matches!(transaction.allocation(), Allocation::Transfer(_))
-                        })
-                        .map(move |transaction| (transaction.id(), name))
+                        .map(move |entry| (entry.transaction().id(), name))
                 })
                 .collect()
         });

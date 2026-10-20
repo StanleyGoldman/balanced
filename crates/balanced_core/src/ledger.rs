@@ -984,13 +984,13 @@ impl Ledger {
         let id = self.next_transaction;
         let currency = self.view.net_worth.currency();
         let transaction = transaction.into_transaction(id, currency)?;
-        // The other side takes the id after this one's.
-        let other_side = other_account.map(|other| (other, transaction.other_side(id.next())));
-        self.insert_posted(index, transaction)?;
-        let mut next = id.next();
+        let other_side = other_account
+            .zip(transaction.other_side_id())
+            .map(|(other, other_side)| (other, transaction.other_side(other_side)));
+        let next = other_side.as_ref().map_or(id, |(_, side)| side.id()).next();
+        self.insert_transaction(index, transaction)?;
         if let Some((other, other_side)) = other_side {
-            self.insert_posted(other, other_side)?;
-            next = next.next();
+            self.insert_transaction(other, other_side)?;
         }
         self.next_transaction = next;
         Ok(DomainCommand::DeleteTransaction { transaction: id })
@@ -1010,14 +1010,23 @@ impl Ledger {
         Ok(index)
     }
 
-    /// Adds `transaction`, whose id is the largest yet, to the account at `index`, after
-    /// the rest of its date.
-    fn insert_posted(&mut self, index: usize, transaction: Transaction) -> Result<(), DomainError> {
+    /// Adds `transaction` to the account at `index`, in register order: a new one, whose
+    /// id is the largest yet, after the rest of its date.
+    fn insert_transaction(
+        &mut self,
+        index: usize,
+        transaction: Transaction,
+    ) -> Result<(), DomainError> {
         let currency = self.view.net_worth.currency();
         // `index` comes from a lookup in this same list of accounts.
         let row = transaction_row(self.view.accounts[index].account.id(), &transaction);
         let (summary, ()) = self.view.edit_register(index, currency, |transactions| {
-            let position = transactions.partition_point(|other| other.date() <= transaction.date());
+            let key = transaction.register_order();
+            let Err(position) =
+                transactions.binary_search_by_key(&key, Transaction::register_order)
+            else {
+                panic!("added {:?}, which its account holds", transaction.id());
+            };
             transactions.insert(position, transaction);
         })?;
         self.replace_account(index, summary)?;
@@ -1040,10 +1049,7 @@ impl Ledger {
                     DomainError::TransferAccountClosed { account }
                 })?;
                 let (account, transaction) = self.remove_transaction(position)?;
-                Some(Box::new(OtherSide {
-                    account,
-                    transaction,
-                }))
+                Some(Box::new(OtherSide::new(account, transaction)))
             }
             None => None,
         };
@@ -1083,10 +1089,7 @@ impl Ledger {
         };
         self.put_back(account, transaction)?;
         if let Some(other_side) = other_side {
-            let OtherSide {
-                account,
-                transaction,
-            } = *other_side;
+            let (account, transaction) = other_side.into_parts();
             self.put_back(account, transaction)?;
         }
         Ok(inverse)
@@ -1109,23 +1112,7 @@ impl Ledger {
             .iter()
             .position(|summary| summary.account.id() == account)
             .ok_or(DomainError::UnknownAccount { account })?;
-        let currency = self.view.net_worth.currency();
-        let row = transaction_row(account, &transaction);
-        let (summary, ()) = self.view.edit_register(index, currency, |transactions| {
-            let key = transaction.register_order();
-            let Err(position) =
-                transactions.binary_search_by_key(&key, Transaction::register_order)
-            else {
-                panic!(
-                    "restored {:?}, which its account still holds",
-                    transaction.id()
-                );
-            };
-            transactions.insert(position, transaction);
-        })?;
-        self.replace_account(index, summary)?;
-        self.store.insert_transaction(&row?)?;
-        Ok(())
+        self.insert_transaction(index, transaction)
     }
 
     fn create_category(
