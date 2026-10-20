@@ -1757,13 +1757,15 @@ mod tests {
     #[test]
     #[should_panic(expected = "a new account's transactions hold no transfer")]
     fn a_transfer_in_a_new_account_is_a_bug() {
+        let everyday = AccountId::new(0);
+
         Ledger::with_accounts(
             usd_code(),
             [],
             [
                 account("Everyday", AccountKind::Checking, usd(dec!(1))),
                 account("Rainy Day", AccountKind::Savings, usd(dec!(1))).with_transactions([
-                    NewTransaction::transfer(date(2), "", AccountId::new(0), usd(dec!(1))),
+                    NewTransaction::transfer(date(2), "Savings top-up", everyday, usd(dec!(1))),
                 ]),
             ],
         )
