@@ -1689,6 +1689,29 @@ impl Proto {
                 if r.has_focus() {
                     self.last_amount = field;
                 }
+                // As in the built register: leaving the field (Enter, Tab, a click away)
+                // replaces typed arithmetic with its result. A press on this field's
+                // calculator button leaves it alone, so the popup can start from the text.
+                let pressing_button = ctx.input(|i| {
+                    i.pointer.any_down()
+                        && i.pointer
+                            .interact_pos()
+                            .is_some_and(|p| self.calc_button_rects[field as usize].contains(p))
+                });
+                if r.lost_focus() && self.popup.is_none() && !pressing_button {
+                    let text = self.text_of(field).trim().to_owned();
+                    if self.reader.read(&text).is_ok_and(|c| c.is_arithmetic())
+                        && let Ok((result, rounded)) = self.result_of(&text)
+                    {
+                        *self.text_mut(field) = result.clone();
+                        self.h.event(
+                            "typed_arithmetic",
+                            json!({ "field": field.name(), "expression": text,
+                                    "result": result, "rounded": rounded }),
+                        );
+                        self.emit(&format!("SetAmount({}, {result})", field.name()), "leaving the field");
+                    }
+                }
                 if self.variant.field_popup() && self.o[BUTTON] {
                     let b = calc_icon(ui);
                     self.h
