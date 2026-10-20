@@ -65,3 +65,11 @@ _Avoid_: Row menu, context column
 **Column chooser**:
 The control at the right end of a register's header that shows, hides and reorders the register's columns.
 _Avoid_: Column picker, column settings
+
+**Transfer**:
+Money moved between two of the household's accounts, recorded as a transaction in each account's register. It's picked by choosing `[Account]` in the Category field, of a transaction or of a split line.
+_Avoid_: Journal entry
+
+**Other side**:
+The transaction a transfer records in the other account. The two sides share their date and amount, with the sign flipped; everything else belongs to each side.
+_Avoid_: Mirror transaction, linked transaction, counterpart
