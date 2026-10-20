@@ -100,6 +100,15 @@ pub enum Damage {
     /// An entry in the undo log isn't a Command this Balanced can read.
     #[error("an undo log entry can't be read")]
     UndoEntry(#[source] UndoEntryError),
+    /// Transaction `transaction` is a side of a transfer that disagrees with
+    /// `other_side`: the other side doesn't name it back, or the two differ in their
+    /// date or amount. Balanced keeps both sides in step, so only another program can
+    /// have written this.
+    #[error("{transaction:?} and its other side {other_side:?} disagree")]
+    TransferSides {
+        transaction: TransactionId,
+        other_side: TransactionId,
+    },
 }
 
 /// Why the data file couldn't take a change.
@@ -249,7 +258,9 @@ impl Ledger {
             .collect::<Result<Vec<_>, OpenError>>()?;
         // The store orders kinds by name; the Account bar orders them by group.
         accounts.sort_by_key(|&(order, _)| order);
-        let accounts = accounts.into_iter().map(|(_, summary)| summary).collect();
+        let accounts: Vec<AccountSummary> =
+            accounts.into_iter().map(|(_, summary)| summary).collect();
+        check_transfers(&accounts)?;
         let mut group_totals = [Money::zero(currency); AccountGroup::ALL.len()];
         for (name, total) in contents.group_totals {
             // `index` counts within `AccountGroup::ALL`, which sizes the array.
@@ -281,6 +292,36 @@ impl Ledger {
         )
         .with_history(history))
     }
+}
+
+/// Refuses `accounts` as damaged when a transfer's two sides disagree, naming the
+/// disagreeing side with the lowest id. The schema guards only that each other side
+/// exists.
+fn check_transfers(accounts: &[AccountSummary]) -> Result<(), OpenError> {
+    let transactions: HashMap<TransactionId, &Transaction> = accounts
+        .iter()
+        .flat_map(AccountSummary::register)
+        .map(|entry| (entry.transaction().id(), entry.transaction()))
+        .collect();
+    let mut sides: Vec<(&Transaction, TransactionId)> = transactions
+        .values()
+        .filter_map(|&side| side.other_side_id().map(|other_side| (side, other_side)))
+        .collect();
+    sides.sort_by_key(|(side, _)| side.id());
+    for (side, other_side) in sides {
+        let agrees = transactions.get(&other_side).is_some_and(|other| {
+            other.other_side_id() == Some(side.id())
+                && other.date() == side.date()
+                && other.amount() == -side.amount()
+        });
+        if !agrees {
+            return Err(OpenError::Damaged(Damage::TransferSides {
+                transaction: side.id(),
+                other_side,
+            }));
+        }
+    }
+    Ok(())
 }
 
 /// `minor_units` of `currency`: cents, for USD.
