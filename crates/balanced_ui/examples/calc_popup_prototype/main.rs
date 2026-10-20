@@ -1331,7 +1331,11 @@ impl Proto {
                 (format!("{mark} {amount}"), false)
             }
             Err(AmountParseError::DivisionByZero) => ("Can't divide by zero".to_owned(), true),
-            Err(_) => ("…".to_owned(), false),
+            // Mid-sum (`12+`) is still being typed; anything else can't be read.
+            Err(_) if expr.trim_end().ends_with(['+', '-', '*', '/', '×', '÷', '−', '(']) => {
+                ("…".to_owned(), false)
+            }
+            Err(_) => ("Not an amount".to_owned(), true),
         }
     }
 
@@ -1348,10 +1352,15 @@ impl Proto {
     ) -> Pad {
         let mut pad = Pad::None;
         let display_id = Id::new((scope, "display"));
-        // Refuse what the reader refuses, and take `=` as a key.
+        // Refuse what the reader refuses, and take `=` as a key, only while the display
+        // has the keyboard: the F2 note box takes letters while the calculator is open.
         let reader = self.reader.clone();
         let mut equals = false;
+        let had_focus = ctx.memory(|m| m.has_focus(display_id));
         ctx.input_mut(|i| {
+            if !had_focus {
+                return;
+            }
             for ev in &mut i.events {
                 if let Event::Text(t) | Event::Paste(t) = ev {
                     if t.contains('=') {
@@ -1361,7 +1370,6 @@ impl Proto {
                 }
             }
         });
-        let had_focus = ctx.memory(|m| m.has_focus(display_id));
         let enter = had_focus && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter));
         let esc = had_focus && ctx.input(|i| i.key_pressed(Key::Escape));
         let width = if slim { 250.0 } else { 172.0 };
@@ -1802,7 +1810,8 @@ impl Proto {
                 found
             });
             if let Some(op) = op {
-                let seed = if self.o[FROM_FIELD] {
+                // An empty field holds 0, so `+` on it starts `0+`, not a bare `+`.
+                let seed = if self.o[FROM_FIELD] && !text.is_empty() {
                     text
                 } else {
                     "0".to_owned()
