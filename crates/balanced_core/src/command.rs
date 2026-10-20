@@ -60,7 +60,8 @@ pub enum DomainCommand {
         account: AccountId,
         transaction: NewTransaction,
     },
-    /// Change one field of an existing transaction.
+    /// Change one field of an existing transaction. A new date or amount on one side of
+    /// a transfer changes its other side too.
     EditTransaction {
         transaction: TransactionId,
         edit: TransactionEdit,
@@ -153,7 +154,8 @@ impl MoveDirection {
 /// The new value of one field of a transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransactionEdit {
-    /// The date, which moves the transaction into date order in its register.
+    /// The date, which moves the transaction into date order in its register. A
+    /// transfer's other side takes the same date.
     Date(Date<Iso>),
     /// The cheque or reference number, or `None` to clear it.
     Number(Option<String>),
@@ -162,11 +164,28 @@ pub enum TransactionEdit {
     /// The one category the whole amount is in.
     Category(CategoryId),
     /// The whole amount, in the account's currency. A split transaction's amount is
-    /// the sum of its lines, so it can't be edited here.
+    /// the sum of its lines, so it can't be edited here. A transfer's other side takes
+    /// the amount with its sign flipped.
     Amount(Money),
     /// How far the transaction has been checked against the bank. Any status may
     /// follow any other.
     ClearedStatus(ClearedStatus),
+}
+
+impl TransactionEdit {
+    /// The edit a transfer's other side takes along with this one: the same date, or
+    /// the amount with its sign flipped. The other fields belong to each side alone.
+    pub(crate) fn for_other_side(&self) -> Option<Self> {
+        match self {
+            Self::Date(date) => Some(Self::Date(*date)),
+            Self::Amount(amount) => Some(Self::Amount(-*amount)),
+            Self::Number(_)
+            | Self::Payee(_)
+            | Self::Memo(_)
+            | Self::Category(_)
+            | Self::ClearedStatus(_) => None,
+        }
+    }
 }
 
 /// A [`DomainCommand`] the ledger applied, with the Command that undoes it.
