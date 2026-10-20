@@ -2998,11 +2998,11 @@ mod tests {
         )
         .unwrap();
 
-        let view = ledger.snapshot();
+        let balances = cleared_balances(&ledger);
 
         // The Reconciled opening balance, both Cleared transactions and the whole split;
         // not the Uncleared salary.
-        assert_eq!(view.accounts()[0].cleared_balance(), usd(dec!(54.00)));
+        assert_eq!(balances, [usd(dec!(54.00))]);
     }
 
     /// Each account's Cleared balance in `ledger`'s snapshot, checked against the data
@@ -3019,7 +3019,11 @@ mod tests {
             .iter()
             .map(|summary| {
                 let id = account_row(summary.account(), 0).id;
-                money(ledger.store.cleared_balance(id).unwrap(), usd_code())
+                let minor_units = ledger
+                    .store
+                    .cleared_balance(id)
+                    .expect("the view has a row for every account");
+                money(minor_units, usd_code())
             })
             .collect();
         assert_eq!(stored, balances, "the data file's view agrees");
