@@ -22,7 +22,7 @@ tasks:
   clippy                                                 lint with warnings denied
   test                                                   run every test except the image snapshots
   snapshots                                              check the image snapshots, on Linux only; UPDATE_SNAPSHOTS=1 rewrites failing ones
-  coverage [--base <ref>] [--fail-under-diff <percent>]  run the tests for line coverage into target/coverage (lcov, html, summary.md); with --base, report how much of the lines changed since <base> they ran
+  coverage [--base <ref>] [--fail-under-diff <percent>]  CI's test: run the suite and doctests, measuring line coverage into target/coverage (lcov, html, summary.md); with --base, report how much of the lines changed since <base> they ran
   locales                                                report untranslated messages per locale
   deny                                                   check licences, advisories, duplicate versions and layer bans
   layers                                                 require workspace crates to depend only on the layers below them

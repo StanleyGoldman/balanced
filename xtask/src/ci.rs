@@ -58,8 +58,9 @@ mod tests {
             })
             .collect();
         let mut in_ci: BTreeSet<&str> = STEPS.iter().map(|&(name, _)| name).collect();
-        // Run by the workflow's `coverage` job, which reports and gates nothing, and too
-        // slow to be part of every local run.
+        // The workflow's test job runs `coverage` where `ci` runs `test`: the same suite
+        // and doctests, built with instrumentation.
+        assert!(in_ci.remove(test::TASK.name));
         in_ci.insert(crate::coverage::TASK.name);
         assert_eq!(in_workflow, in_ci);
     }

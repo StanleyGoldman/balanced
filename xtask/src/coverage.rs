@@ -9,13 +9,14 @@ use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
 
-use crate::{Task, process};
+use crate::{Task, process, test};
 
 pub(crate) const TASK: Task = Task {
     name: "coverage",
     args: "[--base <ref>] [--fail-under-diff <percent>]",
-    summary: "run the tests for line coverage into target/coverage (lcov, html, summary.md); \
-              with --base, report how much of the lines changed since <base> they ran",
+    summary: "CI's test: run the suite and doctests, measuring line coverage into target/coverage \
+              (lcov, html, summary.md); with --base, report how much of the lines changed since \
+              <base> they ran",
     run: |args| Options::parse(args).map(|options| run(&options)),
 };
 
@@ -49,8 +50,9 @@ impl<'a> Options<'a> {
     }
 }
 
-/// Runs the suite under cargo-llvm-cov and writes the report. Doctests aren't
-/// counted: measuring them needs nightly.
+/// Runs the suite under cargo-llvm-cov, then the doctests, and writes the report.
+/// This is `test` with coverage measured, for CI. Doctests run but aren't counted:
+/// measuring them needs nightly.
 fn run(options: &Options<'_>) -> Result<()> {
     let lcov_path = format!("{OUT_DIR}/lcov.info");
     fs::create_dir_all(OUT_DIR).with_context(|| format!("creating {OUT_DIR}"))?;
@@ -69,6 +71,7 @@ fn run(options: &Options<'_>) -> Result<()> {
             &lcov_path,
         ],
     )?;
+    test::doctests()?;
     process::run(
         "cargo",
         &[
