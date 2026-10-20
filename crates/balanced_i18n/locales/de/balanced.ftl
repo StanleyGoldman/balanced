@@ -102,7 +102,10 @@ register-transaction-count =
 dialog-cancel = Abbrechen
 dialog-close = Dialog schließen
 dialog-ok = OK
+dialog-delete-reconciled-transaction-message = Diese Buchung wurde abgeglichen. Trotzdem löschen? { $payee }, { $date }, { $amount }
 dialog-delete-transaction-delete = Löschen
+dialog-reconciled-amount-message = Diese Buchung wurde abgeglichen. Betrag auf { $new } ändern? { $payee }, { $date }, { $amount }
+dialog-reconciled-amount-change = Betrag ändern
 # Coined. "Abgleich" and "Bestätigt" follow the Clr column's GnuCash terms.
 dialog-unreconcile-message = Abgleich dieser Buchung aufheben? Die Buchung wurde mit einem Kontoauszug abgeglichen und wird auf „Bestätigt“ gesetzt. { $payee }, { $date }, { $amount }
 dialog-unreconcile-accept = Auf „Bestätigt“ setzen

@@ -72,6 +72,10 @@ name = "clr"
 required-features = ["test-support"]
 
 [[test]]
+name = "reconciled"
+required-features = ["test-support"]
+
+[[test]]
 name = "flag"
 required-features = ["test-support"]
 
