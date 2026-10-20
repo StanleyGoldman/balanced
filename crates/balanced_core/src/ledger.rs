@@ -14,10 +14,19 @@ use crate::data_file::{account_row, category_row, transaction_row};
 use crate::transaction::{NewTransaction, TransactionId};
 use crate::undo_log;
 use crate::{
-    Account, AccountGroup, AccountId, AccountKind, AccountStatus, Applied, Category, CategoryId,
-    CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection, OtherSide,
-    Transaction, TransactionEdit, Visibility, WriteError,
+    Account, AccountGroup, AccountId, AccountKind, AccountStatus, Allocation, Applied, Category,
+    CategoryId, CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection,
+    OtherSide, Transaction, TransactionEdit, Visibility, WriteError,
 };
+
+/// Where [`TransactionEdit::Category`] or [`TransactionEdit::Transfer`] moves a
+/// transaction's whole amount.
+#[derive(Debug, Clone, Copy)]
+enum Target {
+    Category(CategoryId),
+    /// Another account, which makes the transaction a transfer.
+    Account(AccountId),
+}
 
 /// Counts the changes applied to a [`Ledger`]. A window's view model rebuilds when
 /// the generation of the snapshot it reads changes.
@@ -903,14 +912,44 @@ impl Ledger {
     ) -> Result<DomainCommand, DomainError> {
         let position = self.changeable(id)?;
         // Both indices were just found in this same view.
+        let old = &self.view.accounts[position.account].register[position.entry].transaction;
+        match edit {
+            TransactionEdit::Transfer(account) => {
+                return self.change_target(position, Target::Account(account));
+            }
+            TransactionEdit::Category(category) if old.other_side_id().is_some() => {
+                return self.change_target(position, Target::Category(category));
+            }
+            TransactionEdit::Date(_)
+            | TransactionEdit::Number(_)
+            | TransactionEdit::Payee(_)
+            | TransactionEdit::Memo(_)
+            | TransactionEdit::Category(_)
+            | TransactionEdit::Amount(_)
+            | TransactionEdit::ClearedStatus(_) => {}
+        }
         if let TransactionEdit::Category(category) = edit
             && self.view.category(category).is_none()
         {
             return Err(DomainError::UnknownCategory { category });
         }
-        let old = &self.view.accounts[position.account].register[position.entry].transaction;
         let undo = old.undoing(&edit);
         let edited = old.edited(edit)?;
+        self.replace_transaction(position, edited)?;
+        Ok(DomainCommand::EditTransaction {
+            transaction: id,
+            edit: undo,
+        })
+    }
+
+    /// Puts `edited` in place of the transaction at `position`, which has its id.
+    fn replace_transaction(
+        &mut self,
+        position: TransactionPosition,
+        edited: Transaction,
+    ) -> Result<(), DomainError> {
+        // `position` was found in this same view.
+        let old = &self.view.accounts[position.account].register[position.entry].transaction;
         let row = transaction_row(self.view.accounts[position.account].account.id(), &edited);
         // The account is rebuilt, since a new amount moves every balance after it, and a
         // new date moves the transaction into date order.
@@ -927,10 +966,64 @@ impl Ledger {
         self.replace_account(position.account, summary)?;
         // The row is checked only now, so the ledger's own errors come first.
         self.store.update_transaction(&row?)?;
-        Ok(DomainCommand::EditTransaction {
-            transaction: id,
-            edit: undo,
-        })
+        Ok(())
+    }
+
+    /// Moves the whole amount of the transaction at `position` to `target`. The other
+    /// side it had is deleted, and a transfer gets a new one in the account it names.
+    /// The Command that undoes it deletes the transaction and puts it back as it was,
+    /// with its old other side.
+    fn change_target(
+        &mut self,
+        position: TransactionPosition,
+        target: Target,
+    ) -> Result<DomainCommand, DomainError> {
+        // `position` was found in this same view.
+        let account = self.view.accounts[position.account].account.id();
+        let old = self.view.accounts[position.account].register[position.entry]
+            .transaction
+            .clone();
+        let other = match target {
+            Target::Category(category) => {
+                if self.view.category(category).is_none() {
+                    return Err(DomainError::UnknownCategory { category });
+                }
+                None
+            }
+            Target::Account(other) => Some(self.transfer_target(account, other)?),
+        };
+        let old_side = match old.other_side_id() {
+            Some(old_side) => {
+                let old_side = self.changeable_or(old_side, |account| {
+                    DomainError::TransferAccountClosed { account }
+                })?;
+                let (account, transaction) = self.remove_transaction(old_side)?;
+                Some(Box::new(OtherSide::new(account, transaction)))
+            }
+            None => None,
+        };
+        let id = self.next_transaction;
+        let edited = old.retargeted(match target {
+            Target::Category(category) => Allocation::Category(category),
+            Target::Account(_) => Allocation::Transfer(id),
+        })?;
+        let new_side = other.map(|other| (other, edited.other_side(id)));
+        // The old side was in another account, so the transaction is still at `position`.
+        self.replace_transaction(position, edited)?;
+        if let Some((other, new_side)) = new_side {
+            self.insert_transaction(other, new_side)?;
+            self.next_transaction = id.next();
+        }
+        Ok(DomainCommand::Compound(vec![
+            DomainCommand::DeleteTransaction {
+                transaction: old.id(),
+            },
+            DomainCommand::RestoreTransaction {
+                account,
+                transaction: old,
+                other_side: old_side,
+            },
+        ]))
     }
 
     fn set_flagged(

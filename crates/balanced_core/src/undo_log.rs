@@ -192,6 +192,7 @@ fn edit_to_wire(edit: &TransactionEdit) -> Result<v1::TransactionEdit, WriteErro
         TransactionEdit::Payee(payee) => v1::TransactionEdit::Payee(payee.clone()),
         TransactionEdit::Memo(memo) => v1::TransactionEdit::Memo(memo.clone()),
         TransactionEdit::Category(category) => v1::TransactionEdit::Category(category.raw()),
+        TransactionEdit::Transfer(account) => v1::TransactionEdit::Transfer(account.raw()),
         TransactionEdit::Amount(amount) => v1::TransactionEdit::Amount(minor_units(*amount)?),
         TransactionEdit::ClearedStatus(status) => {
             v1::TransactionEdit::ClearedStatus(cleared_status_to_wire(*status))
@@ -445,6 +446,9 @@ fn edit_from_wire(
         v1::TransactionEdit::Memo(memo) => TransactionEdit::Memo(memo),
         v1::TransactionEdit::Category(category) => {
             TransactionEdit::Category(CategoryId::new(category))
+        }
+        v1::TransactionEdit::Transfer(account) => {
+            TransactionEdit::Transfer(AccountId::new(account))
         }
         v1::TransactionEdit::Amount(amount) => TransactionEdit::Amount(money(amount, currency)),
         v1::TransactionEdit::ClearedStatus(status) => {
@@ -738,6 +742,7 @@ mod tests {
             edit(TransactionEdit::Payee("Fresh Market".to_owned())),
             edit(TransactionEdit::Memo("Weekly shop".to_owned())),
             edit(TransactionEdit::Category(CategoryId::new(6))),
+            edit(TransactionEdit::Transfer(AccountId::new(8))),
             edit(TransactionEdit::Amount(usd(dec!(-90.00)))),
             edit(TransactionEdit::ClearedStatus(ClearedStatus::Uncleared)),
             edit(TransactionEdit::ClearedStatus(ClearedStatus::Cleared)),

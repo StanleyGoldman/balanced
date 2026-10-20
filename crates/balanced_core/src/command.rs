@@ -159,8 +159,13 @@ pub enum TransactionEdit {
     Number(Option<String>),
     Payee(String),
     Memo(String),
-    /// The one category the whole amount is in.
+    /// The one category the whole amount is in. On a transfer, it deletes the other
+    /// side.
     Category(CategoryId),
+    /// The account the whole amount moves to or from, which makes the transaction a
+    /// transfer. Its other side in that account is new, with the payee and memo copied,
+    /// and any other side it had before is deleted.
+    Transfer(AccountId),
     /// The whole amount, in the account's currency. A split transaction's amount is
     /// the sum of its lines, so it can't be edited here.
     Amount(Money),
@@ -208,8 +213,8 @@ pub enum DomainError {
     /// The command gave the opening balance a payee. The opening balance has none.
     #[error("the opening balance has no payee: {transaction:?}")]
     OpeningBalancePayee { transaction: TransactionId },
-    /// The command put the whole amount in one category, but the transaction is the
-    /// opening balance, which has no category, or is split between categories.
+    /// The command put the whole amount in one category or account, but the transaction
+    /// is the opening balance, which has no category, or is split between categories.
     #[error("the transaction isn't in one category: {transaction:?}")]
     NotInOneCategory { transaction: TransactionId },
     /// No category has the id, perhaps because it was deleted.
