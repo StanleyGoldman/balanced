@@ -4,7 +4,7 @@
 
 use rusqlite::params;
 
-use crate::rows::{AccountRow, AllocationRow, CategoryRow, Stack, TransactionRow};
+use crate::rows::{AccountRow, AllocationRow, CategoryRow, SplitTargetRow, Stack, TransactionRow};
 use crate::{Store, StoreError};
 
 impl Store {
@@ -217,10 +217,11 @@ impl Store {
              VALUES (?1, ?2, ?3, ?4, ?5)",
             )?;
             for (position, line) in (0_i64..).zip(lines) {
+                let SplitTargetRow::Category { category_id } = line.target;
                 insert.execute(params![
                     transaction.id,
                     position,
-                    line.category_id,
+                    category_id,
                     line.memo,
                     line.amount
                 ])?;

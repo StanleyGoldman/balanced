@@ -27,18 +27,25 @@ impl TransactionId {
     }
 }
 
-/// One line of a split transaction: part of its amount, in one category.
+/// Where a split line's part of the amount went.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitTarget {
+    /// A category.
+    Category(CategoryId),
+}
+
+/// One line of a split transaction: part of its amount, sent to one target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SplitLine {
-    category: CategoryId,
+    target: SplitTarget,
     memo: String,
     amount: Money,
 }
 
 impl SplitLine {
-    pub(crate) fn new(category: CategoryId, memo: &str, amount: Money) -> Self {
+    pub(crate) fn new(target: SplitTarget, memo: &str, amount: Money) -> Self {
         Self {
-            category,
+            target,
             memo: memo.to_owned(),
             amount,
         }
@@ -47,11 +54,11 @@ impl SplitLine {
     /// A line in `category`, for tests outside the crate's own code.
     #[cfg(feature = "test-support")]
     pub fn for_tests(category: CategoryId, memo: &str, amount: Money) -> Self {
-        Self::new(category, memo, amount)
+        Self::new(SplitTarget::Category(category), memo, amount)
     }
 
-    pub fn category(&self) -> CategoryId {
-        self.category
+    pub fn target(&self) -> SplitTarget {
+        self.target
     }
 
     pub fn memo(&self) -> &str {
@@ -220,7 +227,9 @@ impl Transaction {
         match &self.allocation {
             Allocation::OpeningBalance => false,
             Allocation::Category(own) => *own == category,
-            Allocation::Split(lines) => lines.iter().any(|line| line.category() == category),
+            Allocation::Split(lines) => lines.iter().any(|line| match line.target() {
+                SplitTarget::Category(own) => own == category,
+            }),
         }
     }
 
@@ -349,7 +358,12 @@ impl NewTransaction {
         match &self.allocation {
             NewAllocation::OpeningBalance(_) => Vec::new(),
             NewAllocation::Category(category, _) => vec![*category],
-            NewAllocation::Split(lines) => lines.iter().map(SplitLine::category).collect(),
+            NewAllocation::Split(lines) => lines
+                .iter()
+                .map(|line| match line.target() {
+                    SplitTarget::Category(category) => category,
+                })
+                .collect(),
         }
     }
 
