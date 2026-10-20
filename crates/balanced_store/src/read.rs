@@ -45,8 +45,11 @@ impl Store {
 fn accounts(connection: &Connection) -> rusqlite::Result<Vec<StoredAccount>> {
     connection
         .prepare(
-            "SELECT a.id, a.name, a.kind, a.position, a.hidden, a.closed, b.balance
-             FROM account AS a JOIN account_balance AS b ON b.account_id = a.id
+            "SELECT a.id, a.name, a.kind, a.position, a.hidden, a.closed, b.balance,
+                 c.balance
+             FROM account AS a
+             JOIN account_balance AS b ON b.account_id = a.id
+             JOIN cleared_balance AS c ON c.account_id = a.id
              ORDER BY a.kind, a.position",
         )?
         .query_map([], |row| {
@@ -60,6 +63,7 @@ fn accounts(connection: &Connection) -> rusqlite::Result<Vec<StoredAccount>> {
                     closed: row.get(5)?,
                 },
                 balance: row.get(6)?,
+                cleared_balance: row.get(7)?,
             })
         })?
         .collect()
@@ -183,6 +187,15 @@ impl Store {
                   ORDER BY date DESC LIMIT 1),
                  0)",
             rusqlite::params![account_id, date],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// The Cleared balance of account `account_id`, from the `cleared_balance` view.
+    pub fn cleared_balance(&self, account_id: u32) -> Result<i64, StoreError> {
+        Ok(self.connection.query_row(
+            "SELECT balance FROM cleared_balance WHERE account_id = ?1",
+            [account_id],
             |row| row.get(0),
         )?)
     }

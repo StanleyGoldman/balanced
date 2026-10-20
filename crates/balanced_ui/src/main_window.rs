@@ -8,7 +8,7 @@ use balanced_core::{
     AccountId, AccountSummary, ClearedStatus, DomainCommand, DomainError, LedgerView,
     TransactionEdit, TransactionId,
 };
-use balanced_i18n::Localizer;
+use balanced_i18n::{AmountStyle, Localizer};
 use eframe::egui::accesskit::Role;
 use eframe::egui::text::LayoutJob;
 use eframe::egui::{
@@ -53,6 +53,8 @@ pub(crate) struct MainWindow {
     column_widths: ColumnWidths,
     /// The delete transaction confirm, while it is open.
     delete_transaction: Option<OpenDialog<DeleteTransactionForm>>,
+    /// The confirm for changing a Reconciled transaction's amount, while it is open.
+    reconciled_amount: Option<OpenDialog<ReconciledAmountForm>>,
     /// The un-reconcile confirm, while it is open.
     unreconcile: Option<OpenDialog<UnreconcileForm>>,
     /// The New Account wizard, while it is open.
@@ -98,6 +100,15 @@ struct DeleteTransactionForm {
     transaction: TransactionId,
 }
 
+/// The confirm for changing a Reconciled transaction's amount: which transaction, and
+/// the amount the cell edit would save, formatted as the Dialog opens. No Preferences
+/// change can reach it while it is open, so the text keeps up with the locale.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReconciledAmountForm {
+    transaction: TransactionId,
+    amount: FormattedAmount,
+}
+
 /// The un-reconcile confirm's form: which Reconciled transaction it sets back to
 /// Cleared. Its question is formatted every frame from the Register's row, so it
 /// follows the locale.
@@ -117,6 +128,7 @@ impl MainWindow {
             open_register: None,
             column_widths: layout.column_widths(),
             delete_transaction: None,
+            reconciled_amount: None,
             unreconcile: None,
             new_account: None,
             new_category: None,
@@ -276,6 +288,7 @@ impl MainWindow {
             open_register,
             column_widths: _,
             delete_transaction,
+            reconciled_amount,
             unreconcile,
             new_account,
             new_category,
@@ -290,6 +303,7 @@ impl MainWindow {
         *accounts = None;
         *open_register = None;
         *delete_transaction = None;
+        *reconciled_amount = None;
         *unreconcile = None;
         *new_account = None;
         *new_category = None;
@@ -351,6 +365,16 @@ impl MainWindow {
                 };
                 let form = DeleteTransactionForm { transaction };
                 self.delete_transaction = Some(OpenDialog::new(ctx, form));
+            }
+            &DialogKind::ChangeReconciledAmount {
+                transaction,
+                amount,
+            } => {
+                let form = ReconciledAmountForm {
+                    transaction,
+                    amount: FormattedAmount::new(i18n, amount, AmountStyle::Bare),
+                };
+                self.reconciled_amount = Some(OpenDialog::new(ctx, form));
             }
             DialogKind::Unreconcile { transaction } => {
                 let Some(summary) = self.open_account(view) else {
@@ -431,6 +455,7 @@ impl MainWindow {
     /// Whether a Dialog is open over the Main window.
     fn dialog_open(&self) -> bool {
         self.delete_transaction.is_some()
+            || self.reconciled_amount.is_some()
             || self.unreconcile.is_some()
             || self.new_account.is_some()
             || self.new_category.is_some()
@@ -550,6 +575,7 @@ impl MainWindow {
         });
         self.accounts = Some(accounts);
         self.delete_transaction_dialog(ui.ctx(), i18n, theme, commands, view);
+        self.reconciled_amount_dialog(ui.ctx(), i18n, theme, commands, view);
         self.unreconcile_dialog(ui.ctx(), i18n, theme, commands, view);
         self.new_account_dialog(ui.ctx(), i18n, theme, commands, today);
         self.new_category_dialog(ui.ctx(), i18n, theme, commands, view);
@@ -683,8 +709,17 @@ impl MainWindow {
         }
     }
 
+    /// The Register's row for `transaction`, which a confirm open over the Register asks
+    /// about. The Register's rows can't change while the confirm blocks it, so the row
+    /// is there for as long as the confirm is open.
+    fn confirmed_row(&self, view: &LedgerView, transaction: TransactionId) -> &RegisterRow {
+        self.open_account(view)
+            .and_then(|summary| self.register()?.row(summary.account().id(), transaction))
+            .expect("the Register shows the transaction the confirm asks about")
+    }
+
     /// The delete transaction confirm, while it is open. Delete has first focus, so
-    /// Enter deletes.
+    /// Enter deletes. For a Reconciled transaction the question says it is reconciled.
     fn delete_transaction_dialog(
         &mut self,
         ctx: &egui::Context,
@@ -696,24 +731,24 @@ impl MainWindow {
         let Some(form) = self.delete_transaction.as_ref().map(|dialog| dialog.form) else {
             return;
         };
-        // The Register's rows can't change while the Dialog blocks it, so the row is
-        // there for as long as the Dialog is open.
-        let question = self
-            .open_account(view)
-            .and_then(|summary| {
-                self.register()?
-                    .row(summary.account().id(), form.transaction)
-            })
-            .map(|row| {
-                fl!(
-                    i18n,
-                    "dialog-delete-transaction-message",
-                    payee = row.payee(),
-                    date = row.date(),
-                    amount = row.amount_text()
-                )
-            })
-            .expect("the Register shows the transaction the confirm asks about");
+        let row = self.confirmed_row(view, form.transaction);
+        let (payee, date, amount) = (row.payee(), row.date(), row.amount_text());
+        let question = match row.cleared_status() {
+            ClearedStatus::Reconciled => fl!(
+                i18n,
+                "dialog-delete-reconciled-transaction-message",
+                payee = payee,
+                date = date,
+                amount = amount
+            ),
+            ClearedStatus::Uncleared | ClearedStatus::Cleared => fl!(
+                i18n,
+                "dialog-delete-transaction-message",
+                payee = payee,
+                date = date,
+                amount = amount
+            ),
+        };
         let Some(dialog) = &mut self.delete_transaction else {
             return;
         };
@@ -739,6 +774,59 @@ impl MainWindow {
         self.close_dialog(ctx, |window| &mut window.delete_transaction);
     }
 
+    /// The confirm for changing a Reconciled transaction's amount, while it is open.
+    /// Change Amount has first focus, so Enter sends the edit; Cancel sends nothing, so
+    /// the cell keeps the amount it had.
+    fn reconciled_amount_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        theme: &Theme,
+        commands: &CommandSender,
+        view: &LedgerView,
+    ) {
+        let Some(form) = self
+            .reconciled_amount
+            .as_ref()
+            .map(|dialog| dialog.form.clone())
+        else {
+            return;
+        };
+        let row = self.confirmed_row(view, form.transaction);
+        let question = fl!(
+            i18n,
+            "dialog-reconciled-amount-message",
+            new = form.amount.text(),
+            payee = row.payee(),
+            date = row.date(),
+            amount = row.amount_text()
+        );
+        let Some(dialog) = &mut self.reconciled_amount else {
+            return;
+        };
+        let outcome = LightDialog::new(
+            Id::new("reconciled_amount_dialog"),
+            fl!(i18n, "dialog-reconciled-amount-change"),
+            fl!(i18n, "dialog-cancel"),
+            theme,
+        )
+        .show(ctx, dialog, |ui, _form| {
+            ui.label(question);
+        });
+        match outcome {
+            DialogOutcome::Open => return,
+            DialogOutcome::Accepted => {
+                commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
+                    transaction: form.transaction,
+                    edit: TransactionEdit::Amount(form.amount.money()),
+                }));
+            }
+            DialogOutcome::Cancelled => {}
+            DialogOutcome::Back => unreachable!("the amount confirm has no Back button"),
+        }
+        self.close_dialog(ctx, |window| &mut window.reconciled_amount);
+    }
+
     /// The un-reconcile confirm, while it is open. Mark Cleared has first focus, so
     /// Enter sets the transaction back to Cleared.
     fn unreconcile_dialog(
@@ -752,24 +840,14 @@ impl MainWindow {
         let Some(form) = self.unreconcile.as_ref().map(|dialog| dialog.form) else {
             return;
         };
-        // The Register's rows can't change while the Dialog blocks it, so the row is
-        // there for as long as the Dialog is open.
-        let question = self
-            .open_account(view)
-            .and_then(|summary| {
-                self.register()?
-                    .row(summary.account().id(), form.transaction)
-            })
-            .map(|row| {
-                fl!(
-                    i18n,
-                    "dialog-unreconcile-message",
-                    payee = row.payee(),
-                    date = row.date(),
-                    amount = row.amount_text()
-                )
-            })
-            .expect("the Register shows the transaction the confirm asks about");
+        let row = self.confirmed_row(view, form.transaction);
+        let question = fl!(
+            i18n,
+            "dialog-unreconcile-message",
+            payee = row.payee(),
+            date = row.date(),
+            amount = row.amount_text()
+        );
         let Some(dialog) = &mut self.unreconcile else {
             return;
         };
@@ -796,10 +874,10 @@ impl MainWindow {
         self.close_dialog(ctx, |window| &mut window.unreconcile);
     }
 
-    /// The open account's name above its Register, with its Current and Ending balances,
-    /// the + Transaction button and the Account Actions menu on the right. A closed
-    /// account's header says it is read-only, and + Transaction is disabled. The name
-    /// clips when the Main view is narrow.
+    /// The open account's name above its Register, with its Current, Ending and Cleared
+    /// balances, the + Transaction button and the Account Actions menu on the right. A
+    /// closed account's header says it is read-only, and + Transaction is disabled. The
+    /// name clips when the Main view is narrow.
     #[expect(
         clippy::too_many_arguments,
         reason = "the Account Actions menu items need `view` and `commands` beside the header's own drawing context"
@@ -815,9 +893,10 @@ impl MainWindow {
         accounts: &AccountsModel,
     ) {
         let account = summary.account();
-        let missing = "the model formats both balances of every account in its snapshot";
+        let missing = "the model formats every balance of every account in its snapshot";
         let current = accounts.current_balance(account.id()).expect(missing);
         let ending = accounts.ending_balance(account.id()).expect(missing);
+        let cleared = accounts.cleared_balance(account.id()).expect(missing);
         let closed = account.is_closed();
         Sides::new().shrink_left().truncate().show(
             ui,
@@ -846,6 +925,10 @@ impl MainWindow {
                     commands.send(AppCommand::GoToDraftRow);
                 }
                 for (message, balance) in [
+                    (
+                        fl!(i18n, "register-cleared-balance", amount = cleared.text()),
+                        cleared,
+                    ),
                     (
                         fl!(i18n, "register-ending-balance", amount = ending.text()),
                         ending,

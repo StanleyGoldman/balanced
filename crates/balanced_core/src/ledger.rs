@@ -59,17 +59,18 @@ impl RegisterEntry {
     }
 }
 
-/// An account in a [`LedgerView`], with its transactions and its balance.
+/// An account in a [`LedgerView`], with its transactions and its balances.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountSummary {
     account: Account,
     register: Vec<RegisterEntry>,
     balance: Money,
+    cleared_balance: Money,
 }
 
 impl AccountSummary {
     /// `account` holding `transactions`, which are in register order, with their running
-    /// balances in `currency`. Fails when a balance overflows.
+    /// balances and Cleared balance in `currency`. Fails when a balance overflows.
     fn new(
         account: Account,
         transactions: Vec<Transaction>,
@@ -77,8 +78,12 @@ impl AccountSummary {
     ) -> Result<Self, MoneyError> {
         let mut register = Vec::with_capacity(transactions.len());
         let mut balance = Money::zero(currency);
+        let mut cleared_balance = Money::zero(currency);
         for transaction in transactions {
             balance = balance.checked_add(transaction.amount())?;
+            if transaction.cleared_status().counts_as_cleared() {
+                cleared_balance = cleared_balance.checked_add(transaction.amount())?;
+            }
             register.push(RegisterEntry {
                 transaction,
                 balance,
@@ -88,16 +93,23 @@ impl AccountSummary {
             account,
             register,
             balance,
+            cleared_balance,
         })
     }
 
-    /// `account` holding `register`, whose last running balance is `balance`, as the data
-    /// file's views counted them.
-    pub(crate) fn loaded(account: Account, register: Vec<RegisterEntry>, balance: Money) -> Self {
+    /// `account` holding `register`, whose last running balance is `balance` and whose
+    /// Cleared balance is `cleared_balance`, as the data file's views counted them.
+    pub(crate) fn loaded(
+        account: Account,
+        register: Vec<RegisterEntry>,
+        balance: Money,
+        cleared_balance: Money,
+    ) -> Self {
         Self {
             account,
             register,
             balance,
+            cleared_balance,
         }
     }
 
@@ -136,6 +148,12 @@ impl AccountSummary {
             Some(last) => self.register[last].balance,
             None => Money::zero(self.balance.currency()),
         }
+    }
+
+    /// The account's Cleared balance, in the account's currency: the sum of its Cleared
+    /// and Reconciled transactions, whatever their date.
+    pub fn cleared_balance(&self) -> Money {
+        self.cleared_balance
     }
 }
 
@@ -896,6 +914,12 @@ impl Ledger {
         Ok(position)
     }
 
+    /// Where transaction `id`, a transfer's other side, is, when its account is open to
+    /// changes; else [`DomainError::TransferAccountClosed`] of its account.
+    fn changeable_other_side(&self, id: TransactionId) -> Result<TransactionPosition, DomainError> {
+        self.changeable_or(id, |account| DomainError::TransferAccountClosed { account })
+    }
+
     fn edit_transaction(
         &mut self,
         id: TransactionId,
@@ -909,8 +933,36 @@ impl Ledger {
             return Err(DomainError::UnknownCategory { category });
         }
         let old = &self.view.accounts[position.account].register[position.entry].transaction;
+        // Undoing a date or amount edit on one side brings its other side back too,
+        // since the two sides are always in step.
         let undo = old.undoing(&edit);
+        let other_side = old.other_side_id().zip(edit.for_other_side());
         let edited = old.edited(edit)?;
+        self.rewrite_transaction(position, edited)?;
+        // A refused other side, in a closed account, rolls back both.
+        if let Some((other_side, edit)) = other_side {
+            let position = self.changeable_other_side(other_side)?;
+            // `changeable_other_side` found both indices in this same view.
+            let edited = self.view.accounts[position.account].register[position.entry]
+                .transaction
+                .edited(edit)?;
+            self.rewrite_transaction(position, edited)?;
+        }
+        Ok(DomainCommand::EditTransaction {
+            transaction: id,
+            edit: undo,
+        })
+    }
+
+    /// Puts `edited` in place of the transaction at `position`, which has the same id.
+    /// Fails when a balance overflows or the data file refuses the row.
+    fn rewrite_transaction(
+        &mut self,
+        position: TransactionPosition,
+        edited: Transaction,
+    ) -> Result<(), DomainError> {
+        // `position` comes from a lookup in this same view.
+        let old = &self.view.accounts[position.account].register[position.entry].transaction;
         let row = transaction_row(self.view.accounts[position.account].account.id(), &edited);
         // The account is rebuilt, since a new amount moves every balance after it, and a
         // new date moves the transaction into date order.
@@ -927,10 +979,7 @@ impl Ledger {
         self.replace_account(position.account, summary)?;
         // The row is checked only now, so the ledger's own errors come first.
         self.store.update_transaction(&row?)?;
-        Ok(DomainCommand::EditTransaction {
-            transaction: id,
-            edit: undo,
-        })
+        Ok(())
     }
 
     fn set_flagged(
@@ -1045,9 +1094,7 @@ impl Ledger {
         // A refused other side, in a closed account, rolls back both.
         let other_side = match other_side {
             Some(other_side) => {
-                let position = self.changeable_or(other_side, |account| {
-                    DomainError::TransferAccountClosed { account }
-                })?;
+                let position = self.changeable_other_side(other_side)?;
                 let (account, transaction) = self.remove_transaction(position)?;
                 Some(Box::new(OtherSide::new(account, transaction)))
             }
@@ -1748,6 +1795,24 @@ mod tests {
             [
                 account("Everyday", AccountKind::Checking, usd(dec!(1))).with_transactions([
                     NewTransaction::new(date(2), "Fresh Market", unknown, usd(dec!(-1))),
+                ]),
+            ],
+        )
+        .ok();
+    }
+
+    #[test]
+    #[should_panic(expected = "a new account's transactions hold no transfer")]
+    fn a_transfer_in_a_new_account_is_a_bug() {
+        let everyday = AccountId::new(0);
+
+        Ledger::with_accounts(
+            usd_code(),
+            [],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(1))),
+                account("Rainy Day", AccountKind::Savings, usd(dec!(1))).with_transactions([
+                    NewTransaction::transfer(date(2), "Savings top-up", everyday, usd(dec!(1))),
                 ]),
             ],
         )
@@ -2922,6 +2987,187 @@ mod tests {
         let result = ledger.apply(mark(fresh_market, ClearedStatus::Cleared));
 
         assert_eq!(result, Err(DomainError::AccountClosed { account: old }));
+        assert_eq!(ledger.snapshot(), before);
+    }
+
+    #[test]
+    fn the_cleared_balance_counts_cleared_and_reconciled_transactions_of_any_date() {
+        let groceries = CategoryId::new(0);
+        let salary = CategoryId::new(1);
+        let ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries"), NewCategory::new("Salary")],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(100.00)))
+                    .with_transactions([NewTransaction::new(
+                        date(5),
+                        "Acme Corp",
+                        salary,
+                        usd(dec!(500.00)),
+                    )])
+                    .with_transactions_at(
+                        ClearedStatus::Cleared,
+                        [
+                            NewTransaction::new(
+                                date(10),
+                                "Fresh Market",
+                                groceries,
+                                usd(dec!(-30.25)),
+                            ),
+                            NewTransaction::new(
+                                Date::try_new_iso(2027, 1, 4).unwrap(),
+                                "Bean There",
+                                groceries,
+                                usd(dec!(-4.75)),
+                            ),
+                        ],
+                    )
+                    .with_transactions_at(
+                        ClearedStatus::Reconciled,
+                        [NewTransaction::split(
+                            date(12),
+                            "Costco",
+                            vec![
+                                SplitLine::new(
+                                    SplitTarget::Category(groceries),
+                                    "Food",
+                                    usd(dec!(-5.00)),
+                                ),
+                                SplitLine::new(
+                                    SplitTarget::Category(groceries),
+                                    "Snacks",
+                                    usd(dec!(-6.00)),
+                                ),
+                            ],
+                        )],
+                    ),
+            ],
+        )
+        .unwrap();
+
+        let balances = cleared_balances(&ledger);
+
+        // The Reconciled opening balance, both Cleared transactions and the whole split;
+        // not the Uncleared salary.
+        assert_eq!(balances, [usd(dec!(54.00))]);
+    }
+
+    /// Each account's Cleared balance in `ledger`'s snapshot, checked against the data
+    /// file's `cleared_balance` view.
+    fn cleared_balances(ledger: &Ledger) -> Vec<Money> {
+        let view = ledger.snapshot();
+        let balances: Vec<Money> = view
+            .accounts()
+            .iter()
+            .map(AccountSummary::cleared_balance)
+            .collect();
+        let stored: Vec<Money> = view
+            .accounts()
+            .iter()
+            .map(|summary| {
+                let id = account_row(summary.account(), 0).id;
+                let minor_units = ledger
+                    .store
+                    .cleared_balance(id)
+                    .expect("the view has a row for every account");
+                money(minor_units, usd_code())
+            })
+            .collect();
+        assert_eq!(stored, balances, "the data file's view agrees");
+        balances
+    }
+
+    #[test]
+    fn every_command_that_touches_an_account_keeps_its_cleared_balance_up_to_date() {
+        let mut ledger = everyday();
+        let everyday = ledger.snapshot().accounts()[0].account().id();
+        let fresh_market = transaction_id(&ledger, 1);
+        let mut seen = vec![cleared_balances(&ledger)];
+
+        ledger
+            .apply(mark(fresh_market, ClearedStatus::Cleared))
+            .unwrap();
+        seen.push(cleared_balances(&ledger));
+        ledger
+            .apply(edit(
+                fresh_market,
+                TransactionEdit::Amount(usd(dec!(-40.00))),
+            ))
+            .unwrap();
+        seen.push(cleared_balances(&ledger));
+        ledger
+            .apply(DomainCommand::PostTransaction {
+                account: everyday,
+                transaction: NewTransaction::new(
+                    date(6),
+                    "Shell",
+                    CategoryId::new(0),
+                    usd(dec!(-20.00)),
+                ),
+            })
+            .unwrap();
+        seen.push(cleared_balances(&ledger));
+        ledger
+            .apply(DomainCommand::DeleteTransaction {
+                transaction: fresh_market,
+            })
+            .unwrap();
+        seen.push(cleared_balances(&ledger));
+        // Undo restores the deleted transaction, Cleared as it was.
+        ledger.undo().unwrap();
+        seen.push(cleared_balances(&ledger));
+        ledger
+            .apply(create("Savings", AccountKind::Savings, usd(dec!(50.00))))
+            .unwrap();
+        seen.push(cleared_balances(&ledger));
+
+        assert_eq!(
+            seen,
+            [
+                vec![usd(dec!(100.00))],
+                vec![usd(dec!(69.75))],
+                vec![usd(dec!(60.00))],
+                vec![usd(dec!(60.00))],
+                vec![usd(dec!(100.00))],
+                vec![usd(dec!(60.00))],
+                vec![usd(dec!(60.00)), usd(dec!(50.00))],
+            ]
+        );
+    }
+
+    #[test]
+    fn an_edit_that_takes_the_cleared_balance_out_of_range_is_rejected() {
+        let groceries = CategoryId::new(0);
+        let mut ledger = Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [account("Everyday", AccountKind::Checking, usd(dec!(1.00)))
+                .with_transactions([NewTransaction::new(
+                    date(2),
+                    "Fresh Market",
+                    groceries,
+                    usd(dec!(-1.00)),
+                )])
+                .with_transactions_at(
+                    ClearedStatus::Cleared,
+                    [NewTransaction::new(
+                        date(3),
+                        "Refund",
+                        groceries,
+                        usd(dec!(1.00)),
+                    )],
+                )],
+        )
+        .unwrap();
+        let before = ledger.snapshot();
+        let refund = transaction_id(&ledger, 2);
+        let largest = usd(Decimal::MAX.trunc() / dec!(100));
+
+        // The running balance reaches only the largest amount, after the Uncleared
+        // payment; the Cleared balance, which skips that payment, would pass it.
+        let result = ledger.apply(edit(refund, TransactionEdit::Amount(largest)));
+
+        assert_eq!(result, Err(DomainError::Money(MoneyError::Overflow)));
         assert_eq!(ledger.snapshot(), before);
     }
 

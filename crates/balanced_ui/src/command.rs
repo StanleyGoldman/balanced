@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use balanced_core::{AccountId, DomainCommand, DomainError, TransactionId, WriteError};
+use balanced_core::{AccountId, DomainCommand, DomainError, Money, TransactionId, WriteError};
 use balanced_i18n::Localizer;
 use eframe::egui;
 
@@ -80,6 +80,12 @@ pub(crate) enum DialogKind {
     /// The confirm for deleting the Register's selected transaction. Nothing opens
     /// while no transaction is selected, or while its account is closed.
     DeleteTransaction,
+    /// The confirm for changing a Reconciled transaction's amount to `amount`, from a
+    /// Payment or Deposit cell edit that is not sent until it is accepted.
+    ChangeReconciledAmount {
+        transaction: TransactionId,
+        amount: Money,
+    },
     /// The confirm for setting a Reconciled transaction back to Cleared. Nothing opens
     /// unless the open Register shows the transaction as Reconciled, or while its
     /// account is closed.

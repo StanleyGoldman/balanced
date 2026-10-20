@@ -115,6 +115,15 @@ FROM account AS ac
 LEFT JOIN transaction_amount AS a ON a.account_id = ac.id
 GROUP BY ac.id
 
+view cleared_balance on cleared_balance
+CREATE VIEW cleared_balance AS
+SELECT ac.id AS account_id, coalesce(sum(a.amount), 0) AS balance
+FROM account AS ac
+LEFT JOIN "transaction" AS t
+    ON t.account_id = ac.id AND t.cleared_status IN ('cleared', 'reconciled')
+LEFT JOIN transaction_amount AS a ON a.transaction_id = t.id
+GROUP BY ac.id
+
 view closed_total on closed_total
 CREATE VIEW closed_total AS
 SELECT coalesce(sum(b.balance), 0) AS total
