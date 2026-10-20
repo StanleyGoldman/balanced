@@ -33,7 +33,7 @@ const SUMMARY_PATH: &str = "target/mutants-summary.md";
 
 /// The variable `.github/workflows/mutants.yml` sets to the web page of the
 /// running workflow.
-const PIPELINE_VAR: &str = "CI_RUN_URL";
+const RUN_URL_VAR: &str = "CI_RUN_URL";
 
 /// Tests the mutants `scope_args` select at `HEAD`, then opens, comments on and
 /// closes `mutant` issues as the plan says, or prints those updates. Missed and
@@ -59,18 +59,20 @@ pub(crate) fn run(scope_args: &[String], found_by: FoundBy, updates: IssueUpdate
     let run = Run {
         commit,
         found_by,
-        pipeline: std::env::var(PIPELINE_VAR).ok(),
+        pipeline: std::env::var(RUN_URL_VAR).ok(),
     };
     let actions = plan::plan(outcomes.as_deref(), &list, &issues, &run)?;
     eprintln!("mutants: {} issue updates", actions.len());
-    std::fs::write(SUMMARY_PATH, summary(&actions, &run, updates))
-        .with_context(|| format!("writing {SUMMARY_PATH}"))?;
     for action in &actions {
         eprintln!("{}", describe(action));
         if updates == IssueUpdates::Apply {
             github.apply(action)?;
         }
     }
+    // Written once every update is made, so the summary never lists one that
+    // failed.
+    std::fs::write(SUMMARY_PATH, summary(&actions, &run, updates))
+        .with_context(|| format!("writing {SUMMARY_PATH}"))?;
     Ok(())
 }
 

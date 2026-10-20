@@ -16,10 +16,10 @@
 # run in the CI image, whose Ubuntu matches the snapshot machine (ADR 0004);
 # the runner only supplies Docker. Move both together.
 #
-# Keep the workflow and its last job named `ci`. The `main` ruleset requires
-# that job's check, which passes only when every other job passed or was
-# skipped: renamed, every pull request waits for a check that never arrives
-# and can't merge.
+# The last job, `ci`, is the check for the `main` ruleset to require: it passes
+# only when every other job passed or was skipped. Keep its name and the
+# workflow's: renamed, a required check never arrives and every pull request
+# waits on it.
 
 name: ci
 
@@ -50,8 +50,7 @@ env:
   # Caching (ADR 0003, ADR 0010). `target/` is never persisted: it lives in
   # the checkout on a fresh runner, so every run starts empty. sccache caches
   # whole compiler outputs in the GitHub Actions cache, keyed by a hash of
-  # their inputs, so it can't go stale the way a persistent target did in
-  # quicken_clone. Don't add a cache for `target/`.
+  # their inputs, so it can't go stale. Don't add a cache for `target/`.
   RUSTC_WRAPPER: sccache
   SCCACHE_GHA_ENABLED: "on"
   ACTIONS_CACHE_SERVICE_V2: "on"
