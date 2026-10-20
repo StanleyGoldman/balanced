@@ -1019,6 +1019,11 @@ impl Register {
                     edit: TransactionEdit::ClearedStatus(status),
                 }));
             }
+            RowAction::Unreconcile => {
+                commands.send(AppCommand::OpenDialog(DialogKind::Unreconcile {
+                    transaction: id,
+                }));
+            }
         }
     }
 
@@ -2136,6 +2141,8 @@ enum RowAction {
     SetFlagged(bool),
     /// Give the transaction this Cleared status.
     SetClearedStatus(ClearedStatus),
+    /// Ask before setting a Reconciled transaction back to Cleared.
+    Unreconcile,
 }
 
 /// Whether `rect` lies wholly within `viewport` from top to bottom, give or take half a
@@ -2902,8 +2909,9 @@ fn flag_cell(
 /// The Clr cell of `row`, whose click target is `response`: `c` on a Cleared
 /// transaction, `R` on a Reconciled one, and nothing on an Uncleared one. A click on an
 /// editable row's cell marks an Uncleared transaction Cleared and a Cleared one
-/// Uncleared. Assistive technology reads it as a button whose value is the status. The
-/// draft row's cell is empty and takes no click.
+/// Uncleared, and asks before setting a Reconciled one back to Cleared. Assistive
+/// technology reads it as a button whose value is the status. The draft row's cell is
+/// empty and takes no click.
 fn clr_cell(
     ui: &egui::Ui,
     i18n: &Localizer,
@@ -2955,15 +2963,12 @@ fn clr_cell(
             ui.style().interact(response).text_color(),
         );
     }
-    // TODO(#314): a click on a Reconciled transaction confirms, then marks it Cleared.
-    let next = match status {
-        ClearedStatus::Uncleared => Some(ClearedStatus::Cleared),
-        ClearedStatus::Cleared => Some(ClearedStatus::Uncleared),
-        ClearedStatus::Reconciled => None,
+    let action = match status {
+        ClearedStatus::Uncleared => RowAction::SetClearedStatus(ClearedStatus::Cleared),
+        ClearedStatus::Cleared => RowAction::SetClearedStatus(ClearedStatus::Uncleared),
+        ClearedStatus::Reconciled => RowAction::Unreconcile,
     };
-    let action = next
-        .filter(|_| editable && response.clicked())
-        .map(RowAction::SetClearedStatus);
+    let action = (editable && response.clicked()).then_some(action);
     (response.clone(), action)
 }
 

@@ -21,6 +21,9 @@ const BEAN_THERE: &str = "Clr Bean There, 9/6/2026, -4.75";
 /// The first salary's Clr cell in Everyday Checking, which starts Reconciled.
 const ACME_CORP: &str = "Clr Acme Corp, 9/1/2026, 3,200.00";
 
+/// The question the confirm asks before un-reconciling the first salary.
+const UNRECONCILE_ACME_CORP: &str = "Un-reconcile this transaction? It has been matched against a statement, and will be marked Cleared. Acme Corp, 9/1/2026, 3,200.00";
+
 /// The App on stub data, in the test locale, wide enough to show every Register column,
 /// with the account named `name` open.
 fn app_showing(name: &str) -> Harness<'static, App> {
@@ -69,14 +72,29 @@ fn status(harness: &Harness<'static, App>, label: &str) -> String {
         .expect("a Clr cell reads out its status")
 }
 
+/// Whether the confirm for un-reconciling the first salary is open.
+fn confirm_open(harness: &Harness<'static, App>) -> bool {
+    harness.query_by_label(UNRECONCILE_ACME_CORP).is_some()
+}
+
 /// Presses Ctrl+Z, Undo, then lets the App settle.
 fn undo(harness: &mut Harness<'static, App>) {
+    press_with(harness, Modifiers::COMMAND, Key::Z);
+}
+
+/// Presses `key` alone, then lets the App settle.
+fn press(harness: &mut Harness<'static, App>, key: Key) {
+    press_with(harness, Modifiers::NONE, key);
+}
+
+/// Presses `key` with `modifiers` held, then lets the App settle.
+fn press_with(harness: &mut Harness<'static, App>, modifiers: Modifiers, key: Key) {
     harness.event(Event::Key {
-        key: Key::Z,
+        key,
         physical_key: None,
         pressed: true,
         repeat: false,
-        modifiers: Modifiers::COMMAND,
+        modifiers,
     });
     harness.run();
 }
@@ -151,11 +169,55 @@ fn clicking_a_cleared_rows_clr_cell_marks_it_uncleared() {
 }
 
 #[test]
-fn clicking_a_reconciled_rows_clr_cell_leaves_it_reconciled() {
+fn clicking_a_reconciled_rows_clr_cell_asks_about_that_transaction() {
     let mut harness = app_showing("Everyday Checking");
 
     click(&mut harness, Role::Button, ACME_CORP);
 
+    assert!(confirm_open(&harness));
+}
+
+#[test]
+fn accepting_the_confirm_marks_a_reconciled_transaction_cleared() {
+    let mut harness = app_showing("Everyday Checking");
+    click(&mut harness, Role::Button, ACME_CORP);
+
+    click(&mut harness, Role::Button, "Mark Cleared");
+
+    assert!(!confirm_open(&harness));
+    assert_eq!(status(&harness, ACME_CORP), "Cleared");
+}
+
+#[test]
+fn undo_puts_back_reconciled_after_the_confirm_is_accepted() {
+    let mut harness = app_showing("Everyday Checking");
+    click(&mut harness, Role::Button, ACME_CORP);
+    click(&mut harness, Role::Button, "Mark Cleared");
+
+    undo(&mut harness);
+
+    assert_eq!(status(&harness, ACME_CORP), "Reconciled");
+}
+
+#[test]
+fn cancelling_the_confirm_leaves_the_transaction_reconciled() {
+    let mut harness = app_showing("Everyday Checking");
+    click(&mut harness, Role::Button, ACME_CORP);
+
+    click(&mut harness, Role::Button, "Cancel");
+
+    assert!(!confirm_open(&harness));
+    assert_eq!(status(&harness, ACME_CORP), "Reconciled");
+}
+
+#[test]
+fn esc_closes_the_confirm_and_leaves_the_transaction_reconciled() {
+    let mut harness = app_showing("Everyday Checking");
+    click(&mut harness, Role::Button, ACME_CORP);
+
+    press(&mut harness, Key::Escape);
+
+    assert!(!confirm_open(&harness));
     assert_eq!(status(&harness, ACME_CORP), "Reconciled");
 }
 
