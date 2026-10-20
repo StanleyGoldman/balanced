@@ -1372,7 +1372,8 @@ impl Proto {
         });
         let enter = had_focus && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter));
         let esc = had_focus && ctx.input(|i| i.key_pressed(Key::Escape));
-        let width = if slim { 250.0 } else { 172.0 };
+        // The keypad's width: four 40-point keys and the three gaps between them.
+        let width = if slim { 250.0 } else { 160.0 + 3.0 * ui.spacing().item_spacing.x };
         let r = ui.add(
             TextEdit::singleline(expr)
                 .id(display_id)
