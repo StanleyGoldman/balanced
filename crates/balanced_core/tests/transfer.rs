@@ -6,9 +6,10 @@ use std::path::PathBuf;
 
 use balanced_core::{
     AccountId, AccountKind, AccountStatus, AccountSummary, Allocation, CategoryId, ClearedStatus,
-    CurrencyCode, DomainCommand, DomainError, Ledger, Money, NewTransaction, Transaction,
-    TransactionEdit, TransactionId,
+    CurrencyCode, Damage, DomainCommand, DomainError, Ledger, Money, NewTransaction, OpenError,
+    Transaction, TransactionEdit, TransactionId,
 };
+use balanced_store::{AllocationRow, Store, TransactionRow};
 use icu_calendar::{Date, Iso};
 use tempfile::TempDir;
 
@@ -977,4 +978,109 @@ fn changing_a_transfer_to_the_account_it_already_names_changes_nothing() {
     });
 
     assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
+}
+
+/// The data file of a household after 200.00 was saved from Checking to Savings, with
+/// the Savings side's row then rewritten by `change` below the ledger, as another
+/// program might. Returns the directory holding the file, the file's path, and the
+/// Checking side's id, then the Savings side's.
+fn rewritten_file(
+    change: impl FnOnce(&mut TransactionRow, &[TransactionRow]),
+) -> (TempDir, PathBuf, TransactionId, TransactionId) {
+    let mut household = Household::new();
+    let sent = household.save_200();
+    let received = only(household.posted(household.savings)).id();
+    let Household {
+        dir, path, ledger, ..
+    } = household;
+    drop(ledger);
+    let store = Store::open(&path).expect("the file the ledger wrote opens");
+    let rows: Vec<TransactionRow> = store
+        .read()
+        .expect("the file reads")
+        .transactions
+        .into_iter()
+        .map(|stored| stored.row)
+        .collect();
+    let mut row = rows
+        .iter()
+        .find(|row| {
+            matches!(
+                row.allocation,
+                AllocationRow::Transfer { amount: 20_000, .. }
+            )
+        })
+        .expect("the file holds the Savings side")
+        .clone();
+    change(&mut row, &rows);
+    store.begin().expect("the file takes a change");
+    store.update_transaction(&row).expect("the row rewrites");
+    store.commit().expect("the change commits");
+    (dir, path, sent, received)
+}
+
+/// A change to a transfer side's row, given every transaction row in the file.
+type RowChange = fn(&mut TransactionRow, &[TransactionRow]);
+
+/// Moves `row` to 7 September.
+fn redate(row: &mut TransactionRow) {
+    "2026-09-07".clone_into(&mut row.date);
+}
+
+/// Makes `row`, a transfer side, 250.00.
+fn reamount(row: &mut TransactionRow) {
+    let AllocationRow::Transfer { amount, .. } = &mut row.allocation else {
+        panic!("the row is a transfer side");
+    };
+    *amount = 25_000;
+}
+
+/// Points `row`, a transfer side, at the opening balance of its own account, among
+/// `rows`, which doesn't point back.
+fn repoint(row: &mut TransactionRow, rows: &[TransactionRow]) {
+    let opening_balance = rows
+        .iter()
+        .find(|other| {
+            other.account_id == row.account_id
+                && matches!(other.allocation, AllocationRow::OpeningBalance { .. })
+        })
+        .expect("the account has an opening balance")
+        .id;
+    let AllocationRow::Transfer { other_side_id, .. } = &mut row.allocation else {
+        panic!("the row is a transfer side");
+    };
+    *other_side_id = opening_balance;
+}
+
+#[test]
+fn a_file_whose_transfer_sides_disagree_is_refused_as_damaged_and_left_as_it_was() {
+    let changes: [(&str, RowChange); 4] = [
+        ("date", |row, _| redate(row)),
+        ("amount", |row, _| reamount(row)),
+        ("date and amount", |row, _| {
+            redate(row);
+            reamount(row);
+        }),
+        ("other side", repoint),
+    ];
+    for (changed, change) in changes {
+        let (_dir, path, sent, received) = rewritten_file(change);
+        let before = std::fs::read(&path).expect("the file reads");
+
+        let result = Ledger::open(&path);
+
+        let Err(OpenError::Damaged(Damage::TransferSides {
+            transaction,
+            other_side,
+        })) = result
+        else {
+            panic!("the file whose {changed} was changed opened as {result:?}");
+        };
+        assert_eq!((transaction, other_side), (sent, received), "{changed}");
+        assert_eq!(
+            std::fs::read(&path).expect("the file reads"),
+            before,
+            "{changed}"
+        );
+    }
 }
