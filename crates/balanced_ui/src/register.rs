@@ -2202,8 +2202,17 @@ fn commit(
             Err(error) => return Commit::Unreadable(error),
         },
     };
-    if let Some(change) = change {
-        save(row.id(), change, commands, draft);
+    match (change, row.transaction()) {
+        (Some(TransactionEdit::Amount(amount)), Some(transaction))
+            if row.cleared_status() == ClearedStatus::Reconciled =>
+        {
+            commands.send(AppCommand::OpenDialog(DialogKind::ChangeReconciledAmount {
+                transaction,
+                amount,
+            }));
+        }
+        (Some(change), _) => save(row.id(), change, commands, draft),
+        (None, _) => {}
     }
     Commit::Done
 }

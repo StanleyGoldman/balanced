@@ -240,3 +240,22 @@ fn a_clr_cell_reads_its_label_and_status_in_german() {
         .value();
     assert_eq!(status.as_deref(), Some("Bestätigt"));
 }
+
+#[test]
+fn the_reconciled_amount_confirm_reads_german() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    harness
+        .get_by_role_and_label(Role::Cell, "1.450,00")
+        .click();
+    harness.run();
+    type_text(&mut harness, "1500");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    harness.get_by_label(
+        "Diese Buchung wurde abgeglichen. Betrag auf -1.500,00 ändern? \
+         Maple Property Management, 03.09.2026, -1.450,00",
+    );
+    harness.get_by_role_and_label(Role::Button, "Betrag ändern");
+}

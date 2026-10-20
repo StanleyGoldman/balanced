@@ -204,7 +204,14 @@ dialog-cancel = Cancel
 dialog-close = Close dialog
 # Asks before deleting the transaction the payee, date and amount describe.
 dialog-delete-transaction-message = Delete this transaction? { $payee }, { $date }, { $amount }
+# Asks before deleting a reconciled transaction, which the payee, date and amount
+# describe.
+dialog-delete-reconciled-transaction-message = This transaction is reconciled. Delete it anyway? { $payee }, { $date }, { $amount }
 dialog-delete-transaction-delete = Delete
+# Asks before saving a new amount, $new, on the reconciled transaction the payee,
+# date and amount describe.
+dialog-reconciled-amount-message = This transaction is reconciled. Change its amount to { $new }? { $payee }, { $date }, { $amount }
+dialog-reconciled-amount-change = Change Amount
 dialog-ok = OK
 dialog-new-category-title = New Category
 dialog-new-category-name = Name

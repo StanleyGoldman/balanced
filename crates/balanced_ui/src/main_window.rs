@@ -5,9 +5,10 @@
 use std::path::PathBuf;
 
 use balanced_core::{
-    AccountId, AccountSummary, DomainCommand, DomainError, LedgerView, TransactionId,
+    AccountId, AccountSummary, ClearedStatus, DomainCommand, DomainError, LedgerView, Money,
+    TransactionEdit, TransactionId,
 };
-use balanced_i18n::Localizer;
+use balanced_i18n::{AmountStyle, Localizer};
 use eframe::egui::accesskit::Role;
 use eframe::egui::text::LayoutJob;
 use eframe::egui::{
@@ -52,6 +53,8 @@ pub(crate) struct MainWindow {
     column_widths: ColumnWidths,
     /// The delete transaction confirm, while it is open.
     delete_transaction: Option<OpenDialog<DeleteTransactionForm>>,
+    /// The confirm for changing a Reconciled transaction's amount, while it is open.
+    reconciled_amount: Option<OpenDialog<ReconciledAmountForm>>,
     /// The New Account wizard, while it is open.
     new_account: Option<OpenDialog<NewAccountForm>>,
     /// The New Category Dialog, while it is open.
@@ -95,6 +98,15 @@ struct DeleteTransactionForm {
     transaction: TransactionId,
 }
 
+/// The confirm for changing a Reconciled transaction's amount: which transaction, and
+/// the amount the cell edit would save. Like the delete confirm's, its question is
+/// formatted every frame from the Register's row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReconciledAmountForm {
+    transaction: TransactionId,
+    amount: Money,
+}
+
 impl MainWindow {
     /// The Main window on Home, laid out as `layout` says.
     pub(crate) fn new(layout: &Layout) -> Self {
@@ -106,6 +118,7 @@ impl MainWindow {
             open_register: None,
             column_widths: layout.column_widths(),
             delete_transaction: None,
+            reconciled_amount: None,
             new_account: None,
             new_category: None,
             manage_accounts: None,
@@ -262,6 +275,7 @@ impl MainWindow {
             open_register,
             column_widths: _,
             delete_transaction,
+            reconciled_amount,
             new_account,
             new_category,
             manage_accounts,
@@ -275,6 +289,7 @@ impl MainWindow {
         *accounts = None;
         *open_register = None;
         *delete_transaction = None;
+        *reconciled_amount = None;
         *new_account = None;
         *new_category = None;
         *manage_accounts = None;
@@ -336,6 +351,16 @@ impl MainWindow {
                 let form = DeleteTransactionForm { transaction };
                 self.delete_transaction = Some(OpenDialog::new(ctx, form));
             }
+            &DialogKind::ChangeReconciledAmount {
+                transaction,
+                amount,
+            } => {
+                let form = ReconciledAmountForm {
+                    transaction,
+                    amount,
+                };
+                self.reconciled_amount = Some(OpenDialog::new(ctx, form));
+            }
             DialogKind::NewAccount => {
                 let form = NewAccountForm::new(i18n, view.net_worth().currency(), today);
                 self.new_account = Some(OpenDialog::new(ctx, form));
@@ -396,6 +421,7 @@ impl MainWindow {
     /// Whether a Dialog is open over the Main window.
     fn dialog_open(&self) -> bool {
         self.delete_transaction.is_some()
+            || self.reconciled_amount.is_some()
             || self.new_account.is_some()
             || self.new_category.is_some()
             || self.manage_accounts.is_some()
@@ -514,6 +540,7 @@ impl MainWindow {
         });
         self.accounts = Some(accounts);
         self.delete_transaction_dialog(ui.ctx(), i18n, theme, commands, view);
+        self.reconciled_amount_dialog(ui.ctx(), i18n, theme, commands, view);
         self.new_account_dialog(ui.ctx(), i18n, theme, commands, today);
         self.new_category_dialog(ui.ctx(), i18n, theme, commands, view);
         self.preferences_dialog(ui.ctx(), i18n, theme, commands);
@@ -647,7 +674,7 @@ impl MainWindow {
     }
 
     /// The delete transaction confirm, while it is open. Delete has first focus, so
-    /// Enter deletes.
+    /// Enter deletes. For a Reconciled transaction the question says it is reconciled.
     fn delete_transaction_dialog(
         &mut self,
         ctx: &egui::Context,
@@ -668,13 +695,23 @@ impl MainWindow {
                     .row(summary.account().id(), form.transaction)
             })
             .map(|row| {
-                fl!(
-                    i18n,
-                    "dialog-delete-transaction-message",
-                    payee = row.payee(),
-                    date = row.date(),
-                    amount = row.amount_text()
-                )
+                let (payee, date, amount) = (row.payee(), row.date(), row.amount_text());
+                match row.cleared_status() {
+                    ClearedStatus::Reconciled => fl!(
+                        i18n,
+                        "dialog-delete-reconciled-transaction-message",
+                        payee = payee,
+                        date = date,
+                        amount = amount
+                    ),
+                    ClearedStatus::Uncleared | ClearedStatus::Cleared => fl!(
+                        i18n,
+                        "dialog-delete-transaction-message",
+                        payee = payee,
+                        date = date,
+                        amount = amount
+                    ),
+                }
             })
             .expect("the Register shows the transaction the confirm asks about");
         let Some(dialog) = &mut self.delete_transaction else {
@@ -700,6 +737,66 @@ impl MainWindow {
             DialogOutcome::Back => unreachable!("the delete confirm has no Back button"),
         }
         self.close_dialog(ctx, |window| &mut window.delete_transaction);
+    }
+
+    /// The confirm for changing a Reconciled transaction's amount, while it is open.
+    /// Change Amount has first focus, so Enter sends the edit; Cancel sends nothing, so
+    /// the cell keeps the amount it had.
+    fn reconciled_amount_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        theme: &Theme,
+        commands: &CommandSender,
+        view: &LedgerView,
+    ) {
+        let Some(form) = self.reconciled_amount.as_ref().map(|dialog| dialog.form) else {
+            return;
+        };
+        let new = FormattedAmount::new(i18n, form.amount, AmountStyle::Bare);
+        // The Register's rows can't change while the Dialog blocks it, so the row is
+        // there for as long as the Dialog is open.
+        let question = self
+            .open_account(view)
+            .and_then(|summary| {
+                self.register()?
+                    .row(summary.account().id(), form.transaction)
+            })
+            .map(|row| {
+                fl!(
+                    i18n,
+                    "dialog-reconciled-amount-message",
+                    new = new.text(),
+                    payee = row.payee(),
+                    date = row.date(),
+                    amount = row.amount_text()
+                )
+            })
+            .expect("the Register shows the transaction the confirm asks about");
+        let Some(dialog) = &mut self.reconciled_amount else {
+            return;
+        };
+        let outcome = LightDialog::new(
+            Id::new("reconciled_amount_dialog"),
+            fl!(i18n, "dialog-reconciled-amount-change"),
+            fl!(i18n, "dialog-cancel"),
+            theme,
+        )
+        .show(ctx, dialog, |ui, _form| {
+            ui.label(question);
+        });
+        match outcome {
+            DialogOutcome::Open => return,
+            DialogOutcome::Accepted => {
+                commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
+                    transaction: form.transaction,
+                    edit: TransactionEdit::Amount(form.amount),
+                }));
+            }
+            DialogOutcome::Cancelled => {}
+            DialogOutcome::Back => unreachable!("the amount confirm has no Back button"),
+        }
+        self.close_dialog(ctx, |window| &mut window.reconciled_amount);
     }
 
     /// The open account's name above its Register, with its Current and Ending balances,
