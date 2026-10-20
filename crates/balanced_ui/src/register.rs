@@ -34,8 +34,8 @@ use crate::preferences::Preferences;
 use crate::register_columns::{RegisterColumn, RegisterColumns};
 use crate::register_filter::RegisterFilter;
 use crate::register_model::{
-    AmountSide, RegisterModel, RegisterRow, RegisterSort, RowId, Showing, SortDirection, SortKey,
-    TodayDivider,
+    AmountSide, OtherSide, RegisterModel, RegisterRow, RegisterSort, RowId, Showing, SortDirection,
+    SortKey, TodayDivider,
 };
 use crate::theme::Theme;
 
@@ -803,6 +803,10 @@ pub(crate) struct Register {
     shown: Vec<RegisterColumn>,
     /// The Category cell edit waiting on the New Category Dialog its Create row opened.
     awaiting_category: Option<AwaitingCategory>,
+    /// The transaction whose row takes the cell cursor on the next frame, once the
+    /// Register has caught up with its account. Starting over for another account
+    /// keeps it, since Go to asks for it before the Register sees the account.
+    go_to: Option<TransactionId>,
 }
 
 impl Register {
@@ -878,6 +882,14 @@ impl Register {
             self.missing = None;
             self.go_to_draft_row();
         }
+        if let Some(id) = self.go_to.take() {
+            self.cursor = Some(CellAddress {
+                row: RowId::Transaction(id),
+                column: RegisterColumn::Category,
+            });
+            self.reveal_draft = false;
+            self.centre_pending = true;
+        }
     }
 
     /// Settles what this frame's keys and clicks changed: an edit that refused to let
@@ -935,6 +947,12 @@ impl Register {
                 row: RegisterRow::draft(&self.draft, currency, view, i18n),
             });
         }
+    }
+
+    /// Puts the cell cursor on transaction `id`'s Category cell on the next frame,
+    /// scrolling its row to the middle of the Register.
+    pub(crate) fn go_to(&mut self, id: TransactionId) {
+        self.go_to = Some(id);
     }
 
     /// Puts the cell cursor on the draft row's first cell, scrolling it into view on
@@ -1005,6 +1023,13 @@ impl Register {
                     edit: TransactionEdit::ClearedStatus(status),
                 }));
             }
+            RowAction::GoTo(OtherSide {
+                account,
+                transaction,
+            }) => commands.send(AppCommand::GoToTransaction {
+                account,
+                transaction,
+            }),
             RowAction::Unreconcile => {
                 commands.send(AppCommand::OpenDialog(DialogKind::Unreconcile {
                     transaction: id,
@@ -1318,7 +1343,10 @@ impl Register {
             access,
             viewport,
         };
-        let (response, action) = cell.show(ui, i18n, theme);
+        let (response, mut action) = cell.show(ui, i18n, theme);
+        if column == RegisterColumn::Category && row.other_side().is_some() {
+            response.context_menu(|ui| action = action.or(go_to_item(ui, i18n, row)));
+        }
         // A refused date keeps the cell cursor until it is fixed or cancelled.
         if response.clicked() && !self.edit.as_ref().is_some_and(Edit::is_rejected) {
             self.place_cursor(row.id(), column);
@@ -2138,6 +2166,8 @@ enum RowAction {
     SetFlagged(bool),
     /// Give the transaction this Cleared status.
     SetClearedStatus(ClearedStatus),
+    /// Open the Register of the transfer's other side, with the cell cursor on it.
+    GoTo(OtherSide),
     /// Ask before setting a Reconciled transaction back to Cleared.
     Unreconcile,
 }
@@ -3033,8 +3063,8 @@ fn paint_text(
 
 /// The row's Actions menu: a ⋯ button on the right of the Actions cell, which opens
 /// the menu below it. The default fonts lack ⋯, so its dots are painted. Returns the
-/// command picked from the menu: Flag, or Unflag on a flagged `row`, and Delete. A
-/// read-only row's commands are disabled.
+/// command picked from the menu: Flag, or Unflag on a flagged `row`, Delete, and on a
+/// transfer, Go to its other side. A read-only row's Flag and Delete are disabled.
 fn actions_menu(
     ui: &egui::Ui,
     i18n: &Localizer,
@@ -3084,9 +3114,22 @@ fn actions_menu(
                 .add_enabled(editable, delete)
                 .clicked()
                 .then_some(RowAction::Delete);
-            flag.or(delete)
+            flag.or(delete).or(go_to_item(ui, i18n, row))
         })
         .and_then(|menu| menu.inner)
+}
+
+/// The Go to item of a menu on transfer `row`, which goes to its other side; no item
+/// on a row that isn't a transfer. Returns the command when it is picked.
+fn go_to_item(ui: &mut egui::Ui, i18n: &Localizer, row: &RegisterRow) -> Option<RowAction> {
+    let other_side = row.other_side()?;
+    let go_to = fl!(i18n, "register-actions-go-to", account = row.category());
+    let clicked = ui.button(go_to).clicked();
+    if clicked {
+        // Enter on a focused menu item leaves the menu open.
+        ui.close();
+    }
+    clicked.then_some(RowAction::GoTo(other_side))
 }
 
 /// The column chooser: a ⚙ button on the right of the Actions heading cell `ui`, which
