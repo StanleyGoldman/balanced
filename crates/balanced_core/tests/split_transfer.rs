@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use balanced_core::{
     AccountId, AccountKind, AccountStatus, AccountSummary, Allocation, CategoryId, ClearedStatus,
-    CurrencyCode, DomainCommand, DomainError, Ledger, Money, NewTransaction, SplitLine,
-    SplitTarget, Transaction, TransactionEdit, TransactionId,
+    CurrencyCode, DomainCommand, DomainError, Ledger, Money, NewSplitLine, NewTransaction,
+    SplitLine, SplitTarget, Transaction, TransactionEdit, TransactionId,
 };
 use icu_calendar::{Date, Iso};
 use tempfile::TempDir;
@@ -94,9 +94,9 @@ impl Household {
                 date(5),
                 "Payday",
                 vec![
-                    SplitLine::for_tests(groceries, "Food", usd("-50.00")),
-                    SplitLine::transfer_for_tests(savings, "Rainy day", usd("-200.00")),
-                    SplitLine::transfer_for_tests(savings, "Holiday", usd("-100.00")),
+                    NewSplitLine::for_tests(groceries, "Food", usd("-50.00")),
+                    NewSplitLine::transfer_for_tests(savings, "Rainy day", usd("-200.00")),
+                    NewSplitLine::transfer_for_tests(savings, "Holiday", usd("-100.00")),
                 ],
             ),
         });
@@ -250,8 +250,8 @@ fn post_split_to(household: &mut Household, account: AccountId) -> Result<(), Do
                 date(5),
                 "Payday",
                 vec![
-                    SplitLine::for_tests(groceries, "Food", usd("-50.00")),
-                    SplitLine::transfer_for_tests(account, "Rainy day", usd("-200.00")),
+                    NewSplitLine::for_tests(groceries, "Food", usd("-50.00")),
+                    NewSplitLine::transfer_for_tests(account, "Rainy day", usd("-200.00")),
                 ],
             ),
         })
@@ -466,26 +466,82 @@ fn deleting_a_split_whose_line_goes_to_a_closed_account_is_refused_naming_it() {
     assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
 }
 
+/// Asserts that deleting `account` from a household holding a split with lines to
+/// Savings is refused, naming it, and changes nothing.
+fn assert_account_with_split_lines_is_kept(account: impl Fn(&Household) -> AccountId) {
+    let mut household = Household::new();
+    household.save_from_a_split();
+    let account = account(&household);
+    let before = household.ledger.snapshot();
+
+    let result = household
+        .ledger
+        .apply(DomainCommand::DeleteAccount { account });
+
+    assert_eq!(
+        result.expect_err("the ledger keeps the account"),
+        DomainError::AccountHasTransfers { account }
+    );
+    assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
+}
+
 #[test]
-fn deleting_an_account_holding_a_split_line_or_its_other_side_is_refused_naming_it() {
-    for delete_savings in [false, true] {
-        let mut household = Household::new();
-        household.save_from_a_split();
-        let account = if delete_savings {
-            household.savings
-        } else {
-            household.checking
-        };
-        let before = household.ledger.snapshot();
+fn deleting_the_account_holding_a_split_with_a_line_to_another_is_refused_naming_it() {
+    assert_account_with_split_lines_is_kept(|household| household.checking);
+}
 
-        let result = household
-            .ledger
-            .apply(DomainCommand::DeleteAccount { account });
+#[test]
+fn deleting_an_account_holding_a_split_lines_other_side_is_refused_naming_it() {
+    assert_account_with_split_lines_is_kept(|household| household.savings);
+}
 
-        assert_eq!(
-            result.unwrap_err(),
-            DomainError::AccountHasTransfers { account }
-        );
-        assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
-    }
+#[test]
+fn changing_a_splits_date_when_a_lines_account_is_closed_is_refused_naming_it() {
+    let mut household = Household::new();
+    let split = household.save_from_a_split();
+    let savings = household.savings;
+    household.apply(DomainCommand::SetAccountStatus {
+        account: savings,
+        status: AccountStatus::Closed,
+    });
+    let before = household.ledger.snapshot();
+
+    let result = household.ledger.apply(DomainCommand::EditTransaction {
+        transaction: split,
+        edit: TransactionEdit::Date(date(9)),
+    });
+
+    assert_eq!(
+        result.unwrap_err(),
+        DomainError::TransferAccountClosed { account: savings }
+    );
+    assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
+}
+
+#[test]
+fn redo_moves_a_splits_lines_other_sides_again() {
+    let mut household = Household::new();
+    let split = household.save_from_a_split();
+    household.apply(DomainCommand::EditTransaction {
+        transaction: split,
+        edit: TransactionEdit::Date(date(9)),
+    });
+    household.ledger.undo().expect("the edit undoes");
+
+    household.ledger.redo().expect("the edit redoes");
+
+    assert_eq!(dates(&household, household.savings), [date(9), date(9)]);
+}
+
+#[test]
+fn redo_deletes_an_undeleted_split_and_its_lines_other_sides_again() {
+    let mut household = Household::new();
+    let split = household.save_from_a_split();
+    household.apply(DomainCommand::DeleteTransaction { transaction: split });
+    household.ledger.undo().expect("the delete undoes");
+
+    household.ledger.redo().expect("the delete redoes");
+
+    assert_eq!(household.posted(household.checking), []);
+    assert_eq!(household.posted(household.savings), []);
 }

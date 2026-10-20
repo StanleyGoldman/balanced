@@ -240,7 +240,7 @@ impl LedgerView {
 
     /// The account holding the split that `transaction` is a line's other side of, or
     /// `None` when it is no split line's other side.
-    fn split_account(&self, transaction: &Transaction) -> Option<AccountId> {
+    fn account_of_split_for(&self, transaction: &Transaction) -> Option<AccountId> {
         let Allocation::Transfer(other_side) = transaction.allocation() else {
             return None;
         };
@@ -958,7 +958,7 @@ impl Ledger {
         }
         let old = &self.view.accounts[position.account].register[position.entry].transaction;
         if edit.for_other_side().is_some()
-            && let Some(account) = self.view.split_account(old)
+            && let Some(account) = self.view.account_of_split_for(old)
         {
             return Err(DomainError::SplitLineOtherSide { account });
         }
@@ -1121,7 +1121,7 @@ impl Ledger {
         let position = self.changeable(id)?;
         // `changeable` found both indices in this same view.
         let deleted = &self.view.accounts[position.account].register[position.entry].transaction;
-        if let Some(account) = self.view.split_account(deleted) {
+        if let Some(account) = self.view.account_of_split_for(deleted) {
             return Err(DomainError::SplitLineOtherSide { account });
         }
         let other_side_ids = deleted.other_side_ids();
@@ -1351,7 +1351,7 @@ mod tests {
 
     use super::*;
     use crate::data_file::{date_text, money};
-    use crate::transaction::{NewTransaction, SplitLine, SplitTarget};
+    use crate::transaction::{NewSplitLine, NewSplitTarget, NewTransaction, SplitTarget};
     use crate::{
         AccountKind, AccountStatus, Allocation, ClearedStatus, MoveDirection, TransactionEdit,
         Visibility,
@@ -1714,13 +1714,13 @@ mod tests {
                         date(12),
                         "Costco",
                         vec![
-                            SplitLine::new(
-                                SplitTarget::Category(groceries),
+                            NewSplitLine::new(
+                                NewSplitTarget::Category(groceries),
                                 "Food",
                                 usd(dec!(-142.37)),
                             ),
-                            SplitLine::new(
-                                SplitTarget::Category(household),
+                            NewSplitLine::new(
+                                NewSplitTarget::Category(household),
                                 "Detergent",
                                 usd(dec!(-63.90)),
                             ),
@@ -1756,8 +1756,8 @@ mod tests {
                     NewTransaction::split(
                         date(12),
                         "Costco",
-                        vec![SplitLine::new(
-                            SplitTarget::Category(groceries),
+                        vec![NewSplitLine::new(
+                            NewSplitTarget::Category(groceries),
                             "Food",
                             usd(dec!(-142.37)),
                         )],
@@ -2067,13 +2067,13 @@ mod tests {
                         date(12),
                         "Costco",
                         vec![
-                            SplitLine::new(
-                                SplitTarget::Category(groceries),
+                            NewSplitLine::new(
+                                NewSplitTarget::Category(groceries),
                                 "Food",
                                 usd(dec!(-10.00)),
                             ),
-                            SplitLine::new(
-                                SplitTarget::Category(groceries),
+                            NewSplitLine::new(
+                                NewSplitTarget::Category(groceries),
                                 "Snacks",
                                 usd(dec!(-5.00)),
                             ),
@@ -3063,13 +3063,13 @@ mod tests {
                             date(12),
                             "Costco",
                             vec![
-                                SplitLine::new(
-                                    SplitTarget::Category(groceries),
+                                NewSplitLine::new(
+                                    NewSplitTarget::Category(groceries),
                                     "Food",
                                     usd(dec!(-5.00)),
                                 ),
-                                SplitLine::new(
-                                    SplitTarget::Category(groceries),
+                                NewSplitLine::new(
+                                    NewSplitTarget::Category(groceries),
                                     "Snacks",
                                     usd(dec!(-6.00)),
                                 ),
@@ -3521,13 +3521,13 @@ mod tests {
                         date(12),
                         "Costco",
                         vec![
-                            SplitLine::new(
-                                SplitTarget::Category(groceries),
+                            NewSplitLine::new(
+                                NewSplitTarget::Category(groceries),
                                 "Food",
                                 usd(dec!(-10.00)),
                             ),
-                            SplitLine::new(
-                                SplitTarget::Category(groceries),
+                            NewSplitLine::new(
+                                NewSplitTarget::Category(groceries),
                                 "Snacks",
                                 usd(dec!(-5.00)),
                             ),
@@ -3646,8 +3646,8 @@ mod tests {
                     NewTransaction::split(
                         date(12),
                         "Costco",
-                        vec![SplitLine::new(
-                            SplitTarget::Category(groceries),
+                        vec![NewSplitLine::new(
+                            NewSplitTarget::Category(groceries),
                             "Food",
                             usd(dec!(-142.37)),
                         )],

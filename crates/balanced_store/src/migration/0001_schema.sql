@@ -45,7 +45,8 @@ CREATE INDEX category_parent_id ON category (parent_id);
 -- of its lines, so it stores neither an amount nor a category. A transfer stores its
 -- amount and `other_side_id`, the transaction it records in the other account, which
 -- points back at it, or the split whose line it records. `other_side_id` isn't UNIQUE,
--- since each of a split's lines to an account has an other side pointing at the split.
+-- since each of a split's lines to an account has an other side pointing at the split,
+-- so the schema doesn't stop two transfers pointing at one transaction; `Ledger` does.
 -- Transactions on one date are ordered by id.
 --
 -- Both sides of a transfer are written in one SQLite transaction, so their link is

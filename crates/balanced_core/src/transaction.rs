@@ -5,7 +5,7 @@
 
 use icu_calendar::{Date, Iso};
 
-use crate::{AccountId, CategoryId, DomainError, Money, MoneyError, TransactionEdit};
+use crate::{AccountId, CategoryId, CurrencyCode, DomainError, Money, MoneyError, TransactionEdit};
 
 /// Identifies a transaction for as long as it exists. Ids are never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -27,29 +27,36 @@ impl TransactionId {
     }
 }
 
-/// Where a split line's part of the amount went. `T` names the other end of a transfer:
-/// the line's other side once the split is posted, or the account it goes to in a
-/// [`NewTransaction`].
+/// Where a split line's part of the amount went.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SplitTarget<T = TransactionId> {
+pub enum SplitTarget {
     /// The line's part of the amount is in this category.
     Category(CategoryId),
-    /// The line's part of the amount moved to or from another account, where its other
-    /// side is.
-    Transfer(T),
+    /// The line's part of the amount moved to or from another account, where the
+    /// transaction with this id is its other side.
+    Transfer(TransactionId),
 }
 
-/// One line of a split transaction: part of its amount, sent to one target. `T` is as in
-/// [`SplitTarget`].
+impl SplitTarget {
+    /// The line's other side, when it is a transfer.
+    pub(crate) fn transfer(self) -> Option<TransactionId> {
+        match self {
+            Self::Transfer(other_side) => Some(other_side),
+            Self::Category(_) => None,
+        }
+    }
+}
+
+/// One line of a split transaction: part of its amount, sent to one target.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SplitLine<T = TransactionId> {
-    target: SplitTarget<T>,
+pub struct SplitLine {
+    target: SplitTarget,
     memo: String,
     amount: Money,
 }
 
-impl<T: Copy> SplitLine<T> {
-    pub(crate) fn new(target: SplitTarget<T>, memo: &str, amount: Money) -> Self {
+impl SplitLine {
+    pub(crate) fn new(target: SplitTarget, memo: &str, amount: Money) -> Self {
         Self {
             target,
             memo: memo.to_owned(),
@@ -57,13 +64,7 @@ impl<T: Copy> SplitLine<T> {
         }
     }
 
-    /// A line in `category`, for tests outside the crate's own code.
-    #[cfg(feature = "test-support")]
-    pub fn for_tests(category: CategoryId, memo: &str, amount: Money) -> Self {
-        Self::new(SplitTarget::Category(category), memo, amount)
-    }
-
-    pub fn target(&self) -> SplitTarget<T> {
+    pub fn target(&self) -> SplitTarget {
         self.target
     }
 
@@ -74,14 +75,74 @@ impl<T: Copy> SplitLine<T> {
     pub fn amount(&self) -> Money {
         self.amount
     }
+
+    /// The amount of a split with `lines`, in `currency`: the sum of the lines. Fails
+    /// when it overflows.
+    pub(crate) fn sum(lines: &[Self], currency: CurrencyCode) -> Result<Money, MoneyError> {
+        lines.iter().try_fold(Money::zero(currency), |sum, line| {
+            sum.checked_add(line.amount)
+        })
+    }
 }
 
-impl SplitLine<AccountId> {
-    /// A line to post that moves `amount` from or to `account`, for tests outside the
-    /// crate's own code.
+/// Where a [`NewSplitLine`]'s part of the amount goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NewSplitTarget {
+    /// Into this category.
+    Category(CategoryId),
+    /// To or from this account, where posting the split records the line's other side.
+    Transfer(AccountId),
+}
+
+/// One line of a split transaction to post.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewSplitLine {
+    target: NewSplitTarget,
+    memo: String,
+    amount: Money,
+}
+
+impl NewSplitLine {
+    pub(crate) fn new(target: NewSplitTarget, memo: &str, amount: Money) -> Self {
+        Self {
+            target,
+            memo: memo.to_owned(),
+            amount,
+        }
+    }
+
+    /// A line in `category`, for tests outside the crate's own code.
+    #[cfg(feature = "test-support")]
+    pub fn for_tests(category: CategoryId, memo: &str, amount: Money) -> Self {
+        Self::new(NewSplitTarget::Category(category), memo, amount)
+    }
+
+    /// A line that moves `amount` from or to `account`, for tests outside the crate's
+    /// own code.
     #[cfg(feature = "test-support")]
     pub fn transfer_for_tests(account: AccountId, memo: &str, amount: Money) -> Self {
-        Self::new(SplitTarget::Transfer(account), memo, amount)
+        Self::new(NewSplitTarget::Transfer(account), memo, amount)
+    }
+
+    pub(crate) fn target(&self) -> NewSplitTarget {
+        self.target
+    }
+
+    pub(crate) fn memo(&self) -> &str {
+        &self.memo
+    }
+
+    pub(crate) fn amount(&self) -> Money {
+        self.amount
+    }
+
+    /// The line once posted, going to `target`.
+    fn posted(self, target: SplitTarget) -> SplitLine {
+        SplitLine {
+            target,
+            memo: self.memo,
+            amount: self.amount,
+        }
     }
 }
 
@@ -221,7 +282,7 @@ impl Transaction {
     /// date, for the amount with its sign flipped, with the payee and memo copied, with
     /// no number and no flag, and uncleared.
     pub(crate) fn other_side(&self, id: TransactionId) -> Self {
-        self.side_for(id, &self.memo, self.amount)
+        self.other_side_with(id, &self.memo, self.amount)
     }
 
     /// The other sides the transaction names, in order: a transfer's one, or one for
@@ -232,11 +293,9 @@ impl Transaction {
             Allocation::Transfer(other_side) => vec![self.other_side(*other_side)],
             Allocation::Split(lines) => lines
                 .iter()
-                .filter_map(|line| match line.target {
-                    SplitTarget::Transfer(other_side) => {
-                        Some(self.side_for(other_side, &line.memo, line.amount))
-                    }
-                    SplitTarget::Category(_) => None,
+                .filter_map(|line| {
+                    let other_side = line.target.transfer()?;
+                    Some(self.other_side_with(other_side, &line.memo, line.amount))
                 })
                 .collect(),
             Allocation::OpeningBalance | Allocation::Category(_) => Vec::new(),
@@ -245,7 +304,7 @@ impl Transaction {
 
     /// An other side with `id` pointing back at this transaction, holding `memo` and
     /// `amount` with its sign flipped.
-    fn side_for(&self, id: TransactionId, memo: &str, amount: Money) -> Self {
+    fn other_side_with(&self, id: TransactionId, memo: &str, amount: Money) -> Self {
         Self {
             id,
             date: self.date,
@@ -266,10 +325,7 @@ impl Transaction {
             Allocation::Transfer(other_side) => vec![*other_side],
             Allocation::Split(lines) => lines
                 .iter()
-                .filter_map(|line| match line.target {
-                    SplitTarget::Transfer(other_side) => Some(other_side),
-                    SplitTarget::Category(_) => None,
-                })
+                .filter_map(|line| line.target.transfer())
                 .collect(),
             Allocation::OpeningBalance | Allocation::Category(_) => Vec::new(),
         }
@@ -349,10 +405,9 @@ impl Transaction {
         match &self.allocation {
             Allocation::OpeningBalance | Allocation::Transfer(_) => false,
             Allocation::Category(own) => *own == category,
-            Allocation::Split(lines) => lines.iter().any(|line| match line.target() {
-                SplitTarget::Category(own) => own == category,
-                SplitTarget::Transfer(_) => false,
-            }),
+            Allocation::Split(lines) => lines
+                .iter()
+                .any(|line| line.target() == SplitTarget::Category(category)),
         }
     }
 
@@ -368,7 +423,7 @@ impl Transaction {
 pub(crate) enum NewAllocation {
     OpeningBalance(Money),
     Category(CategoryId, Money),
-    Split(Vec<SplitLine<AccountId>>),
+    Split(Vec<NewSplitLine>),
     /// To or from another account.
     Transfer(AccountId, Money),
 }
@@ -411,13 +466,13 @@ impl NewTransaction {
     }
 
     /// A transaction with `payee`, divided between `lines`.
-    pub(crate) fn split(date: Date<Iso>, payee: &str, lines: Vec<SplitLine<AccountId>>) -> Self {
+    pub(crate) fn split(date: Date<Iso>, payee: &str, lines: Vec<NewSplitLine>) -> Self {
         Self::with_allocation(date, payee, NewAllocation::Split(lines))
     }
 
     /// A split transaction, for tests outside the crate's own code.
     #[cfg(feature = "test-support")]
-    pub fn split_for_tests(date: Date<Iso>, payee: &str, lines: Vec<SplitLine<AccountId>>) -> Self {
+    pub fn split_for_tests(date: Date<Iso>, payee: &str, lines: Vec<NewSplitLine>) -> Self {
         Self::split(date, payee, lines)
     }
 
@@ -502,9 +557,9 @@ impl NewTransaction {
             NewAllocation::Category(category, _) => vec![*category],
             NewAllocation::Split(lines) => lines
                 .iter()
-                .filter_map(|line| match line.target() {
-                    SplitTarget::Category(category) => Some(category),
-                    SplitTarget::Transfer(_) => None,
+                .filter_map(|line| match line.target {
+                    NewSplitTarget::Category(category) => Some(category),
+                    NewSplitTarget::Transfer(_) => None,
                 })
                 .collect(),
         }
@@ -517,9 +572,9 @@ impl NewTransaction {
             NewAllocation::Transfer(account, _) => vec![*account],
             NewAllocation::Split(lines) => lines
                 .iter()
-                .filter_map(|line| match line.target() {
-                    SplitTarget::Transfer(account) => Some(account),
-                    SplitTarget::Category(_) => None,
+                .filter_map(|line| match line.target {
+                    NewSplitTarget::Transfer(account) => Some(account),
+                    NewSplitTarget::Category(_) => None,
                 })
                 .collect(),
             NewAllocation::OpeningBalance(_) | NewAllocation::Category(..) => Vec::new(),
@@ -532,7 +587,7 @@ impl NewTransaction {
     pub(crate) fn into_transaction(
         self,
         id: TransactionId,
-        currency: crate::CurrencyCode,
+        currency: CurrencyCode,
     ) -> Result<Transaction, MoneyError> {
         let cleared_status = self.starting_status();
         let (allocation, amount) = match self.allocation {
@@ -540,21 +595,21 @@ impl NewTransaction {
             NewAllocation::Category(category, amount) => (Allocation::Category(category), amount),
             NewAllocation::Transfer(_, amount) => (Allocation::Transfer(id.next()), amount),
             NewAllocation::Split(lines) => {
-                let amount = split_amount(&lines, currency)?;
                 let mut other_side = id;
-                let lines = lines
+                let lines: Vec<SplitLine> = lines
                     .into_iter()
                     .map(|line| {
                         let target = match line.target {
-                            SplitTarget::Category(category) => SplitTarget::Category(category),
-                            SplitTarget::Transfer(_) => {
+                            NewSplitTarget::Category(category) => SplitTarget::Category(category),
+                            NewSplitTarget::Transfer(_) => {
                                 other_side = other_side.next();
                                 SplitTarget::Transfer(other_side)
                             }
                         };
-                        SplitLine::new(target, &line.memo, line.amount)
+                        line.posted(target)
                     })
                     .collect();
+                let amount = SplitLine::sum(&lines, currency)?;
                 (Allocation::Split(lines), amount)
             }
         };
@@ -576,15 +631,4 @@ impl NewTransaction {
             cleared_status,
         })
     }
-}
-
-/// The amount of a split with `lines`, in `currency`: the sum of the lines. Fails when it
-/// overflows.
-pub(crate) fn split_amount<T>(
-    lines: &[SplitLine<T>],
-    currency: crate::CurrencyCode,
-) -> Result<Money, MoneyError> {
-    lines.iter().try_fold(Money::zero(currency), |sum, line| {
-        sum.checked_add(line.amount)
-    })
 }

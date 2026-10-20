@@ -130,9 +130,10 @@ pub(crate) struct Category {
 }
 
 /// A transaction with its id: a [`NewTransaction`]'s fields after `id`, in one object,
-/// a transfer and a split line to an account naming its other side, then `flagged`, which an unflagged transaction
-/// leaves out, and `cleared_status`, which an uncleared one leaves out. An entry written
-/// before the status existed has none, and reads as uncleared.
+/// a transfer and a split line to an account naming its other side, then `flagged`,
+/// which an unflagged transaction leaves out, and `cleared_status`, which an uncleared
+/// one leaves out. An entry written before the status existed has none, and reads as
+/// uncleared.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Transaction {
     pub(crate) id: u32,

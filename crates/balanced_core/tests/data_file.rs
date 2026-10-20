@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use balanced_core::{
     AccountGroup, AccountId, AccountKind, AccountStatus, AccountSummary, Category, CategoryId,
     ClearedStatus, CurrencyCode, Damage, DomainCommand, DomainError, Ledger, LedgerView, Money,
-    MoneyError, MoveDirection, NewTransaction, OpenError, RegisterEntry, SplitLine,
+    MoneyError, MoveDirection, NewSplitLine, NewTransaction, OpenError, RegisterEntry,
     TransactionEdit, TransactionId, Visibility, WriteError,
 };
 use icu_calendar::{Date, Iso};
@@ -564,8 +564,8 @@ fn costco(food: CategoryId, household: CategoryId) -> NewTransaction {
         date(12),
         "Costco",
         vec![
-            SplitLine::for_tests(food, "Food", usd("-142.37")),
-            SplitLine::for_tests(household, "Paper towels, detergent", usd("-63.90")),
+            NewSplitLine::for_tests(food, "Food", usd("-142.37")),
+            NewSplitLine::for_tests(household, "Paper towels, detergent", usd("-63.90")),
         ],
     )
 }
@@ -902,7 +902,7 @@ fn an_amount_beyond_the_files_range_leaves_memory_undo_and_the_file_as_they_were
             transaction: NewTransaction::split_for_tests(
                 date(4),
                 "Lottery",
-                vec![SplitLine::for_tests(h.food, "Prize", amount)],
+                vec![NewSplitLine::for_tests(h.food, "Prize", amount)],
             ),
         },
         |h, amount| DomainCommand::EditTransaction {

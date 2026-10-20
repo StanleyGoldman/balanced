@@ -5,7 +5,7 @@
 
 use balanced_core::{
     AccountId, AccountSummary, CategoryId, CurrencyCode, DomainCommand, Ledger, Money,
-    NewTransaction, SplitLine,
+    NewSplitLine, NewTransaction,
 };
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
@@ -58,8 +58,8 @@ fn payday() -> Harness<'static, App> {
                 Date::try_new_iso(2026, 10, 1).expect("1 October 2026 is a date"),
                 "Payday",
                 vec![
-                    SplitLine::for_tests(food, "Lunch", usd("-50.00")),
-                    SplitLine::transfer_for_tests(emergency, "Rainy day", usd("-200.00")),
+                    NewSplitLine::for_tests(food, "Lunch", usd("-50.00")),
+                    NewSplitLine::transfer_for_tests(emergency, "Rainy day", usd("-200.00")),
                 ],
             ),
         })
