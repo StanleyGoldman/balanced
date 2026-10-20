@@ -54,6 +54,16 @@ The tests live in `crates/balanced_ui/tests/snapshots.rs`, and the images in `cr
 - **Updating:** `UPDATE_SNAPSHOTS=1 cargo xtask snapshots` rewrites the failing snapshots. Commit each new PNG with the code that changed it, and say in the PR which views changed and why. A snapshot that fails on noise is fixed in the test setup; the thresholds stay put.
 - **A merge conflict:** git can't merge a PNG, so a snapshot that both sides redrew stops a merge whenever `main` moves. Check out either side (`git checkout --theirs <png>`), regenerate it with `UPDATE_SNAPSHOTS=1 cargo xtask snapshots`, and open the new image to confirm it shows both sides' changes before you `git add` it. A PR whose snapshots overlap a busy area of `main`, such as the Register, can conflict again after each merge, so check `gh pr view <n> --json mergeable` after pushing.
 
+## Coverage
+
+CI measures line coverage and reports it; it gates nothing. The `coverage` job (`cargo xtask coverage`, which runs the suite under `cargo-llvm-cov`) runs beside `test` on every pull request and every push to `main`.
+
+- **Where it shows:** the run's job summary; the `coverage` artifact (`html/index.html`, `lcov.info`, `summary.md`), on pull request and `main` runs alike; and, on a pull request from this repository, one comment. Each push deletes the earlier coverage comments and posts the new report (`.github/post-coverage-comment.sh`). A fork's pull request gets no comment, because its token is read-only.
+- **What it counts:** lines and functions of the workspace, minus `xtask` and the `tests/` directories. Image snapshots and doctests aren't run. Tests inside `#[cfg(test)]` modules count their own lines, which lifts the figures a little.
+- **Changed lines:** on a pull request, the share of the lines it adds that hold code and that the tests ran. A line with no code (a comment, a signature) isn't counted. Read it as a pointer to untested code; mutation testing (below) is what judges the tests.
+- **Gating:** not done. UI painting code is hard to cover by line and easy to cover by accident, and a threshold invites tests written for the number. To gate anyway, add `--fail-under-diff <percent>` to the pull request step of the `coverage` job and add the job to `needs` of `ci`.
+- By hand: `cargo xtask coverage [--base origin/main]` writes `target/coverage/`; it needs `cargo install --locked cargo-llvm-cov` and `rustup component add llvm-tools`.
+
 ## Mutation testing
 
 `cargo-mutants` mutates only `balanced_core` and `balanced_i18n` (`.cargo/mutants.toml`). Each mutant runs only its own crate's tests, so core logic has to be caught by core's tests.

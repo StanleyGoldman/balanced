@@ -57,7 +57,7 @@ RUN mkdir -p "$CARGO_HOME/bin" && cd "$CARGO_HOME/bin" && \
       tar -xz --strip-components=1 "sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache" && \
     curl -fsSL "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${CARGO_LLVM_COV_VERSION}/cargo-llvm-cov-x86_64-unknown-linux-musl.tar.gz" | \
       tar -xz && \
-    typos --version && cargo-deny --version && cargo-nextest nextest --version && cargo-mutants mutants --version && sccache --version && cargo-llvm-cov --version
+    typos --version && cargo-deny --version && cargo-nextest nextest --version && cargo-mutants mutants --version && sccache --version && cargo-llvm-cov llvm-cov --version
 
 # rustup with no toolchain of its own, then the one rust-toolchain.toml names
 # (its components included), so the version is written in one place. The build
