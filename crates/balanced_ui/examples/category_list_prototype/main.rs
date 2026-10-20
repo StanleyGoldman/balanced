@@ -72,8 +72,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use balanced_prototype_harness::{Args, Harness};
 use eframe::egui;
 use egui::{
-    Align, CentralPanel, Color32, Context, Id, Key, Layout, Order, Panel, Rect, RichText, Sense,
-    Sides, Stroke, TextEdit, Ui, ViewportBuilder, ViewportCommand, vec2,
+    Align, CentralPanel, Color32, Context, Id, Key, Layout, Order, Panel, RichText, Sense, Sides,
+    Stroke, TextEdit, Ui, ViewportBuilder, ViewportCommand, vec2,
 };
 use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 use serde_json::{Value, json};
@@ -211,7 +211,10 @@ const TREE: &[(&str, &[&str])] = &[
     ("Auto", &["Fuel", "Insurance", "Service", "Registration"]),
     ("Food", &["Groceries", "Dining", "Coffee"]),
     ("Home", &["Rent", "Maintenance", "Insurance", "Furnishings"]),
-    ("Utilities", &["Electric", "Water", "Gas", "Internet", "Phone"]),
+    (
+        "Utilities",
+        &["Electric", "Water", "Gas", "Internet", "Phone"],
+    ),
     ("Health", &["Doctor", "Pharmacy", "Dental"]),
     ("Entertainment", &["Streaming", "Movies", "Games", "Books"]),
     ("Travel", &["Flights", "Hotels", "Car rental"]),
@@ -258,7 +261,14 @@ const SPENDING: &[(&str, &str, i64, u64, bool, i64)] = &[
     ("Travel:Flights", "Delta Air Lines", 38_000, 3, false, 0),
     ("Travel:Hotels", "Marriott", 29_000, 3, false, 0),
     ("Kids:School", "Lincoln Elementary", 22_000, 4, false, 0),
-    ("Kids:Activities", "Youth Soccer League", 6_500, 14, false, 0),
+    (
+        "Kids:Activities",
+        "Youth Soccer League",
+        6_500,
+        14,
+        false,
+        0,
+    ),
     ("Kids:Clothing", "Old Navy", 4_800, 8, false, 0),
     ("Pets:Food", "Chewy", 5_400, 12, false, 0),
     ("Taxes:Federal", "IRS", 90_000, 4, false, 0),
@@ -310,7 +320,7 @@ impl Data {
             next: 1,
             ..Data::default()
         };
-        let mut add = |d: &mut Data, name: &str, parent: Option<u32>, income: bool| {
+        let add = |d: &mut Data, name: &str, parent: Option<u32>, income: bool| {
             let id = d.next;
             d.next += 1;
             d.cats.push(Cat {
@@ -366,7 +376,11 @@ impl Data {
                     rng.below(365) < *per_year
                 };
                 if hit {
-                    let cents = if *fixed { *typical } else { rng.around(*typical) };
+                    let cents = if *fixed {
+                        *typical
+                    } else {
+                        rng.around(*typical)
+                    };
                     push(&mut d, day, payee, Some(cat), None, -cents);
                 }
             }
@@ -376,18 +390,53 @@ impl Data {
             }
             let (_, _, dom) = civil(day);
             if dom == 28 {
-                push(&mut d, day, "Credit Union", Some("Interest"), None, rng.around(420));
-                push(&mut d, day, "Transfer to Savings", None, Some("Savings"), -50_000);
+                push(
+                    &mut d,
+                    day,
+                    "Credit Union",
+                    Some("Interest"),
+                    None,
+                    rng.around(420),
+                );
+                push(
+                    &mut d,
+                    day,
+                    "Transfer to Savings",
+                    None,
+                    Some("Savings"),
+                    -50_000,
+                );
             }
             if rng.below(365) < 5 {
-                push(&mut d, day, "Amazon", Some("Refunds"), None, rng.around(2_800));
+                push(
+                    &mut d,
+                    day,
+                    "Amazon",
+                    Some("Refunds"),
+                    None,
+                    rng.around(2_800),
+                );
             }
             if rng.below(365) < 2 {
-                push(&mut d, day, "Craigslist sale", Some("Other income"), None, rng.around(15_000));
+                push(
+                    &mut d,
+                    day,
+                    "Craigslist sale",
+                    Some("Other income"),
+                    None,
+                    rng.around(15_000),
+                );
             }
             // A few that were never categorized.
             if rng.below(365) < 8 {
-                push(&mut d, day, "Cash withdrawal", None, None, -(rng.around(4_000) / 100 * 100));
+                push(
+                    &mut d,
+                    day,
+                    "Cash withdrawal",
+                    None,
+                    None,
+                    -(rng.around(4_000) / 100 * 100),
+                );
             }
         }
         d
@@ -398,7 +447,10 @@ impl Data {
     }
 
     fn find_path(&self, path: &str) -> Option<u32> {
-        self.cats.iter().map(|c| c.id).find(|id| self.path(*id) == path)
+        self.cats
+            .iter()
+            .map(|c| c.id)
+            .find(|id| self.path(*id) == path)
     }
 
     fn path(&self, id: u32) -> String {
@@ -453,7 +505,10 @@ impl Data {
     }
 
     fn transfer_count(&self, account: &str) -> usize {
-        self.txns.iter().filter(|t| t.transfer == Some(account)).count()
+        self.txns
+            .iter()
+            .filter(|t| t.transfer == Some(account))
+            .count()
     }
 
     /// Paths of every category, for a picker, in alphabetical order.
@@ -501,8 +556,14 @@ enum Op {
 impl Data {
     fn apply(&mut self, op: &Op) {
         match op {
-            Op::Create { name, parent, income } => {
-                let income = parent.and_then(|p| self.cat(p)).map_or(*income, |p| p.income);
+            Op::Create {
+                name,
+                parent,
+                income,
+            } => {
+                let income = parent
+                    .and_then(|p| self.cat(p))
+                    .map_or(*income, |p| p.income);
                 self.cats.push(Cat {
                     id: self.next,
                     name: name.clone(),
@@ -530,8 +591,16 @@ impl Data {
                     }
                 }
             }
-            Op::Merge { from, into, delete_sources } => {
-                for t in self.txns.iter_mut().filter(|t| t.cat.is_some_and(|c| from.contains(&c))) {
+            Op::Merge {
+                from,
+                into,
+                delete_sources,
+            } => {
+                for t in self
+                    .txns
+                    .iter_mut()
+                    .filter(|t| t.cat.is_some_and(|c| from.contains(&c)))
+                {
                     t.cat = Some(*into);
                 }
                 if *delete_sources {
@@ -539,13 +608,22 @@ impl Data {
                     let keep: Vec<u32> = from
                         .iter()
                         .copied()
-                        .filter(|f| self.cats.iter().any(|c| c.parent == Some(*f) && !from.contains(&c.id)))
+                        .filter(|f| {
+                            self.cats
+                                .iter()
+                                .any(|c| c.parent == Some(*f) && !from.contains(&c.id))
+                        })
                         .collect();
-                    self.cats.retain(|c| !from.contains(&c.id) || keep.contains(&c.id));
+                    self.cats
+                        .retain(|c| !from.contains(&c.id) || keep.contains(&c.id));
                 }
             }
             Op::Delete { ids, reassign } => {
-                for t in self.txns.iter_mut().filter(|t| t.cat.is_some_and(|c| ids.contains(&c))) {
+                for t in self
+                    .txns
+                    .iter_mut()
+                    .filter(|t| t.cat.is_some_and(|c| ids.contains(&c)))
+                {
                     t.cat = *reassign;
                 }
                 self.cats.retain(|c| !ids.contains(&c.id));
@@ -578,7 +656,9 @@ impl Variant {
     }
 
     fn from_key(key: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|v| v.key().eq_ignore_ascii_case(key))
+        Self::ALL
+            .into_iter()
+            .find(|v| v.key().eq_ignore_ascii_case(key))
     }
 
     fn label(self) -> &'static str {
@@ -826,7 +906,9 @@ impl Proto {
             None => (self.tog[i] + 1) % n,
             Some("on") => 1.min(n - 1),
             Some("off") => 0,
-            Some(v) => v.parse::<usize>().map_or(self.tog[i], |v| v.saturating_sub(1).min(n - 1)),
+            Some(v) => v
+                .parse::<usize>()
+                .map_or(self.tog[i], |v| v.saturating_sub(1).min(n - 1)),
         };
         if new == self.tog[i] && via == "control" {
             return;
@@ -836,7 +918,8 @@ impl Proto {
             "toggle",
             json!({ "key": TOGGLES[i].0, "option": TOGGLES[i].2[new], "index": new + 1, "via": via, "applies_to": "all" }),
         );
-        self.h.screenshot(format!("toggle-{}-{}", TOGGLES[i].0, new + 1));
+        self.h
+            .screenshot(format!("toggle-{}-{}", TOGGLES[i].0, new + 1));
     }
 
     fn set_dock(&mut self, open: bool, via: &str) {
@@ -885,7 +968,10 @@ impl Proto {
         if !self.open {
             return;
         }
-        self.event("list_closed", json!({ "source": source, "variant": self.variant.key() }));
+        self.event(
+            "list_closed",
+            json!({ "source": source, "variant": self.variant.key() }),
+        );
         if let Some(s) = self.staged.take() {
             if !s.pending.is_empty() {
                 self.event("staged_dropped", json!({ "pending": s.pending.len() }));
@@ -904,11 +990,17 @@ impl Proto {
             return;
         };
         for (name, detail, _) in &s.pending {
-            self.event("command", json!({ "would_emit": name, "detail": detail, "source": "OK" }));
+            self.event(
+                "command",
+                json!({ "would_emit": name, "detail": detail, "source": "OK" }),
+            );
         }
         let n = s.pending.len();
         self.data = s.data;
-        self.status = format!("OK: would emit {n} Command{}", if n == 1 { "" } else { "s" });
+        self.status = format!(
+            "OK: would emit {n} Command{}",
+            if n == 1 { "" } else { "s" }
+        );
         self.close_list("OK");
     }
 
@@ -919,10 +1011,17 @@ impl Proto {
         let d = self.work();
         let paths = |ids: &[u32]| ids.iter().map(|i| d.path(*i)).collect::<Vec<_>>();
         match op {
-            Op::Create { name, parent, income } => (
+            Op::Create {
+                name,
+                parent,
+                income,
+            } => (
                 "CreateCategory".to_owned(),
                 json!({ "name": name, "parent": parent.map(|p| d.path(p)), "income": income }),
-                format!("Created {}", parent.map_or(name.clone(), |p| format!("{}:{name}", d.path(p)))),
+                format!(
+                    "Created {}",
+                    parent.map_or(name.clone(), |p| format!("{}:{name}", d.path(p)))
+                ),
             ),
             Op::Edit { id, name, parent } => (
                 "EditCategory".to_owned(),
@@ -932,9 +1031,17 @@ impl Proto {
             Op::Hide { ids, hidden } => (
                 "SetCategoryHidden".to_owned(),
                 json!({ "categories": paths(ids), "hidden": hidden }),
-                format!("{} {}", if *hidden { "Hid" } else { "Unhid" }, paths(ids).join(", ")),
+                format!(
+                    "{} {}",
+                    if *hidden { "Hid" } else { "Unhid" },
+                    paths(ids).join(", ")
+                ),
             ),
-            Op::Merge { from, into, delete_sources } => (
+            Op::Merge {
+                from,
+                into,
+                delete_sources,
+            } => (
                 "MergeCategories".to_owned(),
                 json!({ "from": paths(from), "into": d.path(*into), "delete_sources": delete_sources }),
                 format!("Merged {} into {}", paths(from).join(", "), d.path(*into)),
@@ -954,7 +1061,12 @@ impl Proto {
             .work()
             .txns
             .iter()
-            .map(|t| (t.cat, t.cat.map(|c| self.work().path(c)).unwrap_or_default()))
+            .map(|t| {
+                (
+                    t.cat,
+                    t.cat.map(|c| self.work().path(c)).unwrap_or_default(),
+                )
+            })
             .collect();
         match &mut self.staged {
             Some(s) => s.data.apply(&op),
@@ -981,10 +1093,16 @@ impl Proto {
         }
         match &mut self.staged {
             Some(s) => {
-                self.h.event("staged_op", json!({ "would_emit": name, "detail": detail, "source": source }));
+                self.h.event(
+                    "staged_op",
+                    json!({ "would_emit": name, "detail": detail, "source": source }),
+                );
                 s.pending.push((name, detail, label.clone()));
             }
-            None => self.h.event("command", json!({ "would_emit": name, "detail": detail, "source": source })),
+            None => self.h.event(
+                "command",
+                json!({ "would_emit": name, "detail": detail, "source": source }),
+            ),
         }
         self.status = label;
         let alive: HashSet<u32> = self.work().cats.iter().map(|c| c.id).collect();
@@ -992,7 +1110,11 @@ impl Proto {
     }
 
     fn selection(&self) -> Vec<u32> {
-        self.sel.iter().copied().filter(|id| self.work().cat(*id).is_some()).collect()
+        self.sel
+            .iter()
+            .copied()
+            .filter(|id| self.work().cat(*id).is_some())
+            .collect()
     }
 
     fn begin_delete(&mut self, asked: Vec<u32>) {
@@ -1007,9 +1129,16 @@ impl Proto {
             .collect();
         let mut ids = asked.clone();
         if !with_subs.is_empty() {
-            let names = with_subs.iter().map(|i| d.path(*i)).collect::<Vec<_>>().join(", ");
+            let names = with_subs
+                .iter()
+                .map(|i| d.path(*i))
+                .collect::<Vec<_>>()
+                .join(", ");
             if self.opt(DEL_PARENT) == 0 {
-                self.event("delete_refused", json!({ "why": "has subcategories", "categories": names }));
+                self.event(
+                    "delete_refused",
+                    json!({ "why": "has subcategories", "categories": names }),
+                );
                 self.sub = Some(Sub::Message {
                     title: "Can't delete yet".to_owned(),
                     body: format!(
@@ -1028,8 +1157,14 @@ impl Proto {
             }
         }
         let usage = d.usage();
-        let used: usize = ids.iter().map(|i| usage.get(i).map_or(0, |u| u.count)).sum();
-        let total: i64 = ids.iter().map(|i| usage.get(i).map_or(0, |u| u.total)).sum();
+        let used: usize = ids
+            .iter()
+            .map(|i| usage.get(i).map_or(0, |u| u.count))
+            .sum();
+        let total: i64 = ids
+            .iter()
+            .map(|i| usage.get(i).map_or(0, |u| u.total))
+            .sum();
         if used > 0 && self.opt(DEL_USED) == 0 {
             let names = ids
                 .iter()
@@ -1037,7 +1172,10 @@ impl Proto {
                 .map(|i| format!("{} ({})", d.path(*i), usage[i].count))
                 .collect::<Vec<_>>()
                 .join(", ");
-            self.event("delete_refused", json!({ "why": "used", "transactions": used }));
+            self.event(
+                "delete_refused",
+                json!({ "why": "used", "transactions": used }),
+            );
             self.sub = Some(Sub::Message {
                 title: "Can't delete a category in use".to_owned(),
                 body: format!(
@@ -1062,7 +1200,11 @@ impl Proto {
             return;
         }
         let delete = self.opt(MERGE) != 1;
-        self.sub = Some(Sub::Merge { from, into: None, delete });
+        self.sub = Some(Sub::Merge {
+            from,
+            into: None,
+            delete,
+        });
     }
 
     fn apply_acts(&mut self, ctx: &Context) {
@@ -1093,7 +1235,10 @@ impl Proto {
                         self.anchor = Some(id);
                     }
                     let path = self.work().path(id);
-                    self.event("select", json!({ "category": path, "count": self.sel.len() }));
+                    self.event(
+                        "select",
+                        json!({ "category": path, "count": self.sel.len() }),
+                    );
                 }
                 Act::Fold(id) => {
                     if !self.folded.remove(&id) {
@@ -1101,7 +1246,11 @@ impl Proto {
                     }
                 }
                 Act::New => {
-                    let parent = self.selection().first().copied().filter(|s| self.work().cat(*s).is_some_and(|c| c.parent.is_none()));
+                    let parent = self
+                        .selection()
+                        .first()
+                        .copied()
+                        .filter(|s| self.work().cat(*s).is_some_and(|c| c.parent.is_none()));
                     self.sub = Some(Sub::New {
                         name: String::new(),
                         parent,
@@ -1193,7 +1342,9 @@ impl Proto {
             "delete" => self.acts.push(Act::Delete(self.selection())),
             "hide" => {
                 let sel = self.selection();
-                let hidden = !sel.iter().all(|i| self.work().cat(*i).is_some_and(|c| c.hidden));
+                let hidden = !sel
+                    .iter()
+                    .all(|i| self.work().cat(*i).is_some_and(|c| c.hidden));
                 self.acts.push(Act::Hide(sel, hidden));
             }
             "usage" => {
@@ -1212,7 +1363,9 @@ impl Proto {
                 self.flash.clear();
                 self.event("reload", json!({ "seed": SEED }));
             }
-            "screenshot" => self.h.screenshot(if rest.is_empty() { "control" } else { rest }),
+            "screenshot" => self
+                .h
+                .screenshot(if rest.is_empty() { "control" } else { rest }),
             "dock" => self.set_dock(rest != "off", "control"),
             "quit" => {
                 self.closing = true;
@@ -1275,17 +1428,34 @@ impl eframe::App for Proto {
             let down = ctx.input(|i| i.key_pressed(Key::ArrowDown));
             let up = ctx.input(|i| i.key_pressed(Key::ArrowUp));
             if down || up {
-                let at = self.sel.iter().next().and_then(|s| self.visible.iter().position(|v| v == s));
+                let at = self
+                    .sel
+                    .iter()
+                    .next()
+                    .and_then(|s| self.visible.iter().position(|v| v == s));
                 let next = match (at, down) {
                     (Some(i), true) => (i + 1).min(self.visible.len() - 1),
                     (Some(i), false) => i.saturating_sub(1),
                     (None, _) => 0,
                 };
-                self.acts.push(Act::Select { id: self.visible[next], ctrl: false, shift: false });
+                self.acts.push(Act::Select {
+                    id: self.visible[next],
+                    ctrl: false,
+                    shift: false,
+                });
             }
             if ctx.input(|i| i.key_pressed(Key::Enter)) {
                 if let Some(id) = self.selection().first() {
-                    self.acts.push(if self.variant.staged() { Act::Edit(*id) } else { Act::Edit(*id) });
+                    if self.variant.staged() {
+                        let name = self
+                            .work()
+                            .cat(*id)
+                            .map(|c| c.name.clone())
+                            .unwrap_or_default();
+                        self.rename = Some((*id, name, true));
+                    } else {
+                        self.acts.push(Act::Edit(*id));
+                    }
                 }
             }
         }
@@ -1296,21 +1466,23 @@ impl eframe::App for Proto {
         self.tab_strip(ui);
         Panel::bottom("status")
             .exact_size(STATUS_H)
-            .frame(self.theme.chrome_frame().inner_margin(egui::Margin::symmetric(8, 4)))
+            .frame(
+                self.theme
+                    .chrome_frame()
+                    .inner_margin(egui::Margin::symmetric(8, 4)),
+            )
             .show(ui, |ui| {
                 ui.label(RichText::new(&self.status).weak());
             });
-        CentralPanel::default().show(ui, |ui| {
-            match self.tab {
-                Tab::Checking => self.register(ui),
-                Tab::Savings => {
-                    ui.label(RichText::new("Savings register: not part of this prototype.").weak());
-                }
-                Tab::Categories => {
-                    let rect = ui.available_rect_before_wrap();
-                    self.h.region(rect, "category list");
-                    self.list_body(ui);
-                }
+        CentralPanel::default().show(ui, |ui| match self.tab {
+            Tab::Checking => self.register(ui),
+            Tab::Savings => {
+                ui.label(RichText::new("Savings register: not part of this prototype.").weak());
+            }
+            Tab::Categories => {
+                let rect = ui.available_rect_before_wrap();
+                self.h.region(rect, "category list");
+                self.list_body(ui);
             }
         });
         self.heavy_window(&ctx);
@@ -1337,7 +1509,9 @@ impl Proto {
                 .resizable(false)
                 .frame(frame)
                 .show(ui, |ui| {
-                    let r = ui.small_button("◀").on_hover_text("Show prototype controls (F4)");
+                    let r = ui
+                        .small_button("◀")
+                        .on_hover_text("Show prototype controls (F4)");
                     self.h.track(&r, "dock: expand");
                     if r.clicked() {
                         self.set_dock(true, "click");
@@ -1407,7 +1581,11 @@ impl Proto {
 
     fn menu_bar(&mut self, ui: &mut Ui) {
         Panel::top("menu_bar")
-            .frame(self.theme.chrome_frame().inner_margin(egui::Margin::symmetric(6, 2)))
+            .frame(
+                self.theme
+                    .chrome_frame()
+                    .inner_margin(egui::Margin::symmetric(6, 2)),
+            )
             .show(ui, |ui| {
                 egui::MenuBar::new().ui(ui, |ui| {
                     ui.menu_button("File", |ui| {
@@ -1434,7 +1612,11 @@ impl Proto {
 
     fn tab_strip(&mut self, ui: &mut Ui) {
         Panel::top("tab_strip")
-            .frame(self.theme.chrome_frame().inner_margin(egui::Margin::symmetric(6, 2)))
+            .frame(
+                self.theme
+                    .chrome_frame()
+                    .inner_margin(egui::Margin::symmetric(6, 2)),
+            )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     for (tab, name) in [(Tab::Checking, "Checking"), (Tab::Savings, "Savings")] {
@@ -1483,7 +1665,9 @@ impl Proto {
                 for label in ["Date", "Payee", "Category", "Amount"] {
                     header.col(|ui| {
                         if label == "Amount" {
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| ui.strong(label));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.strong(label)
+                            });
                         } else {
                             ui.strong(label);
                         }
@@ -1549,12 +1733,7 @@ impl Proto {
         let max = screen.size() - vec2(Theme::DIALOG_MARGIN * 2.0, Theme::DIALOG_MARGIN * 2.0);
         let size = vec2(860.0_f32.min(max.x), 600.0_f32.min(max.y));
         let mut open = true;
-        let title = if self.variant.staged() {
-            "Category List"
-        } else {
-            "Category List"
-        };
-        egui::Window::new(title)
+        egui::Window::new("Category List")
             .id(Id::new("cl_window"))
             .open(&mut open)
             .collapsible(false)
@@ -1570,7 +1749,11 @@ impl Proto {
             });
         ctx.move_to_top(egui::LayerId::new(Order::Middle, Id::new("cl_window")));
         if !open {
-            self.acts.push(if self.variant.staged() { Act::Cancel } else { Act::Close });
+            self.acts.push(if self.variant.staged() {
+                Act::Cancel
+            } else {
+                Act::Close
+            });
         }
     }
 
@@ -1629,7 +1812,11 @@ impl Proto {
             Variant::B => 0.0,
             _ => row_h + 14.0,
         };
-        let toolbar = if variant == Variant::B { row_h + 12.0 } else { 0.0 };
+        let toolbar = if variant == Variant::B {
+            row_h + 12.0
+        } else {
+            0.0
+        };
         StripBuilder::new(ui)
             .size(Size::exact(toolbar))
             .size(Size::exact(row_h + 10.0))
@@ -1697,7 +1884,8 @@ impl Proto {
                 let r = ui.checkbox(&mut self.show_hidden, "Show hidden categories");
                 self.h.track(&r, "show hidden checkbox");
                 if self.show_hidden != before {
-                    self.h.event("filter", json!({ "show_hidden": self.show_hidden }));
+                    self.h
+                        .event("filter", json!({ "show_hidden": self.show_hidden }));
                 }
             }
         });
@@ -1717,7 +1905,8 @@ impl Proto {
                 self.acts.push(Act::Merge(sel.clone()));
             }
             if self.opt(HIDE) == 0 {
-                let all_hidden = !sel.is_empty() && sel.iter().all(|i| d.cat(*i).is_some_and(|c| c.hidden));
+                let all_hidden =
+                    !sel.is_empty() && sel.iter().all(|i| d.cat(*i).is_some_and(|c| c.hidden));
                 let label = if all_hidden { "Unhide" } else { "Hide" };
                 if self.tbtn(ui, label, !sel.is_empty(), "toolbar: Hide") {
                     self.acts.push(Act::Hide(sel.clone(), !all_hidden));
@@ -1760,7 +1949,8 @@ impl Proto {
                 self.acts.push(Act::Merge(sel.clone()));
             }
             if self.opt(HIDE) == 0 {
-                let all_hidden = !sel.is_empty() && sel.iter().all(|i| d.cat(*i).is_some_and(|c| c.hidden));
+                let all_hidden =
+                    !sel.is_empty() && sel.iter().all(|i| d.cat(*i).is_some_and(|c| c.hidden));
                 let label = if all_hidden { "Unhide" } else { "Hide" };
                 if b(self, ui, label, !sel.is_empty(), "button: Hide") {
                     self.acts.push(Act::Hide(sel.clone(), !all_hidden));
@@ -1779,11 +1969,17 @@ impl Proto {
         ui.horizontal_centered(|ui| {
             if self.variant.staged() {
                 let n = self.staged.as_ref().map_or(0, |s| s.pending.len());
-                ui.label(RichText::new(if n == 0 {
-                    "Nothing is saved until OK.".to_owned()
-                } else {
-                    format!("{n} change{} waiting. Nothing is saved until OK.", if n == 1 { "" } else { "s" })
-                }).weak());
+                ui.label(
+                    RichText::new(if n == 0 {
+                        "Nothing is saved until OK.".to_owned()
+                    } else {
+                        format!(
+                            "{n} change{} waiting. Nothing is saved until OK.",
+                            if n == 1 { "" } else { "s" }
+                        )
+                    })
+                    .weak(),
+                );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let r = ui.button("Cancel");
                     self.h.track(&r, "footer: Cancel");
@@ -1847,12 +2043,16 @@ impl Proto {
                 });
                 if usage_on {
                     header.col(|ui| {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| ui.strong("Txns"));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.strong("Txns")
+                        });
                     });
                 }
                 if totals {
                     header.col(|ui| {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| ui.strong("Total"));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.strong("Total")
+                        });
                     });
                 }
                 if staged {
@@ -1880,7 +2080,9 @@ impl Proto {
                         if usage_on {
                             row.col(|ui| {
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    ui.label(RichText::new(d.transfer_count(name).to_string()).weak());
+                                    ui.label(
+                                        RichText::new(d.transfer_count(name).to_string()).weak(),
+                                    );
                                 });
                             });
                         }
@@ -1895,7 +2097,11 @@ impl Proto {
                     row.col(|ui| {
                         ui.add_space(depth as f32 * 18.0 + 2.0);
                         if has_kids {
-                            let glyph = if self.folded.contains(&id) { "⏵" } else { "⏷" };
+                            let glyph = if self.folded.contains(&id) {
+                                "⏵"
+                            } else {
+                                "⏷"
+                            };
                             let r = ui.add(egui::Button::new(glyph).frame(false).small());
                             self.h.track(&r, format!("fold, {}", c.name));
                             if r.clicked() {
@@ -1990,7 +2196,11 @@ impl Proto {
                     self.h.track(&r, format!("category row, {}", d.path(id)));
                     if r.clicked() {
                         let m = r.ctx.input(|i| i.modifiers);
-                        self.acts.push(Act::Select { id, ctrl: m.command, shift: m.shift });
+                        self.acts.push(Act::Select {
+                            id,
+                            ctrl: m.command,
+                            shift: m.shift,
+                        });
                     }
                     if r.double_clicked() {
                         if staged {
@@ -2002,7 +2212,11 @@ impl Proto {
                     if self.variant == Variant::B {
                         r.context_menu(|ui| {
                             if !self.sel.contains(&id) {
-                                self.acts.push(Act::Select { id, ctrl: false, shift: false });
+                                self.acts.push(Act::Select {
+                                    id,
+                                    ctrl: false,
+                                    shift: false,
+                                });
                             }
                             let target = if self.sel.contains(&id) {
                                 self.selection()
@@ -2013,7 +2227,10 @@ impl Proto {
                                 self.acts.push(Act::New);
                                 ui.close();
                             }
-                            if ui.add_enabled(target.len() == 1, egui::Button::new("Edit…")).clicked() {
+                            if ui
+                                .add_enabled(target.len() == 1, egui::Button::new("Edit…"))
+                                .clicked()
+                            {
                                 self.acts.push(Act::Edit(id));
                                 ui.close();
                             }
@@ -2032,7 +2249,10 @@ impl Proto {
                                 self.acts.push(Act::Delete(target.clone()));
                                 ui.close();
                             }
-                            if ui.add_enabled(target.len() == 1, egui::Button::new("Usage…")).clicked() {
+                            if ui
+                                .add_enabled(target.len() == 1, egui::Button::new("Usage…"))
+                                .clicked()
+                            {
                                 self.acts.push(Act::Usage(id));
                                 ui.close();
                             }
@@ -2060,7 +2280,12 @@ impl Proto {
         let modal = egui::Modal::new(Id::new("cl_sub")).show(ctx, |ui| {
             ui.set_width(420.0);
             match &mut sub {
-                Sub::New { name, parent, income, fresh } => {
+                Sub::New {
+                    name,
+                    parent,
+                    income,
+                    fresh,
+                } => {
                     ui.heading("New Category");
                     ui.add_space(6.0);
                     ui.label("Name");
@@ -2074,7 +2299,9 @@ impl Proto {
                     ui.label("Subcategory of");
                     let tops = d.children(None);
                     egui::ComboBox::from_id_salt("new_parent")
-                        .selected_text(parent.map_or("(none: a top-level category)".to_owned(), |p| d.path(p)))
+                        .selected_text(
+                            parent.map_or("(none: a top-level category)".to_owned(), |p| d.path(p)),
+                        )
                         .width(260.0)
                         .show_ui(ui, |ui| {
                             ui.selectable_value(parent, None, "(none: a top-level category)");
@@ -2089,17 +2316,25 @@ impl Proto {
                             ui.radio_value(income, true, "Income");
                         });
                     }
-                    let taken = d.children(*parent).iter().any(|c| d.cat(*c).is_some_and(|c| c.name.eq_ignore_ascii_case(name.trim())));
+                    let taken = d.children(*parent).iter().any(|c| {
+                        d.cat(*c)
+                            .is_some_and(|c| c.name.eq_ignore_ascii_case(name.trim()))
+                    });
                     if taken {
                         ui.colored_label(RED, "A category with that name is already there.");
                     }
                     ui.add_space(8.0);
                     let ok = !name.trim().is_empty() && !taken;
                     ui.horizontal(|ui| {
-                        let r = ui.add_enabled(ok, egui::Button::new("OK").min_size(vec2(70.0, 0.0)));
+                        let r =
+                            ui.add_enabled(ok, egui::Button::new("OK").min_size(vec2(70.0, 0.0)));
                         self.h.track(&r, "new category: OK");
                         if r.clicked() || (enter && ok) {
-                            op = Some(Op::Create { name: name.trim().to_owned(), parent: *parent, income: *income });
+                            op = Some(Op::Create {
+                                name: name.trim().to_owned(),
+                                parent: *parent,
+                                income: *income,
+                            });
                             done = true;
                         }
                         let r = ui.button("Cancel");
@@ -2109,7 +2344,12 @@ impl Proto {
                         }
                     });
                 }
-                Sub::Edit { id, name, parent, fresh } => {
+                Sub::Edit {
+                    id,
+                    name,
+                    parent,
+                    fresh,
+                } => {
                     let c = d.cat(*id).cloned().unwrap();
                     ui.heading("Edit Category");
                     ui.add_space(6.0);
@@ -2123,9 +2363,15 @@ impl Proto {
                     ui.add_space(4.0);
                     ui.label("Subcategory of");
                     let own: Vec<u32> = std::iter::once(*id).chain(d.descendants(*id)).collect();
-                    let tops: Vec<u32> = d.children(None).into_iter().filter(|t| !own.contains(t)).collect();
+                    let tops: Vec<u32> = d
+                        .children(None)
+                        .into_iter()
+                        .filter(|t| !own.contains(t))
+                        .collect();
                     egui::ComboBox::from_id_salt("edit_parent")
-                        .selected_text(parent.map_or("(none: a top-level category)".to_owned(), |p| d.path(p)))
+                        .selected_text(
+                            parent.map_or("(none: a top-level category)".to_owned(), |p| d.path(p)),
+                        )
                         .width(260.0)
                         .show_ui(ui, |ui| {
                             ui.selectable_value(parent, None, "(none: a top-level category)");
@@ -2136,20 +2382,31 @@ impl Proto {
                     let u = usage.get(id).map_or(0, |u| u.count);
                     if u > 0 && name.trim() != c.name {
                         ui.add_space(4.0);
-                        ui.label(RichText::new(format!("Renaming updates {u} transactions.")).weak());
+                        ui.label(
+                            RichText::new(format!("Renaming updates {u} transactions.")).weak(),
+                        );
                     }
-                    let taken = d.children(*parent).iter().any(|s| *s != *id && d.cat(*s).is_some_and(|x| x.name.eq_ignore_ascii_case(name.trim())));
+                    let taken = d.children(*parent).iter().any(|s| {
+                        *s != *id
+                            && d.cat(*s)
+                                .is_some_and(|x| x.name.eq_ignore_ascii_case(name.trim()))
+                    });
                     if taken {
                         ui.colored_label(RED, "A category with that name is already there.");
                     }
                     ui.add_space(8.0);
                     let ok = !name.trim().is_empty() && !taken;
                     ui.horizontal(|ui| {
-                        let r = ui.add_enabled(ok, egui::Button::new("OK").min_size(vec2(70.0, 0.0)));
+                        let r =
+                            ui.add_enabled(ok, egui::Button::new("OK").min_size(vec2(70.0, 0.0)));
                         self.h.track(&r, "edit category: OK");
                         if r.clicked() || (enter && ok) {
                             if name.trim() != c.name || *parent != c.parent {
-                                op = Some(Op::Edit { id: *id, name: name.trim().to_owned(), parent: *parent });
+                                op = Some(Op::Edit {
+                                    id: *id,
+                                    name: name.trim().to_owned(),
+                                    parent: *parent,
+                                });
                             }
                             done = true;
                         }
@@ -2163,10 +2420,16 @@ impl Proto {
                 Sub::Merge { from, into, delete } => {
                     ui.heading("Merge Categories");
                     ui.add_space(6.0);
-                    let n: usize = from.iter().map(|f| usage.get(f).map_or(0, |u| u.count)).sum();
+                    let n: usize = from
+                        .iter()
+                        .map(|f| usage.get(f).map_or(0, |u| u.count))
+                        .sum();
                     ui.label(format!(
                         "Merge {} into one category. Its {n} transaction{} move there.",
-                        from.iter().map(|f| d.path(*f)).collect::<Vec<_>>().join(", "),
+                        from.iter()
+                            .map(|f| d.path(*f))
+                            .collect::<Vec<_>>()
+                            .join(", "),
                         if n == 1 { "" } else { "s" },
                     ));
                     ui.add_space(6.0);
@@ -2196,15 +2459,28 @@ impl Proto {
                             .map(|f| d.path(*f))
                             .collect();
                         if !kept.is_empty() {
-                            ui.label(RichText::new(format!("{} keeps its subcategories, so it stays.", kept.join(", "))).weak());
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} keeps its subcategories, so it stays.",
+                                    kept.join(", ")
+                                ))
+                                .weak(),
+                            );
                         }
                     }
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        let r = ui.add_enabled(into.is_some(), egui::Button::new("Merge").min_size(vec2(70.0, 0.0)));
+                        let r = ui.add_enabled(
+                            into.is_some(),
+                            egui::Button::new("Merge").min_size(vec2(70.0, 0.0)),
+                        );
                         self.h.track(&r, "merge: Merge");
                         if r.clicked() || (enter && into.is_some()) {
-                            op = Some(Op::Merge { from: from.clone(), into: into.unwrap(), delete_sources: *delete || self.tog[MERGE] == 2 });
+                            op = Some(Op::Merge {
+                                from: from.clone(),
+                                into: into.unwrap(),
+                                delete_sources: *delete || self.tog[MERGE] == 2,
+                            });
                             done = true;
                         }
                         let r = ui.button("Cancel");
@@ -2214,18 +2490,34 @@ impl Proto {
                         }
                     });
                 }
-                Sub::Delete { ids, asked, used, total, reassign } => {
+                Sub::Delete {
+                    ids,
+                    asked,
+                    used,
+                    total,
+                    reassign,
+                } => {
                     ui.heading("Delete Category");
                     ui.add_space(6.0);
-                    let names = asked.iter().map(|i| d.path(*i)).collect::<Vec<_>>().join(", ");
+                    let names = asked
+                        .iter()
+                        .map(|i| d.path(*i))
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     let subs = ids.len() - asked.len();
                     if *used == 0 && subs == 0 {
                         ui.label(format!("Delete {names}? No transaction uses it."));
                     } else if *used == 0 {
-                        ui.label(format!("Delete {names} and its {subs} subcategor{}? No transaction uses them.", if subs == 1 { "y" } else { "ies" }));
+                        ui.label(format!(
+                            "Delete {names} and its {subs} subcategor{}? No transaction uses them.",
+                            if subs == 1 { "y" } else { "ies" }
+                        ));
                     } else {
                         let what = if subs > 0 {
-                            format!("{names} and its {subs} subcategor{}", if subs == 1 { "y" } else { "ies" })
+                            format!(
+                                "{names} and its {subs} subcategor{}",
+                                if subs == 1 { "y" } else { "ies" }
+                            )
                         } else {
                             names.clone()
                         };
@@ -2239,7 +2531,9 @@ impl Proto {
                         if self.tog[DEL_USED] == 1 {
                             ui.label("Move those transactions to");
                             egui::ComboBox::from_id_salt("delete_reassign")
-                                .selected_text(reassign.map_or("(Uncategorized)".to_owned(), |p| d.path(p)))
+                                .selected_text(
+                                    reassign.map_or("(Uncategorized)".to_owned(), |p| d.path(p)),
+                                )
                                 .width(300.0)
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(reassign, None, "(Uncategorized)");
@@ -2257,7 +2551,10 @@ impl Proto {
                         self.h.track(&r, "delete: Delete");
                         r.request_focus();
                         if r.clicked() || enter {
-                            op = Some(Op::Delete { ids: ids.clone(), reassign: *reassign });
+                            op = Some(Op::Delete {
+                                ids: ids.clone(),
+                                reassign: *reassign,
+                            });
                             done = true;
                         }
                         let r = ui.button("Cancel");
@@ -2267,7 +2564,11 @@ impl Proto {
                         }
                     });
                 }
-                Sub::Message { title, body, merge_from } => {
+                Sub::Message {
+                    title,
+                    body,
+                    merge_from,
+                } => {
                     ui.heading(title.as_str());
                     ui.add_space(6.0);
                     ui.label(body.as_str());
@@ -2282,7 +2583,11 @@ impl Proto {
                             let r = ui.button("Merge…");
                             self.h.track(&r, "message: Merge");
                             if r.clicked() {
-                                next = Some(Sub::Merge { from, into: None, delete: self.tog[MERGE] != 1 });
+                                next = Some(Sub::Merge {
+                                    from,
+                                    into: None,
+                                    delete: self.tog[MERGE] != 1,
+                                });
                                 done = true;
                             }
                         }
@@ -2354,7 +2659,11 @@ fn main() -> eframe::Result {
             );
         }
         let net: i64 = d.txns.iter().map(|t| t.cents).sum();
-        let uncat = d.txns.iter().filter(|t| t.cat.is_none() && t.transfer.is_none()).count();
+        let uncat = d
+            .txns
+            .iter()
+            .filter(|t| t.cat.is_none() && t.transfer.is_none())
+            .count();
         println!("net {} uncategorized {uncat}", fmt_cents(net));
         return Ok(());
     }
