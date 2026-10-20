@@ -1,0 +1,44 @@
+# What every job needs before its first xtask step, after the checkout (ADR 0010).
+#
+# Builds the CI image from .github/Dockerfile as `balanced-ci:latest` on the
+# runner's Docker daemon, for .github/in-image.sh to run steps in (ADR 0004).
+# Its layers live in the GitHub Actions cache, not a registry: with nothing
+# changed every layer hits and loading the image is the only cost, and an
+# evicted layer rebuilds itself.
+#
+# Exports the runner's cache credentials to later steps, which a `run` step
+# otherwise can't see, so sccache in the image can reach the same cache, and
+# restores the cargo registry: downloaded crate sources, which never change for
+# a version (ADR 0003).
+name: ci-setup
+description: Build the CI image, expose the Actions cache, restore the cargo registry
+runs:
+  using: composite
+  steps:
+    - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      with:
+        script: |
+          core.setSecret(process.env.ACTIONS_RUNTIME_TOKEN);
+          for (const name of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_RESULTS_URL', 'ACTIONS_CACHE_URL']) {
+            if (process.env[name]) core.exportVariable(name, process.env[name]);
+          }
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+    # Without the build summary and record the action adds by default: the
+    # step's log already shows a failing build, and the jobs write summaries
+    # of their own.
+    - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      env:
+        DOCKER_BUILD_SUMMARY: "false"
+        DOCKER_BUILD_RECORD_UPLOAD: "false"
+      with:
+        context: .
+        file: .github/Dockerfile
+        tags: balanced-ci:latest
+        load: true
+        cache-from: type=gha,scope=ci-image
+        cache-to: type=gha,scope=ci-image,mode=max
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.CI_CARGO_HOME }}/registry
+        key: cargo-registry-${{ hashFiles('Cargo.lock') }}
+        restore-keys: cargo-registry-

@@ -36,7 +36,7 @@ cargo xtask ci
 
 This runs every check CI runs: formatting, clippy, tests, image snapshots, locales, `cargo deny`, typos, TODOs, SPDX headers, ADR numbering and commit sign-offs. Run `cargo xtask` with no task to list each check on its own.
 
-Some checks need tools beyond the toolchain: [cargo-nextest](https://nexte.st), [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) and [typos](https://github.com/crate-ci/typos), plus [cargo-mutants](https://mutants.rs) for `cargo xtask mutants`. The image snapshots draw with Vulkan, so a machine without a GPU needs a software driver such as Mesa's lavapipe (`mesa-vulkan-drivers`). `.woodpecker/Dockerfile` pins the versions CI uses.
+Some checks need tools beyond the toolchain: [cargo-nextest](https://nexte.st), [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) and [typos](https://github.com/crate-ci/typos), plus [cargo-mutants](https://mutants.rs) for `cargo xtask mutants`. The image snapshots draw with Vulkan, so a machine without a GPU needs a software driver such as Mesa's lavapipe (`mesa-vulkan-drivers`). `.github/Dockerfile` pins the versions CI uses.
 
 ## Documentation
 

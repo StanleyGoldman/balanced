@@ -18,7 +18,7 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 ### CI
 
-The `woodpecker` skill (`.claude/skills/woodpecker/SKILL.md`) reads and drives CI.
+CI is GitHub Actions (`.github/workflows/`), read and driven with `gh run` and `gh workflow`. `docs/practices/tooling.md` covers how it runs and how to reproduce a failure locally.
 
 ## Working preferences
 

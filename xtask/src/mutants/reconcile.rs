@@ -9,9 +9,9 @@ use std::collections::BTreeSet;
 use anyhow::{Context as _, Result, bail};
 use serde::Deserialize;
 
-use super::MutantsOutcome;
 use super::github::GitHub;
-use super::plan::{self, Action, CloseReason, FoundBy, Run};
+use super::plan::{self, Action, CloseReason, FoundBy, Run, Shard};
+use super::{MutantsOutcome, REPO};
 use crate::process;
 
 /// What a run does with the issue updates its plan decides.
@@ -27,8 +27,13 @@ pub(crate) enum IssueUpdates {
 /// checkout's own files.
 const OUTPUT_DIR: &str = "target";
 
-/// The variable Woodpecker sets to the web page of the running pipeline.
-const PIPELINE_VAR: &str = "CI_PIPELINE_URL";
+/// Where a run writes its issue updates as Markdown, which
+/// `.github/workflows/mutants.yml` adds to the job summary.
+const SUMMARY_PATH: &str = "target/mutants-summary.md";
+
+/// The variable `.github/workflows/mutants.yml` sets to the web page of the
+/// running workflow.
+const RUN_URL_VAR: &str = "CI_RUN_URL";
 
 /// Tests the mutants `scope_args` select at `HEAD`, then opens, comments on and
 /// closes `mutant` issues as the plan says, or prints those updates. Missed and
@@ -54,7 +59,7 @@ pub(crate) fn run(scope_args: &[String], found_by: FoundBy, updates: IssueUpdate
     let run = Run {
         commit,
         found_by,
-        pipeline: std::env::var(PIPELINE_VAR).ok(),
+        pipeline: std::env::var(RUN_URL_VAR).ok(),
     };
     let actions = plan::plan(outcomes.as_deref(), &list, &issues, &run)?;
     eprintln!("mutants: {} issue updates", actions.len());
@@ -64,6 +69,10 @@ pub(crate) fn run(scope_args: &[String], found_by: FoundBy, updates: IssueUpdate
             github.apply(action)?;
         }
     }
+    // Written once every update is made, so the summary never lists one that
+    // failed.
+    std::fs::write(SUMMARY_PATH, summary(&actions, &run, updates))
+        .with_context(|| format!("writing {SUMMARY_PATH}"))?;
     Ok(())
 }
 
@@ -132,9 +141,75 @@ fn warm_up(packages: &BTreeSet<String>) -> Result<()> {
     Ok(())
 }
 
+/// The run's issue updates as Markdown, for the CI job summary: the run and
+/// its commit with a count of each kind of update, then a table of them.
+fn summary(actions: &[Action], run: &Run, updates: IssueUpdates) -> String {
+    let url = format!("https://github.com/{REPO}");
+    let issue_link = |issue: &u64| format!("[#{issue}]({url}/issues/{issue})");
+    let heading = match updates {
+        IssueUpdates::Apply => "### 🧬 Mutant issue updates",
+        IssueUpdates::Print => "### 🧬 Mutant issue updates (dry run, not made)",
+    };
+    let found_by = match run.found_by {
+        FoundBy::PullRequest(number) => format!("Pull request [#{number}]({url}/pull/{number})"),
+        FoundBy::Shard(Shard { index, count }) => format!("Shard {index}/{count}"),
+    };
+    let short = run.commit.get(..7).unwrap_or(&run.commit);
+    let commit = format!("[`{short}`]({url}/commit/{})", run.commit);
+
+    let count =
+        |wanted: fn(&Action) -> bool| actions.iter().filter(|&action| wanted(action)).count();
+    let counts: Vec<String> = [
+        (count(|action| matches!(action, Action::Open(_))), "opened"),
+        (
+            count(|action| matches!(action, Action::Comment { .. })),
+            "found again",
+        ),
+        (
+            count(|action| matches!(action, Action::Close { .. })),
+            "closed",
+        ),
+    ]
+    .into_iter()
+    .filter(|&(count, _)| count > 0)
+    .map(|(count, kind)| format!("{count} {kind}"))
+    .collect();
+    let counts = if counts.is_empty() {
+        "no issue updates".to_owned()
+    } else {
+        counts.join(" · ")
+    };
+
+    let rows: Vec<String> = actions
+        .iter()
+        .map(|action| {
+            let (update, issue) = match action {
+                Action::Open(issue) => ("🆕 Opened", issue.title.clone()),
+                Action::Comment { issue, .. } => ("🔁 Found again", issue_link(issue)),
+                Action::Close { issue, reason, .. } => (
+                    match reason {
+                        CloseReason::Caught => "✅ Closed, caught",
+                        CloseReason::NoLongerGenerated => "🗑️ Closed, no longer generated",
+                    },
+                    issue_link(issue),
+                ),
+            };
+            format!("| {update} | {issue} |\n")
+        })
+        .collect();
+    let table = if rows.is_empty() {
+        String::new()
+    } else {
+        format!("\n| Update | Issue |\n|---|---|\n{}", rows.concat())
+    };
+    format!("{heading}\n\n{found_by} at {commit}: **{counts}**\n{table}")
+}
+
 /// cargo-mutants' arguments for a CI run over the mutants `scope_args` select:
-/// mutated in place in the throwaway checkout, one mutant at a time, with no
-/// baseline, since the `ci` workflow has just passed on this commit. A mutant
+/// mutated in place in the throwaway checkout, one mutant at a time. The run
+/// starts beside the `ci` workflow, not after it, so the baseline proves the
+/// unmutated tests pass first: on a broken commit every mutant would look
+/// caught and close its issue. A mutant
 /// whose tests run past a minute is a timeout; nextest's own kill comes later.
 fn cargo_mutants_args(scope_args: &[String]) -> Vec<String> {
     let mut args: Vec<String> = [
@@ -142,7 +217,6 @@ fn cargo_mutants_args(scope_args: &[String]) -> Vec<String> {
         "--no-shuffle",
         "--cargo-arg=--locked",
         "--in-place",
-        "--baseline=skip",
         "--timeout=60",
     ]
     .into_iter()
@@ -193,10 +267,74 @@ fn describe(action: &Action) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::cargo_mutants_args;
+    use super::{Action, CloseReason, IssueUpdates, cargo_mutants_args, summary};
+    use crate::mutants::plan::{FoundBy, NewIssue, Run, Shard};
+
+    fn every_kind_of_update() -> Vec<Action> {
+        vec![
+            Action::Open(NewIssue {
+                title: "Missed mutant in money.rs".to_owned(),
+                body: "body".to_owned(),
+                labels: vec!["mutant"],
+            }),
+            Action::Comment {
+                issue: 12,
+                body: "found again".to_owned(),
+            },
+            Action::Close {
+                issue: 9,
+                reason: CloseReason::Caught,
+                comment: "caught".to_owned(),
+            },
+            Action::Close {
+                issue: 7,
+                reason: CloseReason::NoLongerGenerated,
+                comment: "gone".to_owned(),
+            },
+        ]
+    }
+
+    fn shard_run() -> Run {
+        Run {
+            commit: "0123456789abcdef0123456789abcdef01234567".to_owned(),
+            found_by: FoundBy::Shard(Shard { index: 3, count: 7 }),
+            pipeline: None,
+        }
+    }
 
     #[test]
-    fn a_ci_run_mutates_in_place_with_no_baseline_and_a_one_minute_timeout() {
+    fn the_summary_tables_each_issue_update_under_its_run() {
+        assert_eq!(
+            summary(&every_kind_of_update(), &shard_run(), IssueUpdates::Apply),
+            "### 🧬 Mutant issue updates\n\n\
+             Shard 3/7 at [`0123456`](https://github.com/StanleyGoldman/balanced/commit/0123456789abcdef0123456789abcdef01234567): \
+             **1 opened · 1 found again · 2 closed**\n\n\
+             | Update | Issue |\n\
+             |---|---|\n\
+             | 🆕 Opened | Missed mutant in money.rs |\n\
+             | 🔁 Found again | [#12](https://github.com/StanleyGoldman/balanced/issues/12) |\n\
+             | ✅ Closed, caught | [#9](https://github.com/StanleyGoldman/balanced/issues/9) |\n\
+             | 🗑️ Closed, no longer generated | [#7](https://github.com/StanleyGoldman/balanced/issues/7) |\n"
+        );
+    }
+
+    #[test]
+    fn a_dry_run_summary_of_a_landed_pull_request_says_its_updates_were_not_made() {
+        let run = Run {
+            found_by: FoundBy::PullRequest(42),
+            ..shard_run()
+        };
+        assert_eq!(
+            summary(&[], &run, IssueUpdates::Print),
+            "### 🧬 Mutant issue updates (dry run, not made)\n\n\
+             Pull request [#42](https://github.com/StanleyGoldman/balanced/pull/42) at \
+             [`0123456`](https://github.com/StanleyGoldman/balanced/commit/0123456789abcdef0123456789abcdef01234567): \
+             **no issue updates**\n"
+        );
+    }
+
+    #[test]
+    fn a_ci_run_mutates_in_place_after_a_baseline_with_a_one_minute_timeout() {
         assert_eq!(
             cargo_mutants_args(&["--shard=3/7".to_owned()]),
             [
@@ -204,7 +342,6 @@ mod tests {
                 "--no-shuffle",
                 "--cargo-arg=--locked",
                 "--in-place",
-                "--baseline=skip",
                 "--timeout=60",
                 "--output=target",
                 "--shard=3/7",
