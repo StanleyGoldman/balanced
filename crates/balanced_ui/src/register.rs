@@ -818,7 +818,8 @@ pub(crate) struct Register {
     /// The Category cell edit waiting on the New Category Dialog its Create row opened.
     awaiting_category: Option<AwaitingCategory>,
     /// The transaction whose row takes the cell cursor on the next frame, once the
-    /// Register has caught up with its account.
+    /// Register has caught up with its account. Starting over for another account
+    /// keeps it, since Go to asks for it before the Register sees the account.
     go_to: Option<TransactionId>,
 }
 
@@ -3095,9 +3096,12 @@ fn actions_menu(
                 .then_some(RowAction::Delete);
             let go_to = row.other_side().and_then(|other_side| {
                 let go_to = fl!(i18n, "register-actions-go-to", account = row.category());
-                ui.button(go_to)
-                    .clicked()
-                    .then_some(RowAction::GoTo(other_side))
+                let clicked = ui.button(go_to).clicked();
+                if clicked {
+                    // Enter on a focused menu item leaves the menu open.
+                    ui.close();
+                }
+                clicked.then_some(RowAction::GoTo(other_side))
             });
             flag.or(delete).or(go_to)
         })

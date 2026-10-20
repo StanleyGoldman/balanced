@@ -218,34 +218,20 @@ impl MainWindow {
     pub(crate) fn switch_pane(&mut self, ctx: &egui::Context) {
         if self.account_bar.has_focus() {
             // The Main view takes keys with no widget focused, as the Register does.
-            ctx.memory_mut(|memory| {
-                if let Some(id) = memory.focused() {
-                    memory.surrender_focus(id);
-                }
-            });
+            release_keyboard(ctx);
         } else {
             self.account_bar.request_focus();
         }
     }
 
     /// Opens `account`'s Register under the Accounts tab and puts its cell cursor on
-    /// `transaction`'s row, with the keyboard.
-    pub(crate) fn go_to_transaction(
-        &mut self,
-        ctx: &egui::Context,
-        account: AccountId,
-        transaction: TransactionId,
-    ) {
+    /// `transaction`'s row. The keyboard follows, since the menu item that asked loses
+    /// focus as it stops being drawn.
+    pub(crate) fn go_to_transaction(&mut self, account: AccountId, transaction: TransactionId) {
         self.navigate(Route::Account(account));
         if let Some(register) = self.register_mut() {
             register.go_to(transaction);
         }
-        // The Register takes keys with no widget focused.
-        ctx.memory_mut(|memory| {
-            if let Some(id) = memory.focused() {
-                memory.surrender_focus(id);
-            }
-        });
     }
 
     /// Shows the open Register and puts its cell cursor on the draft row, with the
@@ -262,11 +248,7 @@ impl MainWindow {
         self.tab = TopLevelTab::Accounts;
         register.go_to_draft_row();
         // The Register takes keys with no widget focused.
-        ctx.memory_mut(|memory| {
-            if let Some(id) = memory.focused() {
-                memory.surrender_focus(id);
-            }
-        });
+        release_keyboard(ctx);
     }
 
     /// Forgets everything shown from the data file that was open, now that another one
@@ -935,4 +917,13 @@ fn header_balance(
             .append_to(&mut text, ui.style(), FontSelection::Default, Align::Center);
     }
     text
+}
+
+/// Takes keyboard focus off whatever widget holds it, so keys reach the Main view.
+fn release_keyboard(ctx: &egui::Context) {
+    ctx.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
 }

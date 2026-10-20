@@ -466,7 +466,10 @@ impl RegisterModel {
             view,
             paths: HashMap::new(),
         };
-        let mut other_accounts = OtherAccounts { view, names: None };
+        let mut other_accounts = OtherAccounts {
+            view,
+            holders: None,
+        };
         let split = fl!(i18n, "register-split");
         let opening_balance = fl!(i18n, "register-opening-balance");
         let shows_balance = sort.key == SortKey::Date;
@@ -493,14 +496,14 @@ impl RegisterModel {
                         split.clone(),
                     ),
                     Allocation::Transfer(other_side) => {
-                        let (account, name) = other_accounts.of(*other_side);
+                        let holder = other_accounts.holding(*other_side);
                         (
                             RowKind::Transfer(OtherSide {
-                                account,
+                                account: holder.id,
                                 transaction: *other_side,
                             }),
                             transaction.payee().to_owned(),
-                            transfer_text(name),
+                            transfer_text(holder.name),
                         )
                     }
                 };
@@ -657,30 +660,39 @@ impl CategoryPaths<'_> {
 /// for while a model is built.
 struct OtherAccounts<'a> {
     view: &'a LedgerView,
-    /// Each transaction's account's id and name, by the transaction's id. Every
-    /// transaction is in it, so a file whose transfer points at a transaction of another
-    /// kind still shows.
-    names: Option<HashMap<TransactionId, (AccountId, &'a str)>>,
+    /// Each transaction's account, by the transaction's id. Every transaction is in it,
+    /// so a file whose transfer points at a transaction of another kind still shows.
+    holders: Option<HashMap<TransactionId, Holder<'a>>>,
+}
+
+/// The account holding a transaction.
+#[derive(Debug, Clone, Copy)]
+struct Holder<'a> {
+    id: AccountId,
+    name: &'a str,
 }
 
 impl<'a> OtherAccounts<'a> {
-    /// The id and name of the account holding transaction `other_side`.
-    fn of(&mut self, other_side: TransactionId) -> (AccountId, &'a str) {
+    /// The account holding transaction `other_side`.
+    fn holding(&mut self, other_side: TransactionId) -> Holder<'a> {
         let view = self.view;
-        let names = self.names.get_or_insert_with(|| {
+        let holders = self.holders.get_or_insert_with(|| {
             view.accounts()
                 .iter()
                 .flat_map(|summary| {
                     let account = summary.account();
-                    let named = (account.id(), account.name());
+                    let holder = Holder {
+                        id: account.id(),
+                        name: account.name(),
+                    };
                     summary
                         .register()
                         .iter()
-                        .map(move |entry| (entry.transaction().id(), named))
+                        .map(move |entry| (entry.transaction().id(), holder))
                 })
                 .collect()
         });
-        *names
+        *holders
             .get(&other_side)
             .expect("a transfer's other side is in its snapshot")
     }

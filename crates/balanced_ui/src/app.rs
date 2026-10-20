@@ -289,9 +289,7 @@ impl App {
             AppCommand::GoToTransaction {
                 account,
                 transaction,
-            } => self
-                .main_window
-                .go_to_transaction(ctx, account, transaction),
+            } => self.main_window.go_to_transaction(account, transaction),
             AppCommand::GoToDraftRow => {
                 if let Some(ledger) = ledger {
                     self.main_window.go_to_draft_row(ctx, &ledger.snapshot());

@@ -167,31 +167,41 @@ fn account(ledger: &Ledger, name: &str) -> AccountId {
 /// The stub ledger with a transfer of 200 from Everyday Checking to the account named
 /// `to`, on 1 October 2026, paid to "Saving up".
 fn with_transfer(to: &str) -> Ledger {
+    with_transfer_on(
+        "Everyday Checking",
+        to,
+        Date::try_new_iso(2026, 10, 1).expect("1 October 2026 is a date"),
+    )
+}
+
+/// The stub ledger with a transfer of 200 from the account named `from` to the one
+/// named `to`, on `date`, paid to "Saving up".
+fn with_transfer_on(from: &str, to: &str, date: Date<icu_calendar::Iso>) -> Ledger {
     let mut ledger = Ledger::stub();
-    let everyday = account(&ledger, "Everyday Checking");
+    let from = account(&ledger, from);
     let to = account(&ledger, to);
     let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
     let amount = Money::new("-200.00".parse().expect("a decimal"), usd).expect("an amount");
     ledger
         .apply(DomainCommand::PostTransaction {
-            account: everyday,
-            transaction: NewTransaction::transfer(
-                Date::try_new_iso(2026, 10, 1).expect("1 October 2026 is a date"),
-                "Saving up",
-                to,
-                amount,
-            ),
+            account: from,
+            transaction: NewTransaction::transfer(date, "Saving up", to, amount),
         })
         .expect("the stub takes the transfer");
     ledger
 }
 
-/// Selects the "Saving up" row and picks `item` from its Actions menu.
-fn pick_action(harness: &mut Harness<'static, App>, item: &str) {
+/// Selects the "Saving up" row by clicking its Payee cell.
+fn select_saving_up(harness: &mut Harness<'static, App>) {
     harness
         .get_by_role_and_label(Role::Cell, "Saving up")
         .click();
     harness.run();
+}
+
+/// Selects the "Saving up" row and picks `item` from its Actions menu.
+fn pick_action(harness: &mut Harness<'static, App>, item: &str) {
+    select_saving_up(harness);
     harness
         .get_by_role_and_label(Role::Button, "Actions")
         .click();
@@ -396,10 +406,7 @@ fn go_to_opens_a_hidden_account() {
 fn go_to_works_from_the_keyboard() {
     let mut harness = app_on(with_transfer("Emergency Fund"));
     open(&mut harness, "Everyday Checking");
-    harness
-        .get_by_role_and_label(Role::Cell, "Saving up")
-        .click();
-    harness.run();
+    select_saving_up(&mut harness);
 
     harness
         .get_by_role_and_label(Role::Button, "Actions")
@@ -434,4 +441,38 @@ fn a_row_that_is_no_transfer_has_no_go_to() {
         .filter(|label| label.starts_with("Go to"))
         .collect();
     assert_eq!(go_to, Vec::<String>::new());
+}
+
+#[test]
+fn keys_reach_the_register_go_to_opened() {
+    let mut harness = app_on(with_transfer("Emergency Fund"));
+    open(&mut harness, "Everyday Checking");
+    pick_action(&mut harness, "Go to [Emergency Fund]");
+
+    press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+    let moved_off = !saving_up_is_selected(&harness);
+    press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+
+    assert!(moved_off);
+    assert!(saving_up_is_selected(&harness));
+}
+
+#[test]
+fn go_to_scrolls_a_far_off_other_side_into_view() {
+    let mut harness = app_on(with_transfer_on(
+        "Emergency Fund",
+        "Household Checking",
+        // Halfway through its 20,000 rows, far from the end the Register opens on.
+        Date::try_new_iso(2020, 1, 1).expect("1 January 2020 is a date"),
+    ));
+    open(&mut harness, "Emergency Fund");
+
+    pick_action(&mut harness, "Go to [Household Checking]");
+
+    // The Register lays out only the rows in view.
+    let in_view = harness
+        .query_by_role_and_label(Role::Cell, "Saving up")
+        .is_some();
+    assert!(in_view);
+    assert!(saving_up_is_selected(&harness));
 }
