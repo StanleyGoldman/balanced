@@ -97,10 +97,17 @@ enum RowKind {
     /// The whole amount, in one category.
     Category(CategoryId),
     Split,
-    /// One side of a transfer, with the id of its other side.
-    Transfer(TransactionId),
+    /// One side of a transfer.
+    Transfer(OtherSide),
     /// The draft row, with its category once one is typed.
     Draft(Option<CategoryTarget>),
+}
+
+/// The other side of a transfer: the transaction, and the account holding it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OtherSide {
+    pub(crate) account: AccountId,
+    pub(crate) transaction: TransactionId,
 }
 
 /// One row of the Register, every cell formatted: a transaction's, or the draft row's.
@@ -210,7 +217,7 @@ impl RegisterRow {
     }
 
     /// The other side of the transfer the row shows, unless it shows none.
-    pub(crate) fn other_side(&self) -> Option<TransactionId> {
+    pub(crate) fn other_side(&self) -> Option<OtherSide> {
         match self.kind {
             RowKind::Transfer(other_side) => Some(other_side),
             RowKind::OpeningBalance | RowKind::Category(_) | RowKind::Split | RowKind::Draft(_) => {
@@ -459,7 +466,10 @@ impl RegisterModel {
             view,
             paths: HashMap::new(),
         };
-        let mut other_accounts = OtherAccounts { view, names: None };
+        let mut other_accounts = OtherAccounts {
+            view,
+            holders: None,
+        };
         let split = fl!(i18n, "register-split");
         let opening_balance = fl!(i18n, "register-opening-balance");
         let shows_balance = sort.key == SortKey::Date;
@@ -485,11 +495,18 @@ impl RegisterModel {
                         transaction.payee().to_owned(),
                         split.clone(),
                     ),
-                    Allocation::Transfer(other_side) => (
-                        RowKind::Transfer(*other_side),
-                        transaction.payee().to_owned(),
-                        transfer_text(other_accounts.name(*other_side)),
-                    ),
+                    Allocation::Transfer(other_side) => {
+                        let (account, name) = other_accounts.holder(*other_side);
+                        let other_side = OtherSide {
+                            account,
+                            transaction: *other_side,
+                        };
+                        (
+                            RowKind::Transfer(other_side),
+                            transaction.payee().to_owned(),
+                            transfer_text(name),
+                        )
+                    }
                 };
                 let row = RegisterRow {
                     id: RowId::Transaction(transaction.id()),
@@ -640,33 +657,34 @@ impl CategoryPaths<'_> {
     }
 }
 
-/// The names of the accounts holding transfers' other sides, gathered the first time one
-/// is asked for while a model is built.
+/// The accounts holding transfers' other sides, gathered the first time one is asked
+/// for while a model is built.
 struct OtherAccounts<'a> {
     view: &'a LedgerView,
-    /// Each transaction's account's name, by the transaction's id. Every transaction is
-    /// in it, so a file whose transfer points at a transaction of another kind still
-    /// shows.
-    names: Option<HashMap<TransactionId, &'a str>>,
+    /// Each transaction's account's id and name, by the transaction's id. Every
+    /// transaction is in it, so a file whose transfer points at a transaction of another
+    /// kind still shows.
+    holders: Option<HashMap<TransactionId, (AccountId, &'a str)>>,
 }
 
 impl<'a> OtherAccounts<'a> {
-    /// The name of the account holding transaction `other_side`.
-    fn name(&mut self, other_side: TransactionId) -> &'a str {
+    /// The id and name of the account holding transaction `other_side`.
+    fn holder(&mut self, other_side: TransactionId) -> (AccountId, &'a str) {
         let view = self.view;
-        let names = self.names.get_or_insert_with(|| {
+        let holders = self.holders.get_or_insert_with(|| {
             view.accounts()
                 .iter()
                 .flat_map(|summary| {
-                    let name = summary.account().name();
+                    let account = summary.account();
+                    let holder = (account.id(), account.name());
                     summary
                         .register()
                         .iter()
-                        .map(move |entry| (entry.transaction().id(), name))
+                        .map(move |entry| (entry.transaction().id(), holder))
                 })
                 .collect()
         });
-        names
+        *holders
             .get(&other_side)
             .expect("a transfer's other side is in its snapshot")
     }

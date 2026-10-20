@@ -823,13 +823,10 @@ pub(crate) struct Register {
 }
 
 impl Register {
-    /// A Register that first shows its account with the cell cursor on `transaction`'s
-    /// Category cell, scrolled to the middle.
-    pub(crate) fn on_transaction(transaction: TransactionId) -> Self {
-        Self {
-            start_on: Some(transaction),
-            ..Self::default()
-        }
+    /// Has the Register, when it first shows its account, put the cell cursor on
+    /// `transaction`'s Category cell, scrolled to the middle, in place of the draft row.
+    pub(crate) fn start_on(&mut self, transaction: TransactionId) {
+        self.start_on = Some(transaction);
     }
 
     /// Whether keys go to the Register: the cell cursor is in it, no Dialog is open
@@ -1357,6 +1354,8 @@ impl Register {
                     // Go to opens the other side of the selected row.
                     self.place_cursor(RowId::Transaction(id), column);
                     commands.send(AppCommand::GoToTransfer);
+                    // egui closes a menu on a pointer click only, not on Enter.
+                    ui.close();
                 }
             });
         }

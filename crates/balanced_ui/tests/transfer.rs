@@ -391,3 +391,34 @@ fn go_to_transfer_in_the_edit_menu_opens_the_selected_row_s_other_side() {
 
     assert_eq!(cursor(&harness), "[Everyday Checking]");
 }
+
+/// Whether the Edit menu's Go to Transfer item is disabled with the cell cursor on the
+/// cell labelled `label`, opening the menu to look and closing it again.
+fn go_to_disabled_on(harness: &mut Harness<'static, App>, label: &str) -> bool {
+    harness.get_by_role_and_label(Role::Cell, label).click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    let disabled = harness
+        .get_by_role_and_label(Role::Button, "Go to Transfer Ctrl+G")
+        .accesskit_node()
+        .is_disabled();
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    disabled
+}
+
+#[test]
+fn go_to_transfer_is_disabled_on_a_row_that_isn_t_a_transfer() {
+    let mut harness = everyday();
+    add_transaction(&mut harness, "Saving up", "[Emergency Fund]", "200");
+    add_transaction(&mut harness, "Corner Shop", "Food & Dining:Groceries", "5");
+
+    assert_eq!(
+        [
+            go_to_disabled_on(&mut harness, "Saving up"),
+            go_to_disabled_on(&mut harness, "Corner Shop"),
+        ],
+        [false, true]
+    );
+}

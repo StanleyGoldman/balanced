@@ -33,7 +33,7 @@ use crate::new_category::NewCategoryForm;
 use crate::preferences::{NetWorthPlacement, Preferences};
 use crate::preferences_dialog::PreferencesForm;
 use crate::register::{ColumnWidths, Register};
-use crate::register_model::RegisterRow;
+use crate::register_model::{OtherSide, RegisterRow};
 use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
@@ -183,7 +183,7 @@ impl MainWindow {
         match action {
             UserAction::Undo => view.can_undo(),
             UserAction::Redo => view.can_redo(),
-            UserAction::GoToTransfer => self.other_side(view).is_some(),
+            UserAction::GoToTransfer => self.other_side().is_some(),
             UserAction::NewTransaction
             | UserAction::DeleteTransaction
             | UserAction::PrintRegister
@@ -241,35 +241,27 @@ impl MainWindow {
         }
     }
 
-    /// The other side of the transfer on the open Register's selected row, and the
-    /// account in `view` that holds it, while the Register shows such a row.
-    fn other_side(&self, view: &LedgerView) -> Option<(AccountId, TransactionId)> {
+    /// The other side of the transfer on the open Register's selected row, while the
+    /// Register shows such a row.
+    fn other_side(&self) -> Option<OtherSide> {
         if !self.shows_register() {
             return None;
         }
         let account = self.open_account_id()?;
-        let other_side = self.register()?.selected_row(account)?.other_side()?;
-        let holder = view.accounts().iter().find(|summary| {
-            summary
-                .register()
-                .iter()
-                .any(|entry| entry.transaction().id() == other_side)
-        })?;
-        Some((holder.account().id(), other_side))
+        self.register()?.selected_row(account)?.other_side()
     }
 
-    /// Opens the account in `view` holding the other side of the transfer on the open
-    /// Register's selected row, with the cell cursor on that other side and the
-    /// keyboard in the Register. A row that isn't a transfer does nothing.
-    pub(crate) fn go_to_transfer(&mut self, ctx: &egui::Context, view: &LedgerView) {
-        let Some((account, other_side)) = self.other_side(view) else {
+    /// Opens the account holding the other side of the transfer on the open Register's
+    /// selected row, with the cell cursor on that other side and the keyboard in the
+    /// Register. A row that isn't a transfer does nothing.
+    pub(crate) fn go_to_transfer(&mut self, ctx: &egui::Context) {
+        let Some(other_side) = self.other_side() else {
             return;
         };
-        self.tab = TopLevelTab::Accounts;
-        self.open_register = Some(OpenRegister {
-            account,
-            register: Register::on_transaction(other_side),
-        });
+        self.navigate(Route::Account(other_side.account));
+        if let Some(register) = self.register_mut() {
+            register.start_on(other_side.transaction);
+        }
         // The Register takes keys with no widget focused.
         ctx.memory_mut(|memory| {
             if let Some(id) = memory.focused() {
