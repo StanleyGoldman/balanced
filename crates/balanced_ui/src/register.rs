@@ -1019,6 +1019,11 @@ impl Register {
                     edit: TransactionEdit::ClearedStatus(status),
                 }));
             }
+            RowAction::Unreconcile => {
+                commands.send(AppCommand::OpenDialog(DialogKind::Unreconcile {
+                    transaction: id,
+                }));
+            }
         }
     }
 
@@ -1415,7 +1420,7 @@ impl Register {
                 &mut self.draft,
             ) {
                 // A refused category leaves nothing to save; the Status bar says why.
-                Commit::Done | Commit::Refused => {}
+                Commit::Done | Commit::Confirming | Commit::Refused => {}
                 Commit::Unreadable(error) => {
                     // Leaving the cell is refused too: the edit keeps the keyboard, and
                     // the cell cursor comes back to it once the rows are laid out.
@@ -1677,6 +1682,17 @@ impl Register {
             &mut self.draft,
         ) {
             Commit::Done => {}
+            Commit::Confirming => {
+                // The confirm takes the keyboard, so the cell cursor moves as `leave`
+                // says but opens no cell behind it.
+                ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+                let step = match leave {
+                    Leave::Enter => Move::Next,
+                    Leave::Tab(step) => step,
+                    Leave::Stay => return None,
+                };
+                return self.move_cursor(cursor, step, keys.rows)?.scroll_offset;
+            }
             Commit::Refused => {
                 edit.list = None;
                 ctx.memory_mut(|memory| memory.request_focus(edit.editor_id()));
@@ -1972,7 +1988,7 @@ impl Register {
                     keys.commands,
                     &mut self.draft,
                 ) {
-                    Commit::Done => None,
+                    Commit::Done | Commit::Confirming => None,
                     Commit::Refused => {
                         edit.list = None;
                         Some(Edit::Text(edit))
@@ -2136,6 +2152,8 @@ enum RowAction {
     SetFlagged(bool),
     /// Give the transaction this Cleared status.
     SetClearedStatus(ClearedStatus),
+    /// Ask before setting a Reconciled transaction back to Cleared.
+    Unreconcile,
 }
 
 /// Whether `rect` lies wholly within `viewport` from top to bottom, give or take half a
@@ -2184,6 +2202,10 @@ fn open_split_view(row: &RegisterRow, column: RegisterColumn, commands: &Command
 enum Commit {
     /// The value was saved, or matched the saved one, or its row is gone.
     Done,
+    /// The value is a Reconciled transaction's new amount, so nothing was sent: the
+    /// confirm that sends it was asked for, and until it does the cell shows the
+    /// saved amount.
+    Confirming,
     /// The value can't be saved, so nothing was sent: a category no category is named
     /// (the Status bar says so), or a refused date (its bubble says so).
     Refused,
@@ -2192,7 +2214,9 @@ enum Commit {
 }
 
 /// Saves `edit`'s text, trimmed, unless it matches the saved text or saved amount: in
-/// `draft` on the draft row, else by sending one edit Command.
+/// `draft` on the draft row, else by sending one edit Command. A new amount for a
+/// transaction whose amount change asks first is not sent: the confirm is asked for
+/// instead, and sends it once accepted.
 fn commit(
     edit: &CellEdit,
     rows: Rows<'_>,
@@ -2221,10 +2245,29 @@ fn commit(
             Err(error) => return Commit::Unreadable(error),
         },
     };
-    if let Some(change) = change {
-        save(row.id(), change, commands, draft);
+    match (change, row.transaction()) {
+        (Some(CellChange::Edit(TransactionEdit::Amount(amount))), Some(transaction))
+            if amount_change_asks_first(row.cleared_status()) =>
+        {
+            commands.send(AppCommand::OpenDialog(DialogKind::ChangeReconciledAmount {
+                transaction,
+                amount,
+            }));
+            return Commit::Confirming;
+        }
+        (Some(change), _) => save(row.id(), change, commands, draft),
+        (None, _) => {}
     }
     Commit::Done
+}
+
+/// Whether changing the amount of a transaction in `status` asks first: only a
+/// Reconciled one's does, since it has been matched against a statement.
+fn amount_change_asks_first(status: ClearedStatus) -> bool {
+    match status {
+        ClearedStatus::Reconciled => true,
+        ClearedStatus::Uncleared | ClearedStatus::Cleared => false,
+    }
 }
 
 /// Saves `change` in a cell of `row`: in `draft` on the draft row, else by sending one
@@ -2902,8 +2945,9 @@ fn flag_cell(
 /// The Clr cell of `row`, whose click target is `response`: `c` on a Cleared
 /// transaction, `R` on a Reconciled one, and nothing on an Uncleared one. A click on an
 /// editable row's cell marks an Uncleared transaction Cleared and a Cleared one
-/// Uncleared. Assistive technology reads it as a button whose value is the status. The
-/// draft row's cell is empty and takes no click.
+/// Uncleared, and asks before setting a Reconciled one back to Cleared. Assistive
+/// technology reads it as a button whose value is the status. The draft row's cell is
+/// empty and takes no click.
 fn clr_cell(
     ui: &egui::Ui,
     i18n: &Localizer,
@@ -2955,15 +2999,12 @@ fn clr_cell(
             ui.style().interact(response).text_color(),
         );
     }
-    // TODO(#314): a click on a Reconciled transaction confirms, then marks it Cleared.
-    let next = match status {
-        ClearedStatus::Uncleared => Some(ClearedStatus::Cleared),
-        ClearedStatus::Cleared => Some(ClearedStatus::Uncleared),
-        ClearedStatus::Reconciled => None,
+    let action = match status {
+        ClearedStatus::Uncleared => RowAction::SetClearedStatus(ClearedStatus::Cleared),
+        ClearedStatus::Cleared => RowAction::SetClearedStatus(ClearedStatus::Uncleared),
+        ClearedStatus::Reconciled => RowAction::Unreconcile,
     };
-    let action = next
-        .filter(|_| editable && response.clicked())
-        .map(RowAction::SetClearedStatus);
+    let action = (editable && response.clicked()).then_some(action);
     (response.clone(), action)
 }
 
