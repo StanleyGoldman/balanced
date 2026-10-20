@@ -189,6 +189,10 @@ jobs:
           include_empty_in_summary: false
           simplified_summary: true
           check_title_template: "{{SUITE_NAME}} › {{TEST_NAME}}"
+          # The whole panic, not its first two lines, which are only "panicked
+          # at": the reason, such as a snapshot's failing pixels or an
+          # assertion's left and right, comes after.
+          truncate_stack_traces: false
 
       # kittest's images of a failed snapshot, the drawing it got and its
       # difference from the committed one, so a mismatch can be seen without
