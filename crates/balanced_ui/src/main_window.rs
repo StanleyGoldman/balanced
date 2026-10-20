@@ -357,6 +357,13 @@ impl MainWindow {
                 if summary.account().is_closed() {
                     return;
                 }
+                let reconciled = self
+                    .register()
+                    .and_then(|register| register.row(summary.account().id(), *transaction))
+                    .is_some_and(|row| row.cleared_status() == ClearedStatus::Reconciled);
+                if !reconciled {
+                    return;
+                }
                 let form = UnreconcileForm {
                     transaction: *transaction,
                 };

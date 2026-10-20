@@ -2880,8 +2880,9 @@ fn flag_cell(
 /// The Clr cell of `row`, whose click target is `response`: `c` on a Cleared
 /// transaction, `R` on a Reconciled one, and nothing on an Uncleared one. A click on an
 /// editable row's cell marks an Uncleared transaction Cleared and a Cleared one
-/// Uncleared, and asks before setting a Reconciled one back to Cleared. Assistive technology reads it as a button whose value is the status. The
-/// draft row's cell is empty and takes no click.
+/// Uncleared, and asks before setting a Reconciled one back to Cleared. Assistive
+/// technology reads it as a button whose value is the status. The draft row's cell is
+/// empty and takes no click.
 fn clr_cell(
     ui: &egui::Ui,
     i18n: &Localizer,
