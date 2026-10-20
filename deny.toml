@@ -17,6 +17,9 @@ ignore = [
   { id = "RUSTSEC-2026-0370", reason = "zvariant: merged into zbus 6; via eframe's accesskit (#178)" },
   { id = "RUSTSEC-2026-0371", reason = "zbus_names: merged into zbus 6; via eframe's accesskit (#178)" },
   { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: merged into zbus 6; via eframe's accesskit (#178)" },
+  # Unmaintained, not vulnerable: archived upstream. It arrives only through i18n-embed's
+  # proc-macros reading i18n.toml at compile time, with no upgrade until i18n-config drops it (#353).
+  { id = "RUSTSEC-2026-0374", reason = "basic-toml: archived; compile-time only, via i18n-config (#353)" },
 ]
 
 [licenses]
