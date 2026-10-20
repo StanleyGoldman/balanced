@@ -378,6 +378,7 @@ status-no-such-category = No category has that name. Pick one from the list, or 
 status-account-closed = This account is closed, so its transactions can't be changed.
 status-transfer-account-closed = The other account of this transfer is closed, so the transfer can't be made, changed or deleted.
 status-transfer-to-own-account = A transfer moves money to another account. Pick an account other than this one.
+status-account-has-transfers = An account that holds a transfer can't be deleted, as the other account would keep its side. Close the account instead.
 # A change to a transaction that no longer exists, such as one just deleted.
 status-unknown-transaction = That transaction no longer exists.
 status-blank-account-name = Enter a name for the account.
