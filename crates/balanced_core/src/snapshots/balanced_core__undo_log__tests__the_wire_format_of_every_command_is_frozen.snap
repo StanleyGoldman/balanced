@@ -22,6 +22,7 @@ expression: entries
 {"edit_transaction":{"transaction":12,"edit":{"payee":"Fresh Market"}}}
 {"edit_transaction":{"transaction":12,"edit":{"memo":"Weekly shop"}}}
 {"edit_transaction":{"transaction":12,"edit":{"category":6}}}
+{"edit_transaction":{"transaction":12,"edit":{"transfer":8}}}
 {"edit_transaction":{"transaction":12,"edit":{"amount":-9000}}}
 {"edit_transaction":{"transaction":12,"edit":{"cleared_status":"uncleared"}}}
 {"edit_transaction":{"transaction":12,"edit":{"cleared_status":"cleared"}}}

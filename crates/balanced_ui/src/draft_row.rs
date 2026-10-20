@@ -56,15 +56,13 @@ impl Draft {
             TransactionEdit::Category(category) => {
                 self.category = Some(CategoryTarget::Category(category));
             }
+            TransactionEdit::Transfer(account) => {
+                self.category = Some(CategoryTarget::Transfer(account));
+            }
             TransactionEdit::Amount(amount) => self.amount = Some(amount),
             // The draft row's Clr cell is empty: a posted transaction starts uncleared.
             TransactionEdit::ClearedStatus(_) => {}
         }
-    }
-
-    /// Makes the draft a transfer to or from `account`.
-    pub(crate) fn transfer(&mut self, account: AccountId) {
-        self.category = Some(CategoryTarget::Transfer(account));
     }
 
     /// Whether the cell `missing` names is still empty.

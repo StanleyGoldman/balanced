@@ -162,8 +162,13 @@ pub enum TransactionEdit {
     Number(Option<String>),
     Payee(String),
     Memo(String),
-    /// The one category the whole amount is in.
+    /// The one category the whole amount is in. On a transfer, it deletes the other
+    /// side.
     Category(CategoryId),
+    /// The account the whole amount moves to or from, which makes the transaction a
+    /// transfer. Its other side in that account is new, with the payee and memo copied,
+    /// and any other side it had before is deleted.
+    Transfer(AccountId),
     /// The whole amount, in the account's currency. A split transaction's amount is
     /// the sum of its lines, so it can't be edited here.
     Amount(Money),
@@ -183,7 +188,17 @@ impl TransactionEdit {
             | Self::Payee(_)
             | Self::Memo(_)
             | Self::Category(_)
+            | Self::Transfer(_)
             | Self::ClearedStatus(_) => None,
+        }
+    }
+
+    /// Whether the edit reaches a transfer's other side: a date or amount it shares, or
+    /// a category or account that removes or replaces it.
+    pub(crate) fn reaches_other_side(&self) -> bool {
+        match self {
+            Self::Date(_) | Self::Amount(_) | Self::Category(_) | Self::Transfer(_) => true,
+            Self::Number(_) | Self::Payee(_) | Self::Memo(_) | Self::ClearedStatus(_) => false,
         }
     }
 }
@@ -227,9 +242,9 @@ pub enum DomainError {
     /// The command gave the opening balance a payee. The opening balance has none.
     #[error("the opening balance has no payee: {transaction:?}")]
     OpeningBalancePayee { transaction: TransactionId },
-    /// The command put the whole amount in one category, but the transaction is the
-    /// opening balance, which has no category, or is split between categories.
-    #[error("the transaction isn't in one category: {transaction:?}")]
+    /// The command put the whole amount in one category or account, but the transaction
+    /// is the opening balance, which has no category, or is split between categories.
+    #[error("the transaction isn't in one category or account: {transaction:?}")]
     NotInOneCategory { transaction: TransactionId },
     /// No category has the id, perhaps because it was deleted.
     #[error("no such category: {category:?}")]
@@ -260,8 +275,8 @@ pub enum DomainError {
     /// another account, which is closed, so its history is read-only.
     #[error("the transfer's other account is closed: {account:?}")]
     TransferAccountClosed { account: AccountId },
-    /// The command would change the date or amount of a split line's other side, or
-    /// delete it. Those change only with the split, in `account`.
+    /// The command would change the date, amount or target of a split line's other
+    /// side, or delete it. Those change only with the split, in `account`.
     #[error("the transaction is a split line's other side; change the split in {account:?}")]
     SplitLineOtherSide { account: AccountId },
     /// The command would delete an account that holds a side of a transfer, which

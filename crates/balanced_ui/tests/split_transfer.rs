@@ -10,7 +10,7 @@ use balanced_core::{
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::App as _;
-use eframe::egui::accesskit::Role;
+use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::{Event, Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
@@ -147,7 +147,7 @@ fn deleting_a_split_lines_other_side_says_to_change_the_split_naming_its_account
     assert_eq!(
         status(&harness),
         [
-            "This is the other side of a split line. Change its date or amount, or delete it, from the split in Everyday Checking."
+            "This is the other side of a split line. Change its date, amount or category, or delete it, from the split in Everyday Checking."
         ]
     );
     assert_eq!(
@@ -172,4 +172,35 @@ fn searching_for_a_split_lines_account_finds_the_split() {
     harness.run();
 
     assert_eq!(column(&harness, "Payee"), ["Payday", ""]);
+}
+
+#[test]
+fn go_to_on_a_split_lines_other_side_goes_to_the_split() {
+    let mut harness = payday();
+    open(&mut harness, "Emergency Fund");
+    harness.get_by_role_and_label(Role::Cell, "Payday").click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Actions")
+        .click();
+    harness.run();
+
+    harness
+        .get_by_role_and_label(Role::Button, "Go to [Everyday Checking]")
+        .click();
+    harness.run();
+
+    let cells: Vec<_> = harness
+        .query_all_by_role(Role::Cell)
+        .map(|cell| {
+            let node = cell.accesskit_node();
+            (node.label().unwrap_or_default(), node.toggled())
+        })
+        .collect();
+    let payee = cells
+        .iter()
+        .position(|(label, _)| label == "Payday")
+        .expect("the Register lists the split");
+    assert_eq!(cells[payee].1, Some(Toggled::True));
+    assert_eq!(cells[payee + 1].0, "[Split]");
 }

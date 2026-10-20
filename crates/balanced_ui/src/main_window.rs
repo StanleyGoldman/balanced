@@ -33,7 +33,7 @@ use crate::new_category::NewCategoryForm;
 use crate::preferences::{NetWorthPlacement, Preferences};
 use crate::preferences_dialog::PreferencesForm;
 use crate::register::{ColumnWidths, Register};
-use crate::register_model::RegisterRow;
+use crate::register_model::{OtherSide, RegisterRow};
 use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
@@ -195,6 +195,7 @@ impl MainWindow {
         match action {
             UserAction::Undo => view.can_undo(),
             UserAction::Redo => view.can_redo(),
+            UserAction::GoToOtherSide => self.other_side().is_some(),
             UserAction::NewTransaction
             | UserAction::DeleteTransaction
             | UserAction::PrintRegister
@@ -242,13 +243,41 @@ impl MainWindow {
     pub(crate) fn switch_pane(&mut self, ctx: &egui::Context) {
         if self.account_bar.has_focus() {
             // The Main view takes keys with no widget focused, as the Register does.
-            ctx.memory_mut(|memory| {
-                if let Some(id) = memory.focused() {
-                    memory.surrender_focus(id);
-                }
-            });
+            release_keyboard(ctx);
         } else {
             self.account_bar.request_focus();
+        }
+    }
+
+    /// Opens `account`'s Register under the Accounts tab and puts its cell cursor on
+    /// `transaction`'s row. The keyboard follows, since the menu item that asked loses
+    /// focus as it stops being drawn.
+    pub(crate) fn go_to_transaction(&mut self, account: AccountId, transaction: TransactionId) {
+        self.navigate(Route::Account(account));
+        if let Some(register) = self.register_mut() {
+            register.go_to(transaction);
+        }
+    }
+
+    /// The other side of the transfer on the open Register's selected row, while the
+    /// Register shows such a row.
+    fn other_side(&self) -> Option<OtherSide> {
+        if !self.shows_register() {
+            return None;
+        }
+        let account = self.open_account_id()?;
+        self.register()?.selected_row(account)?.other_side()
+    }
+
+    /// Goes to the other side of the transfer on the open Register's selected row, as
+    /// [`MainWindow::go_to_transaction`] does. A row that isn't a transfer does nothing.
+    pub(crate) fn go_to_other_side(&mut self) {
+        if let Some(OtherSide {
+            account,
+            transaction,
+        }) = self.other_side()
+        {
+            self.go_to_transaction(account, transaction);
         }
     }
 
@@ -266,11 +295,7 @@ impl MainWindow {
         self.tab = TopLevelTab::Accounts;
         register.go_to_draft_row();
         // The Register takes keys with no widget focused.
-        ctx.memory_mut(|memory| {
-            if let Some(id) = memory.focused() {
-                memory.surrender_focus(id);
-            }
-        });
+        release_keyboard(ctx);
     }
 
     /// Forgets everything shown from the data file that was open, now that another one
@@ -974,6 +999,8 @@ impl MainWindow {
             let edit = ui.menu_button(fl!(i18n, "menu-edit"), |ui| {
                 item(ui, &mut drawn, UserAction::Undo);
                 item(ui, &mut drawn, UserAction::Redo);
+                ui.separator();
+                item(ui, &mut drawn, UserAction::GoToOtherSide);
             });
             drawn.note_menu(&edit.response);
             let view_menu = ui.menu_button(fl!(i18n, "menu-view"), |ui| {
@@ -1090,4 +1117,13 @@ fn header_balance(
             .append_to(&mut text, ui.style(), FontSelection::Default, Align::Center);
     }
     text
+}
+
+/// Takes keyboard focus off whatever widget holds it, so keys reach the Main view.
+fn release_keyboard(ctx: &egui::Context) {
+    ctx.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
 }

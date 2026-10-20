@@ -23,6 +23,7 @@ menu-file-recent = { $number } { $file }
 menu-edit = Edit
 menu-edit-undo = Undo
 menu-edit-redo = Redo
+menu-edit-go-to-transfer = Go to Transfer
 menu-view = View
 menu-view-switch-pane = Switch Pane
 menu-tools = Tools
@@ -134,6 +135,9 @@ register-actions-delete = Delete…
 # The Actions menu items that flag the row's transaction, or take its flag off.
 register-actions-flag = Flag
 register-actions-unflag = Unflag
+# The Actions menu item on one side of a transfer that opens the other side's Register,
+# naming the other account as the Category cell does: Go to [Savings].
+register-actions-go-to = Go to { $account }
 # A Flag cell, which flags or unflags its transaction, as assistive technology reads it.
 register-flag = Flag { $payee }, { $date }, { $amount }
 # A Clr cell, which marks its transaction Cleared or Uncleared, or asks before setting
@@ -375,9 +379,9 @@ status-no-such-category = No category has that name. Pick one from the list, or 
 status-account-closed = This account is closed, so its transactions can't be changed.
 status-transfer-account-closed = The other account of this transfer is closed, so the transfer can't be made, changed or deleted.
 status-transfer-to-own-account = A transfer moves money to another account. Pick an account other than this one.
-status-split-line-other-side = This is the other side of a split line. Change its date or amount, or delete it, from the split.
+status-split-line-other-side = This is the other side of a split line. Change its date, amount or category, or delete it, from the split.
 # $account is the name of the account holding the split.
-status-split-line-other-side-in = This is the other side of a split line. Change its date or amount, or delete it, from the split in { $account }.
+status-split-line-other-side-in = This is the other side of a split line. Change its date, amount or category, or delete it, from the split in { $account }.
 status-account-has-transfers = An account that holds a transfer can't be deleted, as the other account would keep its side. Close the account instead.
 # A change to a transaction that no longer exists, such as one just deleted.
 status-unknown-transaction = That transaction no longer exists.

@@ -233,6 +233,8 @@ pub(crate) enum TransactionEdit {
     Payee(String),
     Memo(String),
     Category(u32),
+    /// The account a transfer goes to or from.
+    Transfer(u32),
     Amount(i64),
     ClearedStatus(ClearedStatus),
 }

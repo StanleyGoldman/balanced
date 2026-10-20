@@ -319,6 +319,33 @@ fn a_date_or_amount_change_on_a_split_lines_other_side_is_refused_naming_the_spl
 }
 
 #[test]
+fn a_target_change_on_a_split_lines_other_side_is_refused_naming_the_splits_account() {
+    let household = Household::new();
+    for edit in [
+        TransactionEdit::Category(household.groceries),
+        TransactionEdit::Transfer(household.checking),
+    ] {
+        let mut household = Household::new();
+        household.save_from_a_split();
+        let other_side = household.posted(household.savings)[0].id();
+        let before = household.ledger.snapshot();
+
+        let result = household.ledger.apply(DomainCommand::EditTransaction {
+            transaction: other_side,
+            edit,
+        });
+
+        assert_eq!(
+            result.unwrap_err(),
+            DomainError::SplitLineOtherSide {
+                account: household.checking
+            }
+        );
+        assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
+    }
+}
+
+#[test]
 fn deleting_a_split_lines_other_side_is_refused_naming_the_splits_account() {
     let mut household = Household::new();
     household.save_from_a_split();

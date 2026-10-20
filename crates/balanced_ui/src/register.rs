@@ -34,8 +34,8 @@ use crate::preferences::Preferences;
 use crate::register_columns::{RegisterColumn, RegisterColumns};
 use crate::register_filter::RegisterFilter;
 use crate::register_model::{
-    AmountSide, RegisterModel, RegisterRow, RegisterSort, RowId, Showing, SortDirection, SortKey,
-    TodayDivider,
+    AmountSide, OtherSide, RegisterModel, RegisterRow, RegisterSort, RowId, Showing, SortDirection,
+    SortKey, TodayDivider,
 };
 use crate::theme::Theme;
 
@@ -362,7 +362,7 @@ impl TextField {
         }
     }
 
-    /// The change that saves `text`, already trimmed, in the field of `row`, or `None`
+    /// The edit that saves `text`, already trimmed, in the field of `row`, or `None`
     /// when it changes nothing. An empty number clears it. A category is named by its
     /// path, and an account by `[Name]`, ignoring case; it fails when no entry in
     /// `choices` has that name.
@@ -371,7 +371,7 @@ impl TextField {
         row: &RegisterRow,
         text: &str,
         choices: &FieldChoices,
-    ) -> Result<Option<CellChange>, NoSuchCategory> {
+    ) -> Result<Option<TransactionEdit>, NoSuchCategory> {
         if text == self.saved(row) {
             return Ok(None);
         }
@@ -389,28 +389,14 @@ impl TextField {
                     return Ok(None);
                 }
                 CategoryTarget::Category(category) => TransactionEdit::Category(category),
-                CategoryTarget::Transfer(account)
-                    if row.draft_transfer_account() == Some(account) =>
-                {
+                CategoryTarget::Transfer(account) if row.transfer_account() == Some(account) => {
                     return Ok(None);
                 }
-                CategoryTarget::Transfer(account) => {
-                    return Ok(Some(CellChange::Transfer(account)));
-                }
+                CategoryTarget::Transfer(account) => TransactionEdit::Transfer(account),
             },
         };
-        Ok(Some(CellChange::Edit(edit)))
+        Ok(Some(edit))
     }
-}
-
-/// What saving a cell changes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum CellChange {
-    /// One field of the transaction.
-    Edit(TransactionEdit),
-    /// The Category cell names another account: the transaction is a transfer to or
-    /// from it.
-    Transfer(AccountId),
 }
 
 /// Why a Category cell's text can't be saved: no category has that name.
@@ -817,6 +803,10 @@ pub(crate) struct Register {
     shown: Vec<RegisterColumn>,
     /// The Category cell edit waiting on the New Category Dialog its Create row opened.
     awaiting_category: Option<AwaitingCategory>,
+    /// The transaction whose row takes the cell cursor on the next frame, once the
+    /// Register has caught up with its account. Starting over for another account
+    /// keeps it, since Go to asks for it before the Register sees the account.
+    go_to: Option<TransactionId>,
 }
 
 impl Register {
@@ -892,6 +882,14 @@ impl Register {
             self.missing = None;
             self.go_to_draft_row();
         }
+        if let Some(id) = self.go_to.take() {
+            self.cursor = Some(CellAddress {
+                row: RowId::Transaction(id),
+                column: RegisterColumn::Category,
+            });
+            self.reveal_draft = false;
+            self.centre_pending = true;
+        }
     }
 
     /// Settles what this frame's keys and clicks changed: an edit that refused to let
@@ -949,6 +947,12 @@ impl Register {
                 row: RegisterRow::draft(&self.draft, currency, view, i18n),
             });
         }
+    }
+
+    /// Puts the cell cursor on transaction `id`'s Category cell on the next frame,
+    /// scrolling its row to the middle of the Register.
+    pub(crate) fn go_to(&mut self, id: TransactionId) {
+        self.go_to = Some(id);
     }
 
     /// Puts the cell cursor on the draft row's first cell, scrolling it into view on
@@ -1019,6 +1023,13 @@ impl Register {
                     edit: TransactionEdit::ClearedStatus(status),
                 }));
             }
+            RowAction::GoTo(OtherSide {
+                account,
+                transaction,
+            }) => commands.send(AppCommand::GoToTransaction {
+                account,
+                transaction,
+            }),
             RowAction::Unreconcile => {
                 commands.send(AppCommand::OpenDialog(DialogKind::Unreconcile {
                     transaction: id,
@@ -1332,7 +1343,10 @@ impl Register {
             access,
             viewport,
         };
-        let (response, action) = cell.show(ui, i18n, theme);
+        let (response, mut action) = cell.show(ui, i18n, theme);
+        if column == RegisterColumn::Category && row.other_side().is_some() {
+            response.context_menu(|ui| action = action.or(go_to_item(ui, i18n, row)));
+        }
         // A refused date keeps the cell cursor until it is fixed or cancelled.
         if response.clicked() && !self.edit.as_ref().is_some_and(Edit::is_rejected) {
             self.place_cursor(row.id(), column);
@@ -2152,6 +2166,8 @@ enum RowAction {
     SetFlagged(bool),
     /// Give the transaction this Cleared status.
     SetClearedStatus(ClearedStatus),
+    /// Open the Register of the transfer's other side, with the cell cursor on it.
+    GoTo(OtherSide),
     /// Ask before setting a Reconciled transaction back to Cleared.
     Unreconcile,
 }
@@ -2241,12 +2257,12 @@ fn commit(
             currency,
             side,
         } => match amount_edit(row, *side, text, reader, *currency) {
-            Ok(change) => change.map(CellChange::Edit),
+            Ok(change) => change,
             Err(error) => return Commit::Unreadable(error),
         },
     };
     match (change, row.transaction()) {
-        (Some(CellChange::Edit(TransactionEdit::Amount(amount))), Some(transaction))
+        (Some(TransactionEdit::Amount(amount)), Some(transaction))
             if amount_change_asks_first(row.cleared_status()) =>
         {
             commands.send(AppCommand::OpenDialog(DialogKind::ChangeReconciledAmount {
@@ -2255,7 +2271,7 @@ fn commit(
             }));
             return Commit::Confirming;
         }
-        (Some(change), _) => save(row.id(), change, commands, draft),
+        (Some(edit), _) => save(row.id(), edit, commands, draft),
         (None, _) => {}
     }
     Commit::Done
@@ -2270,22 +2286,17 @@ fn amount_change_asks_first(status: ClearedStatus) -> bool {
     }
 }
 
-/// Saves `change` in a cell of `row`: in `draft` on the draft row, else by sending one
+/// Saves `edit` in a cell of `row`: in `draft` on the draft row, else by sending one
 /// edit Command.
-fn save(row: RowId, change: CellChange, commands: &CommandSender, draft: &mut Draft) {
-    match (row, change) {
-        (RowId::Transaction(transaction), CellChange::Edit(edit)) => {
+fn save(row: RowId, edit: TransactionEdit, commands: &CommandSender, draft: &mut Draft) {
+    match row {
+        RowId::Transaction(transaction) => {
             commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
                 transaction,
                 edit,
             }));
         }
-        // TODO(#319): make an existing transaction a transfer.
-        (RowId::Transaction(_), CellChange::Transfer(_)) => {
-            commands.send(AppCommand::ShowStatus(StatusMessage::NotAvailableYet));
-        }
-        (RowId::Draft, CellChange::Edit(edit)) => draft.edit(edit),
-        (RowId::Draft, CellChange::Transfer(account)) => draft.transfer(account),
+        RowId::Draft => draft.edit(edit),
     }
 }
 
@@ -2326,12 +2337,7 @@ fn commit_date(
     match edit.date.commit(i18n) {
         date_field::Commit::Unchanged => Commit::Done,
         date_field::Commit::Changed(date) => {
-            save(
-                row.id(),
-                CellChange::Edit(TransactionEdit::Date(date)),
-                commands,
-                draft,
-            );
+            save(row.id(), TransactionEdit::Date(date), commands, draft);
             Commit::Done
         }
         date_field::Commit::Rejected => Commit::Refused,
@@ -3057,8 +3063,8 @@ fn paint_text(
 
 /// The row's Actions menu: a ⋯ button on the right of the Actions cell, which opens
 /// the menu below it. The default fonts lack ⋯, so its dots are painted. Returns the
-/// command picked from the menu: Flag, or Unflag on a flagged `row`, and Delete. A
-/// read-only row's commands are disabled.
+/// command picked from the menu: Flag, or Unflag on a flagged `row`, Delete, and on a
+/// transfer, Go to its other side. A read-only row's Flag and Delete are disabled.
 fn actions_menu(
     ui: &egui::Ui,
     i18n: &Localizer,
@@ -3108,9 +3114,22 @@ fn actions_menu(
                 .add_enabled(editable, delete)
                 .clicked()
                 .then_some(RowAction::Delete);
-            flag.or(delete)
+            flag.or(delete).or(go_to_item(ui, i18n, row))
         })
         .and_then(|menu| menu.inner)
+}
+
+/// The Go to item of a menu on transfer `row`, which goes to its other side; no item
+/// on a row that isn't a transfer. Returns the command when it is picked.
+fn go_to_item(ui: &mut egui::Ui, i18n: &Localizer, row: &RegisterRow) -> Option<RowAction> {
+    let other_side = row.other_side()?;
+    let go_to = fl!(i18n, "register-actions-go-to", account = row.category());
+    let clicked = ui.button(go_to).clicked();
+    if clicked {
+        // Enter on a focused menu item leaves the menu open.
+        ui.close();
+    }
+    clicked.then_some(RowAction::GoTo(other_side))
 }
 
 /// The column chooser: a ⚙ button on the right of the Actions heading cell `ui`, which
