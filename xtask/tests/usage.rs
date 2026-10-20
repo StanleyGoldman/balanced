@@ -31,7 +31,7 @@ tasks:
   adrs [--against <ref>]             require every decision record to have its own number
   dco                                require a Signed-off-by trailer on every non-merge commit since the DCO began
   mutants [<base>] [--re <pattern>]  mutation-test code changed since <base> (default origin/main), or with --re alone every mutant it matches; advisory
-  mutants-shard [--dry-run]          a CI task: mutation-test tonight's shard of every mutant and update the mutant issues, or with --dry-run print the updates; by hand, use mutants
+  mutants-shard <shard> [--dry-run]  a CI task: mutation-test one shard (0 to 6) of every mutant and update the mutant issues, or with --dry-run print the updates; by hand, use mutants
   mutants-landed [--dry-run]         a CI task: mutation-test the diff the pull request that landed HEAD brought into main and update the mutant issues, or with --dry-run print the updates; by hand, use mutants
 "
     );
