@@ -56,6 +56,18 @@ fn manage_accounts_on(ledger: Ledger) -> Harness<'static, App> {
     harness
 }
 
+/// The id of the stub account named `name`.
+fn account(ledger: &Ledger, name: &str) -> AccountId {
+    ledger
+        .snapshot()
+        .accounts()
+        .iter()
+        .map(AccountSummary::account)
+        .find(|account| account.name() == name)
+        .expect("the stub has the account")
+        .id()
+}
+
 /// Replaces the name in the Name field showing `old` with `new`.
 fn rename(harness: &mut Harness<'static, App>, old: &str, new: &str) {
     harness
@@ -254,18 +266,6 @@ fn a_confirmed_delete_takes_the_account_out_on_ok() {
 
     assert!(asked);
     assert!(!listed(&harness, "Car"));
-}
-
-/// The id of the stub account named `name`.
-fn account(ledger: &Ledger, name: &str) -> AccountId {
-    ledger
-        .snapshot()
-        .accounts()
-        .iter()
-        .map(AccountSummary::account)
-        .find(|account| account.name() == name)
-        .expect("the stub has the account")
-        .id()
 }
 
 #[test]
