@@ -17,6 +17,7 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 Every PR that comes from an issue opens its body with `Closes #<n>`, and that includes prototype PRs. The keyword is what puts the PR in the issue's **Development** panel. A prototype PR is closed unmerged, so its keyword only links; the resolution comment closes the issue.
 
+- **Keywords fire in prose too.** GitHub closes on merge every issue that follows close, closes, closed, fix, fixes, fixed, resolve, resolves or resolved anywhere in the body, so "two PRs closed #320" in a lesson PR closed #320. Refer to other issues with a verb that isn't a keyword ("#344 and #348 targeted #320"), and check `closingIssuesReferences` (below) lists only the PR's own issue.
 - **When GitHub links:** only while the PR is open and targets the default branch (`main`). A keyword added after the PR closed, or on a PR stacked on another branch, links nothing until those hold. The link survives the PR closing unmerged.
 - **Check a link** from the PR side; this also works for closed PRs:
 
