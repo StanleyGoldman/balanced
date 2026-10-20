@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Creating an account through the New Account wizard, driven through the AccessKit
 //! tree the way a user drives it.
 
@@ -13,7 +15,7 @@ use icu_calendar::Date;
 /// The App on stub data, in the test locale, on 14 October 2026.
 fn app() -> Harness<'static, App> {
     let mut harness = Harness::new_eframe(|cc| {
-        App::new(
+        App::on_ledger(
             cc,
             Localizer::for_tests(),
             Ledger::stub(),
@@ -118,15 +120,19 @@ fn the_wizard_walks_from_type_to_a_new_account_last_in_its_sub_group() {
         .get_by_role_and_label(Role::Button, "Rainy Day")
         .click();
     harness.run();
-    assert!(shows(&harness, "$1,234.56"), "{:?}", labels(&harness));
+    assert!(
+        shows(&harness, "Ending $1,234.56"),
+        "{:?}",
+        labels(&harness)
+    );
 }
 
 #[test]
-fn the_account_bar_opens_the_wizard() {
+fn add_account_in_the_account_bar_opens_the_wizard() {
     let mut harness = app();
 
     harness
-        .get_by_role_and_label(Role::Button, "+ Account")
+        .get_by_role_and_label(Role::Button, "+ Add Account")
         .click();
     harness.run();
 

@@ -1,21 +1,24 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The Register: one account's transactions in a table, one row each, with the running
 //! balance after each.
 
 use std::collections::{BTreeMap, HashMap};
 
 use balanced_core::{
-    Account, AccountId, AccountSummary, CurrencyCode, DomainCommand, DomainError, Generation,
-    LedgerView, Money, TransactionEdit, TransactionId,
+    Account, AccountId, AccountKind, AccountSummary, CurrencyCode, DomainCommand, DomainError,
+    Generation, LedgerView, Money, TransactionEdit, TransactionId,
 };
 use balanced_i18n::{AmountParseError, AmountReader, Localizer};
 use eframe::egui::accesskit::{self, Role};
+use eframe::egui::emath::GuiRounding as _;
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
 use eframe::egui::{
     self, Align, Align2, Area, Button, Checkbox, CursorIcon, Event, EventFilter, Frame, Id, Key,
-    Label, Layout, Margin, Modifiers, Order, Popup, PopupCloseBehavior, Rect, Response, ScrollArea,
-    Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, WidgetInfo, WidgetText,
-    WidgetType, pos2, vec2,
+    Label, Layout, Margin, Modifiers, Order, Popup, PopupCloseBehavior, Rangef, Rect, Response,
+    ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, WidgetInfo,
+    WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, TableBody, TableBuilder};
 use icu_calendar::{Date, Iso};
@@ -25,11 +28,14 @@ use crate::combobox::{FieldChoices, ListRow};
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::date_field::{self, DateEdit};
 use crate::draft_row::{Draft, Missing};
-use crate::formatted_amount::{FormattedAmount, i18n_currency};
+use crate::formatted_amount::i18n_currency;
 use crate::i18n::fl;
+use crate::preferences::Preferences;
 use crate::register_columns::{RegisterColumn, RegisterColumns};
+use crate::register_filter::RegisterFilter;
 use crate::register_model::{
-    RegisterModel, RegisterRow, RegisterSort, RowId, SortDirection, SortKey,
+    AmountSide, RegisterModel, RegisterRow, RegisterSort, RowId, Showing, SortDirection, SortKey,
+    TodayDivider,
 };
 use crate::theme::Theme;
 
@@ -46,6 +52,10 @@ const RESIZE_HANDLE_WIDTH: f32 = 8.0;
 const ACTION_DOT_RADIUS: f32 = 1.5;
 const ACTION_DOT_SPACING: f32 = 4.5;
 
+/// The flag the Flag column shows on a flagged transaction. The bundled
+/// emoji-icon-font draws it.
+const FLAG_GLYPH: &str = "⚑";
+
 /// The narrowest a combobox list gets, so its entries stay readable under a narrow cell.
 const LIST_MIN_WIDTH: f32 = 240.0;
 
@@ -60,43 +70,64 @@ const SORT_ARROW_GAP: f32 = 4.0;
 
 impl RegisterColumn {
     /// The column's width before the user resizes it, for a column that resizes.
-    /// Payee and Category share the width the others leave, and the Actions column
-    /// fits its button, so neither resizes.
+    /// Payee and Category share the width the others leave, and the Flag and Actions
+    /// columns fit their glyph and button, so none of them resizes.
     fn default_width(self) -> Option<f32> {
         match self {
             Self::Date => Some(80.0),
             Self::Number => Some(48.0),
             Self::Memo => Some(140.0),
-            Self::Amount => Some(90.0),
+            Self::Payment | Self::Deposit => Some(90.0),
             Self::Balance => Some(100.0),
-            Self::Payee | Self::Category | Self::Actions => None,
+            Self::Payee | Self::Category | Self::Flag | Self::Actions => None,
         }
     }
 
-    /// The column's heading. The Actions column has none.
-    fn title(self, i18n: &Localizer) -> String {
+    /// The column's heading in a Register of an account of `kind`. Payment and Deposit
+    /// take the words of the account's statements. The Actions column has none.
+    fn title(self, i18n: &Localizer, kind: AccountKind) -> String {
         match self {
             Self::Date => fl!(i18n, "register-column-date"),
             Self::Number => fl!(i18n, "register-column-number"),
             Self::Payee => fl!(i18n, "register-column-payee"),
             Self::Category => fl!(i18n, "register-column-category"),
             Self::Memo => fl!(i18n, "register-column-memo"),
-            Self::Amount => fl!(i18n, "register-column-amount"),
+            Self::Payment => amount_title(i18n, AmountSide::Payment, kind),
+            Self::Deposit => amount_title(i18n, AmountSide::Deposit, kind),
             Self::Balance => fl!(i18n, "register-column-balance"),
+            Self::Flag => fl!(i18n, "register-column-flag"),
             Self::Actions => String::new(),
         }
     }
 
-    /// What clicking the column's heading sorts by. Number, Balance and Actions don't
-    /// sort.
+    /// What the column's heading shows, given its `title`: the flag on the Flag column,
+    /// which is too narrow for its title, and the title on the rest.
+    fn heading_text(self, title: String) -> String {
+        match self {
+            Self::Flag => FLAG_GLYPH.to_owned(),
+            Self::Date
+            | Self::Number
+            | Self::Payee
+            | Self::Category
+            | Self::Memo
+            | Self::Payment
+            | Self::Deposit
+            | Self::Balance
+            | Self::Actions => title,
+        }
+    }
+
+    /// What clicking the column's heading sorts by. Number, Balance, Flag and Actions
+    /// don't sort.
     fn sort_key(self) -> Option<SortKey> {
         match self {
             Self::Date => Some(SortKey::Date),
             Self::Payee => Some(SortKey::Payee),
             Self::Category => Some(SortKey::Category),
             Self::Memo => Some(SortKey::Memo),
-            Self::Amount => Some(SortKey::Amount),
-            Self::Number | Self::Balance | Self::Actions => None,
+            Self::Payment => Some(SortKey::Amount(AmountSide::Payment)),
+            Self::Deposit => Some(SortKey::Amount(AmountSide::Deposit)),
+            Self::Number | Self::Balance | Self::Flag | Self::Actions => None,
         }
     }
 
@@ -106,8 +137,14 @@ impl RegisterColumn {
     fn width(self, theme: &Theme, widths: &ColumnWidths) -> Column {
         let column = match self {
             Self::Payee | Self::Category => Column::remainder().at_least(MIN_FLEX_WIDTH),
+            Self::Flag => Column::exact(theme.row_height()),
             Self::Actions => Column::exact(theme.row_height() + Theme::EDGE_INSET),
-            Self::Date | Self::Number | Self::Memo | Self::Amount | Self::Balance => Column::exact(
+            Self::Date
+            | Self::Number
+            | Self::Memo
+            | Self::Payment
+            | Self::Deposit
+            | Self::Balance => Column::exact(
                 widths
                     .width(self)
                     .expect("every column that resizes has a width"),
@@ -117,7 +154,7 @@ impl RegisterColumn {
     }
 
     /// Whether the cell cursor can rest in the column. Balance is worked out from the
-    /// other cells, and Actions holds a menu.
+    /// other cells, Flag changes on a click, and Actions holds a menu.
     fn holds_cursor(self) -> bool {
         match self {
             Self::Date
@@ -125,8 +162,9 @@ impl RegisterColumn {
             | Self::Payee
             | Self::Category
             | Self::Memo
-            | Self::Amount => true,
-            Self::Balance | Self::Actions => false,
+            | Self::Payment
+            | Self::Deposit => true,
+            Self::Balance | Self::Flag | Self::Actions => false,
         }
     }
 
@@ -142,15 +180,39 @@ impl RegisterColumn {
             Self::Payee if !row.is_opening_balance() => text(TextField::Payee),
             Self::Category if row.takes_category() => text(TextField::Category),
             Self::Memo => text(TextField::Memo),
-            Self::Amount if !row.is_split() => Some(CellField::Amount),
-            Self::Payee | Self::Category | Self::Amount | Self::Balance | Self::Actions => None,
+            Self::Payment if !row.is_split() => Some(CellField::Amount(AmountSide::Payment)),
+            Self::Deposit if !row.is_split() => Some(CellField::Amount(AmountSide::Deposit)),
+            Self::Payee
+            | Self::Category
+            | Self::Payment
+            | Self::Deposit
+            | Self::Balance
+            | Self::Flag
+            | Self::Actions => None,
         }
     }
 
-    /// Where the column's text sits: amounts on the right, the rest on the left.
+    /// Whether the column holds the amount, on one side.
+    fn holds_amount(self) -> bool {
+        match self {
+            Self::Payment | Self::Deposit => true,
+            Self::Date
+            | Self::Number
+            | Self::Payee
+            | Self::Category
+            | Self::Memo
+            | Self::Balance
+            | Self::Flag
+            | Self::Actions => false,
+        }
+    }
+
+    /// Where the column's text sits: amounts on the right, the flag in the middle, the
+    /// rest on the left.
     fn align(self) -> Align {
         match self {
-            Self::Amount | Self::Balance => Align::Max,
+            Self::Payment | Self::Deposit | Self::Balance => Align::Max,
+            Self::Flag => Align::Center,
             Self::Date
             | Self::Number
             | Self::Payee
@@ -206,8 +268,15 @@ impl ColumnWidths {
     }
 
     /// The handle on the right edge of `column`'s heading, in the heading cell `ui`,
-    /// for a column that resizes. Dragging it resizes the column from the next frame.
-    fn resize_handle(&mut self, ui: &egui::Ui, i18n: &Localizer, column: RegisterColumn) {
+    /// for a column that resizes, in a Register of an account of `kind`. Dragging it
+    /// resizes the column from the next frame.
+    fn resize_handle(
+        &mut self,
+        ui: &egui::Ui,
+        i18n: &Localizer,
+        column: RegisterColumn,
+        kind: AccountKind,
+    ) {
         let Some(width) = self.widths.get_mut(&column) else {
             return;
         };
@@ -219,7 +288,11 @@ impl ColumnWidths {
         let response = ui
             .interact(handle, id, Sense::drag())
             .on_hover_cursor(CursorIcon::ResizeColumn);
-        let label = fl!(i18n, "register-resize-column", column = column.title(i18n));
+        let label = fl!(
+            i18n,
+            "register-resize-column",
+            column = column.title(i18n, kind)
+        );
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), &label));
         ui.ctx()
             .accesskit_node_builder(response.id, |node| node.set_role(Role::Splitter));
@@ -250,8 +323,8 @@ enum CellField {
     Date,
     /// Plain text, or text naming an entry.
     Text(TextField),
-    /// The amount, typed as written or as arithmetic.
-    Amount,
+    /// The amount on one side, typed unsigned, as written or as arithmetic.
+    Amount(AmountSide),
 }
 
 /// A transaction field a Register cell edits as text.
@@ -345,14 +418,55 @@ struct DraftRow {
 }
 
 /// The Register's rows: the transactions' in the order of the sort, then the draft
-/// row, which an account that can't change has none of.
+/// row, which an account that can't change has none of. The Today divider is drawn
+/// between two rows, on a line of its own, and is no row.
 #[derive(Debug, Clone, Copy)]
 struct Rows<'a> {
     transactions: &'a [RegisterRow],
+    /// The index of the row the Today divider sits above, while it is drawn.
+    divider: Option<usize>,
     draft: Option<&'a RegisterRow>,
 }
 
+/// One line of the Register's body: a row, with its index among the rows, or the
+/// Today divider.
+#[derive(Debug, Clone, Copy)]
+enum Line<'a> {
+    Row { index: usize, row: &'a RegisterRow },
+    TodayDivider,
+}
+
 impl<'a> Rows<'a> {
+    /// The rows of `model`, with its Today divider, then `draft`.
+    fn new(model: &'a RegisterModel, draft: Option<&'a RegisterRow>) -> Self {
+        Self {
+            transactions: model.rows(),
+            divider: model.divider(),
+            draft,
+        }
+    }
+
+    /// How many lines the rows take: one each, and one for the Today divider.
+    fn lines(self) -> usize {
+        self.len() + usize::from(self.divider.is_some())
+    }
+
+    /// The line at `index`, top line first.
+    fn line(self, index: usize) -> Option<Line<'a>> {
+        let index = match self.divider {
+            Some(divider) if index == divider => return Some(Line::TodayDivider),
+            Some(divider) if index > divider => index - 1,
+            Some(_) | None => index,
+        };
+        let row = self.get(index)?;
+        Some(Line::Row { index, row })
+    }
+
+    /// The index of the line the row at `index` is drawn on.
+    fn line_of(self, index: usize) -> usize {
+        index + usize::from(self.divider.is_some_and(|divider| index >= divider))
+    }
+
     fn len(self) -> usize {
         self.transactions.len() + usize::from(self.draft.is_some())
     }
@@ -416,11 +530,12 @@ struct CellEdit {
 #[derive(Debug, Clone)]
 enum EditField {
     Text(TextField),
-    /// The amount, in the transaction's currency, read with the formatting locale the
-    /// edit started in.
+    /// The amount on `side`, in the transaction's currency, read with the formatting
+    /// locale the edit started in.
     Amount {
         reader: AmountReader,
         currency: CurrencyCode,
+        side: AmountSide,
     },
 }
 
@@ -605,20 +720,20 @@ impl ListState {
     }
 }
 
-/// The rows fully in view in the last frame, which keyboard scrolling keeps the cell
-/// cursor among.
+/// The lines fully in view in the last frame, counted as [`Rows::line`] counts them,
+/// which keyboard scrolling keeps the cell cursor among.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct RowsInView {
+struct LinesInView {
     first: usize,
     last: usize,
     /// The height of the Register's body.
     height: f32,
-    /// The distance from one row's top to the next one's.
+    /// The distance from one line's top to the next one's.
     pitch: f32,
 }
 
-impl RowsInView {
-    /// The scroll offset that brings row `index` fully into view, or `None` when it
+impl LinesInView {
+    /// The scroll offset that brings line `index` fully into view, or `None` when it
     /// already is.
     #[expect(
         clippy::cast_precision_loss,
@@ -635,15 +750,17 @@ impl RowsInView {
     }
 }
 
-/// The open account's Register: its cached rows, its sort, the cell cursor, the cell
-/// being edited, and the draft row. The cursor's row is the selected row. Opening
-/// another account sorts it by date, empties the draft row and puts the cursor on it.
-/// None of it outlives the run.
+/// The open account's Register: its cached rows, its sort and filter, the cell cursor,
+/// the cell being edited, and the draft row. The cursor's row is the selected row.
+/// Opening another account sorts it by date, clears the filter, empties the draft row
+/// and puts the cursor on it. None of it outlives the run.
 #[derive(Debug, Default)]
 pub(crate) struct Register {
     /// The rows of the last account shown, rebuilt when they are out of date.
     model: Option<RegisterModel>,
     sort: RegisterSort,
+    /// What the filter bar is set to.
+    filter: RegisterFilter,
     /// Whether the sort changed since the rows were last shown, so the cursor's row,
     /// if any, scrolls to the middle of the Register.
     centre_pending: bool,
@@ -654,7 +771,7 @@ pub(crate) struct Register {
     /// The modifiers held with each Tab press `App::raw_input_hook` took for the
     /// Register since the last frame.
     tabs: Vec<Modifiers>,
-    rows_in_view: Option<RowsInView>,
+    lines_in_view: Option<LinesInView>,
     /// Whether the edit refused to let the keyboard leave its cell this frame.
     refused_leave: bool,
     /// What the draft row holds.
@@ -711,32 +828,41 @@ impl Register {
         model.rows().iter().find(|row| row.id() == id)
     }
 
-    /// The index of the row this frame scrolls to the middle of the Register, if any:
-    /// the draft row when it is to come into view, else the cursor's row after a sort.
-    /// The draft row is the last row, so centring it scrolls to the bottom.
-    fn row_to_centre(&mut self, rows: Rows<'_>) -> Option<usize> {
+    /// The index of the line this frame scrolls to the middle of the Register, if any:
+    /// the draft row's when it is to come into view, else the cursor's row's after a
+    /// sort. The draft row is the last row, so centring it scrolls to the bottom.
+    fn line_to_centre(&mut self, rows: Rows<'_>) -> Option<usize> {
         let centre_pending = std::mem::take(&mut self.centre_pending);
-        if std::mem::take(&mut self.reveal_draft) {
-            return rows.position(RowId::Draft);
-        }
-        self.cursor
-            .filter(|_| centre_pending)
-            .and_then(|cursor| rows.position(cursor.row))
+        let row = if std::mem::take(&mut self.reveal_draft) {
+            rows.position(RowId::Draft)
+        } else {
+            self.cursor
+                .filter(|_| centre_pending)
+                .and_then(|cursor| rows.position(cursor.row))
+        };
+        row.map(|row| rows.line_of(row))
     }
 
-    /// Catches up with what changed since the last frame: another account, `account`,
+    /// Catches up with what changed since the last frame: another account, `summary`'s,
     /// starts the Register over with the cell cursor on its draft row, unless it is
-    /// `closed`; and a post that `view` shows applied empties the draft row.
-    fn catch_up(&mut self, account: AccountId, closed: bool, view: &LedgerView) {
+    /// closed; and a post that `view` shows applied empties the draft row, and stays in
+    /// view until the filter changes.
+    fn catch_up(&mut self, summary: &AccountSummary, view: &LedgerView) {
+        let account = summary.account().id();
         if self.model.as_ref().map(RegisterModel::account) != Some(account) {
             self.start_over();
-            if !closed {
+            if !summary.account().is_closed() {
                 self.go_to_draft_row();
             }
         }
         if let Some(sent_at) = self.posted_at.take()
             && view.generation() != sent_at
         {
+            if self.filter.is_set()
+                && let Some(model) = &self.model
+            {
+                self.filter.keep(model.added(summary));
+            }
             self.draft = Draft::default();
             self.missing = None;
             self.go_to_draft_row();
@@ -758,15 +884,16 @@ impl Register {
         self.refresh_draft_row(draft_frame, false);
     }
 
-    /// Starts the Register over for another account: sorted by date, with no cell
-    /// cursor and an empty draft row.
+    /// Starts the Register over for another account: sorted by date and unfiltered,
+    /// with no cell cursor and an empty draft row.
     fn start_over(&mut self) {
         self.sort = RegisterSort::default();
+        self.filter = RegisterFilter::default();
         self.centre_pending = false;
         self.cursor = None;
         self.edit = None;
         self.awaiting_category = None;
-        self.rows_in_view = None;
+        self.lines_in_view = None;
         self.draft = Draft::default();
         self.missing = None;
         self.posted_at = None;
@@ -847,13 +974,19 @@ impl Register {
             .collect()
     }
 
-    /// Carries out `action`, picked from transaction `id`'s Actions menu.
+    /// Carries out `action`, picked on transaction `id`'s row.
     fn act(&mut self, id: TransactionId, action: RowAction, commands: &CommandSender) {
         match action {
             RowAction::Delete => {
                 // The confirm asks about the selected row.
                 self.place_cursor(RowId::Transaction(id), RegisterColumn::Actions);
                 commands.send(AppCommand::OpenDialog(DialogKind::DeleteTransaction));
+            }
+            RowAction::SetFlagged(flagged) => {
+                commands.send(AppCommand::Domain(DomainCommand::SetFlagged {
+                    transaction: id,
+                    flagged,
+                }));
             }
         }
     }
@@ -870,10 +1003,8 @@ impl Register {
             return;
         };
         if let (Some(model), Some(choices)) = (&self.model, &self.choices) {
-            let rows = Rows {
-                transactions: model.rows(),
-                draft: self.draft_row.as_ref().map(|draft| &draft.row),
-            };
+            let draft_row = self.draft_row.as_ref().map(|draft| &draft.row);
+            let rows = Rows::new(model, draft_row);
             let draft = &mut self.draft;
             // A refused edit is dropped: the Shortcut acts on the saved value.
             let _refused = match edit.clone() {
@@ -890,10 +1021,11 @@ impl Register {
     }
 
     /// Draws the Register of `summary`, an account in `view`, filling the space left in
-    /// `ui`. Only the rows in view are laid out. `today` is the date field's today.
+    /// `ui`, as `preferences` say. Only the rows in view are laid out. `today` is the
+    /// date field's today, and the Today divider's.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the column widths and the columns shown are shared by every Register, so the Main window lends them here beside the account, its snapshot and today's date"
+        reason = "the column widths and the Preferences are shared by every Register, so the Main window lends them here beside the account, its snapshot and today's date"
     )]
     pub(crate) fn show(
         &mut self,
@@ -904,17 +1036,17 @@ impl Register {
         summary: &AccountSummary,
         view: &LedgerView,
         widths: &mut ColumnWidths,
-        columns: &RegisterColumns,
+        preferences: &Preferences,
         today: Date<Iso>,
     ) {
+        let columns = &preferences.register_columns;
         self.show_columns(columns);
         let account = summary.account().id();
         let closed = summary.account().is_closed();
-        self.catch_up(account, closed, view);
-        let (model, rebuilt) = match self.model.take() {
-            Some(model) if model.is_current(account, view, self.sort, i18n) => (model, false),
-            _ => (RegisterModel::new(summary, view, self.sort, i18n), true),
-        };
+        self.catch_up(summary, view);
+        let today_divider = today_divider(preferences, today);
+        let (model, rebuilt) = self.take_model(summary, view, today, today_divider, i18n);
+        self.filter_bar(ui, i18n, &model);
         let choices = match self.choices.take() {
             Some(choices) if choices.is_current(view, i18n) => choices,
             _ => FieldChoices::new(view, i18n),
@@ -928,10 +1060,7 @@ impl Register {
         };
         self.refresh_draft_row(draft_frame, rebuilt);
         let draft_row = self.draft_row.take();
-        let rows = Rows {
-            transactions: model.rows(),
-            draft: draft_row.as_ref().map(|draft| &draft.row),
-        };
+        let rows = Rows::new(&model, draft_row.as_ref().map(|draft| &draft.row));
         let keys = KeyContext {
             i18n,
             account,
@@ -944,7 +1073,7 @@ impl Register {
         let key_scroll_offset = self.handle_keys(ui.ctx(), &keys);
         let row_height = theme.row_height();
         let pitch = row_height + ui.spacing().item_spacing.y;
-        let centre_on = self.row_to_centre(rows);
+        let centre_on = self.line_to_centre(rows);
         ScrollArea::horizontal()
             .id_salt(("register_sideways", account))
             .auto_shrink(false)
@@ -955,7 +1084,8 @@ impl Register {
                     .or_else(|| centre_on.map(|index| centring_offset(ui, row_height, index)));
                 let mut table = TableBuilder::new(ui)
                     .id_salt(("register", account))
-                    .striped(theme.alternating_rows())
+                    // The rows stripe themselves, so the Today divider takes no stripe.
+                    .striped(false)
                     .resizable(false)
                     .cell_layout(Layout::left_to_right(Align::Center))
                     .auto_shrink(false)
@@ -973,6 +1103,7 @@ impl Register {
                             theme,
                             commands,
                             columns,
+                            kind: summary.account().kind(),
                         };
                         let shown = self.shown.clone();
                         for column in shown {
@@ -1008,6 +1139,40 @@ impl Register {
         self.choices = Some(choices);
     }
 
+    /// Takes the model of `summary`'s rows, an account in `view`, as of `today` and
+    /// with the Today divider as `today_divider` says, rebuilt if it is out of date, and
+    /// whether it was.
+    fn take_model(
+        &mut self,
+        summary: &AccountSummary,
+        view: &LedgerView,
+        today: Date<Iso>,
+        today_divider: TodayDivider,
+        i18n: &Localizer,
+    ) -> (RegisterModel, bool) {
+        let shown = Showing {
+            sort: self.sort,
+            filter: &self.filter,
+            today,
+            today_divider,
+        };
+        match self.model.take() {
+            Some(model) if model.is_current(summary.account().id(), view, shown, i18n) => {
+                (model, false)
+            }
+            _ => (RegisterModel::new(summary, view, shown, i18n), true),
+        }
+    }
+
+    /// Draws the filter bar above the Register, counting `model`'s rows. A change to
+    /// the filter filters and scrolls the rows on the next frame.
+    fn filter_bar(&mut self, ui: &mut egui::Ui, i18n: &Localizer, model: &RegisterModel) {
+        if self.filter.show(ui, i18n, model) {
+            self.centre_pending = true;
+            ui.ctx().request_repaint();
+        }
+    }
+
     /// Draws `heading` in its cell `ui`, with the column's resize handle, and the
     /// column chooser on the Actions column. Clicking a sortable heading sorts by it.
     fn heading_cell(
@@ -1022,16 +1187,17 @@ impl Register {
             theme,
             commands,
             columns,
+            kind,
         } = *frame;
-        if let Some(key) = heading.show(ui, i18n, theme) {
+        if let Some(key) = heading.show(ui, i18n, theme, kind) {
             self.sort = self.sort.clicked(key);
             self.centre_pending = true;
             // The rows sort and scroll on the next frame.
             ui.ctx().request_repaint();
         }
-        widths.resize_handle(ui, i18n, heading.column);
+        widths.resize_handle(ui, i18n, heading.column, kind);
         if heading.column == RegisterColumn::Actions
-            && let Some(columns) = column_chooser(ui, i18n, heading.register_id, columns)
+            && let Some(columns) = column_chooser(ui, i18n, heading.register_id, columns, kind)
         {
             commands.send(AppCommand::SetRegisterColumns(columns));
         }
@@ -1044,15 +1210,44 @@ impl Register {
         let frame = BodyFrame { viewport, ..frame };
         let rows = frame.rows;
         let mut in_view: Option<(usize, usize)> = None;
-        body.rows(row_height, rows.len(), |mut table_row| {
+        body.rows(row_height, rows.lines(), |mut table_row| {
             let index = table_row.index();
-            let row = rows
-                .get(index)
-                .expect("`rows` lays out indices below `rows.len()` only");
-            table_row.set_selected(self.cursor.is_some_and(|cursor| cursor.row == row.id()));
+            let line = rows
+                .line(index)
+                .expect("`rows` lays out indices below `rows.lines()` only");
             let shown = self.shown.clone();
+            let Line::Row {
+                index: row_index,
+                row,
+            } = line
+            else {
+                let label = fl!(
+                    frame.i18n,
+                    "register-today-divider",
+                    date = frame.i18n.format_date(frame.today)
+                );
+                let mut rule_start = f32::NEG_INFINITY;
+                for (column_index, column) in shown.into_iter().enumerate() {
+                    table_row.col(|ui| {
+                        let divider = DividerCell {
+                            register_id: frame.register_id,
+                            label: (column_index == 0).then_some(label.as_str()),
+                            insets: self.insets(column),
+                            viewport,
+                        };
+                        rule_start = divider.show(ui, frame.theme, rule_start);
+                    });
+                }
+                return;
+            };
+            let selected = self.cursor.is_some_and(|cursor| cursor.row == row.id());
+            table_row.set_selected(selected);
+            let stripe = frame.theme.stripe(row_index).filter(|_| !selected);
             for (column_index, column) in shown.into_iter().enumerate() {
                 table_row.col(|ui| {
+                    if let Some(stripe) = stripe {
+                        paint_stripe(ui, frame.theme, viewport, stripe);
+                    }
                     if column_index == 0 && fully_in(viewport, ui.max_rect()) {
                         in_view = Some(in_view.map_or((index, index), |(first, _)| (first, index)));
                     }
@@ -1060,7 +1255,7 @@ impl Register {
                 });
             }
         });
-        self.rows_in_view = in_view.map(|(first, last)| RowsInView {
+        self.lines_in_view = in_view.map(|(first, last)| LinesInView {
             first,
             last,
             height: viewport.height(),
@@ -1465,9 +1660,12 @@ impl Register {
         ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
         if leave == Leave::Enter
             && cursor.row == RowId::Draft
-            && self.cursor_columns().last() == Some(&cursor.column)
+            && ((cursor.column.holds_amount() && self.draft.amount().is_some())
+                || self.cursor_columns().last() == Some(&cursor.column))
         {
-            // Enter on the draft row's last cell adds the row.
+            // Enter on the draft row's last cell, or on an amount cell once the row
+            // has an amount, adds the row. Enter on an empty Payment moves on to
+            // Deposit.
             self.post(keys);
             return None;
         }
@@ -1608,7 +1806,7 @@ impl Register {
             })) => reader,
             Some(Edit::Text(_) | Edit::Date(_)) => return,
             None => {
-                let Some((row, CellField::Amount)) = field_at(keys.rows, cursor) else {
+                let Some((row, CellField::Amount(_))) = field_at(keys.rows, cursor) else {
                     return;
                 };
                 opened = keys.i18n.amount_reader(i18n_currency(row.currency()));
@@ -1662,8 +1860,8 @@ impl Register {
         self.cursor = Some(address);
         Some(Moved {
             scroll_offset: self
-                .rows_in_view
-                .and_then(|rows_in_view| rows_in_view.offset_showing(row)),
+                .lines_in_view
+                .and_then(|lines_in_view| lines_in_view.offset_showing(rows.line_of(row))),
         })
     }
 
@@ -1696,10 +1894,15 @@ impl Register {
                 return;
             }
             CellField::Text(field) => (field.saved(row), EditField::Text(field)),
-            CellField::Amount => {
+            CellField::Amount(side) => {
                 let currency = row.currency();
                 let reader = keys.i18n.amount_reader(i18n_currency(currency));
-                (row.amount_text(), EditField::Amount { reader, currency })
+                let field = EditField::Amount {
+                    reader,
+                    currency,
+                    side,
+                };
+                (row.amount_text_on(side), field)
             }
         };
         let text = match start {
@@ -1783,12 +1986,13 @@ impl Register {
     }
 }
 
-/// The draft row cell that `missing` names.
+/// The draft row cell that `missing` names. A missing amount names Payment, the
+/// first of the two cells that take one.
 fn missing_column(missing: Missing) -> RegisterColumn {
     match missing {
         Missing::Date => RegisterColumn::Date,
         Missing::Category => RegisterColumn::Category,
-        Missing::Amount => RegisterColumn::Amount,
+        Missing::Amount => RegisterColumn::Payment,
     }
 }
 
@@ -1863,7 +2067,7 @@ enum EditStart {
 #[derive(Clone, Copy)]
 struct BodyFrame<'a> {
     i18n: &'a Localizer,
-    /// Today's date, for the date field.
+    /// Today's date, for the date field and the Today divider.
     today: Date<Iso>,
     theme: &'a Theme,
     commands: &'a CommandSender,
@@ -1893,10 +2097,12 @@ impl Access {
     }
 }
 
-/// A command picked from a row's Actions menu.
+/// A command picked on a row, from its Actions menu or its Flag cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RowAction {
     Delete,
+    /// Flag the transaction, or take its flag off.
+    SetFlagged(bool),
 }
 
 /// Whether `rect` lies wholly within `viewport` from top to bottom, give or take half a
@@ -1973,7 +2179,11 @@ fn commit(
             };
             change
         }
-        EditField::Amount { reader, currency } => match amount_edit(row, text, reader, *currency) {
+        EditField::Amount {
+            reader,
+            currency,
+            side,
+        } => match amount_edit(row, *side, text, reader, *currency) {
             Ok(change) => change,
             Err(error) => return Commit::Unreadable(error),
         },
@@ -1998,22 +2208,25 @@ fn save(row: RowId, edit: TransactionEdit, commands: &CommandSender, draft: &mut
     }
 }
 
-/// The edit that saves `text`, already trimmed, as the amount of `row`, read by
-/// `reader` in `currency`, or `None` when it matches the saved amount.
+/// The edit that saves `text`, already trimmed, as the amount of `row` on `side`,
+/// read by `reader` in `currency`, or `None` when it matches the saved amount. The
+/// text's sign is ignored: the side gives the amount its sign, so the amount moves to
+/// `side` when it was on the other.
 fn amount_edit(
     row: &RegisterRow,
+    side: AmountSide,
     text: &str,
     reader: &AmountReader,
     currency: CurrencyCode,
 ) -> Result<Option<TransactionEdit>, AmountParseError> {
-    if text == row.amount_text() {
+    if text == row.amount_text_on(side) {
         return Ok(None);
     }
     let amount = reader.read(text)?.amount();
     let money = Money::new(amount, currency)
         .expect("the reader gives amounts at the currency's decimal places");
-    let saved = row.amount().map(FormattedAmount::money);
-    Ok((saved != Some(money)).then_some(TransactionEdit::Amount(money)))
+    let money = side.signed(money);
+    Ok((row.amount() != Some(money)).then_some(TransactionEdit::Amount(money)))
 }
 
 /// Saves `edit`'s date, unless it matches the saved date: in `draft` on the draft
@@ -2231,7 +2444,10 @@ fn list_row(
 /// typed so far, in a bubble floating below its cell at `cell`, so the rows below
 /// never move.
 fn bubble(ui: &egui::Ui, i18n: &Localizer, edit: &CellEdit, cell: Rect) {
-    let EditField::Amount { reader, currency } = &edit.field else {
+    let EditField::Amount {
+        reader, currency, ..
+    } = &edit.field
+    else {
         return;
     };
     let (text, colour) = match (edit.error, &edit.preview) {
@@ -2263,7 +2479,10 @@ fn floating_bubble(ui: &egui::Ui, id: Id, cell: Rect, text: String, colour: egui
 /// The result of the arithmetic in `edit`'s text, or `None` when the text is a plain
 /// amount or can't be read.
 fn preview(i18n: &Localizer, edit: &CellEdit) -> Option<Preview> {
-    let EditField::Amount { reader, currency } = &edit.field else {
+    let EditField::Amount {
+        reader, currency, ..
+    } = &edit.field
+    else {
         return None;
     };
     Preview::of(i18n, reader, *currency, &edit.text)
@@ -2291,6 +2510,8 @@ struct HeaderFrame<'a> {
     commands: &'a CommandSender,
     /// The columns every Register shows, which the column chooser changes.
     columns: &'a RegisterColumns,
+    /// The account's kind, which names the Payment and Deposit columns.
+    kind: AccountKind,
 }
 
 /// A column heading on the header band.
@@ -2310,7 +2531,13 @@ impl Heading {
     /// Draws the heading. The band's fill covers the cell and half the gap around it,
     /// clipped to the Register's viewport so it never paints past it. A sortable heading
     /// highlights under the pointer, and returns what it sorts by when clicked.
-    fn show(&self, ui: &egui::Ui, i18n: &Localizer, theme: &Theme) -> Option<SortKey> {
+    fn show(
+        &self,
+        ui: &egui::Ui,
+        i18n: &Localizer,
+        theme: &Theme,
+        kind: AccountKind,
+    ) -> Option<SortKey> {
         let Self {
             register_id,
             column,
@@ -2340,7 +2567,7 @@ impl Heading {
         let direction = key
             .filter(|&key| key == sort.key())
             .map(|_| sort.direction());
-        let title = column.title(i18n);
+        let title = column.title(i18n, kind);
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), &title));
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(Role::ColumnHeader);
@@ -2353,7 +2580,7 @@ impl Heading {
             rect,
             column,
             insets,
-            WidgetText::from(egui::RichText::new(title).strong()),
+            WidgetText::from(egui::RichText::new(column.heading_text(title)).strong()),
         );
         if let (Some(direction), Some(text)) = (direction, text) {
             sort_arrow(ui, column, text, direction);
@@ -2413,7 +2640,7 @@ struct Cell<'a> {
 
 impl Cell<'_> {
     /// Draws the cell, the whole of which is one click target, and returns the command
-    /// picked from its Actions menu, if it has one.
+    /// picked from its Actions menu or its Flag cell, if it has one.
     fn show(
         &self,
         ui: &egui::Ui,
@@ -2439,12 +2666,16 @@ impl Cell<'_> {
             RegisterColumn::Payee => row.payee().into(),
             RegisterColumn::Category => row.category().into(),
             RegisterColumn::Memo => row.memo().into(),
-            RegisterColumn::Amount => row
-                .amount()
+            RegisterColumn::Payment => row
+                .amount_on(AmountSide::Payment)
+                .map_or_else(WidgetText::default, |amount| amount.styled(theme).into()),
+            RegisterColumn::Deposit => row
+                .amount_on(AmountSide::Deposit)
                 .map_or_else(WidgetText::default, |amount| amount.styled(theme).into()),
             RegisterColumn::Balance => row
                 .balance()
                 .map_or_else(WidgetText::default, |balance| balance.styled(theme).into()),
+            RegisterColumn::Flag => return flag_cell(ui, i18n, row, &response, access),
             RegisterColumn::Actions => {
                 // The row's band across the whole Register, for telling whether the
                 // pointer is on this row.
@@ -2461,7 +2692,7 @@ impl Cell<'_> {
                 // The draft row is no transaction yet, so it has no commands.
                 let draft = row.id() == RowId::Draft;
                 if (selected || hovered || open) && !draft {
-                    action = actions_menu(ui, i18n, &response, access);
+                    action = actions_menu(ui, i18n, &response, access, row);
                 } else {
                     // Hidden, the menu leaves an empty cell that selects the row.
                     cell_info(ui, &response, selected, "");
@@ -2491,6 +2722,137 @@ impl Cell<'_> {
         }
         (response, None)
     }
+}
+
+/// The Today divider as `preferences` say, on `today`.
+fn today_divider(preferences: &Preferences, today: Date<Iso>) -> TodayDivider {
+    if preferences.today_divider {
+        TodayDivider::Shown { today }
+    } else {
+        TodayDivider::Hidden
+    }
+}
+
+/// Fills cell `ui` and half the gap around it with `stripe`, as `egui_extras` fills a
+/// selected row, inside `viewport`, the visible part of the Register's body.
+fn paint_stripe(ui: &egui::Ui, theme: &Theme, viewport: Rect, stripe: egui::Color32) {
+    let rect = ui
+        .max_rect()
+        .expand2(0.5 * ui.spacing().item_spacing)
+        .round_ui();
+    ui.ctx()
+        .layer_painter(ui.layer_id())
+        .with_clip_rect(theme.rule_clip(ui.clip_rect(), viewport))
+        .rect_filled(rect, 0.0, stripe);
+}
+
+/// One cell of the Today divider's line: a rule across the cell, beginning with the
+/// divider's label in the first cell.
+struct DividerCell<'a> {
+    /// The Register's id, which the label's id derives from.
+    register_id: Id,
+    /// The label, in the first cell only.
+    label: Option<&'a str>,
+    /// Space between the cell's edges and the label.
+    insets: Insets,
+    /// The visible part of the Register's body, which the label may run across.
+    viewport: Rect,
+}
+
+impl DividerCell<'_> {
+    /// Draws the cell, its rule starting no further left than `rule_start`, and returns
+    /// where the next cell's rule may start: past the label, which runs on over the
+    /// cells beside it.
+    fn show(&self, ui: &egui::Ui, theme: &Theme, rule_start: f32) -> f32 {
+        let rect = ui.max_rect();
+        let half_gap = ui.spacing().item_spacing.x / 2.0;
+        let painter = ui
+            .ctx()
+            .layer_painter(ui.layer_id())
+            .with_clip_rect(self.viewport);
+        let mut rule_start = rule_start.max(rect.left() - half_gap);
+        if let Some(label) = self.label {
+            let galley = painter.layout_no_wrap(
+                label.to_owned(),
+                TextStyle::Body.resolve(ui.style()),
+                theme.today_divider(),
+            );
+            let top_left = pos2(
+                rect.left() + self.insets.left,
+                rect.center().y - galley.size().y / 2.0,
+            );
+            let text = Rect::from_min_size(top_left, galley.size());
+            let response = ui.interact(
+                text,
+                self.register_id.with("register_today_divider"),
+                Sense::hover(),
+            );
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, label));
+            painter.galley(top_left, galley, theme.today_divider());
+            rule_start = text.right() + ui.spacing().item_spacing.x;
+        }
+        let right = rect.right() + half_gap;
+        if rule_start < right {
+            let rule = theme.today_divider_rule(
+                Rangef::new(rule_start, right),
+                rect.center().y,
+                ui.ctx().pixels_per_point(),
+            );
+            painter.add(rule);
+        }
+        rule_start
+    }
+}
+
+/// The Flag cell of `row`, whose click target is `response`: a ⚑ when the transaction
+/// is flagged, which a click on an editable row's cell puts on or takes off. Assistive
+/// technology reads it as a checkbox. The draft row's cell is empty and takes no click.
+fn flag_cell(
+    ui: &egui::Ui,
+    i18n: &Localizer,
+    row: &RegisterRow,
+    response: &Response,
+    access: Access,
+) -> (Response, Option<RowAction>) {
+    if row.id() == RowId::Draft {
+        cell_info(ui, response, false, "");
+        return (response.clone(), None);
+    }
+    let flagged = row.is_flagged();
+    let editable = access == Access::Editable;
+    let label = fl!(
+        i18n,
+        "register-flag",
+        payee = row.payee(),
+        date = row.date(),
+        amount = row.amount_text()
+    );
+    response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, editable, flagged, &label));
+    if !editable {
+        // A read-only row's flag shows but offers no click.
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.remove_action(accesskit::Action::Click);
+        });
+    }
+    let rect = response.rect;
+    let hovered = editable && response.hovered();
+    if (flagged || hovered) && ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(response);
+        let colour = if flagged {
+            visuals.text_color()
+        } else {
+            ui.visuals().weak_text_color()
+        };
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            FLAG_GLYPH,
+            TextStyle::Body.resolve(ui.style()),
+            colour,
+        );
+    }
+    let action = (editable && response.clicked()).then_some(RowAction::SetFlagged(!flagged));
+    (response.clone(), action)
 }
 
 /// Reports a cell to AccessKit as a table cell labelled `label`, toggled when its row is
@@ -2530,7 +2892,8 @@ fn paint_text(
     );
     let x = match column.align() {
         Align::Max => inner.right() - galley.size().x,
-        Align::Min | Align::Center => inner.left(),
+        Align::Center => inner.center().x - galley.size().x / 2.0,
+        Align::Min => inner.left(),
     };
     let top = rect.center().y - galley.size().y / 2.0;
     let painted = Rect::from_min_size(pos2(x, top), galley.size());
@@ -2541,13 +2904,16 @@ fn paint_text(
 
 /// The row's Actions menu: a ⋯ button on the right of the Actions cell, which opens
 /// the menu below it. The default fonts lack ⋯, so its dots are painted. Returns the
-/// command picked from the menu. A read-only row's commands are disabled.
+/// command picked from the menu: Flag, or Unflag on a flagged `row`, and Delete. A
+/// read-only row's commands are disabled.
 fn actions_menu(
     ui: &egui::Ui,
     i18n: &Localizer,
     response: &Response,
     access: Access,
+    row: &RegisterRow,
 ) -> Option<RowAction> {
+    let flagged = row.is_flagged();
     let label = fl!(i18n, "register-actions");
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
     let rect = response.rect;
@@ -2574,10 +2940,22 @@ fn actions_menu(
     }
     Popup::menu(response)
         .show(|ui| {
-            let delete = Button::new(fl!(i18n, "register-actions-delete"));
-            ui.add_enabled(access == Access::Editable, delete)
+            let editable = access == Access::Editable;
+            let flag = Button::new(if flagged {
+                fl!(i18n, "register-actions-unflag")
+            } else {
+                fl!(i18n, "register-actions-flag")
+            });
+            let flag = ui
+                .add_enabled(editable, flag)
                 .clicked()
-                .then_some(RowAction::Delete)
+                .then_some(RowAction::SetFlagged(!flagged));
+            let delete = Button::new(fl!(i18n, "register-actions-delete"));
+            let delete = ui
+                .add_enabled(editable, delete)
+                .clicked()
+                .then_some(RowAction::Delete);
+            flag.or(delete)
         })
         .and_then(|menu| menu.inner)
 }
@@ -2592,6 +2970,7 @@ fn column_chooser(
     i18n: &Localizer,
     register_id: Id,
     columns: &RegisterColumns,
+    kind: AccountKind,
 ) -> Option<RegisterColumns> {
     let cell = ui.max_rect();
     let size = cell.height();
@@ -2627,7 +3006,7 @@ fn column_chooser(
             let last = entries.len().saturating_sub(1);
             for (index, (column, shown)) in entries.into_iter().enumerate() {
                 ui.horizontal(|ui| {
-                    let title = column.title(i18n);
+                    let title = column.title(i18n, kind);
                     let up = fl!(i18n, "register-column-move-up", column = title.clone());
                     if icon_button(ui, "⏶", &up, index > 0).clicked() {
                         changed.move_up(column);
@@ -2646,6 +3025,28 @@ fn column_chooser(
             (changed != *columns).then_some(changed)
         })
         .and_then(|popup| popup.inner)
+}
+
+/// The heading of the column holding amounts on `side`, in a Register of an account
+/// of `kind`.
+fn amount_title(i18n: &Localizer, side: AmountSide, kind: AccountKind) -> String {
+    match kind {
+        AccountKind::Checking
+        | AccountKind::Savings
+        | AccountKind::Investment
+        | AccountKind::Retirement => match side {
+            AmountSide::Payment => fl!(i18n, "register-column-payment"),
+            AmountSide::Deposit => fl!(i18n, "register-column-deposit"),
+        },
+        AccountKind::CreditCard => match side {
+            AmountSide::Payment => fl!(i18n, "register-column-charge"),
+            AmountSide::Deposit => fl!(i18n, "register-column-card-payment"),
+        },
+        AccountKind::Asset | AccountKind::Liability => match side {
+            AmountSide::Payment => fl!(i18n, "register-column-decrease"),
+            AmountSide::Deposit => fl!(i18n, "register-column-increase"),
+        },
+    }
 }
 
 /// A button showing `glyph`, which assistive technology reads as `label`.
@@ -2732,7 +3133,7 @@ mod tests {
                         summary,
                         view,
                         widths,
-                        &RegisterColumns::default(),
+                        &Preferences::default(),
                         Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date"),
                     );
                 },
@@ -2822,7 +3223,7 @@ mod tests {
     #[test]
     fn a_refused_amount_sends_nothing() {
         let (mut harness, receiver) = register();
-        click_cell(&mut harness, "-86.42");
+        click_cell(&mut harness, "86.42");
         harness.event(Event::Text("12.345".to_owned()));
         harness.run();
 
@@ -2834,8 +3235,8 @@ mod tests {
     #[test]
     fn an_amount_typed_as_the_saved_one_sends_nothing() {
         let (mut harness, receiver) = register();
-        click_cell(&mut harness, "-86.42");
-        harness.event(Event::Text("-86.420".to_owned()));
+        click_cell(&mut harness, "86.42");
+        harness.event(Event::Text("86.420".to_owned()));
         harness.run();
 
         press(&mut harness, Key::Enter);
@@ -2860,7 +3261,7 @@ mod tests {
         harness.run();
         press(&mut harness, Key::Enter);
         press(&mut harness, Key::ArrowRight);
-        harness.event(Event::Text("-12".to_owned()));
+        harness.event(Event::Text("12".to_owned()));
         harness.run();
 
         harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);

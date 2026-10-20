@@ -4,10 +4,13 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 balanced_core.workspace = true
 balanced_i18n.workspace = true
+# Finds the Documents folder the save picker starts in.
+directories.workspace = true
 # `persistence` saves the window layout and geometry in eframe storage.
 eframe = { workspace = true, features = ["persistence"] }
 egui_extras.workspace = true
@@ -15,6 +18,9 @@ i18n-embed-fl.workspace = true
 icu_calendar.workspace = true
 jiff.workspace = true
 icu_locale.workspace = true
+# Waits for `rfd`'s native file picker on a worker thread.
+pollster.workspace = true
+rfd.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true
@@ -26,8 +32,10 @@ egui_kittest = { workspace = true, optional = true, features = ["snapshot", "wgp
 [features]
 # `balanced_ui::testing`, for UI tests: unfolding the Account bar's rail, and for the
 # image snapshot tests the App on the lavapipe renderer and the snapshot check with the
-# project thresholds. `PreferencesFile::for_tests`, a
-# preferences file in a temporary directory.
+# project thresholds; and sending the Commands that create and open a data file, which the
+# native file picker sends in the app. `App::on_ledger`, the App on a ledger with no data
+# file. `PreferencesFile::for_tests` and `RecentFilesFile::for_tests`, the files in a
+# temporary directory.
 test-support = ["dep:egui-wgpu", "dep:egui_kittest", "dep:tempfile", "balanced_i18n/test-support"]
 
 [dev-dependencies]
@@ -44,7 +52,23 @@ required-features = ["test-support"]
 
 # Every App test stops the clock on one day with `Clock::fixed`.
 [[test]]
+name = "account_actions"
+required-features = ["test-support"]
+
+[[test]]
 name = "column_chooser"
+required-features = ["test-support"]
+
+[[test]]
+name = "data_file"
+required-features = ["test-support"]
+
+[[test]]
+name = "filter_bar"
+required-features = ["test-support"]
+
+[[test]]
+name = "flag"
 required-features = ["test-support"]
 
 [[test]]
@@ -97,6 +121,10 @@ required-features = ["test-support"]
 
 [[test]]
 name = "register"
+required-features = ["test-support"]
+
+[[test]]
+name = "startup"
 required-features = ["test-support"]
 
 [lints]

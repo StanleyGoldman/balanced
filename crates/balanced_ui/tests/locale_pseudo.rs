@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The App in the `en-XA` pseudo-locale, where text that came through `fl!` shows
 //! accented and bracketed, and anything else shows as plain English.
 
@@ -22,7 +24,7 @@ fn app() -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
-            App::new(
+            App::on_ledger(
                 cc,
                 pseudo(),
                 Ledger::stub(),

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The egui user interface: the Main window, its panels, Dialogs and Detached windows.
 
 mod account_bar;
@@ -7,6 +9,7 @@ mod app;
 mod clock;
 mod combobox;
 mod command;
+mod data_file;
 mod date_field;
 mod dialog;
 mod draft_row;
@@ -21,8 +24,10 @@ mod new_account;
 mod new_category;
 mod preferences;
 mod preferences_dialog;
+mod recent_files;
 mod register;
 mod register_columns;
+mod register_filter;
 mod register_model;
 mod route;
 #[cfg(feature = "test-support")]
@@ -30,7 +35,9 @@ pub mod testing;
 mod theme;
 mod triangle_button;
 mod user_action;
+mod welcome;
 
 pub use app::App;
 pub use clock::Clock;
 pub use preferences::PreferencesFile;
+pub use recent_files::RecentFilesFile;

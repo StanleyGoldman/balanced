@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 #![expect(
     clippy::disallowed_methods,
     reason = "event lines carry wall-clock timestamps; the clock ban is for the app, whose `Clock` lives in `balanced_ui`"

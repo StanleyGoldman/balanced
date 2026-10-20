@@ -12,6 +12,7 @@ The decision and the options that were rejected are in `docs/adr/0001-command-an
 | Edit buffer of the Register row being edited | The Register view | In place. Enter sends a Command |
 | Scroll, hover, focus | egui `Memory`, kept for the run only (`persist_egui_memory` is off) | egui handles them |
 | Preferences | `App`, loaded from `preferences.toml` (`PreferencesFile`) | Only through `AppCommand::SetPreferences`, or `AppCommand::SetRegisterColumns` from the column chooser, which `App::logic` applies and writes; the open Preferences Dialog's draft shows meanwhile |
+| Recent files | `App`, loaded from `recent-files.toml` (`RecentFilesFile`) | When a data file opens or is created, `App` moves it to the top and writes the file |
 | Window layout: Account bar width and fold, folded sections, Register column widths | `Layout` in eframe storage, built from the Main window by `App::save` | In place on the Main window; saved on eframe's timer and on exit |
 | View models (sorted row indices, formatted strings) | The window, cached | Rebuilt when `(generation, sort/filter, locale)` changes |
 
@@ -26,3 +27,4 @@ The decision and the options that were rejected are in `docs/adr/0001-command-an
 - **Rejected Commands come back as a `DomainError`.** A Dialog with a form stays open until its Command is applied, and shows the error inline. A confirm closes as its Command is sent, so its error goes to the Status bar, like any other.
 - **Derived values come from the snapshot.** Running balances and account totals are computed in `balanced_core`. View models format and sort those values but never recompute them.
 - **Rebuild caches only when the generation changes.** A view model rebuilds when the snapshot's `generation`, the window's sort or filter, or the locale changes. Nothing is sorted or formatted for every row on every frame.
+- **A generation counts within one `Ledger`.** Every `Ledger`, stub, created or opened, starts at `Generation::FIRST`, so after the App swaps in another data file's `Ledger` a cached model can pass as current. Drop every cache built from the old file when the file switches (`MainWindow::data_file_switched`).

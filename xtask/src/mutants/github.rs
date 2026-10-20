@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The GitHub calls a CI mutant run makes: reading the open `mutant` issues and
 //! carrying out the plan's actions. It talks to the REST API through `curl`, which
 //! the CI image already has, so xtask needs no HTTP or TLS crates.
@@ -10,8 +12,8 @@ use super::REPO;
 use super::plan::{Action, CloseReason, OpenIssue};
 use crate::process;
 
-/// The environment variable holding the token. In CI it comes from the
-/// `mutants_github_token` secret: issues read and write, pull requests read.
+/// The environment variable holding the token. In CI it is the workflow's own
+/// token: issues read and write, pull requests read.
 const TOKEN_VAR: &str = "GITHUB_TOKEN";
 
 /// GitHub's largest page size.
@@ -22,8 +24,8 @@ pub(crate) struct GitHub {
 }
 
 impl GitHub {
-    /// A client with the token from `GITHUB_TOKEN`. A dry run needs it too: the
-    /// repository is private, so even reading its issues takes a token.
+    /// A client with the token from `GITHUB_TOKEN`. A dry run needs it too, to
+    /// read the issues.
     pub(crate) fn from_env() -> Result<Self> {
         let token = std::env::var(TOKEN_VAR).with_context(|| {
             format!("{TOKEN_VAR} is unset; by hand, `{TOKEN_VAR}=$(gh auth token)` works")

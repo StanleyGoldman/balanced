@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The Main window's layout across a restart: saved by one App, restored by the next.
 
 use std::collections::HashMap;
@@ -39,7 +41,7 @@ fn app(storage: &MemoryStorage) -> Harness<'_, App> {
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
             cc.storage = Some(storage);
-            App::new(
+            App::on_ledger(
                 cc,
                 Localizer::for_tests(),
                 Ledger::stub(),
@@ -214,6 +216,32 @@ fn a_folded_account_bar_survives_a_restart() {
     second.get_by_role_and_label(Role::Button, "Unfold the Account bar");
 }
 
+#[test]
+fn the_folded_rail_has_no_add_account() {
+    let empty = MemoryStorage::default();
+    let mut harness = app(&empty);
+
+    click(&mut harness, "Fold the Account bar");
+
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "+ Add Account")
+            .is_none()
+    );
+}
+
+#[test]
+fn file_new_account_opens_the_wizard_with_the_account_bar_folded() {
+    let empty = MemoryStorage::default();
+    let mut harness = app(&empty);
+    click(&mut harness, "Fold the Account bar");
+
+    click(&mut harness, "File");
+    click(&mut harness, "New Account…");
+
+    harness.get_by_role_and_label(Role::Label, "Step 1 of 4: Type");
+}
+
 /// Opens the account named `name` from the Account bar.
 fn open(harness: &mut Harness<'_, App>, name: &str) {
     harness.get_by_role_and_label(Role::Button, name).click();
@@ -263,6 +291,29 @@ fn a_resized_column_survives_a_restart() {
     open(&mut second, "Everyday Checking");
 
     assert_eq!(column_width(&second, "Memo"), before + 60.0);
+}
+
+#[test]
+fn payment_and_deposit_each_keep_their_own_width_across_a_restart() {
+    let empty = MemoryStorage::default();
+    let mut first = app(&empty);
+    open(&mut first, "Everyday Checking");
+    let payment = column_width(&first, "Payment");
+    let deposit = column_width(&first, "Deposit");
+    resize_column(&mut first, "Payment", 40.0);
+    resize_column(&mut first, "Deposit", 20.0);
+    let storage = save(&mut first);
+
+    let mut second = app(&storage);
+    open(&mut second, "Everyday Checking");
+
+    assert_eq!(
+        (
+            column_width(&second, "Payment"),
+            column_width(&second, "Deposit")
+        ),
+        (payment + 40.0, deposit + 20.0)
+    );
 }
 
 /// Clicks the button labelled `label`, then lets the App settle.

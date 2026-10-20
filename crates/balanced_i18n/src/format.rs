@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Locale formatting through ICU4X, in the formatting locale.
 
 use std::cell::RefCell;

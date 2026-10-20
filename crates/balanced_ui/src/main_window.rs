@@ -1,17 +1,27 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The Main window: Menu bar, tab row, Account bar, Main view and Status bar.
+
+use std::path::PathBuf;
 
 use balanced_core::{
     AccountId, AccountSummary, DomainCommand, DomainError, LedgerView, TransactionId,
 };
 use balanced_i18n::Localizer;
 use eframe::egui::accesskit::Role;
-use eframe::egui::{self, Button, CentralPanel, Id, Label, MenuBar, Panel, RichText, Sides};
+use eframe::egui::text::LayoutJob;
+use eframe::egui::{
+    self, Align, Button, CentralPanel, FontSelection, Id, Label, MenuBar, Panel, Response,
+    RichText, Sides,
+};
 use icu_calendar::{Date, Iso};
 
 use crate::account_bar::{AccountBar, BarFrame};
 use crate::accounts_model::AccountsModel;
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
+use crate::data_file::{self, DataFileRefusal};
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
+use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
 use crate::layout::Layout;
@@ -50,6 +60,8 @@ pub(crate) struct MainWindow {
     manage_accounts: Option<OpenDialog<ManageAccountsForm>>,
     /// The Preferences Dialog, while it is open.
     preferences: Option<OpenDialog<PreferencesForm>>,
+    /// The Dialog saying why a data file was refused, while it is open.
+    data_file_refusal: Option<OpenDialog<DataFileRefusal>>,
     /// Where focus goes now that a Dialog has closed, until a frame restores it.
     focus_return: Option<FocusReturn>,
     menu_nav: MenuNav,
@@ -65,6 +77,8 @@ pub(crate) struct WindowFrame<'a> {
     pub(crate) commands: &'a CommandSender,
     pub(crate) view: &'a LedgerView,
     pub(crate) today: Date<Iso>,
+    /// The Recent files, newest first.
+    pub(crate) recent_files: &'a [PathBuf],
 }
 
 /// The Register open under the Accounts tab and the account it shows.
@@ -96,6 +110,7 @@ impl MainWindow {
             new_category: None,
             manage_accounts: None,
             preferences: None,
+            data_file_refusal: None,
             focus_return: None,
             menu_nav: MenuNav::default(),
         }
@@ -156,13 +171,23 @@ impl MainWindow {
         match action {
             UserAction::Undo => view.can_undo(),
             UserAction::Redo => view.can_redo(),
-            UserAction::NewTransaction | UserAction::DeleteTransaction => self.shows_register(),
+            UserAction::NewTransaction
+            | UserAction::DeleteTransaction
+            | UserAction::PrintRegister
+            | UserAction::ExportToCsv => self.shows_register(),
             UserAction::SwitchPane
+            | UserAction::NewDataFile
+            | UserAction::OpenDataFile
             | UserAction::NewAccount
             | UserAction::ManageAccounts
             | UserAction::Quit
             | UserAction::Preferences
-            | UserAction::About => true,
+            | UserAction::About
+            | UserAction::EditAccountDetails
+            | UserAction::RegisterPreferences => true,
+            UserAction::Reconcile => self
+                .open_account(view)
+                .is_some_and(|summary| !summary.account().is_closed()),
         }
     }
 
@@ -222,6 +247,43 @@ impl MainWindow {
                 memory.surrender_focus(id);
             }
         });
+    }
+
+    /// Forgets everything shown from the data file that was open, now that another one
+    /// is: the Register and its account, the accounts model, the Dialogs that act on
+    /// the file's contents, and the Status bar's message. The new file's snapshots
+    /// count generations afresh, so a cached model could pass as current.
+    pub(crate) fn data_file_switched(&mut self) {
+        let Self {
+            tab: _,
+            status,
+            account_bar: _,
+            accounts,
+            open_register,
+            column_widths: _,
+            delete_transaction,
+            new_account,
+            new_category,
+            manage_accounts,
+            // The Preferences, and a refusal shown meanwhile, belong to no one file.
+            preferences: _,
+            data_file_refusal: _,
+            focus_return: _,
+            menu_nav: _,
+        } = self;
+        *status = None;
+        *accounts = None;
+        *open_register = None;
+        *delete_transaction = None;
+        *new_account = None;
+        *new_category = None;
+        *manage_accounts = None;
+    }
+
+    /// Opens the Dialog saying why a data file was refused, over any Dialog already
+    /// open, since the native file picker leaves the Main window free meanwhile.
+    pub(crate) fn refuse_data_file(&mut self, ctx: &egui::Context, refusal: DataFileRefusal) {
+        self.data_file_refusal = Some(OpenDialog::new(ctx, refusal));
     }
 
     /// Shows `message` in the Status bar.
@@ -338,6 +400,7 @@ impl MainWindow {
             || self.new_category.is_some()
             || self.manage_accounts.is_some()
             || self.preferences.is_some()
+            || self.data_file_refusal.is_some()
     }
 
     /// The account the Main view shows, if it shows one.
@@ -363,6 +426,7 @@ impl MainWindow {
             commands,
             view,
             today,
+            recent_files,
         } = *frame;
         self.focus_return = self
             .focus_return
@@ -386,13 +450,13 @@ impl MainWindow {
             }
         }
         let accounts = match self.accounts.take() {
-            Some(model) if model.is_current(view, i18n) => model,
-            _ => AccountsModel::new(view, i18n),
+            Some(model) if model.is_current(view, i18n, today) => model,
+            _ => AccountsModel::new(view, i18n, today),
         };
         Panel::top("menu_bar")
             .frame(theme.chrome_frame())
             .show(ui, |ui| {
-                let drawn = self.menu_bar(ui, i18n, commands, view);
+                let drawn = self.menu_bar(ui, i18n, commands, view, recent_files);
                 self.menu_nav.drawn(ui.ctx(), drawn);
             });
         Panel::bottom("status_bar")
@@ -429,7 +493,7 @@ impl MainWindow {
         self.account_bar.show(ui, &bar_frame);
         CentralPanel::default().show(ui, |ui| match self.open_account(view) {
             Some(summary) => {
-                Self::context_header(ui, i18n, theme, commands, summary, &accounts);
+                self.context_header(ui, i18n, theme, commands, view, summary, &accounts);
                 if let Some(OpenRegister { register, .. }) = &mut self.open_register {
                     register.show(
                         ui,
@@ -439,7 +503,7 @@ impl MainWindow {
                         summary,
                         view,
                         &mut self.column_widths,
-                        &preferences.register_columns,
+                        preferences,
                         today,
                     );
                 }
@@ -454,6 +518,17 @@ impl MainWindow {
         self.new_category_dialog(ui.ctx(), i18n, theme, commands, view);
         self.preferences_dialog(ui.ctx(), i18n, theme, commands);
         self.manage_accounts_dialog(ui.ctx(), i18n, theme, commands, view);
+        self.data_file_refusal_dialog(ui.ctx(), i18n, theme);
+    }
+
+    /// The Dialog saying why a data file was refused, while it is open. OK closes it.
+    fn data_file_refusal_dialog(&mut self, ctx: &egui::Context, i18n: &Localizer, theme: &Theme) {
+        let Some(dialog) = &mut self.data_file_refusal else {
+            return;
+        };
+        if DataFileRefusal::show_dialog(ctx, i18n, theme, dialog) {
+            self.close_dialog(ctx, |window| &mut window.data_file_refusal);
+        }
     }
 
     /// Manage Accounts, while it is open.
@@ -627,21 +702,28 @@ impl MainWindow {
         self.close_dialog(ctx, |window| &mut window.delete_transaction);
     }
 
-    /// The open account's name and balance above its Register, with + Transaction. A
-    /// closed account's header says it is read-only, and + Transaction is disabled. The
-    /// name and balance clip when the Main view is narrow.
+    /// The open account's name above its Register, with its Current and Ending balances,
+    /// the + Transaction button and the Account Actions menu on the right. A closed
+    /// account's header says it is read-only, and + Transaction is disabled. The name
+    /// clips when the Main view is narrow.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the Account Actions menu items need `view` and `commands` beside the header's own drawing context"
+    )]
     fn context_header(
+        &self,
         ui: &mut egui::Ui,
         i18n: &Localizer,
         theme: &Theme,
         commands: &CommandSender,
+        view: &LedgerView,
         summary: &AccountSummary,
         accounts: &AccountsModel,
     ) {
         let account = summary.account();
-        let balance = accounts
-            .balance(account.id())
-            .expect("the model formats a balance for every account in its snapshot");
+        let missing = "the model formats both balances of every account in its snapshot";
+        let current = accounts.current_balance(account.id()).expect(missing);
+        let ending = accounts.ending_balance(account.id()).expect(missing);
         let closed = account.is_closed();
         Sides::new().shrink_left().truncate().show(
             ui,
@@ -652,22 +734,49 @@ impl MainWindow {
                 }
             },
             |ui| {
-                ui.label(balance.styled(theme).heading());
+                // Sides lays the right side out from the right edge, so the last added
+                // shows first.
+                ui.menu_button(fl!(i18n, "register-account-actions"), |ui| {
+                    for action in [
+                        UserAction::Reconcile,
+                        UserAction::EditAccountDetails,
+                        UserAction::RegisterPreferences,
+                        UserAction::PrintRegister,
+                        UserAction::ExportToCsv,
+                    ] {
+                        self.action_item(ui, i18n, commands, view, action);
+                    }
+                });
                 let add = Button::new(fl!(i18n, "register-new-transaction"));
                 if ui.add_enabled(!closed, add).clicked() {
                     commands.send(AppCommand::GoToDraftRow);
+                }
+                for (message, balance) in [
+                    (
+                        fl!(i18n, "register-ending-balance", amount = ending.text()),
+                        ending,
+                    ),
+                    (
+                        fl!(i18n, "register-current-balance", amount = current.text()),
+                        current,
+                    ),
+                ] {
+                    // One Label each, so a screen reader reads the name with its amount.
+                    ui.label(header_balance(ui, theme, &message, balance));
                 }
             },
         );
     }
 
-    /// Draws the Menu bar, and returns what it drew for the keyboard navigation.
+    /// Draws the Menu bar, with `recent_files` numbered in the File menu above Quit,
+    /// and returns what it drew for the keyboard navigation.
     fn menu_bar(
         &self,
         ui: &mut egui::Ui,
         i18n: &Localizer,
         commands: &CommandSender,
         view: &LedgerView,
+        recent_files: &[PathBuf],
     ) -> DrawnMenus {
         let item = |ui: &mut egui::Ui, drawn: &mut DrawnMenus, action| {
             self.menu_item(ui, i18n, commands, view, drawn, action);
@@ -675,8 +784,15 @@ impl MainWindow {
         let mut drawn = DrawnMenus::default();
         MenuBar::new().ui(ui, |ui| {
             let file = ui.menu_button(fl!(i18n, "menu-file"), |ui| {
+                item(ui, &mut drawn, UserAction::NewDataFile);
+                item(ui, &mut drawn, UserAction::OpenDataFile);
+                ui.separator();
                 item(ui, &mut drawn, UserAction::NewAccount);
                 ui.separator();
+                if !recent_files.is_empty() {
+                    Self::recent_file_items(ui, i18n, commands, &mut drawn, recent_files);
+                    ui.separator();
+                }
                 item(ui, &mut drawn, UserAction::Quit);
             });
             drawn.note_menu(&file.response);
@@ -702,8 +818,30 @@ impl MainWindow {
         drawn
     }
 
-    /// The menu item for `action`, with its Shortcut text, disabled while the action
-    /// can't act on `view`.
+    /// The File menu's items for `recent_files`, numbered from 1 at the newest, each
+    /// showing its file's name and, on hover, its path. Clicking one opens its file.
+    fn recent_file_items(
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        commands: &CommandSender,
+        drawn: &mut DrawnMenus,
+        recent_files: &[PathBuf],
+    ) {
+        for (number, path) in (1_u32..).zip(recent_files) {
+            let file = data_file::file_name(path);
+            let item = ui
+                .button(fl!(i18n, "menu-file-recent", number = number, file = file))
+                .on_hover_text(path.display().to_string());
+            drawn.note_item(&item);
+            if item.clicked() {
+                commands.send(AppCommand::OpenDataFile(path.clone()));
+                // egui closes a menu on a pointer click only, not on Enter.
+                ui.close();
+            }
+        }
+    }
+
+    /// The Menu bar item for `action`, noted in `drawn` for the keyboard navigation.
     fn menu_item(
         &self,
         ui: &mut egui::Ui,
@@ -713,17 +851,31 @@ impl MainWindow {
         drawn: &mut DrawnMenus,
         action: UserAction,
     ) {
+        let item = self.action_item(ui, i18n, commands, view, action);
+        drawn.note_item(&item);
+    }
+
+    /// The menu item for `action`, with its Shortcut text, disabled while the action
+    /// can't act on `view`. Clicking it sends the action's Command and closes the menu.
+    fn action_item(
+        &self,
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        commands: &CommandSender,
+        view: &LedgerView,
+        action: UserAction,
+    ) -> Response {
         let mut button = egui::Button::new(action.label(i18n));
         if let Some(chord) = keymap::chord(action) {
             button = button.shortcut_text(keymap::shortcut_text(chord, i18n, ui.ctx().os()));
         }
         let item = ui.add_enabled(self.can_act(action, view), button);
-        drawn.note_item(&item);
         if item.clicked() {
             commands.send(action.command());
             // egui closes a menu on a pointer click only, not on Enter.
             ui.close();
         }
+        item
     }
 
     fn tab_row(&self, ui: &mut egui::Ui, i18n: &Localizer, commands: &CommandSender) {
@@ -738,4 +890,29 @@ impl MainWindow {
             }
         });
     }
+}
+
+/// `message`, a context header balance such as "Current $5,642.21", as small, weak text
+/// with `balance`'s amount in it styled by `theme` for its sign.
+fn header_balance(
+    ui: &egui::Ui,
+    theme: &Theme,
+    message: &str,
+    balance: &FormattedAmount,
+) -> LayoutJob {
+    let (before, amount, after) = match message.split_once(balance.text()) {
+        Some((before, after)) => (before, Some(balance.styled(theme)), after),
+        None => (message, None, ""),
+    };
+    let mut text = LayoutJob::default();
+    let parts = [
+        Some(RichText::new(before).weak()),
+        amount,
+        Some(RichText::new(after).weak()),
+    ];
+    for part in parts.into_iter().flatten() {
+        part.small()
+            .append_to(&mut text, ui.style(), FontSelection::Default, Align::Center);
+    }
+    text
 }

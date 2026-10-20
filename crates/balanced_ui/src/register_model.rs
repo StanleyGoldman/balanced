@@ -1,11 +1,13 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`RegisterModel`]: one account's transactions as the Register shows them, with every
 //! cell's text already formatted.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use balanced_core::{
-    AccountId, AccountSummary, Allocation, CategoryId, CurrencyCode, Generation, LedgerView,
+    AccountId, AccountSummary, Allocation, CategoryId, CurrencyCode, Generation, LedgerView, Money,
     TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
@@ -16,6 +18,7 @@ use icu_locale::Locale;
 use crate::draft_row::Draft;
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
+use crate::register_filter::RegisterFilter;
 
 /// Separates a category from the one it sits under: `Food & Dining:Groceries`.
 pub(crate) const CATEGORY_SEPARATOR: &str = ":";
@@ -25,6 +28,58 @@ pub(crate) const CATEGORY_SEPARATOR: &str = ":";
 pub(crate) enum RowId {
     Transaction(TransactionId),
     Draft,
+}
+
+/// Which way money moves, which decides whether an amount shows as a payment or a
+/// deposit. The Register shows the amount unsigned in the column for its side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum AmountSide {
+    /// Money out: a negative amount.
+    Payment,
+    /// Money in: zero or a positive amount.
+    Deposit,
+}
+
+impl AmountSide {
+    /// The side `money` is on.
+    pub(crate) fn of(money: Money) -> Self {
+        if money.is_negative() {
+            Self::Payment
+        } else {
+            Self::Deposit
+        }
+    }
+
+    /// The signed amount of `money` on this side, whatever sign `money` has.
+    pub(crate) fn signed(self, money: Money) -> Money {
+        let unsigned = money.amount().abs();
+        let amount = match self {
+            Self::Payment => -unsigned,
+            Self::Deposit => unsigned,
+        };
+        Money::new(amount, money.currency()).expect("a change of sign keeps the decimal places")
+    }
+}
+
+/// An amount as the Register shows it, signed and unsigned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RowAmount {
+    signed: FormattedAmount,
+    /// The amount without its sign, which its side's column shows.
+    unsigned: FormattedAmount,
+}
+
+impl RowAmount {
+    fn new(i18n: &Localizer, money: Money) -> Self {
+        Self {
+            signed: FormattedAmount::new(i18n, money, AmountStyle::Bare),
+            unsigned: FormattedAmount::new(
+                i18n,
+                AmountSide::Deposit.signed(money),
+                AmountStyle::Bare,
+            ),
+        }
+    }
 }
 
 /// Where a row's amount went, as far as its Payee and Category cells care.
@@ -54,8 +109,10 @@ pub(crate) struct RegisterRow {
     memo: String,
     currency: CurrencyCode,
     /// The amount, which only the draft row can be without.
-    amount: Option<FormattedAmount>,
+    amount: Option<RowAmount>,
     balance: Option<FormattedAmount>,
+    /// Whether the transaction is flagged. The draft row never is.
+    flagged: bool,
 }
 
 impl RegisterRow {
@@ -84,10 +141,9 @@ impl RegisterRow {
                 .unwrap_or_default(),
             memo: draft.memo().to_owned(),
             currency,
-            amount: draft
-                .amount()
-                .map(|amount| FormattedAmount::new(i18n, amount, AmountStyle::Bare)),
+            amount: draft.amount().map(|amount| RowAmount::new(i18n, amount)),
             balance: None,
+            flagged: false,
         }
     }
 
@@ -165,20 +221,41 @@ impl RegisterRow {
         self.currency
     }
 
-    /// The amount, as a bare number. Only the draft row can be without one.
-    pub(crate) fn amount(&self) -> Option<&FormattedAmount> {
-        self.amount.as_ref()
+    /// The signed amount. Only the draft row can be without one.
+    pub(crate) fn amount(&self) -> Option<Money> {
+        self.amount.as_ref().map(|amount| amount.signed.money())
     }
 
-    /// The amount's text, or nothing when the row has no amount.
+    /// The signed amount's text, or nothing when the row has no amount.
     pub(crate) fn amount_text(&self) -> &str {
-        self.amount.as_ref().map_or("", FormattedAmount::text)
+        self.amount
+            .as_ref()
+            .map_or("", |amount| amount.signed.text())
+    }
+
+    /// The amount without its sign, as a bare number, when it is on `side`.
+    pub(crate) fn amount_on(&self, side: AmountSide) -> Option<&FormattedAmount> {
+        self.amount
+            .as_ref()
+            .filter(|amount| AmountSide::of(amount.signed.money()) == side)
+            .map(|amount| &amount.unsigned)
+    }
+
+    /// The text of [`RegisterRow::amount_on`], or nothing when the amount is on the
+    /// other side or the row has none.
+    pub(crate) fn amount_text_on(&self, side: AmountSide) -> &str {
+        self.amount_on(side).map_or("", FormattedAmount::text)
     }
 
     /// The running balance after this transaction, as a bare number. Under a sort
     /// other than by date it is `None`, since it would be out of order.
     pub(crate) fn balance(&self) -> Option<&FormattedAmount> {
         self.balance.as_ref()
+    }
+
+    /// Whether the transaction is flagged. The draft row never is.
+    pub(crate) fn is_flagged(&self) -> bool {
+        self.flagged
     }
 
     /// Orders this row and `other` by `key`'s column alone.
@@ -188,8 +265,8 @@ impl RegisterRow {
             SortKey::Payee => i18n.compare_text(&self.payee, &other.payee),
             SortKey::Category => i18n.compare_text(&self.category, &other.category),
             SortKey::Memo => i18n.compare_text(&self.memo, &other.memo),
-            SortKey::Amount => {
-                let amount = |row: &Self| row.amount.as_ref().map(|amount| amount.money().amount());
+            SortKey::Amount(_) => {
+                let amount = |row: &Self| row.amount().map(|amount| amount.amount());
                 amount(self).cmp(&amount(other))
             }
         }
@@ -203,7 +280,9 @@ pub(crate) enum SortKey {
     Payee,
     Category,
     Memo,
-    Amount,
+    /// The signed amount. The side names the column whose heading was clicked, which
+    /// shows the sort arrow; both sides sort alike.
+    Amount(AmountSide),
 }
 
 /// Which way a sort runs.
@@ -262,32 +341,68 @@ impl RegisterSort {
     }
 }
 
+/// Whether the Register sets its rows dated after today apart with the Today divider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TodayDivider {
+    Hidden,
+    /// Drawn above the first row dated after `today`, under a sort by date.
+    Shown {
+        today: Date<Iso>,
+    },
+}
+
 /// What the model was built from. It is rebuilt when any of it changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Source {
     account: AccountId,
     generation: Generation,
     sort: RegisterSort,
+    filter: RegisterFilter,
+    /// Today's date, which the filter's date ranges count from.
+    today: Date<Iso>,
+    today_divider: TodayDivider,
     text_language: LanguageIdentifier,
     formatting_locale: Locale,
 }
 
-/// One account's Register rows, in the order of its sort.
+/// One account's Register rows that its filter shows, in the order of its sort.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisterModel {
     source: Source,
     rows: Vec<RegisterRow>,
+    /// Every transaction in the account, shown or not.
+    transactions: HashSet<TransactionId>,
+    /// The index of the row the Today divider sits above, while it is drawn.
+    divider: Option<usize>,
+}
+
+/// What a [`RegisterModel`] shows: its sort, its filter, today's date and whether the
+/// Today divider is drawn.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Showing<'a> {
+    pub(crate) sort: RegisterSort,
+    pub(crate) filter: &'a RegisterFilter,
+    pub(crate) today: Date<Iso>,
+    pub(crate) today_divider: TodayDivider,
 }
 
 impl RegisterModel {
-    /// The Register of `summary`, an account in `view`, formatted by `i18n` and
-    /// ordered by `sort`.
+    /// The Register of `summary`, an account in `view`, formatted by `i18n`, narrowed
+    /// and ordered as `shown` says, with the Today divider placed as it says. Each
+    /// row's balance is the account's running balance, whichever rows the filter hides.
     pub(crate) fn new(
         summary: &AccountSummary,
         view: &LedgerView,
-        sort: RegisterSort,
+        shown: Showing<'_>,
         i18n: &Localizer,
     ) -> Self {
+        let Showing {
+            sort,
+            filter,
+            today,
+            today_divider,
+        } = shown;
+        let matcher = filter.matcher(today);
         let mut paths = CategoryPaths {
             view,
             paths: HashMap::new(),
@@ -299,7 +414,7 @@ impl RegisterModel {
             .register()
             .iter()
             .enumerate()
-            .map(|(place, entry)| {
+            .filter_map(|(place, entry)| {
                 let transaction = entry.transaction();
                 let (kind, payee, category) = match transaction.allocation() {
                     Allocation::OpeningBalance => (
@@ -318,7 +433,7 @@ impl RegisterModel {
                         split.clone(),
                     ),
                 };
-                RegisterRow {
+                let row = RegisterRow {
                     id: RowId::Transaction(transaction.id()),
                     place,
                     kind,
@@ -329,45 +444,62 @@ impl RegisterModel {
                     category,
                     memo: transaction.memo().to_owned(),
                     currency: transaction.amount().currency(),
-                    amount: Some(FormattedAmount::new(
-                        i18n,
-                        transaction.amount(),
-                        AmountStyle::Bare,
-                    )),
+                    amount: Some(RowAmount::new(i18n, transaction.amount())),
                     balance: shows_balance
                         .then(|| FormattedAmount::new(i18n, entry.balance(), AmountStyle::Bare)),
-                }
+                    flagged: transaction.is_flagged(),
+                };
+                let split_lines = match transaction.allocation() {
+                    Allocation::Split(lines) => lines.as_slice(),
+                    Allocation::OpeningBalance | Allocation::Category(_) => &[],
+                };
+                let split_categories: Vec<String> = split_lines
+                    .iter()
+                    .map(|line| paths.path(line.category()).to_owned())
+                    .collect();
+                matcher
+                    .shows(&row, split_categories.iter().map(String::as_str))
+                    .then_some(row)
             })
             .collect();
         rows.sort_by(|a, b| sort.compare(i18n, a, b));
+        let divider = match today_divider {
+            TodayDivider::Shown { today } if shows_balance => divider(&rows, sort.direction, today),
+            TodayDivider::Shown { .. } | TodayDivider::Hidden => None,
+        };
         Self {
-            source: Self::source(summary.account().id(), view, sort, i18n),
+            source: Self::source(summary.account().id(), view, shown, i18n),
             rows,
+            transactions: transaction_ids(summary).collect(),
+            divider,
         }
     }
 
-    /// Whether the model shows account `account` of `view` ordered by `sort`, as `i18n`
+    /// Whether the model shows account `account` of `view` as `shown` says, as `i18n`
     /// formats it, so needs no rebuild.
     pub(crate) fn is_current(
         &self,
         account: AccountId,
         view: &LedgerView,
-        sort: RegisterSort,
+        shown: Showing<'_>,
         i18n: &Localizer,
     ) -> bool {
-        self.source == Self::source(account, view, sort, i18n)
+        self.source == Self::source(account, view, shown, i18n)
     }
 
     fn source(
         account: AccountId,
         view: &LedgerView,
-        sort: RegisterSort,
+        shown: Showing<'_>,
         i18n: &Localizer,
     ) -> Source {
         Source {
             account,
             generation: view.generation(),
-            sort,
+            sort: shown.sort,
+            filter: shown.filter.clone(),
+            today: shown.today,
+            today_divider: shown.today_divider,
             text_language: i18n.text_language().clone(),
             formatting_locale: i18n.formatting_locale().clone(),
         }
@@ -378,9 +510,54 @@ impl RegisterModel {
         self.source.account
     }
 
-    /// The rows, in the order of the model's sort.
+    /// The rows the filter shows, in the order of the model's sort.
     pub(crate) fn rows(&self) -> &[RegisterRow] {
         &self.rows
+    }
+
+    /// How many transactions the account has, shown or not.
+    pub(crate) fn transaction_count(&self) -> usize {
+        self.transactions.len()
+    }
+
+    /// The transactions in `summary`, the model's account as it is now, that were
+    /// not in it when the model was built.
+    pub(crate) fn added<'a>(
+        &'a self,
+        summary: &'a AccountSummary,
+    ) -> impl Iterator<Item = TransactionId> + 'a {
+        transaction_ids(summary).filter(|id| !self.transactions.contains(id))
+    }
+
+    /// The index of the row the Today divider sits above: the first row dated after
+    /// today, or under a descending sort the first row dated today or earlier. `None`
+    /// while the divider is hidden, under a sort other than by date, or when no row is
+    /// dated after today.
+    pub(crate) fn divider(&self) -> Option<usize> {
+        self.divider
+    }
+}
+
+/// The ids of `summary`'s transactions, in date order.
+fn transaction_ids(summary: &AccountSummary) -> impl Iterator<Item = TransactionId> + '_ {
+    summary
+        .register()
+        .iter()
+        .map(|entry| entry.transaction().id())
+}
+
+/// The index of the row the Today divider sits above in `rows`, sorted by date in
+/// `direction`, unless no row is dated after `today`.
+fn divider(rows: &[RegisterRow], direction: SortDirection, today: Date<Iso>) -> Option<usize> {
+    let scheduled = |row: &RegisterRow| row.saved_date.is_some_and(|date| date > today);
+    match direction {
+        SortDirection::Ascending => rows.iter().position(scheduled),
+        // The scheduled rows come first, so there are some only if the first is one.
+        SortDirection::Descending => scheduled(rows.first()?).then(|| {
+            rows.iter()
+                .position(|row| !scheduled(row))
+                .unwrap_or(rows.len())
+        }),
     }
 }
 

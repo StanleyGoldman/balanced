@@ -1,11 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The Balanced desktop application.
 
 use std::path::PathBuf;
 
 use anyhow::{Context as _, Result, anyhow};
-use balanced_core::Ledger;
 use balanced_i18n::Localizer;
-use balanced_ui::{App, Clock, PreferencesFile};
+use balanced_ui::{App, Clock, PreferencesFile, RecentFilesFile};
 use directories::ProjectDirs;
 use icu_locale::Locale;
 use tracing_subscriber::EnvFilter;
@@ -21,8 +22,9 @@ fn main() -> Result<()> {
         .ok()
         .filter(|tag| !tag.is_empty());
     let i18n = localizer(locale_override.as_deref())?;
-    let ledger = Ledger::stub();
-    let preferences_file = PreferencesFile::in_dir(&config_dir()?);
+    let config_dir = config_dir()?;
+    let preferences_file = PreferencesFile::in_dir(&config_dir);
+    let recent_files_file = RecentFilesFile::in_dir(&config_dir);
     eframe::run_native(
         "Balanced",
         eframe::NativeOptions::default(),
@@ -30,9 +32,9 @@ fn main() -> Result<()> {
             Ok(Box::new(App::new(
                 cc,
                 i18n,
-                ledger,
                 Clock::default(),
                 preferences_file,
+                recent_files_file,
             )))
         }),
     )

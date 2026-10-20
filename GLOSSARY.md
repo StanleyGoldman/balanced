@@ -58,13 +58,33 @@ _Avoid_: Transaction list, ledger view
 The empty row at the bottom of a register where the user types a new transaction; it becomes a transaction when added.
 _Avoid_: New row, blank row, entry row
 
+**Today divider**:
+The labelled line in a register sorted by date between the rows dated today or earlier and the first row dated later. It is not a row, so the cell cursor never rests on it.
+_Avoid_: Today line, future separator
+
 **Actions column**:
 The untitled last column of a register, holding a menu of commands for its row (e.g. Split, Void, Delete).
 _Avoid_: Row menu, context column
 
+**Cleared status**:
+Whether a transaction has shown up on the bank's records. It is one of three states: Uncleared, Cleared (`c`: the bank has it) or Reconciled (`R`: matched against a statement in Reconcile). It is shown in the register's Clr column.
+_Avoid_: Clr flag, cleared flag, check state
+
+**Cleared balance**:
+The total of an account's Cleared and Reconciled transactions, whatever their date: what the bank should show once every cleared transaction has posted.
+_Avoid_: Bank balance, statement balance
+
 **Column chooser**:
 The control at the right end of a register's header that shows, hides and reorders the register's columns.
 _Avoid_: Column picker, column settings
+
+**Account Actions menu**:
+The ⚙ menu at the right end of a register's context header that starts the open account's tasks: Reconcile, editing its details, register preferences, printing and exporting.
+_Avoid_: Account settings, gear menu
+
+**Filter bar**:
+The row above a register's column headings that narrows the rows it shows by search text, date range and transaction type; it never changes a row's running balance.
+_Avoid_: Search bar, filter panel
 
 **Transfer**:
 Money moved between two of the household's accounts, recorded as a transaction in each account's register. It's picked by choosing `[Account]` in the Category field, of a transaction or of a split line.

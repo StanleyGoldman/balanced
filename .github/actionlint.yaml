@@ -1,0 +1,7 @@
+# actionlint 1.7.12, the newest, predates GitHub's `ubuntu-26.04` runner label
+# and reports it as unknown. The label is GitHub-hosted, not self-hosted; this
+# is only where actionlint takes extra labels. Delete it once actionlint knows
+# the label.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04

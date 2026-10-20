@@ -77,6 +77,7 @@ egui_kittest finds widgets through the same AccessKit tree a screen reader uses,
 
 - Every interactive custom-painted widget (Register rows, Account bar entries) calls `Response::widget_info` with the correct role and label.
 - Every text field has a visible label, or is connected to one with `.labelled_by(label.id)`.
+- A right-to-left layout (`Sides`' right side, `ui.horizontal` inside it) reaches AccessKit in the order widgets are added, so a screen reader reads its widgets in reverse of what the screen shows. Draw a name and its value as one `Label`, a `LayoutJob` built from one Fluent message, as the context header does with Current and Ending (`header_balance` in `main_window.rs`).
 
 ## Upgrading egui
 
@@ -92,11 +93,11 @@ egui releases a breaking minor version about every two months, and it removes de
 
 ## Gotchas
 
-- egui's default proportional fonts (Ubuntu-Light, NotoEmoji, emoji-icon-font) lack ▸ ▾ ▼ ⋯, the arrows ← → ↑ ↓, braille such as the ⠿ grip, and box-drawing such as ─, and draw a box in their place; ⏵ ⏶ ⏷ ◀ ▶ ⚙ render. For a missing glyph, paint the shape with the `Painter` (`Shape::convex_polygon` for a triangle, `circle_filled` dots for a grip, `hline` for a rule). Check a glyph with `fc-query --format='%{charset}' <font>` against the fonts in the `epaint_default_fonts` crate.
+- egui's default proportional fonts (Ubuntu-Light, NotoEmoji, emoji-icon-font) lack ▸ ▾ ▼ ⋯, the arrows ← → ↑ ↓, braille such as the ⠿ grip, and box-drawing such as ─, and draw a box in their place; ⏵ ⏶ ⏷ ◀ ▶ ⚙ ⚑ render. For a missing glyph, paint the shape with the `Painter` (`Shape::convex_polygon` for a triangle, `circle_filled` dots for a grip, `hline` for a rule). Check a glyph with `fc-query --format='%{charset}' <font>` against the fonts in the `epaint_default_fonts` crate.
 - A layer raised with `ctx.move_to_top` every frame lands above every other layer of its `Order` that didn't ask this frame. A popup asks only in the frame it opens, so from its second frame it sinks under a same-order layer raised every frame, and kittest's `click()`, which clicks at the node's position, hits the widget beneath. Raise every frame only a layer whose children open at a higher `Order`, as `HeavyDialog` does at `Order::Middle`; a `LightDialog`, at `Order::Foreground` with its date calendar, stays where egui puts it.
 - Read every `ctx` value a closure needs before calling `ctx.fonts_mut`, `ctx.memory` or `ctx.input`: `let heading = TextStyle::Heading.resolve(&ctx.global_style());`, then `ctx.fonts_mut(|f| f.row_height(&heading))`. A `ctx` call inside such a closure takes the context lock again, and the test panics after 10 s with `Failed to acquire RwLock read after 10s. Deadlock?`.
 - A `Ui::new(ctx, id, ..)` registers a widget under its own `id`. Give each widget you `interact` inside it a different id (`heavy.with("close_ui")` for the `Ui`, `heavy.with("close")` for the button). A shared id leaves the button unclickable, with no warning.
 - `egui::MenuBar` takes the whole row. Anything sharing the row (tabs, a search box) goes inside its closure.
 - An egui menu closes on a pointer click only. Enter or Space on a focused menu item clicks it and leaves the menu open, so a menu item calls `ui.close()` when clicked.
-- To pin a footer under a scrolling list in a side panel, nest a `Panel::bottom` and then a `CentralPanel` inside the side panel.
+- Tab follows the order widgets are drawn in, not their place on screen. A `Panel::bottom` footer drawn before its `CentralPanel` list comes before the list in Tab order. To pin a focusable footer under a scrolling list, draw the list first into a `scope_builder` rect that leaves room for the footer's height from the last frame, then the footer, and `request_discard` when that height changes (the Account bar's `open_bar`). A footer with nothing to focus can stay a nested `Panel::bottom` followed by a `CentralPanel`.
 - On Wayland, winit 0.30 ignores window levels and parent windows, so no second OS window can be kept above the Main window there.

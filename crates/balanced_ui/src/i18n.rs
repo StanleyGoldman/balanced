@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The `fl!` macro: every user-visible string goes through it.
 
 /// Looks up a message for the user interface.

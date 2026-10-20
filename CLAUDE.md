@@ -18,7 +18,7 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 ### CI
 
-The `woodpecker` skill (`.claude/skills/woodpecker/SKILL.md`) reads and drives CI.
+CI is GitHub Actions (`.github/workflows/`), read and driven with `gh run` and `gh workflow`. `docs/practices/tooling.md` covers how it runs and how to reproduce a failure locally.
 
 ## Working preferences
 
@@ -86,7 +86,7 @@ The `woodpecker` skill (`.claude/skills/woodpecker/SKILL.md`) reads and drives C
 - Start an `/implement` run with `git fetch origin main` and branch the work from `origin/main`: a worktree can predate merged blockers, so their code looks missing.
 - Then check that everything the ticket reuses (a field, a clock, a Dialog) is already built. When one is still an open ticket that isn't among its blockers, ask the user whether to add it as a blocker or build an interim stand-in.
 - A ticket naming quicken_clone code as its reference means `StanleyGoldman/quicken_clone`, an archived private repo with no local checkout. Read a file with `gh api repos/StanleyGoldman/quicken_clone/contents/<path> -H 'Accept: application/vnd.github.raw'`. It used clap and other crates Balanced lacks, so port its behaviour and tests into the local idiom.
-- Load the `tdd` skill before writing the first test or line of code of an `/implement` run; the skill names `/tdd` only in passing, so it won't load unless you call it.
+- Load the `tdd` skill before writing the first test or line of code of an `/implement` run, seams agreed or not; the `implement` skill calls it only "where possible, at pre-agreed seams".
 - Run each slice red before green. A test that has only failed to compile, or was written after its code, has never been red: break the code it covers, watch the test fail, then restore the code. Do the break with `.claude/scripts/red-check.sh <file> <old> <new> <test command...>`, which restores the file byte for byte (contract in its header).
 - Restore broken code by editing it back, so its mtime moves forward. A file moved back from a backup copy keeps the copy's older mtime, so cargo skips the rebuild and the rerun still tests the broken build.
 - A red counts only when the failing assertion is the behaviour under test. Read the panic in the `cargo nextest run` output; a setup assertion failing, or a `get_by_role_and_label` that finds no node, proves nothing.
@@ -98,6 +98,7 @@ The `woodpecker` skill (`.claude/skills/woodpecker/SKILL.md`) reads and drives C
 - Open pull requests and leave merging to a human; never merge one yourself.
 - Stage by explicit path (`git add <paths>`) and check `git status` before committing: untracked output from another branch (e.g. build or prototype output ignored only on that branch) survives `git switch`.
 - Leave remote branches to GitHub, which deletes a PR's head branch when it merges; cleanup after a merge covers only local branches and worktrees.
+- Each worktree's `target/` grows to tens of GB and outlives the merge. Run `.claude/scripts/clean-merged-targets.sh` at the start of an `/implement` run, and whenever a build fails with `No space left on device`; it deletes `target/` only for worktrees whose PR merged or closed (contract in its header).
 - Before pushing to an existing PR's branch, check the PR is still open (`gh pr view <n> --json state`); once it has merged, put follow-ups on a fresh branch from `origin/main` and open a new PR.
 - Whenever you push to a pull request, update its title and description to cover everything it now contains.
 - **Stack** a PR whose branch builds on another open PR's branch, with `gh stack`, and offer a stack when you foresee two PRs conflicting if merged one at a time. See `docs/agents/stacked-prs.md`.

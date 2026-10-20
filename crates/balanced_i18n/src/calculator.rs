@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`AmountReader`]: reads what the user types in an amount field, a plain amount or
 //! arithmetic over amounts, in the formatting locale the field was opened in.
 

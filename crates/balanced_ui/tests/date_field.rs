@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The Register's segmented date field, driven through the AccessKit tree the way a
 //! user drives it, on a clock stopped on Wednesday 14 October 2026.
 
@@ -19,7 +21,7 @@ fn app_in(i18n: Localizer) -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(move |cc| {
-            App::new(
+            App::on_ledger(
                 cc,
                 i18n,
                 Ledger::stub(),
@@ -396,9 +398,13 @@ fn alt_down_opens_the_calendar_without_moving_the_date() {
 
 /// The calendar's weekday headings, left to right.
 fn weekdays(harness: &Harness<'static, App>) -> Vec<String> {
+    let register_headings = harness
+        .get_by_role_and_label(Role::ColumnHeader, "Date")
+        .rect()
+        .top();
     let mut headings: Vec<_> = harness
         .query_all_by_role(Role::ColumnHeader)
-        .filter(|heading| heading.rect().top() > 100.0)
+        .filter(|heading| heading.rect().top() > register_headings)
         .map(|heading| {
             (
                 heading.rect().left(),

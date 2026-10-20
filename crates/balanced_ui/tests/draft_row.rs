@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The draft row at the bottom of each Register, which adds transactions.
 
 use balanced_core::Ledger;
@@ -15,7 +17,7 @@ fn app() -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
-            App::new(
+            App::on_ledger(
                 cc,
                 Localizer::for_tests(),
                 Ledger::stub(),
@@ -109,12 +111,12 @@ fn row_of(harness: &Harness<'static, App>, payee: &str) -> Vec<String> {
         .iter()
         .position(|cell| cell == payee)
         .expect("the Register lists the payee");
-    cells[payee - 2..payee + 5].to_vec()
+    cells[payee - 2..payee + 6].to_vec()
 }
 
 /// Fills the draft row, from the Date cell under the cursor, Tabbing from cell to
-/// cell. An empty `date` leaves the Date cell alone.
-fn fill_draft(harness: &mut Harness<'static, App>, date: &str, payee: &str, amount: &str) {
+/// cell, with `payment` in the Payment cell. An empty `date` leaves the Date cell alone.
+fn fill_draft(harness: &mut Harness<'static, App>, date: &str, payee: &str, payment: &str) {
     if !date.is_empty() {
         type_keys(harness, date);
     }
@@ -124,17 +126,17 @@ fn fill_draft(harness: &mut Harness<'static, App>, date: &str, payee: &str, amou
     type_text(harness, payee);
     press(harness, Modifiers::NONE, Key::Tab);
     type_text(harness, "Food & Dining:Groceries");
-    // Category, Memo, Amount.
+    // Category, Memo, Payment.
     press(harness, Modifiers::NONE, Key::Tab);
     press(harness, Modifiers::NONE, Key::Tab);
-    type_text(harness, amount);
+    type_text(harness, payment);
 }
 
 #[test]
 fn ctrl_enter_adds_the_draft_row_with_its_running_balance() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    fill_draft(&mut harness, "10/15/2026", "Corner Cafe", "-12");
+    fill_draft(&mut harness, "10/15/2026", "Corner Cafe", "12");
 
     press(&mut harness, Modifiers::COMMAND, Key::Enter);
 
@@ -146,8 +148,34 @@ fn ctrl_enter_adds_the_draft_row_with_its_running_balance() {
             "Corner Cafe",
             "Food & Dining:Groceries",
             "",
-            "-12.00",
-            "5,635.46",
+            "12.00",
+            "",
+            "5,630.21",
+        ]
+    );
+}
+
+#[test]
+fn an_amount_in_the_draft_rows_deposit_adds_money_in() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    fill_draft(&mut harness, "10/15/2026", "Corner Cafe", "");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    type_text(&mut harness, "12");
+
+    press(&mut harness, Modifiers::COMMAND, Key::Enter);
+
+    assert_eq!(
+        row_of(&harness, "Corner Cafe"),
+        [
+            "10/15/2026",
+            "",
+            "Corner Cafe",
+            "Food & Dining:Groceries",
+            "",
+            "",
+            "12.00",
+            "5,654.21",
         ]
     );
 }
@@ -156,7 +184,7 @@ fn ctrl_enter_adds_the_draft_row_with_its_running_balance() {
 fn enter_on_the_amount_adds_the_draft_row_and_leaves_the_cursor_on_an_empty_one() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    fill_draft(&mut harness, "10/15/2026", "Corner Cafe", "-12");
+    fill_draft(&mut harness, "10/15/2026", "Corner Cafe", "12");
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
@@ -166,10 +194,30 @@ fn enter_on_the_amount_adds_the_draft_row_and_leaves_the_cursor_on_an_empty_one(
 }
 
 #[test]
+fn enter_on_an_empty_payment_moves_on_to_deposit() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    fill_draft(&mut harness, "10/15/2026", "Corner Cafe", "");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert!(harness.query_by_label("Amount is missing").is_none());
+    let deposit = harness
+        .get_by_role_and_label(Role::ColumnHeader, "Deposit")
+        .rect()
+        .x_range();
+    let cursor_cell = harness
+        .query_all_by_role(Role::Cell)
+        .find(|cell| cell.accesskit_node().is_selected() == Some(true))
+        .expect("a cell holds the cell cursor");
+    assert!(deposit.contains(cursor_cell.rect().center().x));
+}
+
+#[test]
 fn a_row_with_no_date_is_refused_with_the_cursor_on_its_date() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    fill_draft(&mut harness, "", "Corner Cafe", "-12");
+    fill_draft(&mut harness, "", "Corner Cafe", "12");
 
     press(&mut harness, Modifiers::COMMAND, Key::Enter);
 
@@ -191,7 +239,7 @@ fn a_row_with_no_date_is_refused_with_the_cursor_on_its_date() {
 fn enter_on_the_amount_of_a_row_with_no_date_refuses_it_too() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    fill_draft(&mut harness, "", "Corner Cafe", "-12");
+    fill_draft(&mut harness, "", "Corner Cafe", "12");
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
@@ -203,7 +251,7 @@ fn ctrl_z_takes_a_posted_transaction_back_out() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     let before = cells(&harness);
-    fill_draft(&mut harness, "10/15/2026", "Corner Cafe", "-12");
+    fill_draft(&mut harness, "10/15/2026", "Corner Cafe", "12");
     press(&mut harness, Modifiers::COMMAND, Key::Enter);
     harness.get_by_role_and_label(Role::Cell, "Corner Cafe");
 
@@ -254,24 +302,27 @@ fn a_closed_account_has_no_draft_row() {
 
     open(&mut harness, "Old Checking");
 
-    // The opening balance and two transactions, of eight cells each.
-    assert_eq!(cells(&harness).len(), 3 * 8);
+    // The opening balance and two transactions, of nine cells each.
+    assert_eq!(cells(&harness).len(), 3 * 9);
 }
 
 #[test]
 fn enter_on_the_last_transactions_last_cell_goes_to_the_draft_row() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    // Trattoria Roma's amount, the last transaction's last cell.
-    harness.get_by_role_and_label(Role::Cell, "-64.80").click();
+    // The November rent's Deposit, the last transaction's last cell.
+    harness
+        .get_by_role_and_label(Role::Cell, "1,475.00")
+        .click();
     harness.run();
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
     let (label, top) = cursor(&harness);
     assert_eq!(label, "");
-    assert!(top > row_top(&harness, "Trattoria Roma"));
+    assert!(top > row_top(&harness, "November rent"));
 }
 
 #[test]

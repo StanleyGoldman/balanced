@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`DomainCommand`]s, the only way the ledger changes, and the [`DomainError`]s that
 //! reject them.
 
@@ -62,6 +64,11 @@ pub enum DomainCommand {
     EditTransaction {
         transaction: TransactionId,
         edit: TransactionEdit,
+    },
+    /// Flag a transaction to come back to, or take its flag off.
+    SetFlagged {
+        transaction: TransactionId,
+        flagged: bool,
     },
     /// Delete a transaction, from whichever account holds it.
     DeleteTransaction { transaction: TransactionId },

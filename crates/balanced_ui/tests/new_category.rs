@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Creating a category from a Register Category cell through the New Category Dialog,
 //! and the keys and placement every heavy Dialog shares, driven through the AccessKit
 //! tree the way a user drives it.
@@ -15,7 +17,7 @@ use icu_calendar::Date;
 /// The App on stub data, in the test locale, in a window of `size`.
 fn app(size: Vec2) -> Harness<'static, App> {
     let mut harness = Harness::builder().with_size(size).build_eframe(|cc| {
-        App::new(
+        App::on_ledger(
             cc,
             Localizer::for_tests(),
             Ledger::stub(),

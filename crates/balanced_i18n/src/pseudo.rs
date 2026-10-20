@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The `en-XA` pseudo-locale: `en-US` text, accented and lengthened, so untranslated
 //! strings, truncation and fixed widths show up on screen.
 

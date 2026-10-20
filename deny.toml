@@ -42,10 +42,20 @@ exceptions = [
   # `directories`, whose `dirs-sys` uses it. MPL-2.0 is file-level copyleft, so it doesn't
   # reach Balanced's own code.
   { crate = "option-ext", allow = ["MPL-2.0"] },
+  # Balanced's own crates, under its own license (ADR 0009). The expression is allowed crate
+  # by crate rather than in `allow`, so a GPL dependency still fails. A new workspace crate
+  # gets a line here.
+  { crate = "balanced", allow = ["GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"] },
+  { crate = "balanced_core", allow = ["GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"] },
+  { crate = "balanced_i18n", allow = ["GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"] },
+  { crate = "balanced_prototype_harness", allow = ["GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"] },
+  { crate = "balanced_store", allow = ["GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"] },
+  { crate = "balanced_ui", allow = ["GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"] },
+  { crate = "xtask", allow = ["GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"] },
 ]
 
 [licenses.private]
-ignore = true  # workspace crates are `publish = false` and carry no licence
+ignore = false  # check Balanced's own crates too, against the exceptions above
 
 [bans]
 multiple-versions = "deny"  # catches a split egui/accesskit graph before it becomes a trait error
@@ -103,6 +113,9 @@ skip = [
   { crate = "rustc-hash@1.1.0", reason = "naga 30 (via egui_kittest's wgpu renderer)" },
   { crate = "toml@0.5.11", reason = "find-crate 0.6 (via i18n-embed-fl) beside egui_kittest's toml 1" },
   { crate = "bitflags@1.3.2", reason = "core-graphics 0.23 (via winit 0.30, via eframe 0.36.2)" },
+  # rfd 0.17.2 (latest) waits on its XDG portal with pollster 0.4; eframe 0.36.2 and
+  # Balanced's own file picker use pollster 1. Drop this when rfd moves to pollster 1.
+  { crate = "pollster@0.4.0", reason = "rfd 0.17.2's xdg-portal backend" },
 ]
 
 [sources]

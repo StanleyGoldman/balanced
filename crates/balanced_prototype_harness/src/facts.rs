@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Window facts: one line about the window, shown at the foot of the bottom panel.
 //!
 //! [`crate::Harness`] samples them each frame; this module formats them.

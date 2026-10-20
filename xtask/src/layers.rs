@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! `cargo xtask layers`: workspace crates depend only on the crates below them.
 //!
 //! `ARCHITECTURE.md` draws the layers. [`LAYERS`] is the same rule in code, read

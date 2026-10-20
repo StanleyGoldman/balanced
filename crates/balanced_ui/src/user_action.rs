@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The user-action list: what the Menu bar and the keymap offer, each action's label
 //! and the [`AppCommand`] it sends.
 
 use balanced_i18n::Localizer;
 
 use crate::command::{AppCommand, DialogKind, StatusMessage};
+use crate::data_file::DataFilePicker;
 use crate::i18n::fl;
 
 /// Something the user can do from the Menu bar or with a Shortcut.
@@ -17,6 +20,10 @@ pub(crate) enum UserAction {
     NewTransaction,
     /// Delete the Register's selected transaction, once confirmed.
     DeleteTransaction,
+    /// Pick a path and create an empty data file there.
+    NewDataFile,
+    /// Pick a data file and open it.
+    OpenDataFile,
     /// Open the New Account wizard.
     NewAccount,
     /// Open Manage Accounts.
@@ -25,6 +32,17 @@ pub(crate) enum UserAction {
     /// Open the Preferences Dialog.
     Preferences,
     About,
+    /// Reconcile the open account. It reports that it isn't available yet.
+    Reconcile,
+    /// Open Manage Accounts from the open account's Account Actions menu.
+    EditAccountDetails,
+    /// Open the Preferences Dialog from the open account's Account Actions menu.
+    RegisterPreferences,
+    /// Print the open Register. It reports that it isn't available yet.
+    PrintRegister,
+    /// Export the open Register to a CSV file. It reports that it isn't available
+    /// yet.
+    ExportToCsv,
 }
 
 impl UserAction {
@@ -36,11 +54,18 @@ impl UserAction {
             Self::SwitchPane => fl!(i18n, "menu-view-switch-pane"),
             Self::NewTransaction => fl!(i18n, "menu-new-transaction"),
             Self::DeleteTransaction => fl!(i18n, "menu-delete-transaction"),
+            Self::NewDataFile => fl!(i18n, "menu-file-new-data-file"),
+            Self::OpenDataFile => fl!(i18n, "menu-file-open-data-file"),
             Self::NewAccount => fl!(i18n, "menu-file-new-account"),
             Self::ManageAccounts => fl!(i18n, "menu-tools-manage-accounts"),
             Self::Quit => fl!(i18n, "menu-file-quit"),
             Self::Preferences => fl!(i18n, "menu-tools-preferences"),
             Self::About => fl!(i18n, "menu-help-about"),
+            Self::Reconcile => fl!(i18n, "register-account-actions-reconcile"),
+            Self::EditAccountDetails => fl!(i18n, "register-account-actions-edit-account-details"),
+            Self::RegisterPreferences => fl!(i18n, "register-account-actions-register-preferences"),
+            Self::PrintRegister => fl!(i18n, "register-account-actions-print-register"),
+            Self::ExportToCsv => fl!(i18n, "register-account-actions-export-to-csv"),
         }
     }
 
@@ -52,11 +77,18 @@ impl UserAction {
             Self::NewTransaction
             | Self::DeleteTransaction
             | Self::SwitchPane
+            | Self::NewDataFile
+            | Self::OpenDataFile
             | Self::NewAccount
             | Self::ManageAccounts
             | Self::Quit
             | Self::Preferences
-            | Self::About => false,
+            | Self::About
+            | Self::Reconcile
+            | Self::EditAccountDetails
+            | Self::RegisterPreferences
+            | Self::PrintRegister
+            | Self::ExportToCsv => false,
         }
     }
 
@@ -68,11 +100,20 @@ impl UserAction {
             Self::SwitchPane => AppCommand::SwitchPane,
             Self::NewTransaction => AppCommand::GoToDraftRow,
             Self::DeleteTransaction => AppCommand::OpenDialog(DialogKind::DeleteTransaction),
+            Self::NewDataFile => AppCommand::ChooseDataFile(DataFilePicker::New),
+            Self::OpenDataFile => AppCommand::ChooseDataFile(DataFilePicker::Open),
             Self::NewAccount => AppCommand::OpenDialog(DialogKind::NewAccount),
-            Self::ManageAccounts => AppCommand::OpenDialog(DialogKind::ManageAccounts),
+            Self::ManageAccounts | Self::EditAccountDetails => {
+                AppCommand::OpenDialog(DialogKind::ManageAccounts)
+            }
             Self::Quit => AppCommand::Quit,
-            Self::Preferences => AppCommand::OpenDialog(DialogKind::Preferences),
+            Self::Preferences | Self::RegisterPreferences => {
+                AppCommand::OpenDialog(DialogKind::Preferences)
+            }
             Self::About => AppCommand::ShowStatus(StatusMessage::About),
+            Self::Reconcile | Self::PrintRegister | Self::ExportToCsv => {
+                AppCommand::ShowStatus(StatusMessage::NotAvailableYet)
+            }
         }
     }
 }

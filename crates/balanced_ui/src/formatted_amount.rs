@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`FormattedAmount`]: an amount with its text, formatted once for a view model.
 
 use balanced_core::{CurrencyCode, Money};

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 use std::path::PathBuf;
 
 /// The harness's command-line flags. Other arguments are ignored.

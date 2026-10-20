@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The segmented date field that edits a Register Date cell.
 //!
 //! The field shows the day, month and year in the formatting locale's order. Typing

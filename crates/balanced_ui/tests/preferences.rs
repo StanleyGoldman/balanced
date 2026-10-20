@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Tools → Preferences: each group's Preferences, their live preview, OK and Cancel,
 //! and the preferences file, driven through the AccessKit tree the way a user drives
 //! it.
@@ -18,7 +20,7 @@ use tempfile::TempDir;
 fn app_in(config_dir: &Path) -> Harness<'static, App> {
     let file = PreferencesFile::in_dir(config_dir);
     let mut harness = Harness::new_eframe(move |cc| {
-        App::new(
+        App::on_ledger(
             cc,
             Localizer::for_tests(),
             Ledger::stub(),
@@ -74,17 +76,18 @@ fn dark_then_ok_applies_the_dark_theme_and_writes_the_file() {
     assert!(is_dark(&harness));
     assert_eq!(
         file_text(&dir),
-        "version = 1\n\
+        "version = 2\n\
          scheme = \"dark\"\n\
          font_face = \"egui\"\n\
          dense_rows = false\n\
          monospace_money = false\n\
          coloured_negatives = true\n\
          alternating_rows = true\n\
+         today_divider = true\n\
          gridlines = \"off\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"flag\"]\n\
          hidden_register_columns = []\n"
     );
 }
@@ -166,17 +169,18 @@ fn the_other_display_preferences_apply_and_are_saved_on_ok() {
     assert_eq!(first_face, "Noto Sans");
     assert_eq!(
         file_text(&dir),
-        "version = 1\n\
+        "version = 2\n\
          scheme = \"light\"\n\
          font_face = \"noto_sans\"\n\
          dense_rows = true\n\
          monospace_money = true\n\
          coloured_negatives = false\n\
          alternating_rows = true\n\
+         today_divider = true\n\
          gridlines = \"off\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"flag\"]\n\
          hidden_register_columns = []\n"
     );
 }
@@ -225,24 +229,40 @@ fn the_register_preferences_are_saved_on_ok() {
     show_group(&mut harness, "Register");
 
     click(&mut harness, Role::CheckBox, "Alternating rows");
+    click(&mut harness, Role::CheckBox, "Today divider");
     click(&mut harness, Role::RadioButton, "Both");
     click(&mut harness, Role::Button, "OK");
 
     assert_eq!(
         file_text(&dir),
-        "version = 1\n\
+        "version = 2\n\
          scheme = \"light\"\n\
          font_face = \"egui\"\n\
          dense_rows = false\n\
          monospace_money = false\n\
          coloured_negatives = true\n\
          alternating_rows = false\n\
+         today_divider = false\n\
          gridlines = \"both\"\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
-         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"flag\"]\n\
          hidden_register_columns = []\n"
     );
+}
+
+#[test]
+fn turning_off_the_today_divider_hides_it() {
+    let dir = config_dir();
+    let mut harness = app_in(dir.path());
+    click(&mut harness, Role::Button, "Everyday Checking");
+    open_preferences(&mut harness);
+    show_group(&mut harness, "Register");
+
+    click(&mut harness, Role::CheckBox, "Today divider");
+    click(&mut harness, Role::Button, "OK");
+
+    assert!(!labels(&harness).contains(&"Today · 10/14/2026".to_owned()));
 }
 
 #[test]
@@ -258,17 +278,18 @@ fn the_account_bar_preferences_are_saved_on_ok() {
 
     assert_eq!(
         file_text(&dir),
-        "version = 1\n\
+        "version = 2\n\
          scheme = \"light\"\n\
          font_face = \"egui\"\n\
          dense_rows = false\n\
          monospace_money = false\n\
          coloured_negatives = true\n\
          alternating_rows = true\n\
+         today_divider = true\n\
          gridlines = \"off\"\n\
          group_totals = true\n\
          net_worth_placement = \"status_bar\"\n\
-         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"amount\", \"balance\"]\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"flag\"]\n\
          hidden_register_columns = []\n"
     );
 }
@@ -299,19 +320,19 @@ fn group_totals_show_on_the_headings_while_previewed() {
 
     click(&mut harness, Role::CheckBox, "Show group totals");
 
-    // Everyday Checking $5,647.46, Joint Checking $1,032.00, Household Checking
+    // Everyday Checking $4,071.81, Joint Checking $1,032.00, Household Checking
     // $500.00, Emergency Fund $12,000.00, the hidden Holiday Fund $800.00 and Visa
     // Rewards -$412.30. Closed Old Checking is left out.
     assert_eq!(
         heading_total(&harness, "Banking").as_deref(),
-        Some("$19,567.16")
+        Some("$17,991.51")
     );
 }
 
 /// How many times Net Worth's amount is shown inside the Status bar, and how many
 /// times anywhere.
 fn net_worth_in_status_bar_and_anywhere(harness: &Harness<'static, App>) -> (usize, usize) {
-    let amount = "$288,497.71";
+    let amount = "$286,922.06";
     let in_status_bar = harness
         .get_by_role(Role::Status)
         .query_all_by_role_and_label(Role::Label, amount)
@@ -342,6 +363,28 @@ fn net_worth_moves_to_the_status_bar() {
     click(&mut harness, Role::Button, "OK");
 
     assert_eq!(net_worth_in_status_bar_and_anywhere(&harness), (1, 1));
+}
+
+#[test]
+fn add_account_stays_at_the_foot_of_the_account_bar_with_net_worth_in_the_status_bar() {
+    let dir = config_dir();
+    let mut harness = app_in(dir.path());
+    open_preferences(&mut harness);
+    show_group(&mut harness, "Account bar");
+
+    click(&mut harness, Role::RadioButton, "In the Status bar");
+    click(&mut harness, Role::Button, "OK");
+
+    let add_account = harness
+        .get_by_role_and_label(Role::Button, "+ Add Account")
+        .rect();
+    let net_worth = harness
+        .get_by_role(Role::Status)
+        .get_by_role_and_label(Role::Label, "$286,922.06")
+        .rect();
+    // The Account bar's footer ends where the Status bar, and its Net Worth, begin.
+    let gap = net_worth.top() - add_account.bottom();
+    assert!((0.0..add_account.height()).contains(&gap), "{gap}");
 }
 
 #[test]

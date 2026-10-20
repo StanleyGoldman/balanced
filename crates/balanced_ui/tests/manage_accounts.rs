@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Managing accounts through the Manage Accounts Dialog, driven through the AccessKit
 //! tree the way a user drives it.
 
@@ -15,7 +17,7 @@ fn app() -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .build_eframe(|cc| {
-            App::new(
+            App::on_ledger(
                 cc,
                 Localizer::for_tests(),
                 Ledger::stub(),

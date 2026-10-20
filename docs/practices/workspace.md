@@ -14,6 +14,7 @@
 
   Without that table the crate silently loses every workspace lint.
 - Decide which layer the crate sits in, and in the same PR add it to `LAYERS` in `xtask/src/layers.rs` and update the codemap and invariants in `ARCHITECTURE.md`. `cargo xtask layers` fails on a crate missing from `LAYERS`.
+- A new crate's manifest takes `license.workspace = true`, and the crate gets an entry in `deny.toml`'s `[licenses] exceptions` allowing Balanced's license expression. That expression stays off the `allow` list, so no dependency can bring in GPL code unnoticed.
 - Start with few crates. Split a crate only when compile times or ownership demand it.
 
 ## Dependencies

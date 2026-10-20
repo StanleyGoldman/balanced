@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The modal helper: how every Dialog dims the Main window, takes Esc and Enter, keeps
 //! inside the window and gives focus back when it closes.
 
@@ -102,13 +104,14 @@ impl FocusReturn {
 }
 
 /// A light Dialog: no title bar, a fixed width, its body above a row with its default
-/// button and Cancel, and Back before them in a Dialog with steps. The default button
-/// has first focus.
+/// button and Cancel, and Back before them in a Dialog with steps. A notice has its
+/// default button alone. The default button has first focus.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LightDialog {
     id: Id,
     accept: String,
-    cancel: String,
+    /// Cancel's text, or `None` for a notice, which Esc still closes.
+    cancel: Option<String>,
     back: Option<String>,
     backdrop: Color32,
 }
@@ -120,7 +123,19 @@ impl LightDialog {
         Self {
             id,
             accept,
-            cancel,
+            cancel: Some(cancel),
+            back: None,
+            backdrop: theme.backdrop(),
+        }
+    }
+
+    /// A notice with `id`, whose one button reads `accept`, dimming the window in
+    /// `theme`'s backdrop.
+    pub(crate) fn notice(id: Id, accept: String, theme: &Theme) -> Self {
+        Self {
+            id,
+            accept,
+            cancel: None,
             back: None,
             backdrop: theme.backdrop(),
         }
@@ -170,11 +185,13 @@ impl LightDialog {
                 (accept, cancel, back)
             });
         let (accept, cancel, back) = &modal.inner;
-        if accept.clicked() || (modal.is_top_modal && enter_pressed(ctx, cancel, back.as_ref())) {
+        if accept.clicked()
+            || (modal.is_top_modal && enter_pressed(ctx, cancel.as_ref(), back.as_ref()))
+        {
             DialogOutcome::Accepted
         } else if back.as_ref().is_some_and(Response::clicked) {
             DialogOutcome::Back
-        } else if cancel.clicked() || modal.should_close() {
+        } else if cancel.as_ref().is_some_and(Response::clicked) || modal.should_close() {
             DialogOutcome::Cancelled
         } else {
             DialogOutcome::Open
@@ -299,7 +316,8 @@ impl HeavyDialog {
         let shown = heavy.show(ctx, |ui| {
             let height = ui.available_height();
             body_area(ui, height, |ui| body(ui, &mut dialog.form));
-            let (accept, cancel, _) = buttons(ui, accept, cancel, None);
+            let (accept, cancel, _) = buttons(ui, accept, Some(cancel), None);
+            let cancel = cancel.expect("a heavy Dialog has Cancel");
             let body_took_focus = ctx.memory(egui::Memory::focused) != focused_before;
             if first_frame && !body_took_focus {
                 accept.request_focus();
@@ -330,7 +348,7 @@ impl HeavyDialog {
                 && !popup_open
                 && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape))
         };
-        if accept.clicked() || (is_top && enter_pressed(ctx, &cancel, None)) {
+        if accept.clicked() || (is_top && enter_pressed(ctx, Some(&cancel), None)) {
             DialogOutcome::Accepted
         } else if cancel.clicked() || closed || backdrop.clicked() || escape() {
             DialogOutcome::Cancelled
@@ -403,18 +421,18 @@ fn body_area(ui: &mut egui::Ui, height: f32, body: impl FnOnce(&mut egui::Ui)) {
         .show(ui, body);
 }
 
-/// A Dialog's default button reading `accept`, its Cancel button reading `cancel` and
+/// A Dialog's default button reading `accept`, any Cancel button reading `cancel` and
 /// any Back button reading `back`, at the right edge of `ui`.
 fn buttons(
     ui: &mut egui::Ui,
     accept: String,
-    cancel: String,
+    cancel: Option<String>,
     back: Option<String>,
-) -> (Response, Response, Option<Response>) {
+) -> (Response, Option<Response>, Option<Response>) {
     // Right to left, so the default button sits left of Cancel at the right edge, and
     // Back left of the default button.
     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-        let cancel = ui.add(Button::new(cancel));
+        let cancel = cancel.map(|cancel| ui.add(Button::new(cancel)));
         let accept = ui.add(Button::new(accept));
         let back = back.map(|back| ui.add(Button::new(back)));
         (accept, cancel, back)
@@ -423,9 +441,10 @@ fn buttons(
 }
 
 /// Whether Enter pressed a Dialog's default button: Enter presses it unless focus is
-/// on Cancel or `back`, which Enter presses instead.
-fn enter_pressed(ctx: &egui::Context, cancel: &Response, back: Option<&Response>) -> bool {
-    let other_button_focused = cancel.has_focus() || back.is_some_and(Response::has_focus);
+/// on `cancel` or `back`, which Enter presses instead.
+fn enter_pressed(ctx: &egui::Context, cancel: Option<&Response>, back: Option<&Response>) -> bool {
+    let other_button_focused =
+        cancel.is_some_and(Response::has_focus) || back.is_some_and(Response::has_focus);
     !other_button_focused && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter))
 }
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Categories: what money was spent on or came from, in a tree.
 
 /// Identifies a category for as long as it exists. Ids are never reused.

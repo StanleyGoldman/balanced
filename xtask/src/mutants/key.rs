@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! A mutant's identity across runs, stored in its issue's body.
 
 use anyhow::{Context as _, Result, bail};

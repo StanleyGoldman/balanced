@@ -8,3 +8,6 @@ retries = 0
 # Flag a test as slow after 60 s and kill it after 3 minutes, so a hung test can't
 # eat the CI step's timeout.
 slow-timeout = { period = "60s", terminate-after = 3 }
+# Each run's results as JUnit, in target/nextest/default/junit.xml, which CI's
+# `test` job turns into annotations and a job summary when a test fails.
+junit = { path = "junit.xml" }

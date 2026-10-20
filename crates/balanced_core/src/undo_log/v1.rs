@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Version 1 of the undo log's wire format: a `DomainCommand` as JSON. The format is part
 //! of the data file's schema version. Adding a Command or an optional field keeps it;
 //! any other change needs a migration that clears the log (ADR 0007).
@@ -50,6 +52,10 @@ pub(crate) enum Command {
     EditTransaction {
         transaction: u32,
         edit: TransactionEdit,
+    },
+    SetFlagged {
+        transaction: u32,
+        flagged: bool,
     },
     DeleteTransaction {
         transaction: u32,
@@ -120,12 +126,15 @@ pub(crate) struct Category {
     pub(crate) parent: Option<u32>,
 }
 
-/// A transaction with its id: a [`NewTransaction`]'s fields after `id`, in one object.
+/// A transaction with its id: a [`NewTransaction`]'s fields after `id`, in one object,
+/// then `flagged`, which an unflagged transaction leaves out.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Transaction {
     pub(crate) id: u32,
     #[serde(flatten)]
-    pub(crate) transaction: NewTransaction,
+    pub(crate) fields: NewTransaction,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) flagged: bool,
 }
 
 /// A transaction to post, which the ledger gives an id. A split's amount is the sum of

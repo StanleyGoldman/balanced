@@ -1,0 +1,33 @@
+# An account's balance at the end of each date it has a transaction on: every
+# transaction dated that day or earlier counted, splits included. Dates with no
+# transaction, and accounts with none, have no row.
+
+statement ok
+INSERT INTO account (id, name, kind, position, hidden, closed) VALUES
+    (0, 'Checking', 'checking', 0, 0, 0),
+    (1, 'Savings', 'savings', 0, 0, 0),
+    (2, 'Empty', 'savings', 1, 0, 0)
+
+statement ok
+INSERT INTO category (id, parent_id, name) VALUES (0, NULL, 'Groceries')
+
+statement ok
+INSERT INTO "transaction" (id, account_id, date, number, payee, memo, allocation, amount, category_id) VALUES
+    (0, 0, '2026-01-01', NULL, '', '', 'opening_balance', 1000, NULL),
+    (1, 0, '2026-01-03', NULL, 'Grocer', '', 'category', -250, 0),
+    (2, 0, '2026-01-03', NULL, 'Market', '', 'split', NULL, NULL),
+    (3, 0, '2026-02-01', NULL, 'Grocer', '', 'category', -100, 0),
+    (4, 1, '2026-01-02', NULL, '', '', 'opening_balance', 40, NULL)
+
+statement ok
+INSERT INTO split_line (transaction_id, position, category_id, memo, amount) VALUES
+    (2, 0, 0, '', -5),
+    (2, 1, 0, '', -6)
+
+query ITI rowsort
+SELECT account_id, date, balance FROM daily_balance
+----
+0 2026-01-01 1000
+0 2026-01-03 739
+0 2026-02-01 639
+1 2026-01-02 40

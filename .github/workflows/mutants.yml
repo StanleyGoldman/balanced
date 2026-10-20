@@ -1,0 +1,126 @@
+# Mutation testing after the merge, never as a pull request gate (ADR 0002). A
+# missed mutant becomes a GitHub issue labelled `mutant`, which later runs
+# comment on or close; it never turns a run red. A run that couldn't finish, or
+# couldn't update its issues, is red.
+#
+# Two runs, each started beside `ci` rather than after it, so a merge's
+# mutants don't wait on clippy and the image snapshots. After a push to `main`,
+# `cargo xtask mutants-landed` tests the mutants in the diff the pull request
+# that landed it brought in. Nightly, `cargo xtask mutants-shard <n>` tests one
+# of seven round-robin shards of every mutant on `main`, so all of it is tested
+# once a week. Neither waits for `ci`: cargo-mutants first runs the unmutated
+# tests of the crates in scope, and a failure there fails the run before any
+# issue changes, since on a broken commit every mutant would look caught and
+# close its issue.
+#
+# No path filter, so a prose-only merge runs too: it finds no mutants, tests
+# nothing and still closes the issues of mutants no longer generated.
+#
+# By hand, `gh workflow run mutants.yml -f task=mutants-shard -f shard=3` (or
+# `-f task=mutants-landed`) runs one on `main`'s tip.
+
+name: mutants
+
+# The run's title in the Actions list: `mutants-shard 3/7`, or
+# `mutants-landed · <commit title>`, so it reads apart from `ci`'s run of the
+# same commit.
+run-name: >-
+  ${{ (github.event_name == 'schedule' || inputs.task == 'mutants-shard')
+    && format('mutants-shard {0}/7', github.event_name == 'schedule'
+      && fromJSON('{"0 7 * * 0":"0","0 7 * * 1":"1","0 7 * * 2":"2","0 7 * * 3":"3","0 7 * * 4":"4","0 7 * * 5":"5","0 7 * * 6":"6"}')[github.event.schedule] || inputs.shard)
+    || format('mutants-landed · {0}', github.event.head_commit.message || github.sha) }}
+
+# One schedule per weekday, and a night's shard is its weekday's number, Sunday
+# 0 to Saturday 6. `run-name` and the shard step each look it up in the same
+# schedule-to-shard table; a schedule changed here changes in both. 07:00 UTC is 02:00
+# in New York in winter, 03:00 in summer. GitHub schedules in UTC only, and may
+# start a scheduled run late.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 7 * * 0"
+    - cron: "0 7 * * 1"
+    - cron: "0 7 * * 2"
+    - cron: "0 7 * * 3"
+    - cron: "0 7 * * 4"
+    - cron: "0 7 * * 5"
+    - cron: "0 7 * * 6"
+  workflow_dispatch:
+    inputs:
+      task:
+        description: The xtask task to run
+        type: choice
+        options: [mutants-landed, mutants-shard]
+      shard:
+        description: The shard, for mutants-shard
+        type: choice
+        options: ["0", "1", "2", "3", "4", "5", "6"]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+# One run at a time, so two runs never edit one issue at once. GitHub keeps
+# only the newest waiting run and cancels any older one, so a merge that lands
+# while two runs are queued loses its landed run; the weekly round of shards
+# still tests those mutants.
+concurrency:
+  group: mutants
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # `ci`'s caching (ADR 0003); the notes are in `ci.yml`. This applies to the
+  # xtask build and the warm-up, which builds the mutated crates' tests before
+  # cargo-mutants starts, so their dependencies come from the shared sccache.
+  # cargo-mutants itself runs with incremental on and sccache off; the xtask
+  # sets that for it.
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "on"
+  ACTIONS_CACHE_SERVICE_V2: "on"
+  SCCACHE_IDLE_TIMEOUT: "0"
+  CARGO_INCREMENTAL: "0"
+  CI_CARGO_HOME: ${{ github.workspace }}/../cargo
+  # Caps the container, with no swap, so a mutant that allocates without end is
+  # killed before it takes down the runner.
+  CI_MEMORY: 8g
+  # Linked from every issue update, so an issue names the run that wrote it.
+  CI_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+jobs:
+  mutants:
+    runs-on: ubuntu-26.04
+    steps:
+      # Full history, which `mutants-landed` diffs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/ci-setup
+
+      # The token goes to these two steps alone, so no action in the setup
+      # steps can read a token that writes issues.
+      - name: cargo xtask mutants-landed
+        if: github.event_name == 'push' || inputs.task == 'mutants-landed'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/in-image.sh cargo xtask mutants-landed
+      - name: cargo xtask mutants-shard
+        if: github.event_name == 'schedule' || inputs.task == 'mutants-shard'
+        env:
+          SHARD: >-
+            ${{ github.event_name == 'schedule'
+              && fromJSON('{"0 7 * * 0":"0","0 7 * * 1":"1","0 7 * * 2":"2","0 7 * * 3":"3","0 7 * * 4":"4","0 7 * * 5":"5","0 7 * * 6":"6"}')[github.event.schedule] || inputs.shard }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/in-image.sh cargo xtask mutants-shard "$SHARD"
+
+      # The issues the run opened, commented on and closed, which the task
+      # writes once it has planned them.
+      - name: summarize issue updates
+        if: always() && hashFiles('target/mutants-summary.md') != ''
+        run: cat target/mutants-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: sccache summary
+        if: always()
+        run: .github/sccache-summary.sh

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The undo log's entries: each a [`DomainCommand`] as JSON, through the wire types in
 //! [`v1`], which `DomainCommand` itself doesn't depend on (ADR 0007).
 
@@ -107,6 +109,13 @@ fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
             transaction: transaction.raw(),
             edit: edit_to_wire(edit)?,
         },
+        DomainCommand::SetFlagged {
+            transaction,
+            flagged,
+        } => v1::Command::SetFlagged {
+            transaction: transaction.raw(),
+            flagged: *flagged,
+        },
         DomainCommand::DeleteTransaction { transaction } => v1::Command::DeleteTransaction {
             transaction: transaction.raw(),
         },
@@ -185,7 +194,7 @@ fn transaction_to_wire(transaction: &Transaction) -> Result<v1::Transaction, Wri
     let amount = || minor_units(transaction.amount());
     Ok(v1::Transaction {
         id: transaction.id().raw(),
-        transaction: v1::NewTransaction {
+        fields: v1::NewTransaction {
             date: date_text(transaction.date()),
             number: transaction.number().map(str::to_owned),
             payee: transaction.payee().to_owned(),
@@ -199,6 +208,7 @@ fn transaction_to_wire(transaction: &Transaction) -> Result<v1::Transaction, Wri
                 Allocation::Split(lines) => split_to_wire(lines)?,
             },
         },
+        flagged: transaction.is_flagged(),
     })
 }
 
@@ -313,6 +323,13 @@ fn from_wire(
             transaction: TransactionId::new(transaction),
             edit: edit_from_wire(edit, currency)?,
         },
+        v1::Command::SetFlagged {
+            transaction,
+            flagged,
+        } => DomainCommand::SetFlagged {
+            transaction: TransactionId::new(transaction),
+            flagged,
+        },
         v1::Command::DeleteTransaction { transaction } => DomainCommand::DeleteTransaction {
             transaction: TransactionId::new(transaction),
         },
@@ -394,10 +411,9 @@ fn transaction_from_wire(
     transaction: v1::Transaction,
     currency: CurrencyCode,
 ) -> Result<Transaction, UndoEntryError> {
-    Ok(
-        new_transaction_from_wire(transaction.transaction, currency)?
-            .into_transaction(TransactionId::new(transaction.id), currency)?,
-    )
+    Ok(new_transaction_from_wire(transaction.fields, currency)?
+        .into_transaction(TransactionId::new(transaction.id), currency)?
+        .with_flag(transaction.flagged))
 }
 
 fn split_from_wire(lines: Vec<v1::SplitLine>, currency: CurrencyCode) -> Vec<SplitLine> {
@@ -602,11 +618,32 @@ mod tests {
             edit(TransactionEdit::Memo("Weekly shop".to_owned())),
             edit(TransactionEdit::Category(CategoryId::new(6))),
             edit(TransactionEdit::Amount(usd(dec!(-90.00)))),
+            DomainCommand::SetFlagged {
+                transaction,
+                flagged: true,
+            },
+            DomainCommand::SetFlagged {
+                transaction,
+                flagged: false,
+            },
             DomainCommand::DeleteTransaction { transaction },
             DomainCommand::RestoreTransaction {
                 account,
-                transaction: restored,
+                transaction: restored.clone(),
             },
+            DomainCommand::RestoreTransaction {
+                account,
+                transaction: restored.with_flag(true),
+            },
+        ]
+        .into_iter()
+        .chain(category_commands())
+        .collect()
+    }
+
+    /// One of every category Command, every field set and unset.
+    fn category_commands() -> [DomainCommand; 4] {
+        [
             DomainCommand::CreateCategory {
                 name: "Fuel".to_owned(),
                 parent: Some(CategoryId::new(5)),
@@ -639,11 +676,12 @@ mod tests {
             DomainCommand::Compound(_) => 7,
             DomainCommand::PostTransaction { .. } => 8,
             DomainCommand::EditTransaction { .. } => 9,
-            DomainCommand::DeleteTransaction { .. } => 10,
-            DomainCommand::RestoreTransaction { .. } => 11,
-            DomainCommand::CreateCategory { .. } => 12,
-            DomainCommand::DeleteCategory { .. } => 13,
-            DomainCommand::RestoreCategory { .. } => 14,
+            DomainCommand::SetFlagged { .. } => 10,
+            DomainCommand::DeleteTransaction { .. } => 11,
+            DomainCommand::RestoreTransaction { .. } => 12,
+            DomainCommand::CreateCategory { .. } => 13,
+            DomainCommand::DeleteCategory { .. } => 14,
+            DomainCommand::RestoreCategory { .. } => 15,
         }
     }
 
@@ -652,7 +690,7 @@ mod tests {
         let mut seen: Vec<usize> = every_command().iter().map(variant).collect();
         seen.dedup();
 
-        assert_eq!(seen, (0..15).collect::<Vec<_>>());
+        assert_eq!(seen, (0..16).collect::<Vec<_>>());
     }
 
     #[test]

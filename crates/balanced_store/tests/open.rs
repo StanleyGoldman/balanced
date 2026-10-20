@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Opening a data file: which files it refuses, that it never writes to a refused file,
 //! and the lock it holds while open.
 

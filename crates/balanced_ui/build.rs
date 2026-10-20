@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Rebuilds this crate whenever a message file changes, so `fl!` checks every id and
 //! argument against the current `en-US` file.
 

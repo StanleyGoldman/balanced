@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! A [`Ledger`] over a data file: creating and opening one, and converting between the
 //! domain's types and the store's rows.
 
@@ -9,7 +11,7 @@ use std::sync::Arc;
 use balanced_store::OpenError as StoreOpenError;
 use balanced_store::{
     AccountRow, AllocationRow, CategoryRow, Contents, SplitLineRow, Store, StoreError,
-    TransactionRow,
+    TransactionRow, UpgradeError,
 };
 use icu_calendar::{Date, Iso};
 use rust_decimal::Decimal;
@@ -42,6 +44,18 @@ pub enum OpenError {
     /// Another connection, in this program or another, holds the file.
     #[error("the data file is open elsewhere")]
     Locked,
+    /// The file is from an older Balanced, and the backup taken before upgrading it
+    /// couldn't be written, so it wasn't upgraded.
+    #[error("the data file couldn't be backed up before its upgrade")]
+    BackupFailed(#[source] StoreError),
+    /// Upgrading the file from an older Balanced failed, so it was left at its old
+    /// version. The backup taken first stays at `backup`.
+    #[error("the data file couldn't be upgraded; its backup is at {backup:?}")]
+    UpgradeFailed {
+        backup: PathBuf,
+        #[source]
+        source: UpgradeError,
+    },
     #[error("the data file couldn't be read or written")]
     Store(#[from] StoreError),
     #[error("the data file's currency isn't one Balanced knows")]
@@ -67,6 +81,10 @@ impl From<StoreOpenError> for OpenError {
             StoreOpenError::Damaged(damage) => Self::Damaged(Damage::File(damage)),
             StoreOpenError::Newer { version, latest } => Self::Newer { version, latest },
             StoreOpenError::Locked => Self::Locked,
+            StoreOpenError::BackupFailed(error) => Self::BackupFailed(error),
+            StoreOpenError::UpgradeFailed { backup, source } => {
+                Self::UpgradeFailed { backup, source }
+            }
             StoreOpenError::Store(error) => Self::Store(error),
         }
     }
@@ -155,6 +173,18 @@ impl Ledger {
     /// file, is damaged, comes from a newer Balanced, or is open elsewhere.
     pub fn open(path: &Path) -> Result<Self, OpenError> {
         let store = Store::open(path)?;
+        let contents = store.read()?;
+        Self::load(store, contents)
+    }
+
+    /// [`Self::open`] with `migrations` in place of Balanced's own, for tests that upgrade
+    /// a file through steps of their own.
+    #[cfg(feature = "test-support")]
+    pub fn open_with_migrations(
+        path: &Path,
+        migrations: &[balanced_store::Migration],
+    ) -> Result<Self, OpenError> {
+        let store = Store::open_with_migrations(path, migrations)?;
         let contents = store.read()?;
         Self::load(store, contents)
     }
@@ -354,7 +384,8 @@ fn transaction(
         row.memo,
         allocation,
         amount,
-    ))
+    )
+    .with_flag(row.flagged))
 }
 
 /// The row for `account`, at `position` in its kind.
@@ -413,6 +444,7 @@ pub(crate) fn transaction_row(
         payee: transaction.payee().to_owned(),
         memo: transaction.memo().to_owned(),
         allocation,
+        flagged: transaction.is_flagged(),
     })
 }
 

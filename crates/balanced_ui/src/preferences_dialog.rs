@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The Preferences Dialog's form: a draft of the Preferences, edited one group at a
 //! time. The App shows the draft while the Dialog is open.
 
@@ -125,6 +127,10 @@ impl PreferencesForm {
         ui.checkbox(
             &mut draft.alternating_rows,
             fl!(i18n, "dialog-preferences-alternating-rows"),
+        );
+        ui.checkbox(
+            &mut draft.today_divider,
+            fl!(i18n, "dialog-preferences-today-divider"),
         );
         ui.label(fl!(i18n, "dialog-preferences-gridlines"));
         ui.horizontal(|ui| {

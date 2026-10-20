@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! The text-language fallback chain.
 
 use icu_locale::LanguageIdentifier;

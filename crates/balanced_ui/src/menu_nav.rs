@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Keyboard navigation of the Menu bar. egui's menus have none, so it is built on top
 //! of them. F10 or a lone Alt opens the first menu and puts focus on its first enabled
 //! item. While a menu is open, ← and → open the menu beside it, and ↑ and ↓ move focus

@@ -7,6 +7,7 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.99"
 publish = false
+license = "GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception"
 
 [workspace.dependencies]
 anyhow = "1.0.104"
@@ -37,6 +38,9 @@ icu_provider = "2.3.1"
 insta = "1.49.0"
 iso_currency = "0.7.1"
 jiff = "0.2.38"
+# Default features: the XDG desktop portal on Linux, so no GTK is linked.
+rfd = "0.17.2"
+pollster = "1.0.1"
 rust-embed = "8.13.0"
 # No `serde` feature: the data file and its undo log hold amounts as integer minor units.
 # Never `serde-float`.

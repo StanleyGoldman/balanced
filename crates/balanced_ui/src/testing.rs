@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! Support for tests: the App drawn by the lavapipe software rasterizer, and the
 //! snapshot check with the project thresholds (see `docs/practices/testing.md`).
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use balanced_core::Ledger;
+use balanced_core::{AccountKind, CurrencyCode, DomainCommand, Ledger, Money};
 use balanced_i18n::Localizer;
 use eframe::egui::{self, vec2};
 use egui_kittest::{Harness, SnapshotOptions};
@@ -11,6 +14,7 @@ use egui_wgpu::{WgpuSetup, WgpuSetupCreateNew, wgpu};
 
 use icu_calendar::Date;
 
+use crate::command::AppCommand;
 use crate::preferences::{Preferences, Scheme};
 use crate::{App, Clock, PreferencesFile};
 
@@ -46,8 +50,49 @@ pub fn app(scheme: egui::Theme) -> Harness<'static, App> {
         .with_theme(scheme)
         .wgpu_setup(lavapipe())
         .build_eframe(move |cc| {
-            App::new(cc, Localizer::for_tests(), Ledger::stub(), clock(), preferences_file)
+            App::on_ledger(cc, Localizer::for_tests(), Ledger::stub(), clock(), preferences_file)
         })
+}
+
+/// Sends the Command that creates a data file at `path` and switches to it, as File →
+/// New Data File… does once the native picker returns `path`.
+pub fn new_data_file(harness: &Harness<'_, App>, path: &Path) {
+    harness
+        .state()
+        .send(AppCommand::NewDataFile(path.to_owned()));
+}
+
+/// Sends the Command that opens the data file at `path` and switches to it, as File →
+/// Open Data File… does once the native picker returns `path`.
+pub fn open_data_file(harness: &Harness<'_, App>, path: &Path) {
+    harness
+        .state()
+        .send(AppCommand::OpenDataFile(path.to_owned()));
+}
+
+/// A closed data file named `name` in `dir`, in US dollars, holding checking accounts
+/// named `accounts`, created in that order, so the last one is the change Undo
+/// reverses first.
+///
+/// # Panics
+///
+/// If `dir` can't take a new data file.
+pub fn data_file(dir: &Path, name: &str, accounts: &[&str]) -> PathBuf {
+    let path = dir.join(name);
+    let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
+    let mut ledger = Ledger::create(&path, usd).expect("a new path takes a data file");
+    for account in accounts {
+        ledger
+            .apply(DomainCommand::CreateAccount {
+                name: (*account).to_owned(),
+                kind: AccountKind::Checking,
+                opened: Date::try_new_iso(2026, 9, 1).expect("1 September 2026 is a date"),
+                opening_balance: Money::new("10.00".parse().expect("10.00 is a number"), usd)
+                    .expect("10.00 has two decimal places"),
+            })
+            .expect("a new file takes a new account");
+    }
+    path
 }
 
 /// A clock stopped on 14 October 2026.

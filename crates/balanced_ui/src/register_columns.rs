@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
+
 //! [`RegisterColumn`], a column of the Register, and [`RegisterColumns`], which of them
 //! every Register shows and in what order.
 
@@ -11,8 +13,13 @@ pub(crate) enum RegisterColumn {
     Payee,
     Category,
     Memo,
-    Amount,
+    /// Money out, unsigned. Its heading depends on the account's kind.
+    Payment,
+    /// Money in, unsigned. Its heading depends on the account's kind.
+    Deposit,
     Balance,
+    /// Whether the transaction is flagged, which clicking the cell changes.
+    Flag,
     /// The untitled column holding each row's Actions menu.
     Actions,
 }
@@ -20,14 +27,16 @@ pub(crate) enum RegisterColumn {
 impl RegisterColumn {
     /// Every column, in the default order. A new column goes here as well as in the
     /// matches below, which the compiler checks; it can't check this list.
-    pub(crate) const ALL: [Self; 8] = [
+    pub(crate) const ALL: [Self; 10] = [
         Self::Date,
         Self::Number,
         Self::Payee,
         Self::Category,
         Self::Memo,
-        Self::Amount,
+        Self::Payment,
+        Self::Deposit,
         Self::Balance,
+        Self::Flag,
         Self::Actions,
     ];
 
@@ -40,8 +49,10 @@ impl RegisterColumn {
             Self::Payee => "payee",
             Self::Category => "category",
             Self::Memo => "memo",
-            Self::Amount => "amount",
+            Self::Payment => "payment",
+            Self::Deposit => "deposit",
             Self::Balance => "balance",
+            Self::Flag => "flag",
             Self::Actions => "actions",
         }
     }
@@ -52,12 +63,12 @@ impl RegisterColumn {
     }
 
     /// Whether the column chooser can hide the column. A new transaction needs a date,
-    /// a category and an amount, so those columns stay, and the Actions column stays
-    /// last.
+    /// a category and an amount, so those columns stay (an amount goes in Payment or
+    /// Deposit), and the Actions column stays last.
     pub(crate) fn can_hide(self) -> bool {
         match self {
-            Self::Number | Self::Payee | Self::Memo | Self::Balance => true,
-            Self::Date | Self::Category | Self::Amount | Self::Actions => false,
+            Self::Number | Self::Payee | Self::Memo | Self::Balance | Self::Flag => true,
+            Self::Date | Self::Category | Self::Payment | Self::Deposit | Self::Actions => false,
         }
     }
 
