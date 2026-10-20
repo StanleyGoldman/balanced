@@ -83,6 +83,7 @@ CI is GitHub Actions (`.github/workflows/`), read and driven with `gh run` and `
 ### Implementation
 
 - Assign the ticket to the user as an `/implement` run starts (`gh issue edit <n> --add-assignee @me`), so the tracker shows it is being worked.
+- Before branching, look for an earlier run on the ticket: `gh pr list --search "<n> in:body" --state open` and `git worktree list`. If one exists, resume its worktree and PR. A run can stop mid-merge, with conflicts resolved but not yet staged.
 - Start an `/implement` run with `git fetch origin main` and branch the work from `origin/main`: a worktree can predate merged blockers, so their code looks missing.
 - Then check that everything the ticket reuses (a field, a clock, a Dialog) is already built. When one is still an open ticket that isn't among its blockers, ask the user whether to add it as a blocker or build an interim stand-in.
 - A ticket naming quicken_clone code as its reference means `StanleyGoldman/quicken_clone`, an archived private repo with no local checkout. Read a file with `gh api repos/StanleyGoldman/quicken_clone/contents/<path> -H 'Accept: application/vnd.github.raw'`. It used clap and other crates Balanced lacks, so port its behaviour and tests into the local idiom.
