@@ -517,6 +517,25 @@ fn an_undeleted_cleared_transaction_is_cleared_after_a_reopen() {
 }
 
 #[test]
+fn the_cleared_balance_is_the_same_after_a_reopen() {
+    let (_dir, path, mut ledger) = new_file();
+    let (everyday, food) = everyday_and_food(&mut ledger);
+    let household = create_category(&mut ledger, "Household");
+    let bakery = post(&mut ledger, everyday, 2, "Bakery", food, "-4.10");
+    post(&mut ledger, everyday, 3, "Shell", food, "-48.20");
+    let costco = post_new(&mut ledger, everyday, costco(food, household));
+    mark(&mut ledger, bakery, ClearedStatus::Cleared);
+    mark(&mut ledger, costco, ClearedStatus::Reconciled);
+
+    let reopened = reopen(ledger, &path);
+
+    // The Reconciled opening balance, the Cleared bakery and the whole Reconciled split.
+    let view = reopened.snapshot();
+    let summary = view.account(everyday).expect("the account is still there");
+    assert_eq!(summary.cleared_balance(), usd("-200.37"));
+}
+
+#[test]
 fn an_undeleted_flagged_transaction_is_flagged_after_a_reopen() {
     assert_reopens_as_changed(|ledger| {
         let (everyday, food) = everyday_and_food(ledger);

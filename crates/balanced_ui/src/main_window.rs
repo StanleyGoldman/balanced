@@ -872,10 +872,10 @@ impl MainWindow {
         self.close_dialog(ctx, |window| &mut window.unreconcile);
     }
 
-    /// The open account's name above its Register, with its Current and Ending balances,
-    /// the + Transaction button and the Account Actions menu on the right. A closed
-    /// account's header says it is read-only, and + Transaction is disabled. The name
-    /// clips when the Main view is narrow.
+    /// The open account's name above its Register, with its Current, Ending and Cleared
+    /// balances, the + Transaction button and the Account Actions menu on the right. A
+    /// closed account's header says it is read-only, and + Transaction is disabled. The
+    /// name clips when the Main view is narrow.
     #[expect(
         clippy::too_many_arguments,
         reason = "the Account Actions menu items need `view` and `commands` beside the header's own drawing context"
@@ -891,9 +891,10 @@ impl MainWindow {
         accounts: &AccountsModel,
     ) {
         let account = summary.account();
-        let missing = "the model formats both balances of every account in its snapshot";
+        let missing = "the model formats every balance of every account in its snapshot";
         let current = accounts.current_balance(account.id()).expect(missing);
         let ending = accounts.ending_balance(account.id()).expect(missing);
+        let cleared = accounts.cleared_balance(account.id()).expect(missing);
         let closed = account.is_closed();
         Sides::new().shrink_left().truncate().show(
             ui,
@@ -922,6 +923,10 @@ impl MainWindow {
                     commands.send(AppCommand::GoToDraftRow);
                 }
                 for (message, balance) in [
+                    (
+                        fl!(i18n, "register-cleared-balance", amount = cleared.text()),
+                        cleared,
+                    ),
                     (
                         fl!(i18n, "register-ending-balance", amount = ending.text()),
                         ending,

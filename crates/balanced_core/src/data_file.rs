@@ -238,7 +238,12 @@ impl Ledger {
                     },
                 );
                 let register = registers.remove(&row.id).unwrap_or_default();
-                let summary = AccountSummary::loaded(account, register, money(stored.balance));
+                let summary = AccountSummary::loaded(
+                    account,
+                    register,
+                    money(stored.balance),
+                    money(stored.cleared_balance),
+                );
                 Ok(((kind, row.position), summary))
             })
             .collect::<Result<Vec<_>, OpenError>>()?;

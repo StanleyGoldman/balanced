@@ -115,6 +115,8 @@ pub(crate) struct AccountsModel {
     ending_balances: HashMap<AccountId, FormattedAmount>,
     /// Each account's balance as of today.
     current_balances: HashMap<AccountId, FormattedAmount>,
+    /// Each account's Cleared balance.
+    cleared_balances: HashMap<AccountId, FormattedAmount>,
     /// Each section's total, for the sections whose sum doesn't overflow.
     totals: HashMap<Section, FormattedAmount>,
     net_worth: FormattedAmount,
@@ -182,6 +184,7 @@ impl AccountsModel {
             sections,
             ending_balances: formatted(&AccountSummary::balance),
             current_balances: formatted(&|summary| summary.balance_on(today)),
+            cleared_balances: formatted(&AccountSummary::cleared_balance),
             totals: Section::ALL
                 .into_iter()
                 .filter_map(|section| {
@@ -234,6 +237,12 @@ impl AccountsModel {
     /// counted, or `None` when the snapshot lacks it.
     pub(crate) fn current_balance(&self, id: AccountId) -> Option<&FormattedAmount> {
         self.current_balances.get(&id)
+    }
+
+    /// The Cleared balance of account `id`, its Cleared and Reconciled transactions
+    /// counted whatever their date, or `None` when the snapshot lacks it.
+    pub(crate) fn cleared_balance(&self, id: AccountId) -> Option<&FormattedAmount> {
+        self.cleared_balances.get(&id)
     }
 
     /// The sum of the balances of `section`'s accounts, hidden accounts included, or

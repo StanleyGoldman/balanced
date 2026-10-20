@@ -296,6 +296,28 @@ fn the_context_header_shows_the_current_balance_without_future_rows_and_the_endi
     );
 }
 
+/// The text of the context header's Cleared figure, the one Label starting `Cleared `.
+fn cleared_figure(harness: &Harness<'static, App>) -> String {
+    let figures: Vec<String> = harness
+        .query_all_by_role(Role::Label)
+        .filter_map(|label| label.accesskit_node().value())
+        .filter(|value| value.starts_with("Cleared "))
+        .collect();
+    let [figure] = <[String; 1]>::try_from(figures).expect("the header shows one Cleared figure");
+    figure
+}
+
+#[test]
+fn the_context_header_shows_the_cleared_balance_counting_cleared_and_reconciled_rows() {
+    let mut harness = app();
+
+    open_account(&mut harness, "Everyday Checking");
+
+    // The Reconciled opening balance, salary and rent, then Bean There, the Costco split
+    // and the Northside Water payment scheduled for 20 October, which are Cleared.
+    assert_eq!(cleared_figure(&harness), "Cleared $2,643.58");
+}
+
 #[test]
 fn an_account_with_no_future_rows_shows_both_balances_equal() {
     let mut harness = app();
@@ -362,10 +384,11 @@ fn a_negative_balance_in_the_context_header_takes_the_negative_colour() {
     open_account(&mut harness, "Visa Rewards");
 
     let negative = harness.ctx.global_style().visuals.error_fg_color;
-    // In the Account bar, then as Ending and as Current.
+    // In the Account bar, then as Cleared, Ending and Current: the opening balance is
+    // Reconciled.
     assert_eq!(
         amount_colours(&harness, "-$412.30"),
-        [negative, negative, negative]
+        [negative, negative, negative, negative]
     );
 }
 
@@ -385,6 +408,7 @@ fn a_narrow_window_cuts_the_account_name_short_and_keeps_the_balances_and_button
         [
             label(harness, "Current $5,642.21").rect(),
             label(harness, "Ending $4,071.81").rect(),
+            label(harness, "Cleared $2,643.58").rect(),
             harness
                 .get_by_role_and_label(Role::Button, "+ Transaction")
                 .rect(),

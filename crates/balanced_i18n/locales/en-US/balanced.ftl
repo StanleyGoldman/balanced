@@ -159,9 +159,11 @@ register-account-actions-register-preferences = { -register } preferences…
 register-account-actions-print-register = Print { -register }…
 register-account-actions-export-to-csv = Export to CSV…
 # The context header's balances, each with its formatted amount: Current counts the
-# transactions dated today or earlier, Ending counts every one, the future-dated ones too.
+# transactions dated today or earlier, Ending counts every one, the future-dated ones too,
+# and Cleared counts the Cleared and Reconciled ones, whatever their date.
 register-current-balance = Current { $amount }
 register-ending-balance = Ending { $amount }
+register-cleared-balance = Cleared { $amount }
 # Why the draft row at the bottom of the Register wasn't added, in a bubble below
 # the first empty cell the transaction needs.
 register-draft-date-missing = Date is missing

@@ -228,6 +228,26 @@ fn a_heavy_dialogs_close_button_reads_german() {
     harness.get_by_role_and_label(Role::Button, "Dialog schließen");
 }
 
+/// The text of the context header's Cleared figure, the one Label starting `Bestätigt `.
+fn cleared_figure(harness: &Harness<'static, App>) -> String {
+    let figures: Vec<String> = harness
+        .query_all_by_role(Role::Label)
+        .filter_map(|label| label.accesskit_node().value())
+        .filter(|value| value.starts_with("Bestätigt "))
+        .collect();
+    let [figure] = <[String; 1]>::try_from(figures).expect("the header shows one Cleared figure");
+    figure
+}
+
+#[test]
+fn the_context_header_shows_the_cleared_balance_the_german_way() {
+    let mut harness = app();
+
+    open(&mut harness, "Everyday Checking");
+
+    assert_eq!(cleared_figure(&harness), "Bestätigt 2.643,58\u{a0}$");
+}
+
 #[test]
 fn a_clr_cell_reads_its_label_and_status_in_german() {
     let mut harness = app();
