@@ -54,9 +54,13 @@ mod tests {
             .filter_map(|line| {
                 line.trim()
                     .strip_prefix("run: .github/in-image.sh cargo xtask ")
+                    .and_then(|task| task.split_whitespace().next())
             })
             .collect();
-        let in_ci: BTreeSet<&str> = STEPS.iter().map(|&(name, _)| name).collect();
+        let mut in_ci: BTreeSet<&str> = STEPS.iter().map(|&(name, _)| name).collect();
+        // Run by the workflow's `coverage` job, which reports and gates nothing, and too
+        // slow to be part of every local run.
+        in_ci.insert(crate::coverage::TASK.name);
         assert_eq!(in_workflow, in_ci);
     }
 }

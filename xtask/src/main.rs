@@ -13,6 +13,7 @@
 mod adrs;
 mod ci;
 mod clippy;
+mod coverage;
 mod dco;
 mod deny;
 mod fmt;
@@ -50,6 +51,7 @@ const TASKS: &[Task] = &[
     clippy::TASK,
     test::TASK,
     snapshots::TASK,
+    coverage::TASK,
     locales::TASK,
     deny::TASK,
     layers::TASK,
