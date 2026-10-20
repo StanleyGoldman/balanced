@@ -360,3 +360,48 @@ fn deleting_a_transfer_whose_other_side_is_in_a_closed_account_is_refused_naming
     );
     assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
 }
+
+#[test]
+fn deleting_an_account_holding_either_side_of_a_transfer_is_refused_naming_it() {
+    for delete_savings in [false, true] {
+        let mut household = Household::new();
+        household.save_200();
+        let account = if delete_savings {
+            household.savings
+        } else {
+            household.checking
+        };
+        let before = household.ledger.snapshot();
+
+        let result = household
+            .ledger
+            .apply(DomainCommand::DeleteAccount { account });
+
+        assert_eq!(
+            result.unwrap_err(),
+            DomainError::AccountHasTransfers { account }
+        );
+        assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
+    }
+}
+
+#[test]
+fn an_account_without_transfers_still_deletes_and_undo_restores_it() {
+    let mut household = Household::new();
+    household.save_200();
+    household.apply(DomainCommand::CreateAccount {
+        name: "Car".to_owned(),
+        kind: AccountKind::Asset,
+        opened: date(1),
+        opening_balance: usd("5000.00"),
+    });
+    let car = account_id(&household.ledger, "Car");
+    let before = household.ledger.snapshot();
+
+    household.apply(DomainCommand::DeleteAccount { account: car });
+    let deleted = household.ledger.snapshot().account(car).is_none();
+    household.ledger.undo().expect("the delete undoes");
+
+    assert!(deleted);
+    assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
+}

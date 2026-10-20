@@ -720,6 +720,13 @@ impl Ledger {
             .iter()
             .position(|summary| summary.account.id() == id)
             .ok_or(DomainError::UnknownAccount { account: id })?;
+        if self.view.accounts[index]
+            .register
+            .iter()
+            .any(|entry| entry.transaction.other_side_id().is_some())
+        {
+            return Err(DomainError::AccountHasTransfers { account: id });
+        }
         // `position` found `index` in this same list of accounts.
         let place = index
             - self
