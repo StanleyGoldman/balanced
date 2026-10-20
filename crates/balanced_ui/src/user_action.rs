@@ -20,6 +20,8 @@ pub(crate) enum UserAction {
     NewTransaction,
     /// Delete the Register's selected transaction, once confirmed.
     DeleteTransaction,
+    /// Open the other side of the transfer on the Register's selected row.
+    GoToTransfer,
     /// Pick a path and create an empty data file there.
     NewDataFile,
     /// Pick a data file and open it.
@@ -54,6 +56,7 @@ impl UserAction {
             Self::SwitchPane => fl!(i18n, "menu-view-switch-pane"),
             Self::NewTransaction => fl!(i18n, "menu-new-transaction"),
             Self::DeleteTransaction => fl!(i18n, "menu-delete-transaction"),
+            Self::GoToTransfer => fl!(i18n, "menu-edit-go-to-transfer"),
             Self::NewDataFile => fl!(i18n, "menu-file-new-data-file"),
             Self::OpenDataFile => fl!(i18n, "menu-file-open-data-file"),
             Self::NewAccount => fl!(i18n, "menu-file-new-account"),
@@ -76,6 +79,7 @@ impl UserAction {
             Self::Undo | Self::Redo => true,
             Self::NewTransaction
             | Self::DeleteTransaction
+            | Self::GoToTransfer
             | Self::SwitchPane
             | Self::NewDataFile
             | Self::OpenDataFile
@@ -100,6 +104,7 @@ impl UserAction {
             Self::SwitchPane => AppCommand::SwitchPane,
             Self::NewTransaction => AppCommand::GoToDraftRow,
             Self::DeleteTransaction => AppCommand::OpenDialog(DialogKind::DeleteTransaction),
+            Self::GoToTransfer => AppCommand::GoToTransfer,
             Self::NewDataFile => AppCommand::ChooseDataFile(DataFilePicker::New),
             Self::OpenDataFile => AppCommand::ChooseDataFile(DataFilePicker::Open),
             Self::NewAccount => AppCommand::OpenDialog(DialogKind::NewAccount),

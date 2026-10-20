@@ -97,8 +97,8 @@ enum RowKind {
     /// The whole amount, in one category.
     Category(CategoryId),
     Split,
-    /// One side of a transfer.
-    Transfer,
+    /// One side of a transfer, with the id of its other side.
+    Transfer(TransactionId),
     /// The draft row, with its category once one is typed.
     Draft(Option<CategoryTarget>),
 }
@@ -191,7 +191,7 @@ impl RegisterRow {
             RowKind::Category(id) | RowKind::Draft(Some(CategoryTarget::Category(id))) => Some(id),
             RowKind::OpeningBalance
             | RowKind::Split
-            | RowKind::Transfer
+            | RowKind::Transfer(_)
             | RowKind::Draft(None | Some(CategoryTarget::Transfer(_))) => None,
         }
     }
@@ -204,8 +204,18 @@ impl RegisterRow {
             RowKind::OpeningBalance
             | RowKind::Category(_)
             | RowKind::Split
-            | RowKind::Transfer
+            | RowKind::Transfer(_)
             | RowKind::Draft(None | Some(CategoryTarget::Category(_))) => None,
+        }
+    }
+
+    /// The other side of the transfer the row shows, unless it shows none.
+    pub(crate) fn other_side(&self) -> Option<TransactionId> {
+        match self.kind {
+            RowKind::Transfer(other_side) => Some(other_side),
+            RowKind::OpeningBalance | RowKind::Category(_) | RowKind::Split | RowKind::Draft(_) => {
+                None
+            }
         }
     }
 
@@ -214,7 +224,7 @@ impl RegisterRow {
         match self.kind {
             RowKind::Category(_) | RowKind::Draft(_) => true,
             // TODO(#319): a transfer's Category cell changes its account.
-            RowKind::OpeningBalance | RowKind::Split | RowKind::Transfer => false,
+            RowKind::OpeningBalance | RowKind::Split | RowKind::Transfer(_) => false,
         }
     }
 
@@ -476,7 +486,7 @@ impl RegisterModel {
                         split.clone(),
                     ),
                     Allocation::Transfer(other_side) => (
-                        RowKind::Transfer,
+                        RowKind::Transfer(*other_side),
                         transaction.payee().to_owned(),
                         transfer_text(other_accounts.name(*other_side)),
                     ),

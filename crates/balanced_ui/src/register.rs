@@ -817,9 +817,21 @@ pub(crate) struct Register {
     shown: Vec<RegisterColumn>,
     /// The Category cell edit waiting on the New Category Dialog its Create row opened.
     awaiting_category: Option<AwaitingCategory>,
+    /// The transaction whose row takes the cell cursor when the Register first shows
+    /// an account, in place of the draft row.
+    start_on: Option<TransactionId>,
 }
 
 impl Register {
+    /// A Register that first shows its account with the cell cursor on `transaction`'s
+    /// Category cell, scrolled to the middle.
+    pub(crate) fn on_transaction(transaction: TransactionId) -> Self {
+        Self {
+            start_on: Some(transaction),
+            ..Self::default()
+        }
+    }
+
     /// Whether keys go to the Register: the cell cursor is in it, no Dialog is open
     /// over it, and nothing holds keyboard focus but the Register's own cell editor.
     pub(crate) fn owns_keyboard(&self, ctx: &egui::Context) -> bool {
@@ -876,7 +888,10 @@ impl Register {
         let account = summary.account().id();
         if self.model.as_ref().map(RegisterModel::account) != Some(account) {
             self.start_over();
-            if !summary.account().is_closed() {
+            if let Some(transaction) = self.start_on.take() {
+                self.place_cursor(RowId::Transaction(transaction), RegisterColumn::Category);
+                self.centre_pending = true;
+            } else if !summary.account().is_closed() {
                 self.go_to_draft_row();
             }
         }
@@ -1333,6 +1348,18 @@ impl Register {
             viewport,
         };
         let (response, action) = cell.show(ui, i18n, theme);
+        if column == RegisterColumn::Category
+            && let (Some(id), Some(_)) = (row.transaction(), row.other_side())
+        {
+            response.context_menu(|ui| {
+                let label = fl!(i18n, "register-go-to-other-side", account = row.category());
+                if ui.button(label).clicked() {
+                    // Go to opens the other side of the selected row.
+                    self.place_cursor(RowId::Transaction(id), column);
+                    commands.send(AppCommand::GoToTransfer);
+                }
+            });
+        }
         // A refused date keeps the cell cursor until it is fixed or cancelled.
         if response.clicked() && !self.edit.as_ref().is_some_and(Edit::is_rejected) {
             self.place_cursor(row.id(), column);

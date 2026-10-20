@@ -183,6 +183,7 @@ impl MainWindow {
         match action {
             UserAction::Undo => view.can_undo(),
             UserAction::Redo => view.can_redo(),
+            UserAction::GoToTransfer => self.other_side(view).is_some(),
             UserAction::NewTransaction
             | UserAction::DeleteTransaction
             | UserAction::PrintRegister
@@ -238,6 +239,43 @@ impl MainWindow {
         } else {
             self.account_bar.request_focus();
         }
+    }
+
+    /// The other side of the transfer on the open Register's selected row, and the
+    /// account in `view` that holds it, while the Register shows such a row.
+    fn other_side(&self, view: &LedgerView) -> Option<(AccountId, TransactionId)> {
+        if !self.shows_register() {
+            return None;
+        }
+        let account = self.open_account_id()?;
+        let other_side = self.register()?.selected_row(account)?.other_side()?;
+        let holder = view.accounts().iter().find(|summary| {
+            summary
+                .register()
+                .iter()
+                .any(|entry| entry.transaction().id() == other_side)
+        })?;
+        Some((holder.account().id(), other_side))
+    }
+
+    /// Opens the account in `view` holding the other side of the transfer on the open
+    /// Register's selected row, with the cell cursor on that other side and the
+    /// keyboard in the Register. A row that isn't a transfer does nothing.
+    pub(crate) fn go_to_transfer(&mut self, ctx: &egui::Context, view: &LedgerView) {
+        let Some((account, other_side)) = self.other_side(view) else {
+            return;
+        };
+        self.tab = TopLevelTab::Accounts;
+        self.open_register = Some(OpenRegister {
+            account,
+            register: Register::on_transaction(other_side),
+        });
+        // The Register takes keys with no widget focused.
+        ctx.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
     }
 
     /// Shows the open Register and puts its cell cursor on the draft row, with the
@@ -891,6 +929,8 @@ impl MainWindow {
             let edit = ui.menu_button(fl!(i18n, "menu-edit"), |ui| {
                 item(ui, &mut drawn, UserAction::Undo);
                 item(ui, &mut drawn, UserAction::Redo);
+                ui.separator();
+                item(ui, &mut drawn, UserAction::GoToTransfer);
             });
             drawn.note_menu(&edit.response);
             let view_menu = ui.menu_button(fl!(i18n, "menu-view"), |ui| {

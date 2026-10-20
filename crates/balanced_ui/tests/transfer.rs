@@ -313,3 +313,81 @@ fn deleting_a_transfer_whose_other_account_is_closed_says_why_it_was_refused() {
         1
     );
 }
+
+/// The label of the cell under the cell cursor.
+fn cursor(harness: &Harness<'static, App>) -> String {
+    let cursor = harness
+        .query_all_by_role(Role::Cell)
+        .find(|cell| cell.accesskit_node().is_selected() == Some(true))
+        .expect("a cell holds the cell cursor");
+    cursor.accesskit_node().label().unwrap_or_default()
+}
+
+#[test]
+fn ctrl_g_on_a_transfer_opens_the_other_account_on_its_other_side() {
+    let mut harness = everyday();
+    add_transaction(&mut harness, "Saving up", "[Emergency Fund]", "200");
+    harness
+        .get_by_role_and_label(Role::Cell, "Saving up")
+        .click();
+    harness.run();
+
+    press(&mut harness, Modifiers::COMMAND, Key::G);
+
+    // Only the Emergency Fund side's Category cell reads [Everyday Checking].
+    assert_eq!(cursor(&harness), "[Everyday Checking]");
+}
+
+#[test]
+fn go_to_reaches_a_hidden_account_and_comes_back_from_its_side() {
+    let mut harness = everyday();
+    add_transaction(&mut harness, "Saving up", "[Holiday Fund]", "200");
+    harness
+        .get_by_role_and_label(Role::Cell, "Saving up")
+        .click();
+    harness.run();
+
+    press(&mut harness, Modifiers::COMMAND, Key::G);
+    let there = cursor(&harness);
+    press(&mut harness, Modifiers::COMMAND, Key::G);
+
+    // Only each side's own Category cell names the other account.
+    assert_eq!(there, "[Everyday Checking]");
+    assert_eq!(cursor(&harness), "[Holiday Fund]");
+}
+
+#[test]
+fn go_to_in_a_transfer_s_category_cell_menu_opens_its_other_side() {
+    let mut harness = everyday();
+    add_transaction(&mut harness, "Saving up", "[Emergency Fund]", "200");
+
+    harness
+        .get_by_role_and_label(Role::Cell, "[Emergency Fund]")
+        .click_secondary();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Go to [Emergency Fund]")
+        .click();
+    harness.run();
+
+    assert_eq!(cursor(&harness), "[Everyday Checking]");
+}
+
+#[test]
+fn go_to_transfer_in_the_edit_menu_opens_the_selected_row_s_other_side() {
+    let mut harness = everyday();
+    add_transaction(&mut harness, "Saving up", "[Emergency Fund]", "200");
+    harness
+        .get_by_role_and_label(Role::Cell, "Saving up")
+        .click();
+    harness.run();
+
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Go to Transfer Ctrl+G")
+        .click();
+    harness.run();
+
+    assert_eq!(cursor(&harness), "[Everyday Checking]");
+}

@@ -37,6 +37,10 @@ pub(crate) enum AppCommand {
     /// Put the cell cursor on the open Register's draft row, showing the Register,
     /// unless its account is closed.
     GoToDraftRow,
+    /// Open the account holding the other side of the transfer on the open Register's
+    /// selected row, with the cell cursor on that other side. A row that isn't a
+    /// transfer does nothing.
+    GoToTransfer,
     /// Move keyboard focus from the Account bar to the Main view, or from anywhere
     /// else to the Account bar.
     SwitchPane,

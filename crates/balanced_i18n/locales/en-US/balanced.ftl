@@ -23,6 +23,7 @@ menu-file-recent = { $number } { $file }
 menu-edit = Edit
 menu-edit-undo = Undo
 menu-edit-redo = Redo
+menu-edit-go-to-transfer = Go to Transfer
 menu-view = View
 menu-view-switch-pane = Switch Pane
 menu-tools = Tools
@@ -125,6 +126,9 @@ register-column-move-up = Move { $column } up
 register-column-move-down = Move { $column } down
 # The Category cell of a transaction divided between several categories.
 register-split = [Split]
+# The item in a transfer's Category cell menu that opens its other side. $account is
+# the other account's name in brackets, as the cell shows it.
+register-go-to-other-side = Go to { $account }
 # The Payee cell of an account's first transaction, its starting balance.
 register-opening-balance = Opening Balance
 # The menu of commands on a Register row.

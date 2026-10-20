@@ -291,6 +291,11 @@ impl App {
                     self.main_window.go_to_draft_row(ctx, &ledger.snapshot());
                 }
             }
+            AppCommand::GoToTransfer => {
+                if let Some(ledger) = ledger {
+                    self.main_window.go_to_transfer(ctx, &ledger.snapshot());
+                }
+            }
             AppCommand::OpenSplitView(_) => {
                 self.main_window.show_status(StatusMessage::NotAvailableYet);
             }
