@@ -228,6 +228,26 @@ impl MainWindow {
         }
     }
 
+    /// Opens `account`'s Register under the Accounts tab and puts its cell cursor on
+    /// `transaction`'s row, with the keyboard.
+    pub(crate) fn go_to_transaction(
+        &mut self,
+        ctx: &egui::Context,
+        account: AccountId,
+        transaction: TransactionId,
+    ) {
+        self.navigate(Route::Account(account));
+        if let Some(register) = self.register_mut() {
+            register.go_to(transaction);
+        }
+        // The Register takes keys with no widget focused.
+        ctx.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+    }
+
     /// Shows the open Register and puts its cell cursor on the draft row, with the
     /// keyboard, unless no Register is open or its account in `view` is closed.
     pub(crate) fn go_to_draft_row(&mut self, ctx: &egui::Context, view: &LedgerView) {

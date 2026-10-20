@@ -10,7 +10,7 @@ use balanced_core::{
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::App as _;
-use eframe::egui::accesskit::Role;
+use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::{Event, Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
@@ -164,6 +164,51 @@ fn account(ledger: &Ledger, name: &str) -> AccountId {
         .id()
 }
 
+/// The stub ledger with a transfer of 200 from Everyday Checking to the account named
+/// `to`, on 1 October 2026, paid to "Saving up".
+fn with_transfer(to: &str) -> Ledger {
+    let mut ledger = Ledger::stub();
+    let everyday = account(&ledger, "Everyday Checking");
+    let to = account(&ledger, to);
+    let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
+    let amount = Money::new("-200.00".parse().expect("a decimal"), usd).expect("an amount");
+    ledger
+        .apply(DomainCommand::PostTransaction {
+            account: everyday,
+            transaction: NewTransaction::transfer(
+                Date::try_new_iso(2026, 10, 1).expect("1 October 2026 is a date"),
+                "Saving up",
+                to,
+                amount,
+            ),
+        })
+        .expect("the stub takes the transfer");
+    ledger
+}
+
+/// Selects the "Saving up" row and picks `item` from its Actions menu.
+fn pick_action(harness: &mut Harness<'static, App>, item: &str) {
+    harness
+        .get_by_role_and_label(Role::Cell, "Saving up")
+        .click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Actions")
+        .click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, item).click();
+    harness.run();
+}
+
+/// Whether the "Saving up" row holds the cell cursor.
+fn saving_up_is_selected(harness: &Harness<'static, App>) -> bool {
+    harness
+        .get_by_role_and_label(Role::Cell, "Saving up")
+        .accesskit_node()
+        .toggled()
+        == Some(Toggled::True)
+}
+
 #[test]
 fn a_bracket_lists_every_open_account_but_this_one_hidden_ones_included() {
     let mut harness = everyday();
@@ -312,4 +357,81 @@ fn deleting_a_transfer_whose_other_account_is_closed_says_why_it_was_refused() {
             .count(),
         1
     );
+}
+
+#[test]
+fn go_to_opens_the_other_account_on_the_other_side() {
+    let mut harness = app_on(with_transfer("Emergency Fund"));
+    open(&mut harness, "Everyday Checking");
+
+    pick_action(&mut harness, "Go to [Emergency Fund]");
+
+    assert_eq!(row_of(&harness, "Saving up")[3], "[Everyday Checking]");
+    assert!(saving_up_is_selected(&harness));
+}
+
+#[test]
+fn go_to_from_the_other_side_comes_back() {
+    let mut harness = app_on(with_transfer("Emergency Fund"));
+    open(&mut harness, "Emergency Fund");
+
+    pick_action(&mut harness, "Go to [Everyday Checking]");
+
+    assert_eq!(row_of(&harness, "Saving up")[3], "[Emergency Fund]");
+    assert!(saving_up_is_selected(&harness));
+}
+
+#[test]
+fn go_to_opens_a_hidden_account() {
+    let mut harness = app_on(with_transfer("Holiday Fund"));
+    open(&mut harness, "Everyday Checking");
+
+    pick_action(&mut harness, "Go to [Holiday Fund]");
+
+    assert_eq!(row_of(&harness, "Saving up")[3], "[Everyday Checking]");
+    assert!(saving_up_is_selected(&harness));
+}
+
+#[test]
+fn go_to_works_from_the_keyboard() {
+    let mut harness = app_on(with_transfer("Emergency Fund"));
+    open(&mut harness, "Everyday Checking");
+    harness
+        .get_by_role_and_label(Role::Cell, "Saving up")
+        .click();
+    harness.run();
+
+    harness
+        .get_by_role_and_label(Role::Button, "Actions")
+        .focus();
+    harness.run();
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    harness
+        .get_by_role_and_label(Role::Button, "Go to [Emergency Fund]")
+        .focus();
+    harness.run();
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(row_of(&harness, "Saving up")[3], "[Everyday Checking]");
+    assert!(saving_up_is_selected(&harness));
+}
+
+#[test]
+fn a_row_that_is_no_transfer_has_no_go_to() {
+    let mut harness = app_on(with_transfer("Emergency Fund"));
+    open(&mut harness, "Everyday Checking");
+    harness.get_by_role_and_label(Role::Cell, "Costco").click();
+    harness.run();
+
+    harness
+        .get_by_role_and_label(Role::Button, "Actions")
+        .click();
+    harness.run();
+
+    let go_to: Vec<String> = harness
+        .query_all_by_role(Role::Button)
+        .filter_map(|button| button.accesskit_node().label())
+        .filter(|label| label.starts_with("Go to"))
+        .collect();
+    assert_eq!(go_to, Vec::<String>::new());
 }

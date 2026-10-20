@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use balanced_core::{DomainCommand, DomainError, TransactionId, WriteError};
+use balanced_core::{AccountId, DomainCommand, DomainError, TransactionId, WriteError};
 use balanced_i18n::Localizer;
 use eframe::egui;
 
@@ -34,6 +34,12 @@ pub(crate) enum AppCommand {
     Navigate(Route),
     /// Show the split lines of a split transaction.
     OpenSplitView(TransactionId),
+    /// Open `account`'s Register under the Accounts tab and put the cell cursor on
+    /// `transaction`'s row.
+    GoToTransaction {
+        account: AccountId,
+        transaction: TransactionId,
+    },
     /// Put the cell cursor on the open Register's draft row, showing the Register,
     /// unless its account is closed.
     GoToDraftRow,
