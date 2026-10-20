@@ -240,3 +240,16 @@ fn a_clr_cell_reads_its_label_and_status_in_german() {
         .value();
     assert_eq!(status.as_deref(), Some("Bestätigt"));
 }
+
+#[test]
+fn the_unreconcile_confirm_reads_german() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+
+    open(&mut harness, "Abgl Acme Corp, 01.09.2026, 3.200,00");
+
+    harness.get_by_label(
+        "Abgleich dieser Buchung aufheben? Die Buchung wurde mit einem Kontoauszug abgeglichen und wird auf „Bestätigt“ gesetzt. Acme Corp, 01.09.2026, 3.200,00",
+    );
+    harness.get_by_role_and_label(Role::Button, "Auf „Bestätigt“ setzen");
+}
