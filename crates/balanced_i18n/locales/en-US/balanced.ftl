@@ -366,6 +366,21 @@ dialog-delete-account-delete = Delete
 # The Category List: every category as a tree, with how much each is used.
 dialog-category-list-title = Category List
 dialog-category-list-close = Close
+dialog-category-list-category = Category
+# How many transactions and split lines are in a category or transfer to an account.
+dialog-category-list-txns = Txns
+dialog-category-list-total = Total
+# A row's usage, as a screen reader reads it after the row's name. $total is an amount.
+dialog-category-list-usage = { $count ->
+        [one] 1 transaction
+       *[other] { $count } transactions
+    }, totalling { $total }
+# The usage of a row nothing uses, or whose total is too large to add up.
+dialog-category-list-usage-count = { $count ->
+        [0] No transactions
+        [one] 1 transaction
+       *[other] { $count } transactions
+    }
 
 # The New Account wizard. Each step's heading says how far through it is.
 dialog-new-account-step-type = Step 1 of 4: Type

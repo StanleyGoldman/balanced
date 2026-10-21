@@ -209,6 +209,15 @@ impl Theme {
     /// the tree and its usage columns, and a couple of dozen rows.
     pub(crate) const CATEGORY_LIST_SIZE: Vec2 = vec2(860.0, 600.0);
 
+    /// How far the Category List indents a subcategory past its parent.
+    pub(crate) const CATEGORY_LIST_INDENT: f32 = 18.0;
+
+    /// The width of the Category List's Txns column.
+    pub(crate) const CATEGORY_LIST_COUNT_WIDTH: f32 = 72.0;
+
+    /// The width of the Category List's Total column: room for a seven-figure total.
+    pub(crate) const CATEGORY_LIST_TOTAL_WIDTH: f32 = 120.0;
+
     /// The width of each Name field in Manage Accounts.
     pub(crate) const MANAGE_ACCOUNTS_NAME_WIDTH: f32 = 200.0;
 
