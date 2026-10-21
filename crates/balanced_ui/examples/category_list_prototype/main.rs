@@ -2046,8 +2046,12 @@ impl Proto {
             .collect();
         let n = rows.len() + transfers.len();
         let selected_all = self.selection();
+        // A solid scroll bar takes its own width, so it neither covers Txns nor pushes the
+        // columns past the dialog's edge into a sideways scroll.
+        ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
         let mut table = TableBuilder::new(ui)
             .id_salt("cl_table")
+            .auto_shrink(false)
             .striped(true)
             .resizable(false)
             .sense(Sense::click())
