@@ -120,16 +120,48 @@ enum RowKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SplitLineRow {
     /// Where the line's part of the amount goes.
-    pub(crate) target: CategoryTarget,
+    target: CategoryTarget,
     /// The other side the line keeps, when it goes to another account and already has
     /// one there.
-    pub(crate) other_side: Option<TransactionId>,
-    pub(crate) memo: String,
+    other_side: Option<TransactionId>,
+    memo: String,
     /// The line's signed amount, in the transaction's currency.
-    pub(crate) amount: Money,
+    amount: Money,
 }
 
 impl SplitLineRow {
+    /// A line of `amount` to `target`, memoed `memo`, keeping `other_side` when it goes
+    /// to another account and already has one there.
+    pub(crate) fn new(
+        target: CategoryTarget,
+        other_side: Option<TransactionId>,
+        memo: &str,
+        amount: Money,
+    ) -> Self {
+        Self {
+            target,
+            other_side,
+            memo: memo.to_owned(),
+            amount,
+        }
+    }
+
+    pub(crate) fn target(&self) -> CategoryTarget {
+        self.target
+    }
+
+    pub(crate) fn other_side(&self) -> Option<TransactionId> {
+        self.other_side
+    }
+
+    pub(crate) fn memo(&self) -> &str {
+        &self.memo
+    }
+
+    pub(crate) fn amount(&self) -> Money {
+        self.amount
+    }
+
     /// The line as a [`TransactionEdit::Lines`] edit gives it.
     fn edited(&self) -> EditedSplitLine {
         match (self.target, self.other_side) {
@@ -364,12 +396,7 @@ impl RegisterRow {
                 (account, Some(other_side))
             }
         };
-        SplitLineRow {
-            target,
-            other_side,
-            memo: line.memo().to_owned(),
-            amount: line.amount(),
-        }
+        SplitLineRow::new(target, other_side, line.memo(), line.amount())
     }
 
     pub(crate) fn id(&self) -> RowId {
@@ -931,12 +958,7 @@ impl<'a> OtherAccounts<'a> {
                         Some(other_side),
                     ),
                 };
-                SplitLineRow {
-                    target,
-                    other_side,
-                    memo: line.memo().to_owned(),
-                    amount: line.amount(),
-                }
+                SplitLineRow::new(target, other_side, line.memo(), line.amount())
             })
             .collect()
     }

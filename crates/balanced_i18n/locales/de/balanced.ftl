@@ -156,10 +156,9 @@ dialog-split-line-memo = Notiz, Zeile { $line }
 dialog-split-line-amount = Betrag, Zeile { $line }
 # Coined from GnuCash's "_Add" and "Line".
 dialog-split-add-line = Zeile hinzufügen
-# GnuCash's "_Remove".
+# GnuCash's "_Remove"; .a11y coined from it and "Line".
 dialog-split-remove-line = Entfernen
-# Coined from GnuCash's "_Remove" and "Line".
-dialog-split-remove-line-a11y = Zeile { $line } entfernen
+    .a11y = Zeile { $line } entfernen
 # GnuCash's "Total".
 dialog-split-total = Summe
 # Coined, with GnuCash's "Difference" and "Total".

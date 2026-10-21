@@ -37,7 +37,7 @@ use crate::register::{ColumnWidths, LeaveAnswer, LeftRow, Register};
 use crate::register_model::RegisterRow;
 use crate::route::{Route, TopLevelTab};
 use crate::save_refusal::{RefusalAnswer, SaveRefusal};
-use crate::split_dialog::SplitForm;
+use crate::split_dialog::{DoneOutcome, SplitForm};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
 
@@ -828,17 +828,25 @@ impl MainWindow {
         match outcome {
             DialogOutcome::Open => {}
             DialogOutcome::Accepted => {
-                if let Some((row, lines)) = dialog.form.done() {
-                    self.close_dialog(ctx, |window| &mut window.split);
-                    if let Some(register) = self.register_mut() {
-                        register.split_done(row, lines);
-                    }
+                let done = match dialog.form.done() {
+                    DoneOutcome::Refused => return,
+                    DoneOutcome::Unchanged => None,
+                    DoneOutcome::Changed(done) => Some(done),
+                };
+                self.close_dialog(ctx, |window| &mut window.split);
+                if let Some(register) = self.register_mut() {
+                    register.split_closed(done);
                 }
             }
             DialogOutcome::Back | DialogOutcome::Discarded => {
                 unreachable!("a heavy Dialog has no Back or Discard button")
             }
-            DialogOutcome::Cancelled => self.close_dialog(ctx, |window| &mut window.split),
+            DialogOutcome::Cancelled => {
+                self.close_dialog(ctx, |window| &mut window.split);
+                if let Some(register) = self.register_mut() {
+                    register.split_closed(None);
+                }
+            }
         }
     }
 

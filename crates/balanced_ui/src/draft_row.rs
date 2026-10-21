@@ -19,10 +19,8 @@ pub(crate) struct Draft {
     date: Option<Date<Iso>>,
     number: String,
     payee: String,
-    category: Option<CategoryTarget>,
-    /// The split lines from the Split dialog, in place of a category, and the amount
-    /// they add up to.
-    split: Option<SplitLines>,
+    /// Where the amount goes, once a category or the split lines are given.
+    allocation: Option<DraftAllocation>,
     memo: String,
     amount: Option<Money>,
 }
@@ -40,21 +38,27 @@ impl Draft {
         &self.payee
     }
 
+    /// The one category or account the whole amount goes to, once one is typed.
     pub(crate) fn category(&self) -> Option<CategoryTarget> {
-        self.category
+        match self.allocation {
+            Some(DraftAllocation::One(target)) => Some(target),
+            Some(DraftAllocation::Split(_)) | None => None,
+        }
     }
 
     /// The split lines, when the draft is split.
     pub(crate) fn split(&self) -> Option<&SplitLines> {
-        self.split.as_ref()
+        match &self.allocation {
+            Some(DraftAllocation::Split(split)) => Some(split),
+            Some(DraftAllocation::One(_)) | None => None,
+        }
     }
 
     /// Splits the draft into `split`'s lines, in place of any category, with the
     /// amount they add up to.
     pub(crate) fn set_split(&mut self, split: SplitLines) {
-        self.category = None;
         self.amount = Some(split.amount());
-        self.split = Some(split);
+        self.allocation = Some(DraftAllocation::Split(split));
     }
 
     pub(crate) fn memo(&self) -> &str {
@@ -73,12 +77,10 @@ impl Draft {
             TransactionEdit::Payee(payee) => self.payee = payee,
             TransactionEdit::Memo(memo) => self.memo = memo,
             TransactionEdit::Category(category) => {
-                self.category = Some(CategoryTarget::Category(category));
-                self.split = None;
+                self.allocation = Some(DraftAllocation::One(CategoryTarget::Category(category)));
             }
             TransactionEdit::Transfer(account) => {
-                self.category = Some(CategoryTarget::Transfer(account));
-                self.split = None;
+                self.allocation = Some(DraftAllocation::One(CategoryTarget::Transfer(account)));
             }
             TransactionEdit::Amount(amount) => self.amount = Some(amount),
             // The draft row's Clr cell is empty: a posted transaction starts uncleared.
@@ -96,8 +98,8 @@ impl Draft {
     /// cells from it where they are empty.
     pub(crate) fn recall(&mut self, recalled: &Recalled) {
         recalled.payee().clone_into(&mut self.payee);
-        if self.split.is_none() {
-            self.category = self.category.or(recalled.category());
+        if self.allocation.is_none() {
+            self.allocation = recalled.category().map(DraftAllocation::One);
         }
         if self.memo.is_empty() {
             recalled.memo().clone_into(&mut self.memo);
@@ -112,7 +114,7 @@ impl Draft {
     pub(crate) fn missing(&self) -> Option<Missing> {
         if self.date.is_none() {
             Some(Missing::Date)
-        } else if self.category.is_none() && self.split.is_none() {
+        } else if self.allocation.is_none() {
             Some(Missing::Category)
         } else {
             None
@@ -129,15 +131,16 @@ impl Draft {
     ) -> Result<DomainCommand, Missing> {
         let date = self.date.ok_or(Missing::Date)?;
         let amount = self.amount.unwrap_or_else(|| Money::zero(currency));
-        let mut transaction = match (&self.split, self.category) {
-            (Some(split), _) => NewTransaction::split(date, &self.payee, split.posted()),
-            (None, Some(CategoryTarget::Category(category))) => {
-                NewTransaction::new(date, &self.payee, category, amount)
+        let mut transaction = match self.allocation.as_ref().ok_or(Missing::Category)? {
+            DraftAllocation::Split(split) => {
+                NewTransaction::split(date, &self.payee, split.posted())
             }
-            (None, Some(CategoryTarget::Transfer(other))) => {
-                NewTransaction::transfer(date, &self.payee, other, amount)
+            DraftAllocation::One(CategoryTarget::Category(category)) => {
+                NewTransaction::new(date, &self.payee, *category, amount)
             }
-            (None, None) => return Err(Missing::Category),
+            DraftAllocation::One(CategoryTarget::Transfer(other)) => {
+                NewTransaction::transfer(date, &self.payee, *other, amount)
+            }
         };
         if !self.number.is_empty() {
             transaction = transaction.number(&self.number);
@@ -150,6 +153,15 @@ impl Draft {
             transaction,
         })
     }
+}
+
+/// Where the draft's amount goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DraftAllocation {
+    /// The whole amount, to one category or account, as typed in the Category cell.
+    One(CategoryTarget),
+    /// The split lines from the Split dialog, which add up to the amount.
+    Split(SplitLines),
 }
 
 /// A draft row cell a transaction can't do without, left empty.

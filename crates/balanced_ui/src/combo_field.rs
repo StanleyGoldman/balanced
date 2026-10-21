@@ -9,8 +9,8 @@ use eframe::egui::accesskit::Role;
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
 use eframe::egui::{
-    self, Area, Event, Frame, Id, Order, Rect, Response, ScrollArea, Sense, TextStyle,
-    TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
+    self, Area, Event, Frame, Id, Key, Modifiers, Order, Rect, Response, ScrollArea, Sense,
+    TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 
 use crate::combobox::{ListRow, rest_after};
@@ -73,7 +73,7 @@ impl ListState {
 /// text they match: `list` in the methods below.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ComboText {
-    pub(crate) text: String,
+    text: String,
     /// While the text ends in an Inline completion, the length in bytes of the typed
     /// text before it.
     completion: Option<usize>,
@@ -88,6 +88,20 @@ impl ComboText {
             completion: None,
             list: None,
         }
+    }
+
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The text, for a `TextEdit` to edit in place.
+    pub(crate) fn text_mut(&mut self) -> &mut String {
+        &mut self.text
+    }
+
+    /// Replaces the text with `text`, an entry taken from the list, say.
+    pub(crate) fn set_text(&mut self, text: &str) {
+        text.clone_into(&mut self.text);
     }
 
     /// The text typed so far, without the Inline completion after it.
@@ -222,6 +236,44 @@ impl ComboText {
     ) -> Option<ListRow<'a>> {
         let highlight = self.list?.highlight?;
         self.rows(list).into_iter().nth(highlight)
+    }
+
+    /// Acts on this frame's arrow keys for the focused field, taking them: Alt+↓ lists
+    /// every entry, ↓ opens the list of matches or moves its highlight down, and ↑
+    /// moves the highlight up.
+    pub(crate) fn arrow_keys<'a>(
+        &mut self,
+        ctx: &egui::Context,
+        list: impl Fn(&str) -> Vec<ListRow<'a>>,
+    ) {
+        let (alt_down, down, up) = ctx.input_mut(|input| {
+            // Alt+↓ first, since a bare ↓ also matches it.
+            let alt_down = input.consume_key(Modifiers::ALT, Key::ArrowDown);
+            (
+                alt_down,
+                input.consume_key(Modifiers::NONE, Key::ArrowDown),
+                input.consume_key(Modifiers::NONE, Key::ArrowUp),
+            )
+        });
+        let rows = self.rows(&list).len();
+        if alt_down {
+            self.open_list(ListScope::All, &list);
+        } else if down && rows > 0 {
+            self.highlight_next(rows);
+        } else if down {
+            self.open_list(ListScope::Matching, &list);
+        } else if up {
+            self.highlight_previous();
+        }
+    }
+
+    /// Takes the highlighted entry of the list into the text, if the list is open with
+    /// one highlighted, and closes the list.
+    pub(crate) fn take_highlighted<'a>(&mut self, list: impl FnOnce(&str) -> Vec<ListRow<'a>>) {
+        if let Some(ListRow::Choice(text)) = self.highlighted(list) {
+            self.set_text(text);
+        }
+        self.close_list();
     }
 
     /// Moves the highlight one row down the list of `rows` rows, stopping at the last.

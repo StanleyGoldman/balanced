@@ -265,9 +265,9 @@ dialog-split-line-category = Line { $line } category
 dialog-split-line-memo = Line { $line } memo
 dialog-split-line-amount = Line { $line } amount
 dialog-split-add-line = Add line
+# .a11y is what a screen reader reads for the Remove button of split line $line.
 dialog-split-remove-line = Remove
-# What a screen reader reads for the Remove button of split line $line.
-dialog-split-remove-line-a11y = Remove line { $line }
+    .a11y = Remove line { $line }
 # Labels the amount the split lines must add up to.
 dialog-split-total = Total
 # Why Done didn't close the Split dialog: the lines add up to $lines, not $total,

@@ -60,9 +60,9 @@ impl RowChanges {
     /// changed amount too.
     pub(crate) fn record(&mut self, saved: &RegisterRow, edit: TransactionEdit) {
         let field = Field::of(&edit);
-        let splits = matches!(edit, TransactionEdit::Lines { .. });
+        let edit_is_lines = matches!(edit, TransactionEdit::Lines { .. });
         self.edits.retain(|kept| {
-            Field::of(kept) != field && !(splits && Field::of(kept) == Field::Amount)
+            Field::of(kept) != field && !(edit_is_lines && Field::of(kept) == Field::Amount)
         });
         if saved.holds(&edit) {
             return;

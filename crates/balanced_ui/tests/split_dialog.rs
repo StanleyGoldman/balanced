@@ -651,3 +651,31 @@ fn done_with_a_line_naming_no_category_says_so() {
         "Line 2: no category or account is named “Nowhere”."
     ));
 }
+
+#[test]
+fn done_with_nothing_changed_leaves_a_transaction_in_one_category_as_it_was() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    edit_fresh_market(&mut harness);
+    click_button(&mut harness, "Split");
+
+    click_button(&mut harness, "Done");
+
+    assert_eq!(cells(&harness, "[Split]"), 1);
+    assert_eq!(cells(&harness, "Food & Dining:Groceries"), 1);
+}
+
+#[test]
+fn escape_from_a_dialog_opened_on_a_highlighted_row_leaves_it_the_editing_row() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "[Split]");
+
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Save")
+            .is_some()
+    );
+}

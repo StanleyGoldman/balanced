@@ -41,7 +41,7 @@ use crate::register_model::{
 };
 use crate::row_changes::RowChanges;
 use crate::save_refusal::{RefusalAnswer, SaveRefusal};
-use crate::split_dialog::SplitStart;
+use crate::split_dialog::{SplitDone, SplitStart};
 use crate::theme::Theme;
 
 /// The narrowest Payee and Category get before the Register scrolls sideways.
@@ -814,7 +814,7 @@ pub(crate) struct Register {
     pressed: Option<RowButtonAt>,
     /// The lines the Split dialog's Done gave a row, which the row keeps from the next
     /// frame.
-    split_done: Option<(RowId, SplitLines)>,
+    split_done: Option<SplitDone>,
 }
 
 impl Register {
@@ -1531,7 +1531,7 @@ impl Register {
         self.cursor = Some(target);
         self.start_edit(ctx, keys, EditStart::Empty);
         if let Some(Edit::Text(edit)) = &mut self.edit {
-            edit.combo.text = text;
+            edit.combo.set_text(&text);
             edit.preview = preview(keys.i18n, edit);
             focus_at_end(ctx, edit);
         }
@@ -1570,7 +1570,7 @@ impl Register {
             view,
             i18n,
         };
-        if let Some((row, lines)) = self.split_done.take() {
+        if let Some(SplitDone { row, lines }) = self.split_done.take() {
             let saved = Rows::new(&model, None, None);
             self.unsaved.keep_split(saved, row, lines, commands);
         }
@@ -1960,7 +1960,7 @@ impl Register {
             field.max.x = button.left();
             keypad::button(ui, frame.i18n, edit.editor_id(), button)
         });
-        let typed = edit.combo.text.clone();
+        let typed = edit.combo.text().to_owned();
         let response = editor(
             ui,
             edit,
@@ -1968,7 +1968,7 @@ impl Register {
             insets,
             heading_id(frame.register_id, column),
         );
-        if edit.combo.text != typed {
+        if edit.combo.text() != typed {
             text_changed(ui.ctx(), frame, edit);
         }
         if list_button.as_ref().is_some_and(Response::clicked) {
@@ -1983,7 +1983,7 @@ impl Register {
             if edit.keypad.take().is_some() {
                 focus_at_end(ui.ctx(), edit);
             } else {
-                edit.keypad = Some(Box::new(Keypad::new(&edit.combo.text)));
+                edit.keypad = Some(Box::new(Keypad::new(edit.combo.text())));
             }
         } else if response.lost_focus() && edit.keypad.is_none() {
             let edit = self.edit.take().expect("the edit was just shown");
@@ -2085,7 +2085,7 @@ impl Register {
             }
             keypad::Outcome::Taken(text) => {
                 edit.keypad = None;
-                edit.combo.text = text;
+                edit.combo.set_text(&text);
                 edit.refusal = None;
                 edit.preview = preview(frame.i18n, edit);
                 edit.handed_back = true;
@@ -2280,35 +2280,25 @@ impl Register {
         cursor: CellAddress,
         tab: Option<Move>,
     ) -> Option<f32> {
-        let rows = edit.list_rows(keys.choices).len();
-        let list_open = rows > 0;
+        let list_open = !edit.list_rows(keys.choices).is_empty();
         let offers_list = edit.field.offers_list();
         let amount = matches!(edit.field, EditField::Amount { .. });
         if amount && ctx.input_mut(|input| input.consume_key(Modifiers::ALT, Key::ArrowDown)) {
-            edit.keypad = Some(Box::new(Keypad::new(&edit.combo.text)));
+            edit.keypad = Some(Box::new(Keypad::new(edit.combo.text())));
             self.edit = Some(Edit::Text(edit));
             return None;
         }
-        let (alt_down, down, up, escape, enter) = ctx.input_mut(|input| {
-            // Alt+↓ first, since a bare ↓ also matches it.
-            let alt_down = offers_list && input.consume_key(Modifiers::ALT, Key::ArrowDown);
+        if offers_list {
+            let field = &edit.field;
+            edit.combo
+                .arrow_keys(ctx, |text| field_rows(field, keys.choices, text));
+        }
+        let (escape, enter) = ctx.input_mut(|input| {
             (
-                alt_down,
-                offers_list && input.consume_key(Modifiers::NONE, Key::ArrowDown),
-                offers_list && input.consume_key(Modifiers::NONE, Key::ArrowUp),
                 input.consume_key(Modifiers::NONE, Key::Escape),
                 input.consume_key(Modifiers::NONE, Key::Enter),
             )
         });
-        if alt_down {
-            edit.open_list(ListScope::All, keys.choices);
-        } else if down && list_open {
-            edit.combo.highlight_next(rows);
-        } else if down {
-            edit.open_list(ListScope::Matching, keys.choices);
-        } else if up {
-            edit.combo.highlight_previous();
-        }
         if escape {
             // The first Esc closes the list and drops the completion; the next throws
             // away every change to the row.
@@ -2406,10 +2396,12 @@ impl Register {
         moved.scroll_offset
     }
 
-    /// Gives `row` the `lines` the Split dialog's Done handed back, kept with the row's
-    /// other changes until it is saved.
-    pub(crate) fn split_done(&mut self, row: RowId, lines: SplitLines) {
-        self.split_done = Some((row, lines));
+    /// Takes back the cell cursor's row from the Split dialog, which has closed, as the
+    /// editing row with its Split button focused. The lines Done handed back, if any,
+    /// are kept with the row's other changes until it is saved.
+    pub(crate) fn split_closed(&mut self, done: Option<SplitDone>) {
+        self.split_done = done;
+        self.focus_button = Some(RowButton::Split);
     }
 
     /// Tells the Category cell edit waiting on the New Category Dialog that the
@@ -2448,7 +2440,7 @@ impl Register {
         edit.combo.close_list();
         match outcome? {
             CategoryOutcome::Created(path) => {
-                edit.combo.text = path;
+                edit.combo.set_text(&path);
                 Some(Moved {
                     scroll_offset: self.leave_cell(ctx, keys, edit, cursor, leave),
                 })
@@ -2794,7 +2786,7 @@ impl Register {
         let refused = match edit {
             Edit::Text(mut edit) => {
                 if let Some(ListRow::Choice(text)) = edit.highlighted(keys.choices) {
-                    text.clone_into(&mut edit.combo.text);
+                    edit.combo.set_text(text);
                 }
                 match commit(
                     &edit,
@@ -3055,7 +3047,7 @@ fn focus_at_end(ctx: &egui::Context, edit: &CellEdit) {
     state
         .cursor
         .set_char_range(Some(CCursorRange::one(CCursor::new(
-            edit.combo.text.chars().count(),
+            edit.combo.text().chars().count(),
         ))));
     state.store(ctx, id);
     ctx.memory_mut(|memory| memory.request_focus(id));
@@ -3067,7 +3059,7 @@ fn focus_selecting_all(ctx: &egui::Context, edit: &CellEdit) {
     let mut state = TextEditState::load(ctx, id).unwrap_or_default();
     state.cursor.set_char_range(Some(CCursorRange::two(
         CCursor::new(0),
-        CCursor::new(edit.combo.text.chars().count()),
+        CCursor::new(edit.combo.text().chars().count()),
     )));
     state.store(ctx, id);
     ctx.memory_mut(|memory| memory.request_focus(id));
@@ -3372,7 +3364,7 @@ fn commit(
     let Some(row) = rows.find(edit.cell.row) else {
         return Commit::Done;
     };
-    let text = edit.combo.text.trim();
+    let text = edit.combo.text().trim();
     let change = match &edit.field {
         EditField::Text(field) => {
             let Ok(change) = field.edit(row, text, choices) else {
@@ -3729,7 +3721,7 @@ enum Taken {
 fn take_row(edit: &mut CellEdit, row: ListRow<'_>, commands: &CommandSender) -> Taken {
     match row {
         ListRow::Choice(text) => {
-            text.clone_into(&mut edit.combo.text);
+            edit.combo.set_text(text);
             Taken::Choice
         }
         ListRow::Create(name) => {
@@ -3758,7 +3750,7 @@ fn editor(
     let id = edit.editor_id();
     ui.put(
         inner,
-        TextEdit::singleline(&mut edit.combo.text)
+        TextEdit::singleline(edit.combo.text_mut())
             .id(id)
             .margin(Margin::ZERO)
             .desired_width(inner.width())
@@ -3822,7 +3814,7 @@ fn preview(i18n: &Localizer, edit: &CellEdit) -> Option<Preview> {
     else {
         return None;
     };
-    Preview::of(i18n, reader, *currency, &edit.combo.text)
+    Preview::of(i18n, reader, *currency, edit.combo.text())
 }
 
 /// The Register's table of `account` in `ui`, with `columns` at their widths, scrolled

@@ -208,6 +208,21 @@ impl Theme {
     /// The width of each Name field in Manage Accounts.
     pub(crate) const MANAGE_ACCOUNTS_NAME_WIDTH: f32 = 200.0;
 
+    /// The width of a Split dialog line's Category field, its ⏷ button included.
+    pub(crate) const SPLIT_CATEGORY_WIDTH: f32 = 260.0;
+
+    /// The width of a Split dialog line's Memo field.
+    pub(crate) const SPLIT_MEMO_WIDTH: f32 = 200.0;
+
+    /// The width of the Split dialog's Amount and Total fields.
+    pub(crate) const SPLIT_AMOUNT_WIDTH: f32 = 110.0;
+
+    /// The width of a Split dialog line's Remove button.
+    pub(crate) const SPLIT_REMOVE_WIDTH: f32 = 80.0;
+
+    /// How many lines the Split dialog shows before they scroll.
+    pub(crate) const SPLIT_LINES_SHOWN: usize = 10;
+
     /// The width of the filter bar's search box.
     pub(crate) const SEARCH_BOX_WIDTH: f32 = 240.0;
 
