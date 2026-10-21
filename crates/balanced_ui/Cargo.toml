@@ -40,6 +40,11 @@ test-support = ["dep:egui-wgpu", "dep:egui_kittest", "dep:tempfile", "balanced_i
 
 [dev-dependencies]
 egui_kittest.workspace = true
+# The Reconcile prototype (`examples/reconcile_prototype`, #374).
+balanced_prototype_harness.workspace = true
+eframe.workspace = true
+egui_extras.workspace = true
+serde_json.workspace = true
 balanced_core = { workspace = true, features = ["test-support"] }
 balanced_i18n = { workspace = true, features = ["test-support"] }
 icu_locale.workspace = true
