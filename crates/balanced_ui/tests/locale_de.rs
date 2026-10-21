@@ -326,6 +326,19 @@ fn the_calendars_today_button_reads_german() {
 }
 
 #[test]
+fn the_enter_moves_to_the_next_row_preference_reads_german() {
+    let mut harness = app();
+    open(&mut harness, "Extras");
+    open(&mut harness, "Einstellungen …");
+
+    // The group names fall back to en-US text.
+    harness.get_by_role_and_label(Role::Tab, "Register").click();
+    harness.run();
+
+    harness.get_by_role_and_label(Role::CheckBox, "Mit »Eingabe« zur nächsten Zeile gehen");
+}
+
+#[test]
 fn the_leave_row_prompt_reads_german() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");

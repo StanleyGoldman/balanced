@@ -279,6 +279,9 @@ dialog-preferences-payee-recall = Fill in a new transaction from its payee's las
 # Typing the start of a payee or category fills in the rest of the first one that
 # starts with it, selected, for Tab or Enter to take.
 dialog-preferences-inline-completion = Complete payees and categories as you type
+# Enter or Ctrl+Enter, saving a Register row, opens the next row's cell in the same
+# column. When off, the saved row stays highlighted with no cell open.
+dialog-preferences-enter-moves-to-next-row = Enter moves to the next row
 dialog-preferences-save-without-asking = Save a changed transaction without asking
 dialog-preferences-group-account-bar = { -account-bar }
 # Each group heading in the Account bar shows the sum of its accounts' balances.

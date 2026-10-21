@@ -103,6 +103,7 @@ fn unticking_memo_hides_it_and_saves_it_as_hidden() {
          gridlines = \"off\"\n\
          payee_recall = true\n\
          inline_completion = true\n\
+         enter_moves_to_next_row = true\n\
          save_without_asking = false\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
@@ -140,6 +141,7 @@ fn moving_payee_up_puts_it_before_num_and_saves_the_order() {
          gridlines = \"off\"\n\
          payee_recall = true\n\
          inline_completion = true\n\
+         enter_moves_to_next_row = true\n\
          save_without_asking = false\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\

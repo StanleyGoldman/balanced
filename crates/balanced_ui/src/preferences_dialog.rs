@@ -157,6 +157,10 @@ impl PreferencesForm {
             fl!(i18n, "dialog-preferences-inline-completion"),
         );
         ui.checkbox(
+            &mut draft.enter_moves_to_next_row,
+            fl!(i18n, "dialog-preferences-enter-moves-to-next-row"),
+        );
+        ui.checkbox(
             &mut draft.save_without_asking,
             fl!(i18n, "dialog-preferences-save-without-asking"),
         );

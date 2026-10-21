@@ -1474,8 +1474,7 @@ impl Register {
         preferences: &Preferences,
         today: Date<Iso>,
     ) {
-        let columns = &preferences.register_columns;
-        self.show_columns(columns);
+        self.show_columns(&preferences.register_columns);
         let account = summary.account().id();
         let closed = summary.account().is_closed();
         self.catch_up(summary, view, commands);
@@ -1503,6 +1502,7 @@ impl Register {
             draft_frame,
             choices: &choices,
             payee_recall: PayeeRecall::of(preferences),
+            after_enter: AfterEnter::of(preferences),
             commands,
         };
         let key_scroll_offset = self.handle_keys(ui.ctx(), &keys);
@@ -1537,7 +1537,7 @@ impl Register {
                             i18n,
                             theme,
                             commands,
-                            columns,
+                            columns: &preferences.register_columns,
                             kind: summary.account().kind(),
                         };
                         let shown = self.shown.clone();
@@ -2534,8 +2534,9 @@ impl Register {
     /// returns the scroll offset that brings the cell cursor into view when it has
     /// left it. The draft row is added. A transaction's changes are sent as one
     /// Command, and once the ledger applies it the next row's cell in the same column
-    /// opens; a refused save keeps the changes and opens the cell again. A row with no
-    /// changes moves on at once.
+    /// opens, or the row stays highlighted when Enter doesn't move to the next row; a
+    /// refused save keeps the changes and opens the cell again. A row with no changes
+    /// moves on at once, or stays highlighted.
     fn save_row(
         &mut self,
         ctx: &egui::Context,
@@ -2552,18 +2553,25 @@ impl Register {
             .as_ref()
             .filter(|_| self.unsaved.is_changed(cursor.row))
         else {
+            match keys.after_enter {
+                AfterEnter::NextRow => {}
+                AfterEnter::SameRow => return None,
+            }
             let moved = self.move_cursor(cursor, Move::Down, keys.rows)?;
             self.start_edit(ctx, keys, EditStart::Saved);
             return moved.scroll_offset;
         };
-        let next = keys
-            .rows
-            .position(cursor.row)
-            .and_then(|index| keys.rows.get(index + 1))
-            .map(|row| CellAddress {
-                row: row.id(),
-                column: cursor.column,
-            });
+        let next = match keys.after_enter {
+            AfterEnter::NextRow => keys
+                .rows
+                .position(cursor.row)
+                .and_then(|index| keys.rows.get(index + 1))
+                .map(|row| CellAddress {
+                    row: row.id(),
+                    column: cursor.column,
+                }),
+            AfterEnter::SameRow => None,
+        };
         let confirm = send_save(changes, keys.rows, keys.commands);
         self.saving = Some(Saving {
             at: keys.generation,
@@ -2853,6 +2861,7 @@ struct KeyContext<'a> {
     draft_frame: DraftFrame<'a>,
     choices: &'a FieldChoices,
     payee_recall: PayeeRecall,
+    after_enter: AfterEnter,
     commands: &'a CommandSender,
 }
 
@@ -2870,6 +2879,26 @@ impl PayeeRecall {
             Self::On
         } else {
             Self::Off
+        }
+    }
+}
+
+/// Where the cell cursor goes once Enter or Ctrl+Enter saves a transaction's row, as
+/// the Preferences say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AfterEnter {
+    /// The next row's cell in the same column opens for editing.
+    NextRow,
+    /// The saved row stays highlighted, with no cell open.
+    SameRow,
+}
+
+impl AfterEnter {
+    fn of(preferences: &Preferences) -> Self {
+        if preferences.enter_moves_to_next_row {
+            Self::NextRow
+        } else {
+            Self::SameRow
         }
     }
 }
