@@ -660,7 +660,9 @@ impl MainWindow {
             theme,
         )
         .fitted(width)
-        .show(ctx, dialog, |ui, form| form.show(ui, i18n, theme, today, width));
+        .show(ctx, dialog, |ui, form| {
+            form.show(ui, i18n, theme, today, width);
+        });
         match outcome {
             DialogOutcome::Open => return,
             DialogOutcome::Accepted => {

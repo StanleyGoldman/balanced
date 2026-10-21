@@ -29,9 +29,7 @@ fn app_with(account: &str) -> Harness<'static, App> {
             )
         });
     harness.run();
-    harness
-        .get_by_role_and_label(Role::Button, account)
-        .click();
+    harness.get_by_role_and_label(Role::Button, account).click();
     harness.run();
     harness
 }
@@ -176,7 +174,6 @@ fn go_scrolls_a_far_off_row_into_view() {
     // The Register lays out only the rows in view.
     assert_eq!(selected_date(&harness).as_deref(), Some("3/1/2015"));
 }
-
 
 #[test]
 fn esc_closes_go_to_date_with_the_cell_cursor_unmoved() {

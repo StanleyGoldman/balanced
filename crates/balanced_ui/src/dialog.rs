@@ -340,19 +340,13 @@ impl HeavyDialog {
         }
         let focused_before = ctx.memory(egui::Memory::focused);
         let shown = heavy.show(ctx, |ui| {
-            let (accept, cancel, _) = if let HeavySize::Fitted(width) = size {
-                ui.set_width(width.max(title_row).min(room.width()));
-                body(ui, &mut dialog.form);
-                // An auto-sized window offers all the room it may grow to, which the
-                // buttons' row would centre itself in.
-                let row = Vec2::new(ui.available_width(), button_height(ui));
-                ui.allocate_ui(row, |ui| buttons(ui, accept, Some(cancel), None))
-                    .inner
-            } else {
-                let height = ui.available_height();
-                body_area(ui, height, |ui| body(ui, &mut dialog.form));
-                buttons(ui, accept, Some(cancel), None)
+            let fitted_width = match size {
+                HeavySize::Fitted(width) => Some(width.max(title_row).min(room.width())),
+                HeavySize::Default | HeavySize::Opens(_) => None,
             };
+            let (accept, cancel, _) = heavy_contents(ui, fitted_width, accept, cancel, |ui| {
+                body(ui, &mut dialog.form);
+            });
             let cancel = cancel.expect("a heavy Dialog has Cancel");
             let body_took_focus = ctx.memory(egui::Memory::focused) != focused_before;
             if first_frame && !body_took_focus {
@@ -435,6 +429,31 @@ fn close_button(
     ui.painter()
         .line_segment([cross.right_top(), cross.left_bottom()], stroke);
     response
+}
+
+/// Draws a heavy Dialog's `body` above its default button reading `accept` and its
+/// Cancel reading `cancel`. A fitted Dialog's body is `fitted_width` wide and doesn't
+/// scroll; any other's body scrolls when it is too tall for the Dialog.
+fn heavy_contents(
+    ui: &mut egui::Ui,
+    fitted_width: Option<f32>,
+    accept: String,
+    cancel: String,
+    body: impl FnOnce(&mut egui::Ui),
+) -> (Response, Option<Response>, Option<Response>) {
+    if let Some(width) = fitted_width {
+        ui.set_width(width);
+        body(ui);
+        // An auto-sized window offers all the room it may grow to, which the buttons'
+        // row would centre itself in.
+        let row = Vec2::new(ui.available_width(), button_height(ui));
+        ui.allocate_ui(row, |ui| buttons(ui, accept, Some(cancel), None))
+            .inner
+    } else {
+        let height = ui.available_height();
+        body_area(ui, height, body);
+        buttons(ui, accept, Some(cancel), None)
+    }
 }
 
 /// The layer of the backdrop behind the heavy Dialog with id `heavy`, which is its
