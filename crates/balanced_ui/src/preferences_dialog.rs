@@ -150,6 +150,10 @@ impl PreferencesForm {
             &mut draft.inline_completion,
             fl!(i18n, "dialog-preferences-inline-completion"),
         );
+        ui.checkbox(
+            &mut draft.enter_moves_to_next_row,
+            fl!(i18n, "dialog-preferences-enter-moves-to-next-row"),
+        );
     }
 
     /// The Account bar group: what the Account bar shows.
