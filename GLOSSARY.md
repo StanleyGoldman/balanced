@@ -32,6 +32,10 @@ _Avoid_: Popup, child window, floating window
 A short-lived window for a single task, usually modal, that blocks the main window until dismissed (e.g. confirm, New Account, split).
 _Avoid_: Popup, modal window
 
+**Tool window**:
+A long-lived, non-modal window drawn inside the main window, over the main view, that stays open while the user works beside it (e.g. the Calculator).
+_Avoid_: Floating window, palette, popup
+
 **Preference**:
 A choice about how Balanced looks or behaves that belongs to the person using this computer and applies to every data file they open (e.g. dense rows, gridlines). Set in Tools → Preferences.
 _Avoid_: Application-level option, setting, option

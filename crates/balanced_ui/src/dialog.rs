@@ -341,13 +341,11 @@ impl HeavyDialog {
         // egui centres it beside its ×. The × sits in a slot as wide as that gap and as
         // tall as the title row.
         let style = ctx.global_style();
-        let heading = TextStyle::Heading.resolve(&style);
-        let (gap, close_slot, title_width) = ctx.fonts_mut(|fonts| {
-            let gap = Vec2::splat(fonts.row_height(&heading));
-            let title = fonts.layout_no_wrap(title.clone(), heading, Color32::PLACEHOLDER);
-            let slot = Vec2::new(gap.x, title.size().y.max(gap.y));
-            (gap, slot, title.size().x)
-        });
+        let TitleRow {
+            gap,
+            close_slot,
+            title_width,
+        } = TitleRow::of(ctx, &title);
         // The title, the gap after it and the ×, so a fitted Dialog shows its whole
         // title.
         let title_row = title_width + gap.x + style.spacing.item_spacing.x + close_slot.x;
@@ -414,12 +412,39 @@ impl HeavyDialog {
     }
 }
 
-/// The × at the right of the title bar of the heavy Dialog with id `heavy`, drawn on
-/// its `layer` where egui draws its own: centred in a `slot` at the top right corner
-/// inside the frame of the window at `window`. A screen reader reads it as `label`.
-fn close_button(
+/// The room a window's title row gives its own ×, in place of egui's.
+pub(crate) struct TitleRow {
+    /// The gap after the title, as wide as egui's ×.
+    pub(crate) gap: Vec2,
+    /// The slot the × is centred in: as wide as the gap and as tall as the title row.
+    pub(crate) close_slot: Vec2,
+    /// How wide the title is.
+    pub(crate) title_width: f32,
+}
+
+impl TitleRow {
+    /// The title row of a window titled `title`.
+    pub(crate) fn of(ctx: &egui::Context, title: &str) -> Self {
+        let heading = TextStyle::Heading.resolve(&ctx.global_style());
+        ctx.fonts_mut(|fonts| {
+            let gap = Vec2::splat(fonts.row_height(&heading));
+            let title = fonts.layout_no_wrap(title.to_owned(), heading, Color32::PLACEHOLDER);
+            Self {
+                gap,
+                close_slot: Vec2::new(gap.x, title.size().y.max(gap.y)),
+                title_width: title.size().x,
+            }
+        })
+    }
+}
+
+/// The × at the right of the title bar of the window with id `window_id`, a heavy
+/// Dialog or a Tool window, drawn on its `layer` where egui draws its own: centred in
+/// a `slot` at the top right corner inside the frame of the window at `window`. A
+/// screen reader reads it as `label`.
+pub(crate) fn close_button(
     ctx: &egui::Context,
-    heavy: Id,
+    window_id: Id,
     layer: LayerId,
     window: Rect,
     slot: Vec2,
@@ -436,15 +461,15 @@ fn close_button(
     let rect = Rect::from_center_size(slot.center(), Vec2::splat(style.spacing.icon_width));
     let ui = egui::Ui::new(
         ctx.clone(),
-        heavy.with("close_ui"),
+        window_id.with("close_ui"),
         UiBuilder::new()
             .layer_id(layer)
             .max_rect(rect)
-            .accessibility_parent(heavy),
+            .accessibility_parent(window_id),
     );
     // It takes drags as well as clicks, so a drag that starts on it doesn't move the
     // Dialog by the title bar beneath it.
-    let response = ui.interact(rect, heavy.with("close"), Sense::click_and_drag());
+    let response = ui.interact(rect, window_id.with("close"), Sense::click_and_drag());
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
     // Two strokes in the widget's foreground colour, as egui paints its ×.
     let visuals = ui.style().interact(&response);

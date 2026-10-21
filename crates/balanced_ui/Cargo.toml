@@ -109,6 +109,10 @@ name = "keypad"
 required-features = ["test-support"]
 
 [[test]]
+name = "calculator"
+required-features = ["test-support"]
+
+[[test]]
 name = "layout"
 required-features = ["test-support"]
 

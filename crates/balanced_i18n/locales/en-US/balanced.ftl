@@ -29,6 +29,7 @@ menu-view-switch-pane = Switch Pane
 menu-tools = Tools
 menu-tools-manage-accounts = Manage Accounts…
 menu-tools-preferences = Preferences…
+menu-tools-calculator = Calculator
 menu-help = Help
 menu-help-about = About { -brand-name }
 menu-new-transaction = New Transaction
@@ -390,6 +391,19 @@ keypad-ok = OK
 keypad-waiting = …
 # Shown under the keypad's sum when it can't be read as an amount.
 keypad-not-an-amount = Not an amount
+# The Calculator's tall key, shown as "=", as a screen reader reads it. It replaces
+# the sum with its result.
+keypad-equals = Equals
+
+## Calculator
+
+# The Calculator, a window that stays open over the Main window. Its title, and the
+# label of its sum.
+calculator = Calculator
+# Puts the Calculator's result into the amount cell last edited, as if typed there.
+calculator-paste = Paste
+# The Calculator's close button, as a screen reader reads it.
+calculator-close = Close calculator
 
 ## Date field
 
@@ -412,6 +426,8 @@ field-date-today = Today
 
 status-about = { -brand-name } { $version }
 status-not-available-yet = Not available yet
+status-no-paste-target = Click a Payment or Deposit cell first, then Paste puts the result there.
+status-paste-not-an-amount = The calculator's sum isn't an amount, so there is nothing to paste.
 status-no-such-category = No category has that name. Pick one from the list, or create it.
 status-account-closed = This account is closed, so its transactions can't be changed.
 status-transfer-account-closed = The other account of this transfer is closed, so the transfer can't be made, changed or deleted.

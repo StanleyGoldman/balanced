@@ -52,6 +52,8 @@ pub(crate) enum AppCommand {
     /// Move keyboard focus from the Account bar to the Main view, or from anywhere
     /// else to the Account bar.
     SwitchPane,
+    /// Open the Calculator over the Main view, unless it is already open.
+    OpenCalculator,
     /// Open a Dialog over the Main window.
     OpenDialog(DialogKind),
     /// Apply a change the open Dialog's form asks for. The Dialog closes once the
@@ -116,6 +118,11 @@ pub(crate) enum StatusMessage {
     About,
     /// The answer to a command whose feature isn't built yet.
     NotAvailableYet,
+    /// Why the Calculator's Paste changed nothing: no Payment or Deposit cell has been
+    /// edited in the Register shown.
+    NoPasteTarget,
+    /// Why the Calculator's Paste changed nothing: its sum isn't an amount.
+    PasteNotAnAmount,
     /// Why a Category cell refused its typed text: no category has that name.
     NoSuchCategory,
     /// The preferences file couldn't be read, so the app started from the default
@@ -152,6 +159,8 @@ impl StatusMessage {
         match self {
             Self::About => fl!(i18n, "status-about", version = env!("CARGO_PKG_VERSION")),
             Self::NotAvailableYet => fl!(i18n, "status-not-available-yet"),
+            Self::NoPasteTarget => fl!(i18n, "status-no-paste-target"),
+            Self::PasteNotAnAmount => fl!(i18n, "status-paste-not-an-amount"),
             Self::NoSuchCategory => fl!(i18n, "status-no-such-category"),
             Self::PreferencesReset => fl!(i18n, "status-preferences-reset"),
             Self::PreferencesUnreadable => fl!(i18n, "status-preferences-unreadable"),

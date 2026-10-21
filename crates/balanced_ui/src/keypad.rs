@@ -87,7 +87,7 @@ pub(crate) enum Outcome {
 
 /// An arithmetic operator on the keypad.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Operator {
+pub(crate) enum Operator {
     Add,
     Subtract,
     Multiply,
@@ -106,15 +106,25 @@ impl Operator {
     }
 }
 
+/// What the keypad's tall key does: OK under a field, = in the Calculator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Finish {
+    /// Hands the result back to the field.
+    Ok,
+    /// Replaces the sum with its result.
+    Equals,
+}
+
 /// One key of the keypad.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum PadKey {
+pub(crate) enum PadKey {
     Digit(char),
     Operator(Operator),
     Decimal,
     Clear,
     Backspace,
-    Ok,
+    /// The tall key, OK or = as its host's [`Finish`] says.
+    Finish,
 }
 
 impl PadKey {
@@ -136,13 +146,14 @@ impl PadKey {
         (Self::Digit('1'), [0.0, 3.0, 1.0, 1.0]),
         (Self::Digit('2'), [1.0, 3.0, 1.0, 1.0]),
         (Self::Digit('3'), [2.0, 3.0, 1.0, 1.0]),
-        (Self::Ok, [3.0, 3.0, 1.0, 2.0]),
+        (Self::Finish, [3.0, 3.0, 1.0, 2.0]),
         (Self::Digit('0'), [0.0, 4.0, 2.0, 1.0]),
         (Self::Decimal, [2.0, 4.0, 1.0, 1.0]),
     ];
 
-    /// What the key shows, and what a screen reader reads for it.
-    fn face(self, i18n: &Localizer, reader: &AmountReader) -> (String, String) {
+    /// What the key shows, and what a screen reader reads for it, with the tall key
+    /// doing what `finish` says.
+    fn face(self, i18n: &Localizer, reader: &AmountReader, finish: Finish) -> (String, String) {
         match self {
             Self::Digit(digit) => (digit.to_string(), digit.to_string()),
             Self::Operator(Operator::Add) => ("+".to_owned(), fl!(i18n, "keypad-add")),
@@ -155,7 +166,10 @@ impl PadKey {
             ),
             Self::Clear => (fl!(i18n, "keypad-clear", "key"), fl!(i18n, "keypad-clear")),
             Self::Backspace => ("⏴".to_owned(), fl!(i18n, "keypad-backspace")),
-            Self::Ok => (fl!(i18n, "keypad-ok"), fl!(i18n, "keypad-ok")),
+            Self::Finish => match finish {
+                Finish::Ok => (fl!(i18n, "keypad-ok"), fl!(i18n, "keypad-ok")),
+                Finish::Equals => ("=".to_owned(), fl!(i18n, "keypad-equals")),
+            },
         }
     }
 }
@@ -189,7 +203,7 @@ impl Keypad {
         field: Rect,
         button: Rect,
     ) -> Outcome {
-        let display = id.with("keypad_display");
+        let display = display_id(id);
         let mut outcome = Outcome::Open;
         if ctx.memory(|memory| memory.has_focus(display)) {
             amount_field::refuse_characters(ctx, reader);
@@ -210,67 +224,22 @@ impl Keypad {
         }
         let row_height = theme.row_height();
         let gap = ctx.global_style().spacing.item_spacing;
-        let key = vec2(row_height * KEY_WIDTH, row_height * KEY_HEIGHT);
-        let width = key.x * COLUMNS + gap.x * (COLUMNS - 1.0);
         // The field's preview floats one row under the field.
         let anchor = field.right_bottom() + vec2(0.0, row_height + 2.0 * gap.y);
-        let mut pressed = None;
         let area = Area::new(id.with("keypad"))
             .order(Order::Foreground)
             .pivot(Align2::RIGHT_TOP)
             .fixed_pos(anchor)
             .show(ctx, |ui| {
-                Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_width(width);
-                    let caption = ui.label(
-                        RichText::new(fl!(i18n, "field-amount-keypad"))
-                            .small()
-                            .weak(),
-                    );
-                    ui.add(
-                        TextEdit::singleline(&mut self.text)
-                            .id(display)
-                            .horizontal_align(Align::RIGHT)
-                            .desired_width(width)
-                            .event_filter(EventFilter {
-                                escape: true,
-                                ..Default::default()
-                            }),
-                    )
-                    .labelled_by(caption.id);
-                    self.result_line(ui, i18n, reader, currency, width);
-                    let (grid, _) = ui.allocate_exact_size(
-                        vec2(width, key.y * ROWS + gap.y * (ROWS - 1.0)),
-                        Sense::hover(),
-                    );
-                    for (pad_key, [column, row, columns, rows]) in PadKey::LAYOUT {
-                        let min = grid.min + vec2(column * (key.x + gap.x), row * (key.y + gap.y));
-                        let size = vec2(
-                            key.x * columns + gap.x * (columns - 1.0),
-                            key.y * rows + gap.y * (rows - 1.0),
-                        );
-                        let (face, label) = pad_key.face(i18n, reader);
-                        let rect = Rect::from_min_size(min, size);
-                        if key_button(ui, id.with(("keypad_key", pad_key)), rect, &face, &label)
-                            .clicked()
-                        {
-                            pressed = Some(pad_key);
-                        }
-                    }
-                });
+                Frame::popup(ui.style())
+                    .show(ui, |ui| {
+                        let caption = fl!(i18n, "field-amount-keypad");
+                        self.body(ui, i18n, theme, reader, currency, id, &caption, Finish::Ok)
+                    })
+                    .inner
             });
-        if let Some(pad_key) = pressed {
-            self.focus = true;
-            match pad_key {
-                PadKey::Digit(digit) => self.text.push(digit),
-                PadKey::Operator(operator) => self.text.push(operator.typed()),
-                PadKey::Decimal => self.text.push_str(reader.decimal_mark()),
-                PadKey::Clear => self.text.clear(),
-                PadKey::Backspace => {
-                    self.text.pop();
-                }
-                PadKey::Ok => outcome = self.take(i18n, reader, currency),
-            }
+        if self.press(area.inner, reader) {
+            outcome = self.take(i18n, reader, currency);
         }
         if outcome == Outcome::Open {
             let outside = ctx.input(|input| {
@@ -283,25 +252,133 @@ impl Keypad {
                 return Outcome::Cancelled;
             }
         }
-        if std::mem::take(&mut self.focus) {
-            focus_at_end(ctx, display, &self.text);
-        }
+        self.end_frame(ctx, id);
         outcome
     }
 
-    /// Hands the sum's result back, formatted as the field shows amounts, or keeps the
-    /// keypad open with its display focused when the sum isn't an amount.
-    fn take(&mut self, i18n: &Localizer, reader: &AmountReader, currency: CurrencyCode) -> Outcome {
+    /// Draws the keypad's caption, its display labelled `caption`, the line under the
+    /// display and its keys, the last of them `finish`, into `ui`, and returns the key
+    /// pressed this frame. `id` is the keypad's own.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the body borrows its host's reader, currency and labels for the frame"
+    )]
+    pub(crate) fn body(
+        &mut self,
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        theme: &Theme,
+        reader: &AmountReader,
+        currency: CurrencyCode,
+        id: Id,
+        caption: &str,
+        finish: Finish,
+    ) -> Option<PadKey> {
+        let row_height = theme.row_height();
+        let gap = ui.spacing().item_spacing;
+        let key = vec2(row_height * KEY_WIDTH, row_height * KEY_HEIGHT);
+        let width = width(ui, theme);
+        ui.set_width(width);
+        let caption = ui.label(RichText::new(caption).small().weak());
+        ui.add(
+            TextEdit::singleline(&mut self.text)
+                .id(display_id(id))
+                .horizontal_align(Align::RIGHT)
+                .desired_width(width)
+                .event_filter(EventFilter {
+                    escape: true,
+                    ..Default::default()
+                }),
+        )
+        .labelled_by(caption.id);
+        self.result_line(ui, i18n, reader, currency, width);
+        let (grid, _) = ui.allocate_exact_size(
+            vec2(width, key.y * ROWS + gap.y * (ROWS - 1.0)),
+            Sense::hover(),
+        );
+        let mut pressed = None;
+        for (pad_key, [column, row, columns, rows]) in PadKey::LAYOUT {
+            let min = grid.min + vec2(column * (key.x + gap.x), row * (key.y + gap.y));
+            let size = vec2(
+                key.x * columns + gap.x * (columns - 1.0),
+                key.y * rows + gap.y * (rows - 1.0),
+            );
+            let (face, label) = pad_key.face(i18n, reader, finish);
+            let rect = Rect::from_min_size(min, size);
+            if key_button(ui, id.with(("keypad_key", pad_key)), rect, &face, &label).clicked() {
+                pressed = Some(pad_key);
+            }
+        }
+        pressed
+    }
+
+    /// Adds `pressed`, the key the body reported, if any, to the sum, and returns
+    /// whether it was the finishing key, OK or =, which the host acts on.
+    pub(crate) fn press(&mut self, pressed: Option<PadKey>, reader: &AmountReader) -> bool {
+        let Some(pad_key) = pressed else {
+            return false;
+        };
+        self.focus = true;
+        match pad_key {
+            PadKey::Digit(digit) => self.text.push(digit),
+            PadKey::Operator(operator) => self.text.push(operator.typed()),
+            PadKey::Decimal => self.text.push_str(reader.decimal_mark()),
+            PadKey::Clear => self.text.clear(),
+            PadKey::Backspace => {
+                self.text.pop();
+            }
+            PadKey::Finish => return true,
+        }
+        false
+    }
+
+    /// Gives the display of the keypad with `id` the keyboard, with its text cursor at
+    /// the end, when a key or a refused result asked for it this frame.
+    pub(crate) fn end_frame(&mut self, ctx: &egui::Context, id: Id) {
+        if std::mem::take(&mut self.focus) {
+            focus_at_end(ctx, display_id(id), &self.text);
+        }
+    }
+
+    /// The sum's result, formatted as an amount field shows it, or `None` when the
+    /// sum isn't an amount. A `None` gives the display the keyboard back.
+    pub(crate) fn result(
+        &mut self,
+        i18n: &Localizer,
+        reader: &AmountReader,
+        currency: CurrencyCode,
+    ) -> Option<String> {
         if let Ok(calculation) = reader.read(self.text.trim()) {
-            Outcome::Taken(i18n.format_amount(
+            Some(i18n.format_amount(
                 calculation.amount(),
                 i18n_currency(currency),
                 AmountStyle::Bare,
             ))
         } else {
             self.focus = true;
-            Outcome::Open
+            None
         }
+    }
+
+    /// Replaces the sum with its result, as = does, or leaves it, focused, when it
+    /// isn't an amount.
+    pub(crate) fn equals(
+        &mut self,
+        i18n: &Localizer,
+        reader: &AmountReader,
+        currency: CurrencyCode,
+    ) {
+        if let Some(result) = self.result(i18n, reader, currency) {
+            self.text = result;
+            self.focus = true;
+        }
+    }
+
+    /// Hands the sum's result back, formatted as the field shows amounts, or keeps the
+    /// keypad open with its display focused when the sum isn't an amount.
+    fn take(&mut self, i18n: &Localizer, reader: &AmountReader, currency: CurrencyCode) -> Outcome {
+        self.result(i18n, reader, currency)
+            .map_or(Outcome::Open, Outcome::Taken)
     }
 
     /// The line under the display: the sum's result as the field's preview shows it,
@@ -337,6 +414,17 @@ impl Keypad {
             |ui| ui.add(Label::new(text).extend()),
         );
     }
+}
+
+/// The id of the display of the keypad with `id`.
+pub(crate) fn display_id(id: Id) -> Id {
+    id.with("keypad_display")
+}
+
+/// How wide the keypad's body is in `ui`, drawn with `theme`.
+fn width(ui: &egui::Ui, theme: &Theme) -> f32 {
+    let key_width = theme.row_height() * KEY_WIDTH;
+    key_width * COLUMNS + ui.spacing().item_spacing.x * (COLUMNS - 1.0)
 }
 
 /// The 🖩 button in `rect`, beside the amount field with `field`, which opens and

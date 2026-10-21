@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
 
-//! The egui user interface: the Main window, its panels, Dialogs and Detached windows.
+//! The egui user interface: the Main window, its panels, Dialogs, Tool windows and
+//! Detached windows.
 
 mod account_bar;
 mod accounts_model;
 mod amount_field;
 mod app;
+mod calculator;
 mod clock;
 mod combobox;
 mod command;
