@@ -2059,14 +2059,15 @@ impl Proto {
             .id(Id::new("rc_window"))
             .open(&mut open)
             .collapsible(false)
-            .resizable(true)
-            .default_size(size)
-            .max_size(max)
-            .default_pos(screen.center() - size / 2.0)
+            // Fixed: the lists' tables don't shrink, so a resizable Window grew to the
+            // whole screen. Movable still; its size isn't this prototype's question.
+            .resizable(false)
+            .fixed_size(size)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .default_pos(screen.center())
             .show(ctx, |ui| {
                 let rect = ui.available_rect_before_wrap();
                 self.h.region(rect, "reconcile dialog");
-                ui.set_min_size(vec2(size.x - 24.0, size.y - 48.0));
                 self.dialog_body(ui);
             });
         ctx.move_to_top(egui::LayerId::new(Order::Middle, Id::new("rc_window")));
@@ -2140,26 +2141,40 @@ impl Proto {
         let rect = ui.available_rect_before_wrap();
         self.h.region(rect, "reconcile figures");
         ui.horizontal(|ui| {
-            egui::Grid::new("rc_figs")
-                .num_columns(2)
-                .spacing(vec2(24.0, 2.0))
-                .show(ui, |ui| {
-                    // Two columns of three: what's ticked on the left, the balances on the right.
-                    for pair in [(0, 3), (1, 4), (2, 5)] {
-                        for i in [pair.0, pair.1] {
-                            let (label, v, is_diff) = &rows[i];
-                            ui.label(label.as_str());
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.label(if *is_diff {
-                                    self.diff_text(*v)
-                                } else {
-                                    RichText::new(fmt_cents(*v))
-                                });
-                            });
-                        }
-                        ui.end_row();
-                    }
-                });
+            // Painted at fixed places: right-to-left cells in a Grid stretched the Dialog.
+            let row_h = self.theme.row_height();
+            let (label_w, value_w, gap) = (200.0, 110.0, 32.0);
+            let (rect, _) = ui.allocate_exact_size(
+                vec2(2.0 * (label_w + value_w) + gap, 3.0 * row_h),
+                Sense::hover(),
+            );
+            let font = egui::TextStyle::Body.resolve(ui.style());
+            let text = ui.visuals().text_color();
+            for (n, i) in [0, 1, 2, 3, 4, 5].into_iter().enumerate() {
+                let (label, v, is_diff) = &rows[i];
+                let col = (n / 3) as f32;
+                let y = rect.top() + (n % 3) as f32 * row_h + row_h / 2.0;
+                let x = rect.left() + col * (label_w + value_w + gap);
+                ui.painter().text(
+                    egui::pos2(x, y),
+                    egui::Align2::LEFT_CENTER,
+                    label,
+                    font.clone(),
+                    text,
+                );
+                let color = match (*is_diff, *v == 0) {
+                    (true, true) => GREEN,
+                    (true, false) => RED,
+                    _ => text,
+                };
+                ui.painter().text(
+                    egui::pos2(x + label_w + value_w, y),
+                    egui::Align2::RIGHT_CENTER,
+                    fmt_cents(*v),
+                    font.clone(),
+                    color,
+                );
+            }
             ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
                 self.finish_buttons(ui);
             });
@@ -2343,14 +2358,12 @@ impl Proto {
                         RichText::new(fmt_cents(*v))
                     });
                 }
-                ui.label(
-                    RichText::new(
-                        "   Click a Clr cell, or select a row and press Space, to tick it.",
-                    )
+            });
+            ui.label(
+                RichText::new("Click a Clr cell, or select a row and press Space, to tick it.")
                     .small()
                     .weak(),
-                );
-            });
+            );
         });
         self.h.region(r.response.rect, "reconcile bar");
     }
@@ -2375,10 +2388,10 @@ impl Proto {
                         ui.label(RichText::new(format!("Reconcile {name}")).heading());
                     },
                     |ui| {
-                        let r = ui.small_button("✕").on_hover_text("Finish later");
+                        let r = ui.small_button("Close").on_hover_text("Finish later");
                         self.h.track(&r, "panel close");
                         if r.clicked() {
-                            self.acts.push(Act::Later("panel ✕"));
+                            self.acts.push(Act::Later("panel Close"));
                         }
                     },
                 );
