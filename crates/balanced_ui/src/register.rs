@@ -672,10 +672,10 @@ impl CellEdit {
     }
 
     /// Completes the typed text with the rest of the first entry of the open list that
-    /// starts with it, ignoring case, and highlights that entry. Returns the length in
-    /// characters of the typed text and of the whole, or `None` when no entry starts
-    /// with it.
-    fn complete(&mut self, choices: &FieldChoices) -> Option<(usize, usize)> {
+    /// starts with it, ignoring case, and highlights that entry. Returns the range of
+    /// the completion, or `None` when no entry starts with the text. An entry that is
+    /// the text, ignoring case, is highlighted and leaves nothing to complete.
+    fn complete(&mut self, choices: &FieldChoices) -> Option<CCursorRange> {
         let (index, rest) =
             self.list_rows(choices)
                 .into_iter()
@@ -686,13 +686,26 @@ impl CellEdit {
                     }
                     ListRow::Create(_) => None,
                 })?;
-        let typed = self.text.chars().count();
-        self.completion = Some(self.text.len());
-        self.text.push_str(&rest);
         if let Some(list) = &mut self.list {
             list.highlight = Some(index);
         }
-        Some((typed, self.text.chars().count()))
+        if rest.is_empty() {
+            return None;
+        }
+        let typed = CCursor::new(self.text.chars().count());
+        self.completion = Some(self.text.len());
+        self.text.push_str(&rest);
+        Some(CCursorRange::two(
+            typed,
+            CCursor::new(self.text.chars().count()),
+        ))
+    }
+
+    /// Drops the Inline completion, if one shows, leaving the typed text.
+    fn drop_completion(&mut self) {
+        if let Some(typed) = self.completion.take() {
+            self.text.truncate(typed);
+        }
     }
 
     /// The highlighted row of the list, if it is open with one highlighted.
@@ -1694,9 +1707,14 @@ impl Register {
             edit.highlight_previous();
         }
         if escape {
-            // The first Esc closes the list; the next cancels the edit.
+            // The first Esc closes the list and drops the completion; the next cancels
+            // the edit.
             if list_open {
                 edit.list = None;
+                if edit.completion.is_some() {
+                    edit.drop_completion();
+                    focus_at_end(ctx, &edit);
+                }
                 self.edit = Some(Edit::Text(edit));
             } else {
                 ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
@@ -2143,8 +2161,8 @@ fn text_typed(ctx: &egui::Context) -> bool {
     })
 }
 
-/// Completes `edit`'s text, just typed into, when the caret ends at the end, selecting the completion so the next character typed replaces
-/// it.
+/// Completes `edit`'s text, just typed into, when the caret is at its end. The
+/// completion is selected, so the next character typed replaces it.
 fn complete_typing(ctx: &egui::Context, edit: &mut CellEdit, choices: &FieldChoices) {
     let id = edit.editor_id();
     let Some(mut state) = TextEditState::load(ctx, id) else {
@@ -2156,13 +2174,10 @@ fn complete_typing(ctx: &egui::Context, edit: &mut CellEdit, choices: &FieldChoi
     if !caret_at_end {
         return;
     }
-    let Some((typed, end)) = edit.complete(choices) else {
+    let Some(completion) = edit.complete(choices) else {
         return;
     };
-    state.cursor.set_char_range(Some(CCursorRange::two(
-        CCursor::new(typed),
-        CCursor::new(end),
-    )));
+    state.cursor.set_char_range(Some(completion));
     state.store(ctx, id);
     ctx.request_repaint();
 }

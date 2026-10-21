@@ -370,3 +370,24 @@ fn turning_inline_completion_off_in_the_preferences_dialog_stops_it_on_ok() {
 
     assert_eq!(editor(&harness, "Payee"), "Tratt");
 }
+
+#[test]
+fn esc_drops_the_completion_with_the_list() {
+    let mut harness = everyday_checking();
+    type_payee(&mut harness, "Tratt");
+
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+
+    assert_eq!(editor(&harness, "Payee"), "Tratt");
+}
+
+#[test]
+fn backspace_after_typing_a_whole_entry_keeps_the_lists_top_row_for_tab() {
+    let mut harness = everyday_checking();
+    type_payee(&mut harness, "shell");
+    press(&mut harness, Modifiers::NONE, Key::Backspace);
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(draft_row(&harness)[2], "Shell");
+}
