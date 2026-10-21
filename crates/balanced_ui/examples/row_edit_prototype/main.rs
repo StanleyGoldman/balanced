@@ -2155,7 +2155,13 @@ impl Proto {
         if k == 2 {
             te = te.horizontal_align(Align::Max);
         }
-        let r = ui.add(te);
+        // A Grid in an auto-sized Window shrinks its fields below `desired_width`, so the
+        // dialog and the bar give each column a fixed width.
+        let r = if tag == "table" {
+            ui.add(te)
+        } else {
+            ui.add_sized([[200.0, 240.0, 100.0][k], ui.spacing().interact_size.y], te)
+        };
         self.edit_ids_now.insert(id);
         self.h.track(
             &r,
