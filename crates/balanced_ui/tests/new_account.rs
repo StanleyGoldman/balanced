@@ -7,7 +7,7 @@ use balanced_core::Ledger;
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::egui::accesskit::Role;
-use eframe::egui::{Event, Key, Modifiers};
+use eframe::egui::{Event, Key, Modifiers, PointerButton, pos2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use icu_calendar::Date;
@@ -41,12 +41,17 @@ fn wizard() -> Harness<'static, App> {
 
 /// Presses `key` with no modifier, then runs the App until it settles.
 fn press(harness: &mut Harness<'static, App>, key: Key) {
+    press_with(harness, Modifiers::NONE, key);
+}
+
+/// Presses `key` with `modifiers` held, then runs the App until it settles.
+fn press_with(harness: &mut Harness<'static, App>, modifiers: Modifiers, key: Key) {
     harness.event(Event::Key {
         key,
         physical_key: None,
         pressed: true,
         repeat: false,
-        modifiers: Modifiers::NONE,
+        modifiers,
     });
     harness.run();
 }
@@ -260,4 +265,218 @@ fn esc_in_the_calendar_closes_it_and_keeps_the_wizard_open() {
 
     assert!(!shows(&harness, "October 2026"));
     assert!(shows(&harness, "Step 3 of 4: Opening balance"));
+}
+
+/// Walks the wizard to its Opening Balance step and types `balance` in its field.
+fn type_balance(harness: &mut Harness<'static, App>, balance: &str) {
+    press(harness, Key::Enter);
+    type_into(harness, "Name", "Rainy Day");
+    press(harness, Key::Enter);
+    type_into(harness, "Opening balance", balance);
+}
+
+/// Clicks the button labelled `label`.
+fn click_button(harness: &mut Harness<'static, App>, label: &str) {
+    harness.get_by_role_and_label(Role::Button, label).click();
+    harness.run();
+}
+
+/// The text in the keypad's display, or `None` while no keypad is open.
+fn display(harness: &Harness<'static, App>) -> Option<String> {
+    harness
+        .query_by_role_and_label(Role::TextInput, "Keypad")
+        .map(|node| node.accesskit_node().value().unwrap_or_default())
+}
+
+/// The text in the opening balance field.
+fn balance(harness: &Harness<'static, App>) -> String {
+    harness
+        .get_by_role_and_label(Role::TextInput, "Opening balance")
+        .accesskit_node()
+        .value()
+        .unwrap_or_default()
+}
+
+/// Types `sum` into the open keypad's display.
+fn type_in_display(harness: &mut Harness<'static, App>, sum: &str) {
+    harness
+        .get_by_role_and_label(Role::TextInput, "Keypad")
+        .type_text(sum);
+    harness.run();
+}
+
+/// Walks the wizard to its Opening Balance step with `balance` typed, opens the
+/// keypad and types `sum` in it after the number.
+fn type_in_keypad(harness: &mut Harness<'static, App>, balance: &str, sum: &str) {
+    type_balance(harness, balance);
+    click_button(harness, "Keypad");
+    type_in_display(harness, sum);
+}
+
+/// Whether the opening balance's date field has keyboard focus.
+fn date_has_focus(harness: &Harness<'static, App>) -> bool {
+    harness
+        .get_by_role_and_label(Role::TextInput, "As of")
+        .is_focused()
+}
+
+#[test]
+fn the_keypad_button_opens_the_keypad_on_the_opening_balance() {
+    let mut harness = wizard();
+    type_balance(&mut harness, "86.42");
+
+    click_button(&mut harness, "Keypad");
+
+    assert_eq!(display(&harness).as_deref(), Some("86.42"));
+}
+
+#[test]
+fn alt_down_opens_the_keypad_on_the_opening_balance() {
+    let mut harness = wizard();
+    type_balance(&mut harness, "86.42");
+
+    press_with(&mut harness, Modifiers::ALT, Key::ArrowDown);
+
+    assert_eq!(display(&harness).as_deref(), Some("86.42"));
+}
+
+#[test]
+fn an_operator_typed_in_the_opening_balance_stays_in_it() {
+    let mut harness = wizard();
+    type_balance(&mut harness, "86.42");
+
+    type_into(&mut harness, "Opening balance", "+");
+
+    assert_eq!(display(&harness), None);
+    assert_eq!(balance(&harness), "86.42+");
+}
+
+#[test]
+fn enter_in_the_keypad_puts_its_result_in_the_opening_balance_and_moves_on() {
+    let mut harness = wizard();
+    type_balance(&mut harness, "86.42");
+    click_button(&mut harness, "Keypad");
+    click_button(&mut harness, "Clear");
+    type_in_display(&mut harness, "154*2");
+
+    press(&mut harness, Key::Enter);
+
+    assert_eq!(display(&harness), None);
+    assert!(shows(&harness, "Step 3 of 4: Opening balance"));
+    assert_eq!(balance(&harness), "308.00");
+    assert!(date_has_focus(&harness));
+}
+
+#[test]
+fn ok_puts_the_keypads_result_in_the_opening_balance_and_moves_on() {
+    let mut harness = wizard();
+    type_balance(&mut harness, "86.42");
+    click_button(&mut harness, "Keypad");
+    click_button(&mut harness, "Clear");
+    for key in ["1", "5", "4", "Multiply", "2"] {
+        click_button(&mut harness, key);
+    }
+
+    click_button(&mut harness, "OK");
+
+    assert_eq!(display(&harness), None);
+    assert_eq!(balance(&harness), "308.00");
+    assert!(date_has_focus(&harness));
+}
+
+#[test]
+fn esc_in_the_keypad_closes_it_and_keeps_the_wizard_and_the_opening_balance() {
+    let mut harness = wizard();
+    type_in_keypad(&mut harness, "86.42", "*2");
+
+    press(&mut harness, Key::Escape);
+
+    assert_eq!(display(&harness), None);
+    assert!(shows(&harness, "Step 3 of 4: Opening balance"));
+    assert_eq!(balance(&harness), "86.42");
+}
+
+#[test]
+fn a_click_outside_the_keypad_closes_it_and_keeps_the_opening_balance() {
+    let mut harness = wizard();
+    type_in_keypad(&mut harness, "86.42", "*2");
+
+    harness.get_by_label("Step 3 of 4: Opening balance").click();
+    harness.run();
+
+    assert_eq!(display(&harness), None);
+    assert_eq!(balance(&harness), "86.42");
+}
+
+#[test]
+fn a_rounded_result_in_the_keypad_is_marked() {
+    let mut harness = wizard();
+
+    type_in_keypad(&mut harness, "86.42", "/3");
+
+    assert!(shows(&harness, "~ $28.81"));
+}
+
+#[test]
+fn text_in_the_keypad_that_is_no_sum_is_not_an_amount() {
+    let mut harness = wizard();
+
+    type_in_keypad(&mut harness, "86.42", ".2.3");
+
+    assert!(shows(&harness, "Not an amount"));
+}
+
+#[test]
+fn the_keypad_button_closes_an_open_keypad_and_keeps_the_opening_balance() {
+    let mut harness = wizard();
+    type_in_keypad(&mut harness, "86.42", "*2");
+
+    click_button(&mut harness, "Keypad");
+
+    assert_eq!(display(&harness), None);
+    assert_eq!(balance(&harness), "86.42");
+}
+
+#[test]
+fn an_empty_opening_balance_opens_an_empty_keypad() {
+    let mut harness = wizard();
+    type_balance(&mut harness, "");
+
+    click_button(&mut harness, "Keypad");
+
+    assert_eq!(display(&harness).as_deref(), Some(""));
+}
+
+#[test]
+fn ok_refuses_text_in_the_keypad_that_is_not_an_amount() {
+    let mut harness = wizard();
+    type_in_keypad(&mut harness, "86.42", ".2.3");
+
+    click_button(&mut harness, "OK");
+
+    assert_eq!(display(&harness).as_deref(), Some("86.42.2.3"));
+    assert_eq!(balance(&harness), "86.42");
+}
+
+#[test]
+fn a_click_on_the_dimmed_window_closes_only_the_keypad() {
+    let mut harness = wizard();
+    type_in_keypad(&mut harness, "86.42", "*2");
+    // The window's top left corner, which the dimmed window covers.
+    let behind = pos2(4.0, 4.0);
+
+    harness.event(Event::PointerMoved(behind));
+    for pressed in [true, false] {
+        harness.event(Event::PointerButton {
+            pos: behind,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    harness.run();
+
+    assert_eq!(display(&harness), None);
+    assert!(shows(&harness, "Step 3 of 4: Opening balance"));
+    assert_eq!(balance(&harness), "86.42");
 }

@@ -114,6 +114,9 @@ pub(crate) struct LightDialog {
     cancel: Option<String>,
     back: Option<String>,
     backdrop: Color32,
+    /// Whether the body has a popup of its own open, or the press that closed one is
+    /// still held, so that a click on the dimmed window closes only the popup.
+    body_popup: bool,
 }
 
 impl LightDialog {
@@ -126,6 +129,7 @@ impl LightDialog {
             cancel: Some(cancel),
             back: None,
             backdrop: theme.backdrop(),
+            body_popup: false,
         }
     }
 
@@ -138,6 +142,7 @@ impl LightDialog {
             cancel: None,
             back: None,
             backdrop: theme.backdrop(),
+            body_popup: false,
         }
     }
 
@@ -145,6 +150,16 @@ impl LightDialog {
     pub(crate) fn with_back(self, back: String) -> Self {
         Self {
             back: Some(back),
+            ..self
+        }
+    }
+
+    /// The same Dialog, kept open by a click on the dimmed window while `open` says
+    /// its body has a popup of its own open, or the press that closed one is still
+    /// held: that click closes only the popup.
+    pub(crate) fn with_body_popup(self, open: bool) -> Self {
+        Self {
+            body_popup: open,
             ..self
         }
     }
@@ -164,6 +179,7 @@ impl LightDialog {
             cancel,
             back,
             backdrop,
+            body_popup,
         } = self;
         let room =
             (ctx.content_rect().size() - Vec2::splat(2.0 * Theme::DIALOG_MARGIN)).max(Vec2::ZERO);
@@ -191,7 +207,9 @@ impl LightDialog {
             DialogOutcome::Accepted
         } else if back.as_ref().is_some_and(Response::clicked) {
             DialogOutcome::Back
-        } else if cancel.as_ref().is_some_and(Response::clicked) || modal.should_close() {
+        } else if cancel.as_ref().is_some_and(Response::clicked)
+            || (!(body_popup && modal.backdrop_response.clicked()) && modal.should_close())
+        {
             DialogOutcome::Cancelled
         } else {
             DialogOutcome::Open
