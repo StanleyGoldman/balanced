@@ -3,11 +3,11 @@
 //! What a Register combobox lists: the [`Choices`] a field offers, and the rows of its
 //! list for the text typed so far.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use balanced_core::{
-    AccountId, AccountSummary, Allocation, CategoryId, Generation, LedgerView, RegisterEntry,
-    Transaction,
+    AccountId, AccountSummary, Allocation, CategoryId, Generation, LedgerView, Money,
+    RegisterEntry, Transaction,
 };
 use balanced_i18n::Localizer;
 use icu_locale::Locale;
@@ -111,9 +111,40 @@ pub(crate) enum CategoryTarget {
     Transfer(AccountId),
 }
 
+/// What Payee recall fills in from a payee's latest transaction: the payee as that
+/// transaction spells it, and what each of the draft row's empty cells takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Recalled {
+    payee: String,
+    category: CategoryTarget,
+    memo: String,
+    /// `None` when the transaction's amount is in another currency than the account
+    /// whose Register recalls it.
+    amount: Option<Money>,
+}
+
+impl Recalled {
+    pub(crate) fn payee(&self) -> &str {
+        &self.payee
+    }
+
+    pub(crate) fn category(&self) -> CategoryTarget {
+        self.category
+    }
+
+    pub(crate) fn memo(&self) -> &str {
+        &self.memo
+    }
+
+    pub(crate) fn amount(&self) -> Option<Money> {
+        self.amount
+    }
+}
+
 /// What one account's Register offers in its Payee and Category comboboxes: every payee
-/// and every category in a snapshot, then the accounts it can transfer to. It is rebuilt
-/// when the snapshot, the account or the formatting locale changes.
+/// and every category in a snapshot, then the accounts it can transfer to. It also holds
+/// what Payee recall fills in for each payee. It is rebuilt when the snapshot, the
+/// account or the formatting locale changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FieldChoices {
     generation: Generation,
@@ -121,22 +152,25 @@ pub(crate) struct FieldChoices {
     formatting_locale: Locale,
     payees: Choices<()>,
     categories: Choices<CategoryTarget>,
+    /// What recalling each payee fills in, by the payee in lower case.
+    recalls: HashMap<String, Recalled>,
 }
 
 impl FieldChoices {
     /// The payees of every transaction in `view`, each once, its categories by their
     /// paths, and then, as `[Name]`, every open account but `account`, hidden ones
-    /// included. Each part is sorted as `i18n` sorts text.
+    /// included. Each part is sorted as `i18n` sorts text. Opening balances have no
+    /// payee to offer.
     pub(crate) fn new(view: &LedgerView, account: AccountId, i18n: &Localizer) -> Self {
-        let payees: BTreeSet<&str> = view
-            .accounts()
-            .iter()
-            .flat_map(AccountSummary::register)
-            .map(RegisterEntry::transaction)
-            .filter(|transaction| *transaction.allocation() != Allocation::OpeningBalance)
-            .map(Transaction::payee)
-            .filter(|payee| !payee.is_empty())
-            .collect();
+        let transactions = || {
+            view.accounts()
+                .iter()
+                .flat_map(AccountSummary::register)
+                .map(RegisterEntry::transaction)
+                .filter(|transaction| *transaction.allocation() != Allocation::OpeningBalance)
+                .filter(|transaction| !transaction.payee().is_empty())
+        };
+        let payees: BTreeSet<&str> = transactions().map(Transaction::payee).collect();
         let categories = view.categories().iter().map(|category| {
             let text = category_text(view, category.id())
                 .expect("every category of a snapshot has a path in it");
@@ -159,6 +193,7 @@ impl FieldChoices {
             formatting_locale: i18n.formatting_locale().clone(),
             payees: Choices::new(i18n, payees.into_iter().map(|payee| (payee.to_owned(), ()))),
             categories: Choices::new(i18n, categories).followed_by(Choices::new(i18n, accounts)),
+            recalls: Recalled::by_payee(transactions(), view, account),
         }
     }
 
@@ -182,6 +217,60 @@ impl FieldChoices {
     pub(crate) fn categories(&self) -> &Choices<CategoryTarget> {
         &self.categories
     }
+
+    /// What recalling the payee named `payee`, trimmed, ignoring case, fills in, if an
+    /// earlier transaction has that payee.
+    pub(crate) fn recalled(&self, payee: &str) -> Option<&Recalled> {
+        self.recalls.get(&payee_key(payee))
+    }
+}
+
+impl Recalled {
+    /// What recalling each payee of `transactions` fills in `account`'s draft row, by
+    /// the payee's key: from its latest transaction, by date and then by id, when that
+    /// one is in one category.
+    fn by_payee<'a>(
+        transactions: impl Iterator<Item = &'a Transaction>,
+        view: &LedgerView,
+        account: AccountId,
+    ) -> HashMap<String, Self> {
+        let mut latest: HashMap<String, &Transaction> = HashMap::new();
+        for transaction in transactions {
+            latest
+                .entry(payee_key(transaction.payee()))
+                .and_modify(|kept| {
+                    if (transaction.date(), transaction.id()) > (kept.date(), kept.id()) {
+                        *kept = transaction;
+                    }
+                })
+                .or_insert(transaction);
+        }
+        let currency = view
+            .account(account)
+            .map(|summary| summary.account().currency());
+        latest
+            .into_iter()
+            .filter_map(|(key, transaction)| {
+                // TODO(#384): recall from a transfer or a split too.
+                let Allocation::Category(category) = *transaction.allocation() else {
+                    return None;
+                };
+                let amount = transaction.amount();
+                let recalled = Self {
+                    payee: transaction.payee().to_owned(),
+                    category: CategoryTarget::Category(category),
+                    memo: transaction.memo().to_owned(),
+                    amount: (Some(amount.currency()) == currency).then_some(amount),
+                };
+                Some((key, recalled))
+            })
+            .collect()
+    }
+}
+
+/// The key a payee is remembered by: its text, trimmed, in lower case.
+fn payee_key(payee: &str) -> String {
+    payee.trim().to_lowercase()
 }
 
 #[cfg(test)]

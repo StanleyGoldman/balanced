@@ -113,6 +113,19 @@ fn preferences_light() {
     check_snapshot(&mut harness, "preferences_light");
 }
 
+#[test]
+#[ignore = "image snapshot: run with `cargo xtask snapshots`"]
+fn preferences_register_light() {
+    let mut harness = app(Theme::Light);
+
+    click(&mut harness, Role::Button, "Tools");
+    click(&mut harness, Role::Button, "Preferences…");
+    click(&mut harness, Role::Tab, "Register");
+    pointer_gone(&mut harness);
+
+    check_snapshot(&mut harness, "preferences_register_light");
+}
+
 /// Opens Everyday Checking and narrows its Register to payments from the filter bar,
 /// which then counts the rows it shows and offers Reset.
 fn filter_to_payments(harness: &mut Harness<'static, App>) {
