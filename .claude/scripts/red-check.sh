@@ -9,8 +9,10 @@
 #   <new>   the text that replaces it (may be empty).
 #   <test command...>  a `cargo nextest run`, run as given, e.g.
 #                      cargo nextest run -p balanced_ui --features test-support --test register name
-#                      (balanced_ui's test files require `--features test-support`;
-#                      without it nextest refuses to build them.)
+#                      (pass `--features test-support` for any test file its
+#                      crate's Cargo.toml gives `required-features`: every
+#                      balanced_ui file and most of balanced_core's, split_lines
+#                      included. Without it nextest refuses to build them.)
 #                      Only nextest's captured output is parsed: a `cargo test`
 #                      command always comes back as an error, and `--no-capture`
 #                      leaves "panics" empty.
