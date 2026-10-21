@@ -24,7 +24,8 @@ use egui_extras::{Column, TableBody, TableBuilder};
 use icu_calendar::{Date, Iso};
 
 use crate::amount_field::{self, Preview};
-use crate::combobox::{CategoryTarget, FieldChoices, ListRow, rest_after};
+use crate::combo_field::{self, ComboText, DROP_DOWN_GLYPH, ListScope};
+use crate::combobox::{CategoryTarget, FieldChoices, ListRow};
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::date_field::{self, DateEdit};
 use crate::draft_row::{Draft, Missing};
@@ -55,19 +56,9 @@ const RESIZE_HANDLE_WIDTH: f32 = 8.0;
 const ACTION_DOT_RADIUS: f32 = 1.5;
 const ACTION_DOT_SPACING: f32 = 4.5;
 
-/// The ⏷ that marks a button opening a list or a menu below it. The bundled
-/// emoji-icon-font draws it.
-const DROP_DOWN_GLYPH: &str = "⏷";
-
 /// The flag the Flag column shows on a flagged transaction. The bundled
 /// emoji-icon-font draws it.
 const FLAG_GLYPH: &str = "⚑";
-
-/// The narrowest a combobox list gets, so its entries stay readable under a narrow cell.
-const LIST_MIN_WIDTH: f32 = 240.0;
-
-/// How many rows a combobox list shows before it scrolls.
-const LIST_MAX_ROWS: usize = 10;
 
 /// The sort arrow beside the sorted column's heading: its width, its height, and the
 /// space between it and the heading.
@@ -548,11 +539,9 @@ enum Move {
 struct CellEdit {
     cell: CellAddress,
     field: EditField,
-    text: String,
-    /// While the text ends in an Inline completion, the length in bytes of the typed
-    /// text before it.
-    completion: Option<usize>,
-    list: Option<ListState>,
+    /// The text, with its Inline completion and list, which only a field that offers a
+    /// list has.
+    combo: ComboText,
     /// Why the last commit was refused, until the text changes. An amount's reason
     /// shows in a bubble below the cell.
     refusal: Option<SaveRefusal>,
@@ -660,159 +649,56 @@ impl CellEdit {
         if !self.field.offers_list() {
             return;
         }
-        self.list = Some(ListState {
-            scope,
-            highlight: Some(0),
-            reveal: true,
-            offset: 0.0,
-        });
-        let named = match scope {
-            ListScope::Matching => None,
-            ListScope::All => self.list_rows(choices).iter().position(
-                |row| matches!(row, ListRow::Choice(text) if text.eq_ignore_ascii_case(self.text.trim())),
-            ),
-        };
-        if let (Some(list), Some(named)) = (&mut self.list, named) {
-            list.highlight = Some(named);
-        }
+        let field = &self.field;
+        self.combo
+            .open_list(scope, |text| field_rows(field, choices, text));
     }
 
     /// The rows of the list, from `choices`, or none while it is closed.
     fn list_rows<'a>(&self, choices: &'a FieldChoices) -> Vec<ListRow<'a>> {
-        let Some(list) = self.list else {
-            return Vec::new();
-        };
-        let text = match list.scope {
-            ListScope::Matching => self.typed(),
-            ListScope::All => "",
-        };
-        match &self.field {
-            EditField::Text(TextField::Payee) => choices.payees().list(text),
-            EditField::Text(TextField::Category) => {
-                let categories = choices.categories();
-                let mut rows = categories.list(text);
-                rows.extend(categories.create_row(text));
-                rows
-            }
-            EditField::Text(TextField::Number | TextField::Memo) | EditField::Amount { .. } => {
-                Vec::new()
-            }
-        }
+        self.combo
+            .rows(|text| field_rows(&self.field, choices, text))
     }
 
-    /// The text typed so far, without the Inline completion after it.
-    fn typed(&self) -> &str {
-        &self.text[..self.completion.unwrap_or(self.text.len())]
-    }
-
-    /// Completes the typed text with the rest of the first entry of the open list that
-    /// starts with it, ignoring case, and highlights that entry. Returns the range of
-    /// the completion, or `None` when no entry starts with the text. An entry that is
-    /// the text, ignoring case, is highlighted and leaves nothing to complete.
-    fn complete(&mut self, choices: &FieldChoices) -> Option<CCursorRange> {
-        let (index, rest) =
-            self.list_rows(choices)
-                .into_iter()
-                .enumerate()
-                .find_map(|(index, row)| match row {
-                    ListRow::Choice(text) => {
-                        Some((index, rest_after(text, &self.text)?.to_owned()))
-                    }
-                    ListRow::Create(_) => None,
-                })?;
-        if let Some(list) = &mut self.list {
-            list.highlight = Some(index);
-        }
-        if rest.is_empty() {
-            return None;
-        }
-        let typed = CCursor::new(self.text.chars().count());
-        self.completion = Some(self.text.len());
-        self.text.push_str(&rest);
-        Some(CCursorRange::two(
-            typed,
-            CCursor::new(self.text.chars().count()),
-        ))
-    }
-
-    /// Drops the Inline completion, if one shows, leaving the typed text.
-    fn drop_completion(&mut self) {
-        if let Some(typed) = self.completion.take() {
-            self.text.truncate(typed);
-        }
+    /// Draws the list, while it is open, below the cell at `cell`, and returns the
+    /// row pressed this frame.
+    fn show_list<'a>(
+        &mut self,
+        ui: &egui::Ui,
+        frame: &BodyFrame<'a>,
+        cell: Rect,
+    ) -> Option<ListRow<'a>> {
+        let rows = self.list_rows(frame.choices);
+        self.combo.show_list(
+            ui,
+            frame.i18n,
+            self.editor_id().with("list"),
+            &rows,
+            cell,
+            frame.theme.row_height(),
+        )
     }
 
     /// The highlighted row of the list, if it is open with one highlighted.
     fn highlighted<'a>(&self, choices: &'a FieldChoices) -> Option<ListRow<'a>> {
-        let highlight = self.list?.highlight?;
-        self.list_rows(choices).into_iter().nth(highlight)
-    }
-
-    /// Moves the highlight one row down the list of `rows` rows, stopping at the last.
-    fn highlight_next(&mut self, rows: usize) {
-        if let Some(list) = &mut self.list {
-            let last = rows.saturating_sub(1);
-            list.highlight = Some(list.highlight.map_or(0, |row| (row + 1).min(last)));
-            list.reveal = true;
-        }
-    }
-
-    /// Clears the list's highlight, so Tab and Enter keep the text.
-    fn highlight_none(&mut self) {
-        if let Some(list) = &mut self.list {
-            list.highlight = None;
-        }
-    }
-
-    /// Moves the highlight one row up the list. Up from the top row clears it, so
-    /// Enter keeps the typed text.
-    fn highlight_previous(&mut self) {
-        if let Some(list) = &mut self.list {
-            list.highlight = list.highlight.and_then(|row| row.checked_sub(1));
-            list.reveal = true;
-        }
+        self.combo
+            .highlighted(|text| field_rows(&self.field, choices, text))
     }
 }
 
-/// Which entries a combobox list shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ListScope {
-    /// Those matching the typed text, as typing opens it.
-    Matching,
-    /// Every entry, as ⏷ and Alt+↓ open it.
-    All,
-}
-
-/// An open combobox list: which entries it lists, its highlighted row, and how far
-/// it is scrolled.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct ListState {
-    scope: ListScope,
-    /// The row Enter takes, or `None` to keep the typed text.
-    highlight: Option<usize>,
-    /// Whether the highlight moved since the list was last drawn, so the list scrolls
-    /// to show it.
-    reveal: bool,
-    /// The list's scroll offset when it was last drawn.
-    offset: f32,
-}
-
-impl ListState {
-    /// The scroll offset that shows the highlighted row, row `pitch` apart, in a list
-    /// `height` high, when the highlight moved out of view; else `None`.
-    fn reveal_offset(self, pitch: f32, height: f32) -> Option<f32> {
-        let highlight = self.highlight.filter(|_| self.reveal)?;
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "list rows stay far below 2^24, where f32 stops counting whole numbers"
-        )]
-        let top = highlight as f32 * pitch;
-        if top < self.offset {
-            Some(top)
-        } else if top + pitch > self.offset + height {
-            Some(top + pitch - height)
-        } else {
-            None
+/// The rows the list of `field` shows for `text`, from `choices`: the matching payees,
+/// or the matching categories and accounts with a row creating the typed category.
+fn field_rows<'a>(field: &EditField, choices: &'a FieldChoices, text: &str) -> Vec<ListRow<'a>> {
+    match field {
+        EditField::Text(TextField::Payee) => choices.payees().list(text),
+        EditField::Text(TextField::Category) => {
+            let categories = choices.categories();
+            let mut rows = categories.list(text);
+            rows.extend(categories.create_row(text));
+            rows
+        }
+        EditField::Text(TextField::Number | TextField::Memo) | EditField::Amount { .. } => {
+            Vec::new()
         }
     }
 }
@@ -1641,7 +1527,7 @@ impl Register {
         self.cursor = Some(target);
         self.start_edit(ctx, keys, EditStart::Empty);
         if let Some(Edit::Text(edit)) = &mut self.edit {
-            edit.text = text;
+            edit.combo.text = text;
             edit.preview = preview(keys.i18n, edit);
             focus_at_end(ctx, edit);
         }
@@ -2050,13 +1936,13 @@ impl Register {
             Rect::from_x_y_ranges(cell.right() - cell.height()..=cell.right(), cell.y_range());
         let list_button = matches!(edit.field, EditField::Text(TextField::Category)).then(|| {
             field.max.x = button.left();
-            list_button(ui, frame.i18n, button, edit.editor_id())
+            combo_field::list_button(ui, frame.i18n, button, edit.editor_id())
         });
         let keypad_button = matches!(edit.field, EditField::Amount { .. }).then(|| {
             field.max.x = button.left();
             keypad::button(ui, frame.i18n, edit.editor_id(), button)
         });
-        let typed = edit.text.clone();
+        let typed = edit.combo.text.clone();
         let response = editor(
             ui,
             edit,
@@ -2064,13 +1950,13 @@ impl Register {
             insets,
             heading_id(frame.register_id, column),
         );
-        if edit.text != typed {
+        if edit.combo.text != typed {
             text_changed(ui.ctx(), frame, edit);
         }
         if list_button.as_ref().is_some_and(Response::clicked) {
             // The click took focus from the editor, which keeps the edit.
-            if edit.list.is_some_and(|list| list.scope == ListScope::All) {
-                edit.list = None;
+            if edit.combo.lists_all() {
+                edit.combo.close_list();
             } else {
                 edit.open_list(ListScope::All, frame.choices);
             }
@@ -2079,7 +1965,7 @@ impl Register {
             if edit.keypad.take().is_some() {
                 focus_at_end(ui.ctx(), edit);
             } else {
-                edit.keypad = Some(Box::new(Keypad::new(&edit.text)));
+                edit.keypad = Some(Box::new(Keypad::new(&edit.combo.text)));
             }
         } else if response.lost_focus() && edit.keypad.is_none() {
             let edit = self.edit.take().expect("the edit was just shown");
@@ -2113,7 +1999,7 @@ impl Register {
         let Some(Edit::Text(edit)) = self.edit.as_mut() else {
             return;
         };
-        let pressed = list(ui, frame, edit, cell);
+        let pressed = edit.show_list(ui, frame, cell);
         if let Some(row) = pressed
             && let Some(Edit::Text(mut edit)) = self.edit.take()
         {
@@ -2181,7 +2067,7 @@ impl Register {
             }
             keypad::Outcome::Taken(text) => {
                 edit.keypad = None;
-                edit.text = text;
+                edit.combo.text = text;
                 edit.refusal = None;
                 edit.preview = preview(frame.i18n, edit);
                 edit.handed_back = true;
@@ -2381,7 +2267,7 @@ impl Register {
         let offers_list = edit.field.offers_list();
         let amount = matches!(edit.field, EditField::Amount { .. });
         if amount && ctx.input_mut(|input| input.consume_key(Modifiers::ALT, Key::ArrowDown)) {
-            edit.keypad = Some(Box::new(Keypad::new(&edit.text)));
+            edit.keypad = Some(Box::new(Keypad::new(&edit.combo.text)));
             self.edit = Some(Edit::Text(edit));
             return None;
         }
@@ -2399,19 +2285,19 @@ impl Register {
         if alt_down {
             edit.open_list(ListScope::All, keys.choices);
         } else if down && list_open {
-            edit.highlight_next(rows);
+            edit.combo.highlight_next(rows);
         } else if down {
             edit.open_list(ListScope::Matching, keys.choices);
         } else if up {
-            edit.highlight_previous();
+            edit.combo.highlight_previous();
         }
         if escape {
             // The first Esc closes the list and drops the completion; the next throws
             // away every change to the row.
             if list_open {
-                edit.list = None;
-                if edit.completion.is_some() {
-                    edit.drop_completion();
+                edit.combo.close_list();
+                if edit.combo.is_completed() {
+                    edit.combo.drop_completion();
                     focus_at_end(ctx, &edit);
                 }
                 self.edit = Some(Edit::Text(edit));
@@ -2535,10 +2421,10 @@ impl Register {
         } = self
             .awaiting_category
             .take_if(|awaiting| awaiting.outcome.is_some())?;
-        edit.list = None;
+        edit.combo.close_list();
         match outcome? {
             CategoryOutcome::Created(path) => {
-                edit.text = path;
+                edit.combo.text = path;
                 Some(Moved {
                     scroll_offset: self.leave_cell(ctx, keys, edit, cursor, leave),
                 })
@@ -2865,9 +2751,7 @@ impl Register {
         let edit = CellEdit {
             cell: cursor,
             field,
-            text,
-            completion: None,
-            list: None,
+            combo: ComboText::new(text),
             refusal: None,
             preview: None,
             keypad: None,
@@ -2890,7 +2774,7 @@ impl Register {
         let refused = match edit {
             Edit::Text(mut edit) => {
                 if let Some(ListRow::Choice(text)) = edit.highlighted(keys.choices) {
-                    text.clone_into(&mut edit.text);
+                    text.clone_into(&mut edit.combo.text);
                 }
                 match commit(
                     &edit,
@@ -2927,7 +2811,7 @@ impl Register {
     fn keep_refused_open(&mut self, edit: Edit, refusal: SaveRefusal, commands: &CommandSender) {
         self.edit = Some(match edit {
             Edit::Text(mut edit) => {
-                edit.list = None;
+                edit.combo.close_list();
                 say_in_status_bar(refusal.clone(), commands);
                 Edit::Text(edit.refused(refusal))
             }
@@ -2954,13 +2838,15 @@ impl Register {
         // A text edit opens again as it was, with no bubble, since the Dialog said why.
         // A date opens again from the row, its whole date selected.
         let edit = match edit {
-            Some(Edit::Text(edit)) => Some(CellEdit {
-                refusal: None,
-                list: None,
-                keypad: None,
-                handed_back: false,
-                ..edit
-            }),
+            Some(Edit::Text(mut edit)) => {
+                edit.combo.close_list();
+                Some(CellEdit {
+                    refusal: None,
+                    keypad: None,
+                    handed_back: false,
+                    ..edit
+                })
+            }
             Some(Edit::Date(_)) | None => None,
         };
         self.refused = Some(Refused {
@@ -3149,7 +3035,7 @@ fn focus_at_end(ctx: &egui::Context, edit: &CellEdit) {
     state
         .cursor
         .set_char_range(Some(CCursorRange::one(CCursor::new(
-            edit.text.chars().count(),
+            edit.combo.text.chars().count(),
         ))));
     state.store(ctx, id);
     ctx.memory_mut(|memory| memory.request_focus(id));
@@ -3161,7 +3047,7 @@ fn focus_selecting_all(ctx: &egui::Context, edit: &CellEdit) {
     let mut state = TextEditState::load(ctx, id).unwrap_or_default();
     state.cursor.set_char_range(Some(CCursorRange::two(
         CCursor::new(0),
-        CCursor::new(edit.text.chars().count()),
+        CCursor::new(edit.combo.text.chars().count()),
     )));
     state.store(ctx, id);
     ctx.memory_mut(|memory| memory.request_focus(id));
@@ -3179,13 +3065,16 @@ fn say_in_status_bar(refusal: SaveRefusal, commands: &CommandSender) {
 /// Brings `edit` up to date with its text, just changed: its list narrows to the
 /// matching choices, typing completes it, and its error and preview start over.
 fn text_changed(ctx: &egui::Context, frame: &BodyFrame<'_>, edit: &mut CellEdit) {
-    let completed = edit.completion.take().is_some();
+    let completed = edit.combo.forget_completion();
     edit.open_list(ListScope::Matching, frame.choices);
     if frame.inline_completion == InlineCompletion::On && text_typed(ctx) {
-        complete_typing(ctx, edit, frame.choices);
+        let id = edit.editor_id();
+        let field = &edit.field;
+        edit.combo
+            .complete_typing(ctx, id, |text| field_rows(field, frame.choices, text));
     } else if completed {
         // Deleting a completion keeps the typed text for Tab and Enter too.
-        edit.highlight_none();
+        edit.combo.highlight_none();
     }
     edit.refusal = None;
     edit.preview = preview(frame.i18n, edit);
@@ -3199,27 +3088,6 @@ fn text_typed(ctx: &egui::Context) -> bool {
             .iter()
             .any(|event| matches!(event, Event::Text(_) | Event::Paste(_)))
     })
-}
-
-/// Completes `edit`'s text, just typed into, when the caret is at its end. The
-/// completion is selected, so the next character typed replaces it.
-fn complete_typing(ctx: &egui::Context, edit: &mut CellEdit, choices: &FieldChoices) {
-    let id = edit.editor_id();
-    let Some(mut state) = TextEditState::load(ctx, id) else {
-        return;
-    };
-    let caret_at_end = state.cursor.char_range().is_some_and(|range| {
-        range.is_empty() && range.primary.index == CCursor::new(edit.text.chars().count()).index
-    });
-    if !caret_at_end {
-        return;
-    }
-    let Some(completion) = edit.complete(choices) else {
-        return;
-    };
-    state.cursor.set_char_range(Some(completion));
-    state.store(ctx, id);
-    ctx.request_repaint();
 }
 
 /// How a cell edit leaves its cell once its text is kept in the row.
@@ -3485,7 +3353,7 @@ fn commit(
     let Some(row) = rows.find(edit.cell.row) else {
         return Commit::Done;
     };
-    let text = edit.text.trim();
+    let text = edit.combo.text.trim();
     let change = match &edit.field {
         EditField::Text(field) => {
             let Ok(change) = field.edit(row, text, choices) else {
@@ -3817,7 +3685,7 @@ enum Taken {
 fn take_row(edit: &mut CellEdit, row: ListRow<'_>, commands: &CommandSender) -> Taken {
     match row {
         ListRow::Choice(text) => {
-            text.clone_into(&mut edit.text);
+            text.clone_into(&mut edit.combo.text);
             Taken::Choice
         }
         ListRow::Create(name) => {
@@ -3846,7 +3714,7 @@ fn editor(
     let id = edit.editor_id();
     ui.put(
         inner,
-        TextEdit::singleline(&mut edit.text)
+        TextEdit::singleline(&mut edit.combo.text)
             .id(id)
             .margin(Margin::ZERO)
             .desired_width(inner.width())
@@ -3857,138 +3725,6 @@ fn editor(
             }),
     )
     .labelled_by(heading)
-}
-
-/// The ⏷ button in `rect`, beside the Category cell being edited, which lists every
-/// category.
-fn list_button(ui: &egui::Ui, i18n: &Localizer, rect: Rect, editor: Id) -> Response {
-    let response = ui.interact(rect, editor.with("list_button"), Sense::click());
-    let label = fl!(i18n, "register-category-list");
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
-    let visuals = ui.style().interact(&response);
-    if response.hovered() || response.is_pointer_button_down_on() {
-        ui.painter().rect_filled(rect, 0.0, visuals.weak_bg_fill);
-    }
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        DROP_DOWN_GLYPH,
-        TextStyle::Body.resolve(ui.style()),
-        visuals.text_color(),
-    );
-    response
-}
-
-/// Draws `edit`'s list, while it is open, in a popup below `cell`, scrolled to show
-/// a highlight that moved, and returns the row pressed this frame. A row is taken on
-/// the press, since the release would come after the press has moved focus off the
-/// editor.
-fn list<'a>(
-    ui: &egui::Ui,
-    frame: &BodyFrame<'a>,
-    edit: &mut CellEdit,
-    cell: Rect,
-) -> Option<ListRow<'a>> {
-    let rows = edit.list_rows(frame.choices);
-    let state = edit.list.as_mut().filter(|_| !rows.is_empty())?;
-    let row_height = frame.theme.row_height();
-    let pitch = row_height + ui.spacing().item_spacing.y;
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "at most LIST_MAX_ROWS rows show at once"
-    )]
-    let height = rows.len().min(LIST_MAX_ROWS) as f32 * pitch - ui.spacing().item_spacing.y;
-    let width = cell.width().max(LIST_MIN_WIDTH);
-    let mut scroll = ScrollArea::vertical()
-        .max_height(height)
-        .min_scrolled_height(height);
-    if let Some(offset) = state.reveal_offset(pitch, height) {
-        scroll = scroll.vertical_scroll_offset(offset);
-    }
-    state.reveal = false;
-    let highlight = state.highlight;
-    let mut pressed = None;
-    let output = Area::new(edit.editor_id().with("list"))
-        .order(Order::Foreground)
-        .fixed_pos(cell.left_bottom())
-        .show(ui.ctx(), |ui| {
-            Frame::popup(ui.style())
-                .show(ui, |ui| {
-                    ui.set_width(width);
-                    scroll.show_rows(ui, row_height, rows.len(), |ui, in_view| {
-                        for index in in_view {
-                            // `show_rows` lays out indices below `rows.len()` only.
-                            let row = &rows[index];
-                            let highlighted = highlight == Some(index);
-                            if list_row(ui, frame.i18n, row, highlighted, row_height) {
-                                pressed = Some(row.clone());
-                            }
-                        }
-                    })
-                })
-                .inner
-        })
-        .inner;
-    if let Some(state) = &mut edit.list {
-        state.offset = output.state.offset.y;
-    }
-    pressed
-}
-
-/// Draws one row of a combobox list, `row_height` high, and returns whether the
-/// pointer pressed it this frame.
-fn list_row(
-    ui: &mut egui::Ui,
-    i18n: &Localizer,
-    row: &ListRow<'_>,
-    highlighted: bool,
-    row_height: f32,
-) -> bool {
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click());
-    let label = match row {
-        ListRow::Choice(text) => (*text).to_owned(),
-        ListRow::Create(name) => fl!(i18n, "register-create-category", name = name.clone()),
-    };
-    response.widget_info(|| {
-        WidgetInfo::selected(
-            WidgetType::SelectableLabel,
-            ui.is_enabled(),
-            highlighted,
-            &label,
-        )
-    });
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(Role::ListBoxOption);
-        node.set_selected(highlighted);
-    });
-    let visuals = ui.visuals();
-    let (fill, text_color) = if highlighted {
-        (
-            Some(visuals.selection.bg_fill),
-            visuals.selection.stroke.color,
-        )
-    } else if response.hovered() {
-        (
-            Some(visuals.widgets.hovered.weak_bg_fill),
-            visuals.text_color(),
-        )
-    } else {
-        (None, visuals.text_color())
-    };
-    if let Some(fill) = fill {
-        ui.painter().rect_filled(rect, 0.0, fill);
-    }
-    let galley = WidgetText::from(label).into_galley(
-        ui,
-        Some(TextWrapMode::Truncate),
-        rect.width(),
-        TextStyle::Body,
-    );
-    let top = rect.center().y - galley.size().y / 2.0;
-    ui.painter()
-        .galley(pos2(rect.left(), top), galley, text_color);
-    response.is_pointer_button_down_on()
 }
 
 /// Shows why `edit`'s last commit was refused, or else the result of the arithmetic
@@ -4042,7 +3778,7 @@ fn preview(i18n: &Localizer, edit: &CellEdit) -> Option<Preview> {
     else {
         return None;
     };
-    Preview::of(i18n, reader, *currency, &edit.text)
+    Preview::of(i18n, reader, *currency, &edit.combo.text)
 }
 
 /// The Register's table of `account` in `ui`, with `columns` at their widths, scrolled

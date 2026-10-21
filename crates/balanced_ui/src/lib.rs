@@ -9,6 +9,7 @@ mod amount_field;
 mod app;
 mod calculator;
 mod clock;
+mod combo_field;
 mod combobox;
 mod command;
 mod data_file;
