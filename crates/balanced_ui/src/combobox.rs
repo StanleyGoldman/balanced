@@ -193,7 +193,7 @@ impl FieldChoices {
             formatting_locale: i18n.formatting_locale().clone(),
             payees: Choices::new(i18n, payees.into_iter().map(|payee| (payee.to_owned(), ()))),
             categories: Choices::new(i18n, categories).followed_by(Choices::new(i18n, accounts)),
-            recalls: recalls(transactions(), view, account),
+            recalls: Recalled::by_payee(transactions(), view, account),
         }
     }
 
@@ -221,49 +221,56 @@ impl FieldChoices {
     /// What recalling the payee named `payee`, trimmed, ignoring case, fills in, if an
     /// earlier transaction has that payee.
     pub(crate) fn recalled(&self, payee: &str) -> Option<&Recalled> {
-        self.recalls.get(&payee.trim().to_lowercase())
+        self.recalls.get(&payee_key(payee))
     }
 }
 
-/// What recalling each payee of `transactions`, in lower case, fills in `account`'s
-/// draft row: from its latest transaction, by date and then by id, when that one is in
-/// one category.
-fn recalls<'a>(
-    transactions: impl Iterator<Item = &'a Transaction>,
-    view: &LedgerView,
-    account: AccountId,
-) -> HashMap<String, Recalled> {
-    let mut latest: HashMap<String, &Transaction> = HashMap::new();
-    for transaction in transactions {
+impl Recalled {
+    /// What recalling each payee of `transactions` fills in `account`'s draft row, by
+    /// the payee's key: from its latest transaction, by date and then by id, when that
+    /// one is in one category.
+    fn by_payee<'a>(
+        transactions: impl Iterator<Item = &'a Transaction>,
+        view: &LedgerView,
+        account: AccountId,
+    ) -> HashMap<String, Self> {
+        let mut latest: HashMap<String, &Transaction> = HashMap::new();
+        for transaction in transactions {
+            latest
+                .entry(payee_key(transaction.payee()))
+                .and_modify(|kept| {
+                    if (transaction.date(), transaction.id()) > (kept.date(), kept.id()) {
+                        *kept = transaction;
+                    }
+                })
+                .or_insert(transaction);
+        }
+        let currency = view
+            .account(account)
+            .map(|summary| summary.account().currency());
         latest
-            .entry(transaction.payee().to_lowercase())
-            .and_modify(|kept| {
-                if (transaction.date(), transaction.id()) > (kept.date(), kept.id()) {
-                    *kept = transaction;
-                }
+            .into_iter()
+            .filter_map(|(key, transaction)| {
+                // TODO(#384): recall from a transfer or a split too.
+                let Allocation::Category(category) = *transaction.allocation() else {
+                    return None;
+                };
+                let amount = transaction.amount();
+                let recalled = Self {
+                    payee: transaction.payee().to_owned(),
+                    category: CategoryTarget::Category(category),
+                    memo: transaction.memo().to_owned(),
+                    amount: (Some(amount.currency()) == currency).then_some(amount),
+                };
+                Some((key, recalled))
             })
-            .or_insert(transaction);
+            .collect()
     }
-    let currency = view
-        .account(account)
-        .map(|summary| summary.account().currency());
-    latest
-        .into_iter()
-        .filter_map(|(folded, transaction)| {
-            // TODO(#384): recall from a transfer or a split too.
-            let Allocation::Category(category) = *transaction.allocation() else {
-                return None;
-            };
-            let amount = transaction.amount();
-            let recalled = Recalled {
-                payee: transaction.payee().to_owned(),
-                category: CategoryTarget::Category(category),
-                memo: transaction.memo().to_owned(),
-                amount: (Some(amount.currency()) == currency).then_some(amount),
-            };
-            Some((folded, recalled))
-        })
-        .collect()
+}
+
+/// The key a payee is remembered by: its text, trimmed, in lower case.
+fn payee_key(payee: &str) -> String {
+    payee.trim().to_lowercase()
 }
 
 #[cfg(test)]

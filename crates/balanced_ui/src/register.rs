@@ -2208,7 +2208,13 @@ struct DraftFrame<'a> {
 impl DraftFrame<'_> {
     /// The draft row holding `draft`.
     fn row(self, draft: &Draft) -> RegisterRow {
-        RegisterRow::draft(draft, self.currency, self.view, self.i18n)
+        let Self {
+            currency,
+            view,
+            i18n,
+            ..
+        } = self;
+        RegisterRow::draft(draft, currency, view, i18n)
     }
 }
 
@@ -2319,9 +2325,8 @@ fn commit(
             return Commit::Confirming;
         }
         (Some(TransactionEdit::Payee(payee)), None)
-            if let Some(recalled) = choices
-                .recalled(&payee)
-                .filter(|_| payee_recall == PayeeRecall::On) =>
+            if payee_recall == PayeeRecall::On
+                && let Some(recalled) = choices.recalled(&payee) =>
         {
             draft.recall(recalled);
         }
