@@ -18,8 +18,8 @@ use crate::undo_log;
 use crate::usage::UsageCounts;
 use crate::{
     Account, AccountGroup, AccountId, AccountKind, AccountStatus, Allocation, Applied, Category,
-    CategoryId, CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection,
-    OtherSide, Transaction, TransactionEdit, Usage, Visibility, WriteError,
+    CategoryId, CategoryType, CurrencyCode, DomainCommand, DomainError, Money, MoneyError,
+    MoveDirection, OtherSide, Transaction, TransactionEdit, Usage, Visibility, WriteError,
 };
 
 /// Where [`TransactionEdit::Category`] or [`TransactionEdit::Transfer`] moves a
@@ -501,25 +501,25 @@ impl Ledger {
     /// transfer.
     pub(crate) fn with_accounts(
         currency: CurrencyCode,
-        categories: impl IntoIterator<Item = NewCategory>,
+        new_categories: impl IntoIterator<Item = NewCategory>,
         accounts: impl IntoIterator<Item = NewAccount>,
     ) -> Result<Self, MoneyError> {
-        let categories: Vec<Category> = (0..)
-            .zip(categories)
-            .map(|(id, new)| new.into_category(CategoryId::new(id)))
-            .collect();
+        let mut categories: Vec<Category> = Vec::new();
+        for (id, new) in (0..).zip(new_categories) {
+            let id = CategoryId::new(id);
+            // Each category before this one has a lower id, so the parent must be one.
+            let parent_type = new.parent().map(|parent| {
+                categories
+                    .iter()
+                    .find(|category| category.id() == parent)
+                    .unwrap_or_else(|| panic!("{id:?} sits under a later category, {parent:?}"))
+                    .category_type()
+            });
+            categories.push(new.into_category(id, parent_type));
+        }
         let next_category = CategoryId::new(
             u32::try_from(categories.len()).expect("a ledger holds fewer than 2^32 categories"),
         );
-        for category in &categories {
-            if let Some(parent) = category.parent() {
-                assert!(
-                    parent < category.id(),
-                    "{:?} sits under a later category, {parent:?}",
-                    category.id()
-                );
-            }
-        }
         let mut transaction_ids = (0..).map(TransactionId::new);
         let mut summaries: Vec<AccountSummary> = Vec::new();
         let mut net_worth = Money::zero(currency);
@@ -767,9 +767,11 @@ impl Ledger {
                 transaction,
                 other_sides,
             } => self.restore_transaction(account, transaction, other_sides)?,
-            DomainCommand::CreateCategory { name, parent } => {
-                self.create_category(&name, parent)?
-            }
+            DomainCommand::CreateCategory {
+                name,
+                parent,
+                category_type,
+            } => self.create_category(&name, parent, category_type)?,
             DomainCommand::DeleteCategory { category } => self.delete_category(category)?,
             DomainCommand::RestoreCategory { category } => self.restore_category(category)?,
         };
@@ -1476,16 +1478,21 @@ impl Ledger {
         &mut self,
         name: &str,
         parent: Option<CategoryId>,
+        category_type: CategoryType,
     ) -> Result<DomainCommand, DomainError> {
         let name = name.trim();
         if name.is_empty() {
             return Err(DomainError::BlankCategoryName);
         }
-        if let Some(parent) = parent
-            && self.view.category(parent).is_none()
-        {
-            return Err(DomainError::UnknownCategory { category: parent });
-        }
+        let parent_type = match parent {
+            Some(parent) => Some(
+                self.view
+                    .category(parent)
+                    .ok_or(DomainError::UnknownCategory { category: parent })?
+                    .category_type(),
+            ),
+            None => None,
+        };
         let folded = name.to_lowercase();
         if self
             .view
@@ -1498,11 +1505,12 @@ impl Ledger {
             });
         }
         let id = self.next_category;
-        let mut category = NewCategory::new(name);
-        if let Some(parent) = parent {
-            category = category.under(parent);
-        }
-        let category = category.into_category(id);
+        let category = Category::new(
+            id,
+            name.to_owned(),
+            parent,
+            parent_type.unwrap_or(category_type),
+        );
         self.store.insert_category(&category_row(&category))?;
         self.next_category = id.next();
         let view = Arc::make_mut(&mut self.view);
@@ -2178,10 +2186,98 @@ mod tests {
     }
 
     fn create_category(name: &str, parent: Option<CategoryId>) -> DomainCommand {
+        create_typed(name, parent, CategoryType::Expense)
+    }
+
+    fn create_typed(
+        name: &str,
+        parent: Option<CategoryId>,
+        category_type: CategoryType,
+    ) -> DomainCommand {
         DomainCommand::CreateCategory {
             name: name.to_owned(),
             parent,
+            category_type,
         }
+    }
+
+    /// The name and type of every category in `view`, in its order.
+    fn category_types(view: &LedgerView) -> Vec<(&str, CategoryType)> {
+        view.categories()
+            .iter()
+            .map(|category| (category.name(), category.category_type()))
+            .collect()
+    }
+
+    #[test]
+    fn a_top_level_category_takes_the_type_it_is_created_with() {
+        let mut ledger = everyday();
+
+        ledger
+            .apply(create_typed("Salary", None, CategoryType::Income))
+            .unwrap();
+
+        assert_eq!(
+            category_types(&ledger.snapshot()).last(),
+            Some(&("Salary", CategoryType::Income))
+        );
+    }
+
+    #[test]
+    fn a_subcategory_takes_its_parents_type_not_the_one_it_is_created_with() {
+        let mut ledger = everyday();
+        ledger
+            .apply(create_typed("Salary", None, CategoryType::Income))
+            .unwrap();
+        let salary = CategoryId::new(2);
+
+        ledger
+            .apply(create_typed("Bonus", Some(salary), CategoryType::Expense))
+            .unwrap();
+
+        assert_eq!(
+            category_types(&ledger.snapshot()).last(),
+            Some(&("Bonus", CategoryType::Income))
+        );
+    }
+
+    #[test]
+    fn a_ledger_built_with_categories_gives_each_subcategory_its_parents_type() {
+        let ledger = Ledger::with_accounts(
+            usd_code(),
+            [
+                NewCategory::new("Income").income(),
+                NewCategory::new("Salary").under(CategoryId::new(0)),
+                NewCategory::new("Home"),
+            ],
+            [],
+        )
+        .unwrap();
+
+        assert_eq!(
+            category_types(&ledger.snapshot()),
+            [
+                ("Income", CategoryType::Income),
+                ("Salary", CategoryType::Income),
+                ("Home", CategoryType::Expense),
+            ]
+        );
+    }
+
+    #[test]
+    fn undo_then_redo_of_a_created_category_keeps_its_type() {
+        let mut ledger = everyday();
+        ledger
+            .apply(create_typed("Salary", None, CategoryType::Income))
+            .unwrap();
+
+        ledger.undo().unwrap();
+        ledger.redo().unwrap();
+
+        assert_eq!(
+            category_types(&ledger.snapshot()).last(),
+            Some(&("Salary", CategoryType::Income))
+        );
     }
 
     #[test]

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
 
-//! Version 1 of the undo log's wire format: a `DomainCommand` as JSON. The format is part
-//! of the data file's schema version. Adding a Command or an optional field keeps it;
-//! any other change needs a migration that clears the log (ADR 0007).
+//! The undo log's wire format: a `DomainCommand` as JSON. The format is part of the data
+//! file's schema version. Adding a Command or an optional field keeps it; any other
+//! change needs a migration that clears the log (ADR 0007). Schema version 2 gave each
+//! category its type, so its migration clears the log.
 //!
 //! Ids are integers, amounts integer minor units in the data file's currency, and dates
 //! ISO `YYYY-MM-DD` text. Enums are `snake_case`, and a Command is an object whose one key
@@ -70,6 +71,7 @@ pub(crate) enum Command {
     CreateCategory {
         name: String,
         parent: Option<u32>,
+        category_type: CategoryType,
     },
     DeleteCategory {
         category: u32,
@@ -127,6 +129,18 @@ pub(crate) struct Category {
     pub(crate) id: u32,
     pub(crate) name: String,
     pub(crate) parent: Option<u32>,
+    #[expect(
+        clippy::struct_field_names,
+        reason = "the glossary's term is category type, and `type` is a keyword"
+    )]
+    pub(crate) category_type: CategoryType,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CategoryType {
+    Income,
+    Expense,
 }
 
 /// A transaction with its id: a [`NewTransaction`]'s fields after `id`, in one object,

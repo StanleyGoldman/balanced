@@ -75,6 +75,13 @@ account-kind-asset = Asset
 # Debt, such as a mortgage or a loan.
 account-kind-liability = Liability
 
+## Category types
+
+# A category for money coming in, such as a salary.
+category-type-income = Income
+# A category for money going out, such as groceries.
+category-type-expense = Expense
+
 ## Account bar
 
 account-bar-title = Accounts
@@ -289,6 +296,8 @@ dialog-new-category-name = Name
 dialog-new-category-hint = Use “:” to put it under another category, as in Home:Garden.
 # $parent is the text before the last colon of the typed name.
 dialog-new-category-no-parent = No category is named “{ $parent }”.
+# The label before the Income and Expense choice, shown for a top-level category only.
+dialog-new-category-type = Type
 dialog-go-to-date-title = Go to Date
 # The label of Go to date's date field.
 dialog-go-to-date-date = Date
@@ -367,6 +376,8 @@ dialog-delete-account-delete = Delete
 dialog-category-list-title = Category List
 dialog-category-list-close = Close
 dialog-category-list-category = Category
+# Whether a category is Income or Expense.
+dialog-category-list-type = Type
 # How many transactions and split lines are in a category or transfer to an account.
 dialog-category-list-txns = Txns
 dialog-category-list-total = Total
@@ -379,6 +390,9 @@ dialog-category-list-usage = { $count ->
         [one] 1 transaction
        *[other] { $count } transactions
     }, totalling { $total }
+# A category's row as a screen reader reads it after its name: $category_type is Income
+# or Expense, and $usage the row's usage, as above or below.
+dialog-category-list-typed-usage = { $category_type }: { $usage }
 # The usage of a row nothing uses, or whose total is too large to add up.
 dialog-category-list-usage-count = { $count ->
         [0] No transactions

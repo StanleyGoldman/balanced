@@ -22,17 +22,44 @@ impl CategoryId {
     }
 }
 
-/// A category: its name, and the category it sits under, if any.
+/// Whether a category is money coming in or going out. A subcategory has its top-level
+/// category's type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CategoryType {
+    Income,
+    Expense,
+}
+
+impl CategoryType {
+    pub const ALL: [Self; 2] = [Self::Income, Self::Expense];
+}
+
+/// A category: its name, its type, and the category it sits under, if any.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Category {
     id: CategoryId,
     name: String,
     parent: Option<CategoryId>,
+    #[expect(
+        clippy::struct_field_names,
+        reason = "the glossary's term is category type, and `type` is a keyword"
+    )]
+    category_type: CategoryType,
 }
 
 impl Category {
-    pub(crate) fn new(id: CategoryId, name: String, parent: Option<CategoryId>) -> Self {
-        Self { id, name, parent }
+    pub(crate) fn new(
+        id: CategoryId,
+        name: String,
+        parent: Option<CategoryId>,
+        category_type: CategoryType,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            parent,
+            category_type,
+        }
     }
 
     pub fn id(&self) -> CategoryId {
@@ -47,6 +74,11 @@ impl Category {
     pub fn parent(&self) -> Option<CategoryId> {
         self.parent
     }
+
+    /// Whether it is Income or Expense: the same as its top-level category's.
+    pub fn category_type(&self) -> CategoryType {
+        self.category_type
+    }
 }
 
 /// A category to add to a new [`Ledger`](crate::Ledger). Its id is its position in the
@@ -55,14 +87,24 @@ impl Category {
 pub(crate) struct NewCategory {
     name: String,
     parent: Option<CategoryId>,
+    category_type: CategoryType,
 }
 
 impl NewCategory {
-    /// A category at the top of the tree.
+    /// An Expense category at the top of the tree.
     pub(crate) fn new(name: &str) -> Self {
         Self {
             name: name.to_owned(),
             parent: None,
+            category_type: CategoryType::Expense,
+        }
+    }
+
+    /// The same category, an Income one.
+    pub(crate) fn income(self) -> Self {
+        Self {
+            category_type: CategoryType::Income,
+            ..self
         }
     }
 
@@ -74,11 +116,23 @@ impl NewCategory {
         }
     }
 
-    pub(crate) fn into_category(self, id: CategoryId) -> Category {
+    /// The category it sits under, or `None` at the top of the tree.
+    pub(crate) fn parent(&self) -> Option<CategoryId> {
+        self.parent
+    }
+
+    /// The category, with id `id`. A subcategory takes `parent_type`, its parent's
+    /// type, in place of its own.
+    pub(crate) fn into_category(
+        self,
+        id: CategoryId,
+        parent_type: Option<CategoryType>,
+    ) -> Category {
         Category {
             id,
             name: self.name,
             parent: self.parent,
+            category_type: parent_type.unwrap_or(self.category_type),
         }
     }
 }

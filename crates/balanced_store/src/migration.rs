@@ -27,11 +27,19 @@ pub enum UndoFormat {
 
 /// Balanced's migrations, in order: the first is version 1. The `.slt` tests run against
 /// the last; `tests/slt.rs` says how to test a schema between two of them.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    sql: include_str!("migration/0001_schema.sql"),
-    data: None,
-    undo_format: UndoFormat::Kept,
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        sql: include_str!("migration/0001_schema.sql"),
+        data: None,
+        undo_format: UndoFormat::Kept,
+    },
+    Migration {
+        sql: include_str!("migration/0002_category_type.sql"),
+        data: None,
+        // A deleted category in the log has no type to restore it with.
+        undo_format: UndoFormat::Changed,
+    },
+];
 
 /// The schema version a file has after every one of `migrations`.
 pub(crate) fn latest_version(migrations: &[Migration]) -> u32 {

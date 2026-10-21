@@ -21,7 +21,7 @@ use crate::transaction::{SplitLine, SplitTarget};
 use crate::undo_log::{self, UndoEntryError};
 use crate::{
     Account, AccountGroup, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId,
-    ClearedStatus, CurrencyCode, DomainError, Ledger, Money, MoneyError, Transaction,
+    CategoryType, ClearedStatus, CurrencyCode, DomainError, Ledger, Money, MoneyError, Transaction,
     TransactionId, Visibility,
 };
 
@@ -207,13 +207,14 @@ impl Ledger {
             .categories
             .into_iter()
             .map(|row| {
-                Category::new(
+                Ok(Category::new(
                     CategoryId::new(row.id),
                     row.name,
                     row.parent_id.map(CategoryId::new),
-                )
+                    category_type(&row.category_type)?,
+                ))
             })
-            .collect();
+            .collect::<Result<_, OpenError>>()?;
         // Transactions come by account, in register order.
         let mut registers: HashMap<u32, Vec<RegisterEntry>> = HashMap::new();
         for stored in contents.transactions {
@@ -400,6 +401,24 @@ fn cleared_status(name: &str) -> Result<ClearedStatus, OpenError> {
         })
 }
 
+/// The store's name for `category_type`.
+fn category_type_name(category_type: CategoryType) -> &'static str {
+    match category_type {
+        CategoryType::Income => "income",
+        CategoryType::Expense => "expense",
+    }
+}
+
+fn category_type(name: &str) -> Result<CategoryType, OpenError> {
+    CategoryType::ALL
+        .into_iter()
+        .find(|&category_type| category_type_name(category_type) == name)
+        .ok_or_else(|| OpenError::Unknown {
+            what: "category type",
+            value: name.to_owned(),
+        })
+}
+
 fn kind(name: &str) -> Result<AccountKind, OpenError> {
     AccountKind::ALL
         .into_iter()
@@ -492,6 +511,7 @@ pub(crate) fn category_row(category: &Category) -> CategoryRow {
         id: category.id().raw(),
         parent_id: category.parent().map(CategoryId::raw),
         name: category.name().to_owned(),
+        category_type: category_type_name(category.category_type()).to_owned(),
     }
 }
 

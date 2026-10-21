@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
 
-//! The Category List: a heavy Dialog showing every category as a tree, with how many
-//! transactions and split lines use each and their total, and every account a
+//! The Category List: a heavy Dialog showing every category as a tree, with its type,
+//! how many transactions and split lines use each and their total, and every account a
 //! transaction can transfer to.
 
 use std::collections::{BTreeMap, HashSet};
@@ -14,12 +14,13 @@ use eframe::egui::{
     self, Align, EventFilter, Id, Key, Layout, Modifiers, Rect, Response, RichText, Sense,
     TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
-use egui_extras::{Column, TableBuilder};
+use egui_extras::{Column, TableBuilder, TableRow};
 use icu_locale::{LanguageIdentifier, Locale};
 
 use crate::dialog::{DialogOutcome, HeavyDialog, OpenDialog};
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
+use crate::new_category::type_label;
 use crate::register_model::transfer_text;
 use crate::theme::Theme;
 use crate::triangle_button::{Fold, fold_triangle};
@@ -97,12 +98,14 @@ struct ListRow {
     name: String,
     /// Whether any category sits under it.
     has_children: bool,
+    /// The Type cell's text: a category's type, or `None` for an account.
+    category_type: Option<String>,
     /// The Txns cell's text.
     count: String,
     /// The Total cell's amount, or `None` when nothing uses the row or the total
     /// overflows.
     total: Option<FormattedAmount>,
-    /// The count and total, as a screen reader reads them after the name.
+    /// The type, count and total, as a screen reader reads them after the name.
     description: String,
 }
 
@@ -160,7 +163,16 @@ impl ListModel {
             let under = children.get(&Some(category.id()));
             let name = category.name().to_owned();
             let has_children = under.is_some();
-            rows.push(ListRow::new(i18n, key, depth, name, has_children, usage));
+            let category_type = Some(type_label(i18n, category.category_type()));
+            rows.push(ListRow::new(
+                i18n,
+                key,
+                depth,
+                name,
+                has_children,
+                category_type,
+                usage,
+            ));
             pending.extend(
                 under
                     .into_iter()
@@ -174,7 +186,7 @@ impl ListModel {
             let usage = view.transfer_usage(account.id());
             let name = transfer_text(account.name());
             let key = RowKey::Transfer(account.id());
-            rows.push(ListRow::new(i18n, key, 0, name, false, usage));
+            rows.push(ListRow::new(i18n, key, 0, name, false, None, usage));
         }
         Self {
             source: Source::of(view, i18n),
@@ -210,6 +222,7 @@ impl ListRow {
         depth: usize,
         name: String,
         has_children: bool,
+        category_type: Option<String>,
         usage: &Usage,
     ) -> Self {
         let count = usage.count();
@@ -231,11 +244,21 @@ impl ListRow {
         } else {
             fl!(i18n, "dialog-category-list-usage-count", count = count)
         };
+        let description = match &category_type {
+            Some(category_type) => fl!(
+                i18n,
+                "dialog-category-list-typed-usage",
+                category_type = category_type.clone(),
+                usage = description
+            ),
+            None => description,
+        };
         Self {
             key,
             depth,
             name,
             has_children,
+            category_type,
             count: i18n.format_number(
                 i64::try_from(count).expect("a ledger holds fewer than 2^63 transactions"),
             ),
@@ -280,27 +303,14 @@ impl CategoryListForm {
             .sense(Sense::CLICK)
             .cell_layout(Layout::left_to_right(Align::Center))
             .column(Column::remainder().clip(true))
+            .column(Column::exact(Theme::CATEGORY_LIST_TYPE_WIDTH))
             .column(Column::exact(Theme::CATEGORY_LIST_COUNT_WIDTH))
             .column(Column::exact(Theme::CATEGORY_LIST_TOTAL_WIDTH));
         if let Some(offset) = self.scroll_to.take() {
             table = table.vertical_scroll_offset(offset);
         }
         let scrolled = table
-            .header(row_height, |mut header| {
-                header.col(|ui| {
-                    ui.strong(fl!(i18n, "dialog-category-list-category"));
-                });
-                header.col(|ui| {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.strong(fl!(i18n, "dialog-category-list-txns"));
-                    });
-                });
-                header.col(|ui| {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.strong(fl!(i18n, "dialog-category-list-total"));
-                    });
-                });
-            })
+            .header(row_height, |header| headings(header, i18n))
             .body(|body| {
                 body.rows(row_height, shown.len(), |mut table_row| {
                     // egui asks only for rows below `shown.len()`.
@@ -319,6 +329,11 @@ impl CategoryListForm {
                     table_row.col(|ui| {
                         if let Some(asked) = name_cell(ui, i18n, row, state) {
                             action = Some(asked);
+                        }
+                    });
+                    table_row.col(|ui| {
+                        if let Some(category_type) = &row.category_type {
+                            ui.label(category_type);
                         }
                     });
                     table_row.col(|ui| {
@@ -408,6 +423,26 @@ impl CategoryListForm {
         self.selected = Some(key);
         self.focus_selected = true;
     }
+}
+
+/// The table's headings: Category, Type, Txns and Total.
+fn headings(mut header: TableRow<'_, '_>, i18n: &Localizer) {
+    header.col(|ui| {
+        ui.strong(fl!(i18n, "dialog-category-list-category"));
+    });
+    header.col(|ui| {
+        ui.strong(fl!(i18n, "dialog-category-list-type"));
+    });
+    header.col(|ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.strong(fl!(i18n, "dialog-category-list-txns"));
+        });
+    });
+    header.col(|ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.strong(fl!(i18n, "dialog-category-list-total"));
+        });
+    });
 }
 
 /// The offset that brings the row at `index`, of rows `pitch` apart, into a `view`

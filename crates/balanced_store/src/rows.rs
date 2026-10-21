@@ -23,6 +23,8 @@ pub struct CategoryRow {
     pub id: u32,
     pub parent_id: Option<u32>,
     pub name: String,
+    /// `income` or `expense`.
+    pub category_type: String,
 }
 
 /// A transaction in account `account_id`.

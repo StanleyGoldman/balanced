@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 
 use balanced_core::{
     AccountGroup, AccountId, AccountKind, AccountStatus, AccountSummary, Category, CategoryId,
-    ClearedStatus, CurrencyCode, Damage, DomainCommand, DomainError, Ledger, LedgerView, Money,
-    MoneyError, MoveDirection, NewSplitLine, NewTransaction, OpenError, RegisterEntry,
-    TransactionEdit, TransactionId, Visibility, WriteError,
+    CategoryType, ClearedStatus, CurrencyCode, Damage, DomainCommand, DomainError, Ledger,
+    LedgerView, Money, MoneyError, MoveDirection, NewSplitLine, NewTransaction, OpenError,
+    RegisterEntry, TransactionEdit, TransactionId, Visibility, WriteError,
 };
 use icu_calendar::{Date, Iso};
 use tempfile::TempDir;
@@ -339,8 +339,14 @@ fn create_category(ledger: &mut Ledger, name: &str) -> CategoryId {
         DomainCommand::CreateCategory {
             name: name.to_owned(),
             parent: None,
+            category_type: CategoryType::Expense,
         },
     );
+    category_id(ledger, name)
+}
+
+/// The id of the category named `name`.
+fn category_id(ledger: &Ledger, name: &str) -> CategoryId {
     ledger
         .snapshot()
         .categories()
@@ -359,6 +365,30 @@ fn a_created_category_is_there_after_a_reopen() {
             DomainCommand::CreateCategory {
                 name: "Groceries".to_owned(),
                 parent: Some(food),
+                category_type: CategoryType::Expense,
+            },
+        );
+    });
+}
+
+#[test]
+fn an_income_category_and_its_subcategory_are_income_after_a_reopen() {
+    assert_reopens_as_changed(|ledger| {
+        apply(
+            ledger,
+            DomainCommand::CreateCategory {
+                name: "Salary".to_owned(),
+                parent: None,
+                category_type: CategoryType::Income,
+            },
+        );
+        let salary = category_id(ledger, "Salary");
+        apply(
+            ledger,
+            DomainCommand::CreateCategory {
+                name: "Bonus".to_owned(),
+                parent: Some(salary),
+                category_type: CategoryType::Expense,
             },
         );
     });
@@ -789,12 +819,14 @@ fn every_command(h: &Household) -> Vec<DomainCommand> {
         DomainCommand::CreateCategory {
             name: "Fuel".to_owned(),
             parent: Some(h.food),
+            category_type: CategoryType::Expense,
         },
         DomainCommand::DeleteCategory { category: h.unused },
         DomainCommand::Compound(vec![
             DomainCommand::CreateCategory {
                 name: "Coffee".to_owned(),
                 parent: None,
+                category_type: CategoryType::Expense,
             },
             DomainCommand::DeleteTransaction {
                 transaction: h.payments[0],
@@ -859,6 +891,7 @@ fn a_refused_compound_of_transaction_and_category_changes_leaves_the_file_as_it_
         DomainCommand::CreateCategory {
             name: "Coffee".to_owned(),
             parent: None,
+            category_type: CategoryType::Expense,
         },
         DomainCommand::PostTransaction {
             account: h.everyday,
@@ -875,6 +908,7 @@ fn a_refused_compound_of_transaction_and_category_changes_leaves_the_file_as_it_
         DomainCommand::CreateCategory {
             name: "food".to_owned(),
             parent: None,
+            category_type: CategoryType::Expense,
         },
     ]));
 
@@ -919,6 +953,7 @@ fn an_amount_beyond_the_files_range_leaves_memory_undo_and_the_file_as_they_were
             DomainCommand::CreateCategory {
                 name: "Coffee".to_owned(),
                 parent: None,
+                category_type: CategoryType::Expense,
             },
             command(&h, too_large),
         ]));
@@ -946,6 +981,7 @@ fn a_category_the_file_would_keep_is_refused_as_in_use() {
     let groceries = DomainCommand::CreateCategory {
         name: "Groceries".to_owned(),
         parent: Some(h.unused),
+        category_type: CategoryType::Expense,
     };
     apply(&mut ledger, groceries);
     let before = contents(&ledger.snapshot());
