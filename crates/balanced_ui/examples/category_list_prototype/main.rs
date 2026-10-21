@@ -800,6 +800,7 @@ struct Proto {
     tog: [usize; 6],
     theme: Theme,
     dock_open: bool,
+    maximize_sent: bool,
     status: String,
     data: Data,
     staged: Option<Staged>,
@@ -832,6 +833,7 @@ impl Proto {
         let data = Data::generate();
         Self {
             h,
+            maximize_sent: false,
             variant,
             tog: [0; 6],
             theme: Theme::new(ThemeSettings::default()),
@@ -935,6 +937,10 @@ impl Proto {
     // The list opening and closing
 
     fn surface_opened(&mut self) {
+        // Only B shows the list in a tab; leaving B takes its tab away.
+        if self.variant != Variant::B && self.tab == Tab::Categories {
+            self.tab = Tab::Checking;
+        }
         if self.variant == Variant::B {
             self.tab = Tab::Categories;
             self.staged = None;
@@ -1166,12 +1172,21 @@ impl Proto {
             .map(|i| usage.get(i).map_or(0, |u| u.total))
             .sum();
         if used > 0 && self.opt(DEL_USED) == 0 {
-            let names = ids
+            let in_use: Vec<u32> = ids
                 .iter()
+                .copied()
                 .filter(|i| usage.get(i).is_some_and(|u| u.count > 0))
-                .map(|i| format!("{} ({})", d.path(*i), usage[i].count))
-                .collect::<Vec<_>>()
-                .join(", ");
+                .collect();
+            let names = if in_use.len() == 1 {
+                format!("{} is", d.path(in_use[0]))
+            } else {
+                let list = in_use
+                    .iter()
+                    .map(|i| format!("{} ({})", d.path(*i), usage[i].count))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{list} are")
+            };
             self.event(
                 "delete_refused",
                 json!({ "why": "used", "transactions": used }),
@@ -1179,7 +1194,7 @@ impl Proto {
             self.sub = Some(Sub::Message {
                 title: "Can't delete a category in use".to_owned(),
                 body: format!(
-                    "{names} is used by {used} transaction{}. Merge it into another category first, then delete it.",
+                    "{names} used by {used} transaction{}. Merge into another category first, then delete.",
                     if used == 1 { "" } else { "s" }
                 ),
                 merge_from: Some(asked),
@@ -1301,6 +1316,10 @@ impl Proto {
             .split_once(' ')
             .map_or((cmd, ""), |(v, r)| (v, r.trim()));
         let bad = |s: &mut Self| s.event("control_unknown", json!({ "command": cmd }));
+        // The action verbs act on the list, as its buttons do, so open it first.
+        if matches!(verb, "new" | "edit" | "merge" | "delete" | "hide" | "usage") && !self.open {
+            self.open_list("control");
+        }
         match verb {
             "variant" => match Variant::from_key(rest) {
                 Some(v) => self.set_variant(v, "control"),
@@ -1353,6 +1372,11 @@ impl Proto {
                 }
             }
             "ok" => self.acts.push(Act::Ok),
+            // Cancel dismisses an open confirm or message first, as its own Cancel button does.
+            "cancel" if self.sub.is_some() => {
+                self.sub = None;
+                self.event("sub_closed", json!({ "via": "control" }));
+            }
             "cancel" => self.acts.push(Act::Cancel),
             "reload" => {
                 self.data = Data::generate();
@@ -1386,6 +1410,10 @@ impl eframe::App for Proto {
 
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if !self.maximize_sent {
+            ctx.send_viewport_cmd(ViewportCommand::Maximized(true));
+            self.maximize_sent = true;
+        }
         if let Some(cmd) = self.h.begin_frame(&ctx) {
             self.apply_control(&ctx, &cmd);
         }
@@ -2010,7 +2038,12 @@ impl Proto {
         let usage_on = self.opt(USAGE) != 2;
         let totals = self.opt(USAGE) == 1;
         let staged = self.variant.staged();
-        let transfers = ["Checking", "Savings"];
+        // Transfer rows obey the search, and drop out when Show picks Income or Expense.
+        let q = self.search.trim().to_lowercase();
+        let transfers: Vec<&str> = ["Checking", "Savings"]
+            .into_iter()
+            .filter(|t| !matches!(self.show, 1 | 2) && t.to_lowercase().contains(&q))
+            .collect();
         let n = rows.len() + transfers.len();
         let selected_all = self.selection();
         let mut table = TableBuilder::new(ui)
@@ -2031,7 +2064,8 @@ impl Proto {
             if self.opt(HIDE) == 0 {
                 table = table.column(Column::exact(56.0));
             }
-            table = table.column(Column::exact(158.0));
+            // Room for Merge and Delete, plus Usage when the usage columns are off.
+            table = table.column(Column::exact(if usage_on { 158.0 } else { 236.0 }));
         }
         table
             .header(row_h + 2.0, |mut header| {
@@ -2671,7 +2705,8 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: ViewportBuilder::default()
             .with_title("Balanced — PROTOTYPE Category List")
-            .with_maximized(true),
+            .with_maximized(true)
+            .with_inner_size([1600.0, 1000.0]),
         ..Default::default()
     };
     eframe::run_native(
