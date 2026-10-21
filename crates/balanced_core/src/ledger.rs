@@ -499,7 +499,21 @@ impl Ledger {
     /// Panics when a category sits under one that isn't before it in `categories`, when
     /// a transaction names a category that isn't in `categories`, or when it is a
     /// transfer.
+    #[cfg(test)]
     pub(crate) fn with_accounts(
+        currency: CurrencyCode,
+        categories: impl IntoIterator<Item = NewCategory>,
+        accounts: impl IntoIterator<Item = NewAccount>,
+    ) -> Result<Self, MoneyError> {
+        let store =
+            Store::create_in_memory(currency.as_str()).expect("SQLite makes an in-memory file");
+        Self::with_accounts_in(store, currency, categories, accounts)
+    }
+
+    /// [`Self::with_accounts`], written to `store`, which is a new, empty data file in
+    /// `currency`.
+    pub(crate) fn with_accounts_in(
+        store: Store,
         currency: CurrencyCode,
         categories: impl IntoIterator<Item = NewCategory>,
         accounts: impl IntoIterator<Item = NewAccount>,
@@ -551,7 +565,7 @@ impl Ledger {
             let position = summaries.partition_point(|summary| summary.account.kind() <= kind);
             summaries.insert(position, summary);
         }
-        let store = in_memory_store(currency, &categories, &summaries);
+        write_rows(&store, &categories, &summaries);
         let totals = Totals::count(&summaries, currency);
         Ok(Self::from_parts(
             store,
@@ -1607,14 +1621,9 @@ fn write_account(store: &Store, summary: &AccountSummary, place: usize) -> Resul
     Ok(())
 }
 
-/// An in-memory data file in `currency` holding `categories`, each after the one it sits
-/// under, and `accounts`, in Account bar order.
-fn in_memory_store(
-    currency: CurrencyCode,
-    categories: &[Category],
-    accounts: &[AccountSummary],
-) -> Store {
-    let store = Store::create_in_memory(currency.as_str()).expect("SQLite makes an in-memory file");
+/// Writes `categories`, each after the one it sits under, and `accounts`, in Account bar
+/// order, to `store`, a new, empty data file.
+fn write_rows(store: &Store, categories: &[Category], accounts: &[AccountSummary]) {
     let write = || -> Result<(), DomainError> {
         store.begin()?;
         for category in categories {
@@ -1624,13 +1633,12 @@ fn in_memory_store(
         let mut placed: HashMap<AccountKind, usize> = HashMap::new();
         for summary in accounts {
             let place = placed.entry(summary.account.kind()).or_default();
-            write_account(&store, summary, *place)?;
+            write_account(store, summary, *place)?;
             *place += 1;
         }
         Ok(store.commit()?)
     };
     write().expect("a new ledger's rows fit the data file's schema");
-    store
 }
 
 #[cfg(test)]

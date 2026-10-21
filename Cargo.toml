@@ -17,6 +17,8 @@ balanced_prototype_harness = { path = "crates/balanced_prototype_harness" }
 balanced_store = { path = "crates/balanced_store" }
 balanced_ui = { path = "crates/balanced_ui" }
 directories = "6.0.0"
+# Default features off: they only add `--help` text to the benchmark binaries.
+divan = { version = "0.1.21", default-features = false }
 egui = { version = "0.36.2", default-features = false }
 egui_extras = { version = "0.36.2", default-features = false }
 egui-wgpu = { version = "0.36.2", default-features = false }
