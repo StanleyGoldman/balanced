@@ -44,6 +44,7 @@ ARG TYPOS_VERSION=1.51.1
 ARG NEXTEST_VERSION=0.9.148
 ARG CARGO_MUTANTS_VERSION=27.1.0
 ARG SCCACHE_VERSION=0.18.0
+ARG CARGO_LLVM_COV_VERSION=0.9.1
 RUN mkdir -p "$CARGO_HOME/bin" && cd "$CARGO_HOME/bin" && \
     curl -fsSL "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz" | \
       tar -xz --strip-components=1 "cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl/cargo-deny" && \
@@ -54,7 +55,9 @@ RUN mkdir -p "$CARGO_HOME/bin" && cd "$CARGO_HOME/bin" && \
       tar -xz && \
     curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz" | \
       tar -xz --strip-components=1 "sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache" && \
-    typos --version && cargo-deny --version && cargo-nextest nextest --version && cargo-mutants mutants --version && sccache --version
+    curl -fsSL "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${CARGO_LLVM_COV_VERSION}/cargo-llvm-cov-x86_64-unknown-linux-musl.tar.gz" | \
+      tar -xz && \
+    typos --version && cargo-deny --version && cargo-nextest nextest --version && cargo-mutants mutants --version && sccache --version && cargo-llvm-cov llvm-cov --version
 
 # rustup with no toolchain of its own, then the one rust-toolchain.toml names
 # (its components included), so the version is written in one place. The build

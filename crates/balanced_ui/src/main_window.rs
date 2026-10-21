@@ -2,8 +2,6 @@
 
 //! The Main window: Menu bar, tab row, Account bar, Main view and Status bar.
 
-use std::path::PathBuf;
-
 use balanced_core::{
     AccountId, AccountSummary, ClearedStatus, DomainCommand, DomainError, LedgerView,
     TransactionEdit, TransactionId,
@@ -23,6 +21,7 @@ use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::data_file::{self, DataFileRefusal};
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
 use crate::formatted_amount::FormattedAmount;
+use crate::go_to_date::GoToDateForm;
 use crate::i18n::fl;
 use crate::keymap::{self, KEYMAP};
 use crate::layout::Layout;
@@ -32,14 +31,15 @@ use crate::new_account::{self, NewAccountForm, WizardOutcome};
 use crate::new_category::NewCategoryForm;
 use crate::preferences::{NetWorthPlacement, Preferences};
 use crate::preferences_dialog::PreferencesForm;
+use crate::recent_files::RecentFiles;
 use crate::register::{ColumnWidths, Register};
-use crate::register_model::{OtherSide, RegisterRow};
+use crate::register_model::RegisterRow;
 use crate::route::{Route, TopLevelTab};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
 
-/// What the Main window shows. Only its [`Layout`] outlives the run: every run starts
-/// on Home, with no Register open.
+/// What the Main window shows. Only its [`Layout`] outlives the run. A data file opens
+/// on the view it last closed on, which the Recent files keep.
 #[derive(Debug)]
 pub(crate) struct MainWindow {
     tab: TopLevelTab,
@@ -67,6 +67,8 @@ pub(crate) struct MainWindow {
     preferences: Option<OpenDialog<PreferencesForm>>,
     /// The Dialog saying why a data file was refused, while it is open.
     data_file_refusal: Option<OpenDialog<DataFileRefusal>>,
+    /// Go to date, while it is open.
+    go_to_date: Option<OpenDialog<GoToDateForm>>,
     /// Where focus goes now that a Dialog has closed, until a frame restores it.
     focus_return: Option<FocusReturn>,
     menu_nav: MenuNav,
@@ -83,7 +85,7 @@ pub(crate) struct WindowFrame<'a> {
     pub(crate) view: &'a LedgerView,
     pub(crate) today: Date<Iso>,
     /// The Recent files, newest first.
-    pub(crate) recent_files: &'a [PathBuf],
+    pub(crate) recent_files: &'a RecentFiles,
 }
 
 /// The Register open under the Accounts tab and the account it shows.
@@ -135,6 +137,7 @@ impl MainWindow {
             manage_accounts: None,
             preferences: None,
             data_file_refusal: None,
+            go_to_date: None,
             focus_return: None,
             menu_nav: MenuNav::default(),
         }
@@ -168,6 +171,27 @@ impl MainWindow {
         }
     }
 
+    /// Where the Main view is: the open account's Register on the Accounts tab, or
+    /// else the tab shown.
+    pub(crate) fn route(&self) -> Route {
+        match self.open_account_id() {
+            Some(account) if self.tab == TopLevelTab::Accounts => Route::Account(account),
+            _ => Route::Tab(self.tab),
+        }
+    }
+
+    /// Shows `route`, the view a data file last closed on, now that the file is open
+    /// again as `view`. An account no longer in the file opens the Accounts tab with
+    /// no Register.
+    pub(crate) fn reopen(&mut self, route: Route, view: &LedgerView) {
+        match route {
+            Route::Account(account) if view.account(account).is_none() => {
+                self.navigate(Route::Tab(TopLevelTab::Accounts));
+            }
+            Route::Tab(_) | Route::Account(_) => self.navigate(route),
+        }
+    }
+
     /// The account whose Register is open, or `None` while none is.
     fn open_account_id(&self) -> Option<AccountId> {
         self.open_register.as_ref().map(|open| open.account)
@@ -195,8 +219,8 @@ impl MainWindow {
         match action {
             UserAction::Undo => view.can_undo(),
             UserAction::Redo => view.can_redo(),
-            UserAction::GoToOtherSide => self.other_side().is_some(),
             UserAction::NewTransaction
+            | UserAction::GoToDate
             | UserAction::DeleteTransaction
             | UserAction::PrintRegister
             | UserAction::ExportToCsv => self.shows_register(),
@@ -259,25 +283,15 @@ impl MainWindow {
         }
     }
 
-    /// The other side of the transfer on the open Register's selected row, while the
-    /// Register shows such a row.
-    fn other_side(&self) -> Option<OtherSide> {
+    /// Puts the open Register's cell cursor on the first row dated on or after `date`,
+    /// or on its last row when none is, and scrolls the row into view. With no Register
+    /// shown it does nothing.
+    pub(crate) fn go_to_date(&mut self, date: Date<Iso>) {
         if !self.shows_register() {
-            return None;
+            return;
         }
-        let account = self.open_account_id()?;
-        self.register()?.selected_row(account)?.other_side()
-    }
-
-    /// Goes to the other side of the transfer on the open Register's selected row, as
-    /// [`MainWindow::go_to_transaction`] does. A row that isn't a transfer does nothing.
-    pub(crate) fn go_to_other_side(&mut self) {
-        if let Some(OtherSide {
-            account,
-            transaction,
-        }) = self.other_side()
-        {
-            self.go_to_transaction(account, transaction);
+        if let Some(register) = self.register_mut() {
+            register.go_to_date(date);
         }
     }
 
@@ -316,6 +330,7 @@ impl MainWindow {
             new_account,
             new_category,
             manage_accounts,
+            go_to_date,
             // The Preferences, and a refusal shown meanwhile, belong to no one file.
             preferences: _,
             data_file_refusal: _,
@@ -331,6 +346,7 @@ impl MainWindow {
         *new_account = None;
         *new_category = None;
         *manage_accounts = None;
+        *go_to_date = None;
     }
 
     /// Opens the Dialog saying why a data file was refused, over any Dialog already
@@ -433,6 +449,16 @@ impl MainWindow {
                 let form = PreferencesForm::new(preferences.clone());
                 self.preferences = Some(OpenDialog::new(ctx, form));
             }
+            DialogKind::GoToDate => {
+                let Some(summary) = self.open_account(view) else {
+                    return;
+                };
+                let seed = self
+                    .register()
+                    .and_then(|register| register.selected_date(summary.account().id()))
+                    .unwrap_or(today);
+                self.go_to_date = Some(OpenDialog::new(ctx, GoToDateForm::new(seed)));
+            }
         }
     }
 
@@ -485,6 +511,7 @@ impl MainWindow {
             || self.manage_accounts.is_some()
             || self.preferences.is_some()
             || self.data_file_refusal.is_some()
+            || self.go_to_date.is_some()
     }
 
     /// The account the Main view shows, if it shows one.
@@ -526,7 +553,7 @@ impl MainWindow {
             if !actions.is_empty() {
                 self.menu_nav.close(ui.ctx());
                 if let Some(register) = self.register_mut() {
-                    register.commit_edit(ui.ctx(), i18n, commands);
+                    register.commit_edit(ui.ctx(), i18n, preferences, commands);
                 }
             }
             for action in actions {
@@ -605,6 +632,48 @@ impl MainWindow {
         self.preferences_dialog(ui.ctx(), i18n, theme, commands);
         self.manage_accounts_dialog(ui.ctx(), i18n, theme, commands, view);
         self.data_file_refusal_dialog(ui.ctx(), i18n, theme);
+        self.go_to_date_dialog(ui.ctx(), i18n, theme, commands, today);
+    }
+
+    /// Go to date, while it is open: a small window around the date field, as wide as
+    /// the Register's Date column. Go, or Enter, sends the date and closes it; a box
+    /// holding no date says so and stays open.
+    fn go_to_date_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        theme: &Theme,
+        commands: &CommandSender,
+        today: Date<Iso>,
+    ) {
+        let width = self.column_widths.date();
+        let Some(dialog) = &mut self.go_to_date else {
+            return;
+        };
+        let outcome = HeavyDialog::new(
+            Id::new("go_to_date_dialog"),
+            fl!(i18n, "dialog-go-to-date-title"),
+            fl!(i18n, "dialog-go-to-date-go"),
+            fl!(i18n, "dialog-cancel"),
+            fl!(i18n, "dialog-close"),
+            theme,
+        )
+        .fitted(width)
+        .show(ctx, dialog, |ui, form| {
+            form.show(ui, i18n, theme, today, width);
+        });
+        match outcome {
+            DialogOutcome::Open => return,
+            DialogOutcome::Accepted => {
+                let Some(date) = dialog.form.submit(i18n) else {
+                    return;
+                };
+                commands.send(AppCommand::GoToDate(date));
+            }
+            DialogOutcome::Back => unreachable!("a heavy Dialog has no Back button"),
+            DialogOutcome::Cancelled => {}
+        }
+        self.close_dialog(ctx, |window| &mut window.go_to_date);
     }
 
     /// The Dialog saying why a data file was refused, while it is open. OK closes it.
@@ -976,7 +1045,7 @@ impl MainWindow {
         i18n: &Localizer,
         commands: &CommandSender,
         view: &LedgerView,
-        recent_files: &[PathBuf],
+        recent_files: &RecentFiles,
     ) -> DrawnMenus {
         let item = |ui: &mut egui::Ui, drawn: &mut DrawnMenus, action| {
             self.menu_item(ui, i18n, commands, view, drawn, action);
@@ -989,7 +1058,7 @@ impl MainWindow {
                 ui.separator();
                 item(ui, &mut drawn, UserAction::NewAccount);
                 ui.separator();
-                if !recent_files.is_empty() {
+                if recent_files.newest().is_some() {
                     Self::recent_file_items(ui, i18n, commands, &mut drawn, recent_files);
                     ui.separator();
                 }
@@ -1000,7 +1069,7 @@ impl MainWindow {
                 item(ui, &mut drawn, UserAction::Undo);
                 item(ui, &mut drawn, UserAction::Redo);
                 ui.separator();
-                item(ui, &mut drawn, UserAction::GoToOtherSide);
+                item(ui, &mut drawn, UserAction::GoToDate);
             });
             drawn.note_menu(&edit.response);
             let view_menu = ui.menu_button(fl!(i18n, "menu-view"), |ui| {
@@ -1027,16 +1096,16 @@ impl MainWindow {
         i18n: &Localizer,
         commands: &CommandSender,
         drawn: &mut DrawnMenus,
-        recent_files: &[PathBuf],
+        recent_files: &RecentFiles,
     ) {
-        for (number, path) in (1_u32..).zip(recent_files) {
+        for (number, path) in (1_u32..).zip(recent_files.paths()) {
             let file = data_file::file_name(path);
             let item = ui
                 .button(fl!(i18n, "menu-file-recent", number = number, file = file))
                 .on_hover_text(path.display().to_string());
             drawn.note_item(&item);
             if item.clicked() {
-                commands.send(AppCommand::OpenDataFile(path.clone()));
+                commands.send(AppCommand::OpenDataFile(path.to_owned()));
                 // egui closes a menu on a pointer click only, not on Enter.
                 ui.close();
             }

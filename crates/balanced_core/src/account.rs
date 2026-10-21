@@ -109,6 +109,22 @@ impl AccountId {
     }
 }
 
+/// The id as a number, for keeping it outside the data file, such as in the Recent
+/// files.
+impl From<AccountId> for u32 {
+    fn from(id: AccountId) -> Self {
+        id.0
+    }
+}
+
+/// The id kept outside the data file as `id`. It names no account in a ledger that
+/// has none by that id.
+impl From<u32> for AccountId {
+    fn from(id: u32) -> Self {
+        Self(id)
+    }
+}
+
 /// An account: its name, its kind, its currency, and whether it is hidden or closed.
 ///
 /// Hidden and closed are independent. A hidden account is left out of the Account
@@ -377,5 +393,12 @@ mod tests {
                 (AccountKind::Liability, AccountGroup::PropertyDebt),
             ]
         );
+    }
+
+    #[test]
+    fn an_id_converted_to_a_number_keeps_its_value() {
+        let number = u32::from(AccountId::from(7));
+
+        assert_eq!(number, 7);
     }
 }

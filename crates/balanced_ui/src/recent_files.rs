@@ -5,44 +5,150 @@
 
 use std::path::{Path, PathBuf};
 
+use balanced_core::AccountId;
 use serde::{Deserialize, Serialize};
 
-/// The data files opened lately, newest first. Recent files are a record, not a
-/// Preference.
+use crate::route::{Route, TopLevelTab};
+
+/// The data files opened lately, newest first, each with the view it closed on. Recent
+/// files are a record, not a Preference.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct RecentFiles(Vec<PathBuf>);
+pub(crate) struct RecentFiles(Vec<RecentFile>);
+
+/// A Recent file: where it is, and the view it last closed on, if one was saved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecentFile {
+    path: PathBuf,
+    last_view: Option<Route>,
+}
 
 impl RecentFiles {
     /// How many files the list keeps.
     const MAX: usize = 4;
 
-    /// Puts `path` at the top, as the file just opened or created, and drops the
-    /// oldest file past [`RecentFiles::MAX`].
+    /// Puts `path` at the top, as the file just opened, and drops the oldest file past
+    /// [`RecentFiles::MAX`]. A file already listed keeps its saved view.
     pub(crate) fn note_opened(&mut self, path: PathBuf) {
-        self.0.retain(|listed| *listed != path);
-        self.0.insert(0, path);
+        let last_view = self.last_view(&path);
+        self.0.retain(|listed| listed.path != path);
+        self.0.insert(0, RecentFile { path, last_view });
         self.0.truncate(Self::MAX);
+    }
+
+    /// Saves `route` as the view the listed file at `path` closed on. A file not
+    /// listed saves nothing.
+    pub(crate) fn note_closed(&mut self, path: &Path, route: Route) {
+        self.set_last_view(path, Some(route));
+    }
+
+    /// Forgets the view saved for the listed file at `path`, now that a new file has
+    /// replaced it.
+    pub(crate) fn note_replaced(&mut self, path: &Path) {
+        self.set_last_view(path, None);
+    }
+
+    /// Sets the view saved for the listed file at `path`. A file not listed saves
+    /// nothing.
+    fn set_last_view(&mut self, path: &Path, last_view: Option<Route>) {
+        if let Some(listed) = self.0.iter_mut().find(|listed| listed.path == path) {
+            listed.last_view = last_view;
+        }
+    }
+
+    /// The view the listed file at `path` last closed on, if one was saved.
+    pub(crate) fn last_view(&self, path: &Path) -> Option<Route> {
+        self.0
+            .iter()
+            .find(|listed| listed.path == path)
+            .and_then(|listed| listed.last_view)
     }
 
     /// The file opened last, if any.
     pub(crate) fn newest(&self) -> Option<&Path> {
-        self.0.first().map(PathBuf::as_path)
+        self.0.first().map(|listed| listed.path.as_path())
     }
 
     /// The files, newest first.
-    pub(crate) fn files(&self) -> &[PathBuf] {
-        &self.0
+    pub(crate) fn paths(&self) -> impl Iterator<Item = &Path> {
+        self.0.iter().map(|listed| listed.path.as_path())
     }
 }
 
-/// The version of the file's format this build writes.
-const VERSION: i64 = 1;
+/// The version of the file's format this build writes. A change in what a key means
+/// bumps it and adds a step to [`migrate`].
+const VERSION: i64 = 2;
+
+/// The key holding the file's format version.
+const VERSION_KEY: &str = "version";
 
 /// The file's contents: its format version, then the files, newest first.
 #[derive(Serialize, Deserialize)]
 struct Contents {
     version: i64,
-    files: Vec<PathBuf>,
+    files: Vec<Entry>,
+}
+
+/// A Recent file as the file keeps it.
+#[derive(Serialize, Deserialize)]
+struct Entry {
+    path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_view: Option<LastView>,
+}
+
+/// The view a file closed on, as the file keeps it: the top-level tab and, on the
+/// Accounts tab, the account whose Register was open.
+#[derive(Serialize, Deserialize)]
+struct LastView {
+    tab: TopLevelTab,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    account: Option<u32>,
+}
+
+impl From<Route> for LastView {
+    fn from(route: Route) -> Self {
+        match route {
+            Route::Tab(tab) => Self { tab, account: None },
+            Route::Account(account) => Self {
+                tab: TopLevelTab::Accounts,
+                account: Some(account.into()),
+            },
+        }
+    }
+}
+
+impl TryFrom<LastView> for Route {
+    type Error = LoadError;
+
+    /// An account on any tab but Accounts is an error, since only the Accounts tab
+    /// shows a Register.
+    fn try_from(view: LastView) -> Result<Self, LoadError> {
+        match (view.tab, view.account) {
+            (TopLevelTab::Accounts, Some(account)) => Ok(Self::Account(AccountId::from(account))),
+            (tab, None) => Ok(Self::Tab(tab)),
+            (tab, Some(_)) => Err(LoadError::AccountOffAccountsTab(tab)),
+        }
+    }
+}
+
+/// Brings `table`, read from a file in format `version`, up to [`VERSION`].
+fn migrate(table: toml::Table, version: i64) -> Result<toml::Table, LoadError> {
+    match version {
+        1 => migrate(migrate_v1_to_v2(table), 2),
+        VERSION => Ok(table),
+        _ => Err(LoadError::UnknownVersion(version)),
+    }
+}
+
+/// Turns version 1's bare paths into entries with no saved view.
+fn migrate_v1_to_v2(mut table: toml::Table) -> toml::Table {
+    if let Some(toml::Value::Array(files)) = table.get_mut("files") {
+        for file in files.iter_mut() {
+            let path = std::mem::replace(file, toml::Value::Boolean(false));
+            *file = toml::Value::Table(toml::Table::from_iter([("path".to_owned(), path)]));
+        }
+    }
+    table
 }
 
 /// The `recent-files.toml` file in a config directory.
@@ -80,7 +186,8 @@ impl RecentFilesFile {
         }
     }
 
-    /// The Recent files in the file, or none when there is no file.
+    /// The Recent files in the file, or none when there is no file. A file in an
+    /// older format is read as this build's.
     pub(crate) fn load(&self) -> Result<RecentFiles, LoadError> {
         let text = match std::fs::read_to_string(&self.path) {
             Ok(text) => text,
@@ -89,11 +196,22 @@ impl RecentFilesFile {
             }
             Err(error) => return Err(LoadError::Read(error)),
         };
-        let contents: Contents = toml::from_str(&text)?;
-        if contents.version != VERSION {
-            return Err(LoadError::UnknownVersion(contents.version));
-        }
-        let mut files = contents.files;
+        let table: toml::Table = toml::from_str(&text)?;
+        let version = match table.get(VERSION_KEY) {
+            Some(toml::Value::Integer(version)) => *version,
+            _ => return Err(LoadError::NoVersion),
+        };
+        let contents: Contents = migrate(table, version)?.try_into()?;
+        let mut files = contents
+            .files
+            .into_iter()
+            .map(|entry| {
+                Ok(RecentFile {
+                    path: entry.path,
+                    last_view: entry.last_view.map(Route::try_from).transpose()?,
+                })
+            })
+            .collect::<Result<Vec<_>, LoadError>>()?;
         files.truncate(RecentFiles::MAX);
         Ok(RecentFiles(files))
     }
@@ -102,9 +220,17 @@ impl RecentFilesFile {
     /// written whole beside the old one and then renamed over it, so a failed write
     /// leaves the old file as it was.
     pub(crate) fn save(&self, recent: &RecentFiles) -> Result<(), SaveError> {
+        let files = recent
+            .0
+            .iter()
+            .map(|listed| Entry {
+                path: listed.path.clone(),
+                last_view: listed.last_view.map(LastView::from),
+            })
+            .collect();
         let text = toml::to_string(&Contents {
             version: VERSION,
-            files: recent.0.clone(),
+            files,
         })?;
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir)?;
@@ -123,6 +249,10 @@ pub(crate) enum LoadError {
     Read(#[source] std::io::Error),
     #[error("the recent files file is not valid")]
     Invalid(#[from] toml::de::Error),
+    #[error("the recent files file has no version")]
+    NoVersion,
+    #[error("the recent files file saves an account on a tab other than Accounts: {0:?}")]
+    AccountOffAccountsTab(TopLevelTab),
     #[error("the recent files file has a version this build can't read: {0}")]
     UnknownVersion(i64),
 }
@@ -151,6 +281,10 @@ mod tests {
         (dir, file)
     }
 
+    fn paths(recent: &RecentFiles) -> Vec<&Path> {
+        recent.paths().collect()
+    }
+
     fn recent(paths: &[&str]) -> RecentFiles {
         let mut recent = RecentFiles::default();
         for path in paths.iter().rev() {
@@ -166,11 +300,11 @@ mod tests {
         recent.note_opened(PathBuf::from("/c.balanced"));
 
         assert_eq!(
-            recent.files(),
+            paths(&recent),
             [
-                PathBuf::from("/c.balanced"),
-                PathBuf::from("/a.balanced"),
-                PathBuf::from("/b.balanced"),
+                Path::new("/c.balanced"),
+                Path::new("/a.balanced"),
+                Path::new("/b.balanced"),
             ]
         );
         assert_eq!(recent.newest(), Some(Path::new("/c.balanced")));
@@ -183,11 +317,11 @@ mod tests {
         recent.note_opened(PathBuf::from("/b.balanced"));
 
         assert_eq!(
-            recent.files(),
+            paths(&recent),
             [
-                PathBuf::from("/b.balanced"),
-                PathBuf::from("/a.balanced"),
-                PathBuf::from("/c.balanced"),
+                Path::new("/b.balanced"),
+                Path::new("/a.balanced"),
+                Path::new("/c.balanced"),
             ]
         );
     }
@@ -199,14 +333,35 @@ mod tests {
         recent.note_opened(PathBuf::from("/e.balanced"));
 
         assert_eq!(
-            recent.files(),
+            paths(&recent),
             [
-                PathBuf::from("/e.balanced"),
-                PathBuf::from("/a.balanced"),
-                PathBuf::from("/b.balanced"),
-                PathBuf::from("/c.balanced"),
+                Path::new("/e.balanced"),
+                Path::new("/a.balanced"),
+                Path::new("/b.balanced"),
+                Path::new("/c.balanced"),
             ]
         );
+    }
+
+    #[test]
+    fn a_file_opened_again_keeps_the_view_it_closed_on() {
+        let mut recent = recent(&["/a.balanced", "/b.balanced"]);
+        let account = Route::Account(AccountId::from(3));
+        recent.note_closed(Path::new("/b.balanced"), account);
+
+        recent.note_opened(PathBuf::from("/b.balanced"));
+
+        assert_eq!(recent.last_view(Path::new("/b.balanced")), Some(account));
+        assert_eq!(recent.last_view(Path::new("/a.balanced")), None);
+    }
+
+    #[test]
+    fn closing_a_file_not_listed_saves_nothing() {
+        let mut recent = recent(&["/a.balanced"]);
+
+        recent.note_closed(Path::new("/b.balanced"), Route::Tab(TopLevelTab::Bills));
+
+        assert_eq!(recent, self::recent(&["/a.balanced"]));
     }
 
     #[test]
@@ -219,22 +374,46 @@ mod tests {
     }
 
     #[test]
-    fn the_file_holds_its_version_and_the_files_newest_first() {
+    fn the_file_holds_its_version_and_each_file_with_the_view_it_closed_on() {
         let (dir, file) = file();
+        let mut saved = recent(&["/c.balanced", "/b.balanced", "/a.balanced"]);
+        saved.note_closed(Path::new("/c.balanced"), Route::Account(AccountId::from(3)));
+        saved.note_closed(
+            Path::new("/b.balanced"),
+            Route::Tab(TopLevelTab::PropertyDebt),
+        );
 
-        file.save(&recent(&["/b.balanced", "/a.balanced"])).unwrap();
+        file.save(&saved).unwrap();
 
         let text = std::fs::read_to_string(dir.path().join("recent-files.toml")).unwrap();
         assert_eq!(
             text,
-            "version = 1\nfiles = [\"/b.balanced\", \"/a.balanced\"]\n"
+            "version = 2\n\
+             \n\
+             [[files]]\n\
+             path = \"/c.balanced\"\n\
+             \n\
+             [files.last_view]\n\
+             tab = \"accounts\"\n\
+             account = 3\n\
+             \n\
+             [[files]]\n\
+             path = \"/b.balanced\"\n\
+             \n\
+             [files.last_view]\n\
+             tab = \"property_debt\"\n\
+             \n\
+             [[files]]\n\
+             path = \"/a.balanced\"\n"
         );
     }
 
     #[test]
     fn saved_files_load_back() {
         let (_dir, file) = file();
-        let saved = recent(&["/b.balanced", "/a.balanced"]);
+        let mut saved = recent(&["/c.balanced", "/b.balanced", "/a.balanced"]);
+        saved.note_closed(Path::new("/c.balanced"), Route::Account(AccountId::from(3)));
+        saved.note_closed(Path::new("/b.balanced"), Route::Tab(TopLevelTab::Accounts));
 
         file.save(&saved).unwrap();
         let loaded = file.load().unwrap();
@@ -243,17 +422,51 @@ mod tests {
     }
 
     #[test]
-    fn a_version_from_a_later_build_is_an_error() {
+    fn a_version_1_file_loads_its_files_with_no_saved_views() {
         let (dir, file) = file();
         std::fs::write(
             dir.path().join("recent-files.toml"),
-            "version = 2\nfiles = []\n",
+            "version = 1\nfiles = [\"/b.balanced\", \"/a.balanced\"]\n",
+        )
+        .unwrap();
+
+        let loaded = file.load().unwrap();
+
+        assert_eq!(loaded, recent(&["/b.balanced", "/a.balanced"]));
+    }
+
+    #[test]
+    fn an_account_on_a_tab_other_than_accounts_is_an_error() {
+        let (dir, file) = file();
+        std::fs::write(
+            dir.path().join("recent-files.toml"),
+            "version = 2\n\
+             [[files]]\n\
+             path = \"/a.balanced\"\n\
+             last_view = { tab = \"bills\", account = 3 }\n",
         )
         .unwrap();
 
         let loaded = file.load();
 
-        assert!(matches!(loaded, Err(LoadError::UnknownVersion(2))));
+        assert!(matches!(
+            loaded,
+            Err(LoadError::AccountOffAccountsTab(TopLevelTab::Bills))
+        ));
+    }
+
+    #[test]
+    fn a_version_from_a_later_build_is_an_error() {
+        let (dir, file) = file();
+        std::fs::write(
+            dir.path().join("recent-files.toml"),
+            "version = 3\nfiles = []\n",
+        )
+        .unwrap();
+
+        let loaded = file.load();
+
+        assert!(matches!(loaded, Err(LoadError::UnknownVersion(3))));
     }
 
     #[test]

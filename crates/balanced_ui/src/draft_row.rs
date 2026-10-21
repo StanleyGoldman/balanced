@@ -7,7 +7,7 @@ use balanced_core::{AccountId, DomainCommand, Money, NewTransaction, Transaction
 use balanced_i18n::Localizer;
 use icu_calendar::{Date, Iso};
 
-use crate::combobox::CategoryTarget;
+use crate::combobox::{CategoryTarget, Recalled};
 use crate::i18n::fl;
 
 /// What the draft row holds so far. Every cell starts empty.
@@ -62,6 +62,19 @@ impl Draft {
             TransactionEdit::Amount(amount) => self.amount = Some(amount),
             // The draft row's Clr cell is empty: a posted transaction starts uncleared.
             TransactionEdit::ClearedStatus(_) => {}
+        }
+    }
+
+    /// Takes `recalled`'s spelling of the payee, and fills the Category, Memo and amount
+    /// cells from it where they are empty.
+    pub(crate) fn recall(&mut self, recalled: &Recalled) {
+        recalled.payee().clone_into(&mut self.payee);
+        self.category = self.category.or(recalled.category());
+        if self.memo.is_empty() {
+            recalled.memo().clone_into(&mut self.memo);
+        }
+        if self.amount.is_none() {
+            self.amount = recalled.amount();
         }
     }
 

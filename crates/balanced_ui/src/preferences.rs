@@ -106,6 +106,12 @@ pub(crate) struct Preferences {
     /// A line in the Register between today's rows and the rows dated later.
     pub(crate) today_divider: bool,
     pub(crate) gridlines: Gridlines,
+    /// Committing a new transaction's payee fills its empty cells from the payee's
+    /// latest transaction (Payee recall).
+    pub(crate) payee_recall: bool,
+    /// Typing in a Payee or Category cell completes the text with the rest of the
+    /// first entry that starts with it (Inline completion).
+    pub(crate) inline_completion: bool,
     /// Each Account bar heading shows its section's total.
     pub(crate) group_totals: bool,
     pub(crate) net_worth_placement: NetWorthPlacement,
@@ -125,6 +131,8 @@ impl Default for Preferences {
             alternating_rows: true,
             today_divider: true,
             gridlines: Gridlines::default(),
+            payee_recall: true,
+            inline_completion: true,
             group_totals: false,
             net_worth_placement: NetWorthPlacement::default(),
             register_columns: RegisterColumns::default(),
@@ -306,6 +314,8 @@ mod tests {
             alternating_rows: false,
             today_divider: false,
             gridlines: Gridlines::Both,
+            payee_recall: false,
+            inline_completion: false,
             group_totals: true,
             net_worth_placement: NetWorthPlacement::StatusBar,
             register_columns,
@@ -390,6 +400,8 @@ mod tests {
             alternating_rows: false,
             today_divider: true,
             gridlines: Gridlines::Both,
+            payee_recall: true,
+            inline_completion: true,
             group_totals: true,
             net_worth_placement: NetWorthPlacement::StatusBar,
             register_columns,
@@ -556,6 +568,34 @@ mod tests {
     }
 
     #[test]
+    fn payee_recall_is_on_in_a_file_from_before_it() {
+        let (dir, file) = file();
+        std::fs::write(
+            dir.path().join("preferences.toml"),
+            "version = 2\ndense_rows = true\n",
+        )
+        .unwrap();
+
+        let loaded = file.load().unwrap();
+
+        assert!(loaded.payee_recall);
+    }
+
+    #[test]
+    fn inline_completion_is_on_in_a_file_from_before_it() {
+        let (dir, file) = file();
+        std::fs::write(
+            dir.path().join("preferences.toml"),
+            "version = 2\ndense_rows = true\n",
+        )
+        .unwrap();
+
+        let loaded = file.load().unwrap();
+
+        assert!(loaded.inline_completion);
+    }
+
+    #[test]
     fn no_file_loads_the_defaults() {
         let (_dir, file) = file();
 
@@ -610,6 +650,8 @@ mod tests {
              alternating_rows = true\n\
              today_divider = true\n\
              gridlines = \"off\"\n\
+             payee_recall = true\n\
+             inline_completion = true\n\
              group_totals = false\n\
              net_worth_placement = \"account_bar\"\n\
              register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\

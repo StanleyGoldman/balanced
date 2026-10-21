@@ -57,6 +57,7 @@ egui's own focus handling and widgets read keys and clicks before app code does.
 ### Popups and layout
 
 - **Lists in a cell pick on pointer press:** a combobox list or calendar shown under a focused field picks a row on `is_pointer_button_down_on()`, not `clicked()`. egui takes focus from the field when a click is released elsewhere (`SurrenderFocusOn::Clicks`, the default), early in the release frame, so a popup drawn only while the field has focus is gone before its `clicked()` is read.
+- **A popup's keys belong to its field:** while the popup is open, the field's own input handling takes Enter and Esc, and the host (the Register, a Dialog) leaves them alone. A host that reads Enter or Esc first commits the field or closes itself instead, and every host of the field needs the same guard. The date field's calendar works this way (`DateEdit::press`).
 - **Keep the field focused across a press on its popup or button:** egui's release still takes the field's focus, and the cell commits on blur. Note a press on the popup (`any_pressed()` inside its `area_rect`) or on a button beside the field, then call `request_focus` on the field every frame until `pointer.any_down()` is false. The segmented date field's calendar and 📅 button do this.
 - **A scrolling list in a popup:** give the `ScrollArea` the same `max_height` and `min_scrolled_height`. An `Area` sizes itself from last frame's content, so a list that grows (typed text widening to every entry) shows only its old height of rows. Under `show_rows`, a highlighted row moved past the view isn't laid out and can't `scroll_to_me`: keep the offset from the last frame's `ScrollAreaOutput::state` and set `vertical_scroll_offset` when the highlight moves.
 - **One-line bubbles:** a hint or error in an `Area` near the window edge wraps unless its label uses `Label::extend()`.
@@ -77,6 +78,7 @@ egui_kittest finds widgets through the same AccessKit tree a screen reader uses,
 
 - Every interactive custom-painted widget (Register rows, Account bar entries) calls `Response::widget_info` with the correct role and label.
 - Every text field has a visible label, or is connected to one with `.labelled_by(label.id)`.
+- Mark the chosen item of a set (a calendar's marked day, a list's highlighted row) with `ctx.accesskit_node_builder(response.id, |node| node.set_selected(true))`. egui writes `WidgetInfo::selected` to AccessKit as *toggled*, a checkbox's checked state, so a test reading `is_selected()` sees `None`.
 - A right-to-left layout (`Sides`' right side, `ui.horizontal` inside it) reaches AccessKit in the order widgets are added, so a screen reader reads its widgets in reverse of what the screen shows. Draw a name and its value as one `Label`, a `LayoutJob` built from one Fluent message, as the context header does with Current and Ending (`header_balance` in `main_window.rs`).
 
 ## Upgrading egui
@@ -93,6 +95,7 @@ egui releases a breaking minor version about every two months, and it removes de
 
 ## Gotchas
 
+- An auto-sized `Window` (`.auto_sized()`) offers its contents all the height it may grow to. A `Layout::right_to_left(Align::Center)` button row centres itself in that height, and the window stretches to the bottom of the screen. Give the row its own height with `ui.allocate_ui(vec2(ui.available_width(), row_height), ..)`, as a fitted `HeavyDialog` does.
 - egui's default proportional fonts (Ubuntu-Light, NotoEmoji, emoji-icon-font) lack ▸ ▾ ▼ ⋯, the arrows ← → ↑ ↓, braille such as the ⠿ grip, and box-drawing such as ─, and draw a box in their place; ⏵ ⏶ ⏷ ◀ ▶ ⚙ ⚑ render. For a missing glyph, paint the shape with the `Painter` (`Shape::convex_polygon` for a triangle, `circle_filled` dots for a grip, `hline` for a rule). Check a glyph with `fc-query --format='%{charset}' <font>` against the fonts in the `epaint_default_fonts` crate.
 - A layer raised with `ctx.move_to_top` every frame lands above every other layer of its `Order` that didn't ask this frame. A popup asks only in the frame it opens, so from its second frame it sinks under a same-order layer raised every frame, and kittest's `click()`, which clicks at the node's position, hits the widget beneath. Raise every frame only a layer whose children open at a higher `Order`, as `HeavyDialog` does at `Order::Middle`; a `LightDialog`, at `Order::Foreground` with its date calendar, stays where egui puts it.
 - Read every `ctx` value a closure needs before calling `ctx.fonts_mut`, `ctx.memory` or `ctx.input`: `let heading = TextStyle::Heading.resolve(&ctx.global_style());`, then `ctx.fonts_mut(|f| f.row_height(&heading))`. A `ctx` call inside such a closure takes the context lock again, and the test panics after 10 s with `Failed to acquire RwLock read after 10s. Deadlock?`.

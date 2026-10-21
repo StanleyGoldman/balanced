@@ -85,6 +85,8 @@ fn dark_then_ok_applies_the_dark_theme_and_writes_the_file() {
          alternating_rows = true\n\
          today_divider = true\n\
          gridlines = \"off\"\n\
+         payee_recall = true\n\
+         inline_completion = true\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
@@ -178,6 +180,8 @@ fn the_other_display_preferences_apply_and_are_saved_on_ok() {
          alternating_rows = true\n\
          today_divider = true\n\
          gridlines = \"off\"\n\
+         payee_recall = true\n\
+         inline_completion = true\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
@@ -244,6 +248,8 @@ fn the_register_preferences_are_saved_on_ok() {
          alternating_rows = false\n\
          today_divider = false\n\
          gridlines = \"both\"\n\
+         payee_recall = true\n\
+         inline_completion = true\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
@@ -287,6 +293,8 @@ fn the_account_bar_preferences_are_saved_on_ok() {
          alternating_rows = true\n\
          today_divider = true\n\
          gridlines = \"off\"\n\
+         payee_recall = true\n\
+         inline_completion = true\n\
          group_totals = true\n\
          net_worth_placement = \"status_bar\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\

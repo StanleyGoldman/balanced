@@ -94,6 +94,17 @@ impl AmountReader {
             || Operator::from_char(c).is_some()
     }
 
+    /// Whether `text` ends in an operator, so a sum typed in it waits for its next
+    /// amount: `12+` does, `12` and `12+3` don't. Spaces after the operator count
+    /// for nothing.
+    pub fn awaits_operand(text: &str) -> bool {
+        text.trim_end()
+            .chars()
+            .next_back()
+            .and_then(Operator::from_char)
+            .is_some()
+    }
+
     /// Reads `text`: a plain amount, or arithmetic (`+ - * /`) over amounts.
     ///
     /// A plain amount goes through the strict parser, which rejects more decimal
@@ -271,6 +282,20 @@ mod tests {
 
     fn read(reader: &AmountReader, text: &str) -> Result<(Decimal, bool), AmountParseError> {
         reader.read(text).map(|c| (c.amount(), c.rounded()))
+    }
+
+    #[test]
+    fn a_sum_ending_in_an_operator_awaits_its_next_amount() {
+        let awaiting = ["12+", "12 * ", "-", "3\u{2212}"].map(AmountReader::awaits_operand);
+
+        assert_eq!(awaiting, [true; 4]);
+    }
+
+    #[test]
+    fn a_sum_ending_in_an_amount_awaits_nothing() {
+        let awaiting = ["", "12", "12+3", "-5"].map(AmountReader::awaits_operand);
+
+        assert_eq!(awaiting, [false; 4]);
     }
 
     #[test]

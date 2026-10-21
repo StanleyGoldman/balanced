@@ -180,9 +180,8 @@ fn down_skips_a_disabled_menu_item() {
 
     press(&mut harness, Modifiers::NONE, Key::ArrowDown);
 
-    // Redo, below Undo, is disabled while there is nothing to redo, so Down wraps back
-    // to Undo.
-    assert_eq!(focused(&harness).as_deref(), Some("Undo Ctrl+Z"));
+    // Redo, below Undo, is disabled while there is nothing to redo, so Down skips it.
+    assert_eq!(focused(&harness).as_deref(), Some("Go to Date… Ctrl+G"));
 }
 
 #[test]

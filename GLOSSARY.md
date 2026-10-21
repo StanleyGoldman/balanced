@@ -41,7 +41,7 @@ The one file that holds a household's finances: its accounts, transactions and u
 _Avoid_: Database, document, project, Quicken file
 
 **Recent files**:
-The data files the person using this computer has opened lately, newest first, listed in the File menu. The newest one opens at startup. Recent files are a record, not a Preference.
+The data files the person using this computer has opened lately, newest first, listed in the File menu. The newest one opens at startup. Each entry also remembers where the person left that file: the top-level tab and the account open when it last closed, which it reopens on. Recent files are a record, not a Preference.
 _Avoid_: MRU list, history
 
 **Shortcut**:
@@ -58,6 +58,14 @@ _Avoid_: Transaction list, ledger view
 The empty row at the bottom of a register where the user types a new transaction; it becomes a transaction when added.
 _Avoid_: New row, blank row, entry row
 
+**Payee recall**:
+Filling a draft row's empty cells from the latest transaction, in any account, with the payee just entered. A payee remembers only what its transactions say, so editing or deleting the latest one changes what it recalls.
+_Avoid_: QuickFill, memorized payee, autofill
+
+**Inline completion**:
+The rest of the closest matching payee or category, shown selected in the cell as the user types, so Tab or Enter takes it and typing on replaces it.
+_Avoid_: Autocomplete, type-ahead
+
 **Today divider**:
 The labelled line in a register sorted by date between the rows dated today or earlier and the first row dated later. It is not a row, so the cell cursor never rests on it.
 _Avoid_: Today line, future separator
@@ -73,6 +81,18 @@ _Avoid_: Clr flag, cleared flag, check state
 **Cleared balance**:
 The total of an account's Cleared and Reconciled transactions, whatever their date: what the bank should show once every cleared transaction has posted.
 _Avoid_: Bank balance, statement balance
+
+**Reconcile**:
+Matching an account's Cleared transactions against a Statement until the Statement's ending balance equals the Cleared balance, then marking them Reconciled.
+_Avoid_: Balance the account, match statement
+
+**Statement**:
+The bank's periodic record of an account, as far as Reconcile needs it: an ending date and an ending balance.
+_Avoid_: Bank statement, period
+
+**Balance adjustment**:
+A transaction Reconcile posts, at the user's request, for whatever difference remains between a Statement and the Cleared balance.
+_Avoid_: Correction, plug, fudge entry
 
 **Column chooser**:
 The control at the right end of a register's header that shows, hides and reorders the register's columns.

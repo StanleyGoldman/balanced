@@ -23,7 +23,7 @@ menu-file-recent = { $number } { $file }
 menu-edit = Edit
 menu-edit-undo = Undo
 menu-edit-redo = Redo
-menu-edit-go-to-transfer = Go to Transfer
+menu-edit-go-to-date = Go to Date…
 menu-view = View
 menu-view-switch-pane = Switch Pane
 menu-tools = Tools
@@ -230,6 +230,11 @@ dialog-new-category-name = Name
 dialog-new-category-hint = Use “:” to put it under another category, as in Home:Garden.
 # $parent is the text before the last colon of the typed name.
 dialog-new-category-no-parent = No category is named “{ $parent }”.
+dialog-go-to-date-title = Go to Date
+# The label of Go to date's date field.
+dialog-go-to-date-date = Date
+# The button that moves the Register to the date.
+dialog-go-to-date-go = Go
 dialog-preferences-title = Preferences
 # The groups listed down the left of the Preferences Dialog.
 dialog-preferences-group-display = Display
@@ -254,6 +259,12 @@ dialog-preferences-gridlines-off = Off
 dialog-preferences-gridlines-horizontal = Horizontal
 dialog-preferences-gridlines-vertical = Vertical
 dialog-preferences-gridlines-both = Both
+# Committing a new transaction's payee fills its other cells from the last
+# transaction with that payee.
+dialog-preferences-payee-recall = Fill in a new transaction from its payee's last one
+# Typing the start of a payee or category fills in the rest of the first one that
+# starts with it, selected, for Tab or Enter to take.
+dialog-preferences-inline-completion = Complete payees and categories as you type
 dialog-preferences-group-account-bar = { -account-bar }
 # Each group heading in the Account bar shows the sum of its accounts' balances.
 dialog-preferences-group-totals = Show group totals
@@ -356,6 +367,30 @@ field-amount-preview = = { $amount }
 # The same, when the result was rounded to the currency's decimal places.
 field-amount-preview-rounded = ~ { $amount }
 
+## Keypad
+
+# The button beside an amount field that opens its keypad, a calculator under the
+# field. The keypad's sum is labelled with the same word.
+field-amount-keypad = Keypad
+    .tooltip = Keypad (Alt+Down)
+# The keypad's keys, as a screen reader reads them. Each shows its symbol.
+keypad-add = Add
+keypad-subtract = Subtract
+keypad-multiply = Multiply
+keypad-divide = Divide
+keypad-decimal = Decimal mark
+# .key is the letter on the key itself.
+keypad-clear = Clear
+    .key = C
+keypad-backspace = Backspace
+# Puts the keypad's result in the amount field.
+keypad-ok = OK
+# Shown under the keypad's sum while it ends in an operator, waiting for the next
+# amount.
+keypad-waiting = …
+# Shown under the keypad's sum when it can't be read as an amount.
+keypad-not-an-amount = Not an amount
+
 ## Date field
 
 # The letters standing for each part of a date in a date pattern, such as M/D/YYYY.
@@ -370,6 +405,8 @@ field-date-calendar = Calendar
     .tooltip = Calendar (Alt+Down)
 field-date-previous-month = Previous month
 field-date-next-month = Next month
+# The button under the calendar that picks today's date.
+field-date-today = Today
 
 ## Status bar
 

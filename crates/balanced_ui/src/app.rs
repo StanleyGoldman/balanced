@@ -48,8 +48,8 @@ pub struct App {
 enum Session {
     Open {
         ledger: Ledger,
-        /// Where the data file is, or `None` while tests run the App on data with no
-        /// file.
+        /// Where the data file is, as the Recent files list it, or `None` while tests
+        /// run the App on data with no file.
         path: Option<PathBuf>,
     },
     Welcome(Welcome),
@@ -94,7 +94,7 @@ impl App {
                 }
             },
         };
-        Self::start(
+        let mut app = Self::start(
             cc,
             i18n,
             session,
@@ -102,7 +102,9 @@ impl App {
             preferences_file,
             recent_files_file,
             recent_files,
-        )
+        );
+        app.reopen_last_view();
+        app
     }
 
     /// The App started on `session`, with the rest as [`App::new`] takes it.
@@ -200,20 +202,52 @@ impl App {
     }
 
     /// Puts `ledger`, over the data file at `path`, in place of the open one, which
-    /// closes it, or of the welcome screen, and shows the new file from scratch. The
-    /// file goes to the top of the Recent files.
+    /// closes it, or of the welcome screen. The closed file's Recent files entry keeps
+    /// the view it closed on, and the new file goes to the top of the Recent files and
+    /// opens on the view it last closed on, or else from scratch on the tab shown.
     fn switch_data_file(&mut self, ledger: Ledger, path: PathBuf) {
-        // The file is open, so it resolves, unless it has just been moved.
-        let listed = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
-        self.recent_files.note_opened(listed);
+        self.note_closed();
+        let listed = listed(path);
+        self.recent_files.note_opened(listed.clone());
+        self.save_recent_files();
+        self.session = Session::Open {
+            ledger,
+            path: Some(listed),
+        };
+        self.main_window.data_file_switched();
+        self.reopen_last_view();
+    }
+
+    /// Saves the view the Main window shows as the one the open data file closed on.
+    fn note_closed(&mut self) {
+        if let Session::Open {
+            path: Some(path), ..
+        } = &self.session
+        {
+            self.recent_files
+                .note_closed(path, self.main_window.route());
+        }
+    }
+
+    /// Shows the view the open data file last closed on, if the Recent files saved one.
+    fn reopen_last_view(&mut self) {
+        let Session::Open {
+            ledger,
+            path: Some(path),
+        } = &self.session
+        else {
+            return;
+        };
+        if let Some(route) = self.recent_files.last_view(path) {
+            self.main_window.reopen(route, &ledger.snapshot());
+        }
+    }
+
+    /// Writes the Recent files to their file.
+    fn save_recent_files(&self) {
         if let Err(error) = self.recent_files_file.save(&self.recent_files) {
             tracing::warn!(?error, "saving the Recent files failed");
         }
-        self.session = Session::Open {
-            ledger,
-            path: Some(path),
-        };
-        self.main_window.data_file_switched();
     }
 
     /// Shows why a data file was refused, over the Main window, or before the welcome
@@ -233,7 +267,10 @@ impl App {
             return;
         }
         match create_replacing(&path) {
-            Ok(ledger) => self.switch_data_file(ledger, path),
+            Ok(ledger) => {
+                self.recent_files.note_replaced(&listed(path.clone()));
+                self.switch_data_file(ledger, path);
+            }
             Err(error) => {
                 tracing::warn!(?error, ?path, "creating the data file failed");
                 self.refuse_data_file(ctx, DataFileRefusal::not_created(&path));
@@ -299,7 +336,7 @@ impl App {
                 account,
                 transaction,
             } => self.main_window.go_to_transaction(account, transaction),
-            AppCommand::GoToOtherSide => self.main_window.go_to_other_side(),
+            AppCommand::GoToDate(date) => self.main_window.go_to_date(date),
             AppCommand::GoToDraftRow => {
                 if let Some(ledger) = ledger {
                     self.main_window.go_to_draft_row(ctx, &ledger.snapshot());
@@ -420,6 +457,12 @@ impl eframe::App for App {
         self.main_window.layout().save(storage);
     }
 
+    /// Saves the view the Main window shows as the one the open data file closed on.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.note_closed();
+        self.save_recent_files();
+    }
+
     /// egui's memory (scroll offsets, focus, panel sizes) stays out of storage: the
     /// [`Layout`] holds everything that outlives the run.
     fn persist_egui_memory(&self) -> bool {
@@ -450,10 +493,16 @@ impl eframe::App for App {
             commands: &self.commands,
             view: &view,
             today,
-            recent_files: self.recent_files.files(),
+            recent_files: &self.recent_files,
         };
         self.main_window.show(ui, &frame);
     }
+}
+
+/// `path` as the Recent files list it: resolved through any links or relative parts.
+/// A data file just opened resolves, unless it has just been moved.
+fn listed(path: PathBuf) -> PathBuf {
+    fs::canonicalize(&path).unwrap_or(path)
 }
 
 /// Creates an empty data file at `path`, replacing any file there, since the native

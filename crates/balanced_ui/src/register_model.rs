@@ -7,8 +7,8 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use balanced_core::{
-    AccountId, AccountSummary, Allocation, CategoryId, ClearedStatus, CurrencyCode, Generation,
-    LedgerView, Money, SplitTarget, TransactionId,
+    Account, AccountId, AccountSummary, Allocation, CategoryId, ClearedStatus, CurrencyCode,
+    Generation, LedgerView, Money, SplitTarget, Transaction, TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
 use icu_calendar::{Date, Iso};
@@ -597,6 +597,19 @@ impl RegisterModel {
         &self.rows
     }
 
+    /// The row Go to date lands on for `date`: of the rows dated on or after it, the
+    /// earliest dated, and the first shown among those that share its date. When no
+    /// row is, the latest dated, and the last shown among those. `None` while no row
+    /// is shown.
+    pub(crate) fn row_on_or_after(&self, date: Date<Iso>) -> Option<&RegisterRow> {
+        // `min_by_key` keeps the first of equal rows, and `max_by_key` the last.
+        self.rows
+            .iter()
+            .filter(|row| row.saved_date().is_some_and(|saved| saved >= date))
+            .min_by_key(|row| row.saved_date())
+            .or_else(|| self.rows.iter().max_by_key(|row| row.saved_date()))
+    }
+
     /// How many transactions the account has, shown or not.
     pub(crate) fn transaction_count(&self) -> usize {
         self.transactions.len()
@@ -665,7 +678,7 @@ struct OtherAccounts<'a> {
     view: &'a LedgerView,
     /// Each transaction's account, by the transaction's id. Every transaction is in it,
     /// so a file whose transfer points at a transaction of another kind still shows.
-    holders: Option<HashMap<TransactionId, Holder<'a>>>,
+    holders: Option<HashMap<TransactionId, (&'a Account, &'a Transaction)>>,
 }
 
 /// The account holding a transaction.
@@ -679,26 +692,32 @@ impl<'a> OtherAccounts<'a> {
     /// The account holding transaction `other_side`.
     fn holding(&mut self, other_side: TransactionId) -> Holder<'a> {
         let view = self.view;
-        let holders = self.holders.get_or_insert_with(|| {
-            view.accounts()
-                .iter()
-                .flat_map(|summary| {
-                    let account = summary.account();
-                    let holder = Holder {
-                        id: account.id(),
-                        name: account.name(),
-                    };
-                    summary
-                        .register()
-                        .iter()
-                        .map(move |entry| (entry.transaction().id(), holder))
-                })
-                .collect()
-        });
-        *holders
+        let (account, _) = self
+            .holders
+            .get_or_insert_with(|| transactions_by_id(view))
             .get(&other_side)
-            .expect("a transfer's other side is in its snapshot")
+            .expect("a transfer's other side is in its snapshot");
+        Holder {
+            id: account.id(),
+            name: account.name(),
+        }
     }
+}
+
+/// Every transaction of `view`, with the account holding it, by the transaction's id.
+pub(crate) fn transactions_by_id(
+    view: &LedgerView,
+) -> HashMap<TransactionId, (&Account, &Transaction)> {
+    view.accounts()
+        .iter()
+        .flat_map(|summary| {
+            let account = summary.account();
+            summary.register().iter().map(move |entry| {
+                let transaction = entry.transaction();
+                (transaction.id(), (account, transaction))
+            })
+        })
+        .collect()
 }
 
 /// The path from the top of the tree to category `id` of `view`, as the Register shows

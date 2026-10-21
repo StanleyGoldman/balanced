@@ -12,13 +12,17 @@
 # skipped. Run it from any checkout of the repository; `gh` must be logged in.
 #
 # Output: one JSON line on stdout:
-#   {"status": "cleaned"|"error", "cleaned": [path], "skipped": [path],
-#    "freed_kb": number, "next": string?}
+#   {"status": "cleaned"|"partial"|"error", "cleaned": [path], "skipped": [path],
+#    "failed": [path], "freed_kb": number, "next": string?}
 #   cleaned: every merged or closed worktree's `target/` was deleted (or, with
 #            --dry-run, would be); "freed_kb" is their total size. "skipped"
 #            lists the worktrees with a `target/` left in place.
+#   partial: as cleaned, except the worktrees in "failed", whose `target/` holds
+#            files `rm` couldn't delete, usually root-owned output of a build run
+#            in a container. Their `rm` errors are dropped; "next" names the
+#            command for the user to run, and "freed_kb" counts only "cleaned".
 #   error:   bad arguments, or the repository or `gh` failed. "next" says why.
-# Exit codes: 0 cleaned, 2 error.
+# Exit codes: 0 cleaned, 1 partial, 2 error.
 set -euo pipefail
 
 fail() {
@@ -39,6 +43,7 @@ worktrees="$(dirname "$common")/.claude/worktrees"
 
 cleaned=()
 skipped=()
+failed=()
 freed=0
 for dir in "$worktrees"/*/; do
   dir=${dir%/}
@@ -53,14 +58,27 @@ for dir in "$worktrees"/*/; do
     skipped+=("$dir")
     continue
   fi
-  size=$(du -sk "$dir/target" | cut -f1)
-  $dry_run || rm -rf "$dir/target"
+  size=$(du -sk "$dir/target" 2>/dev/null | cut -f1) || true
+  if ! $dry_run && ! rm -rf "$dir/target" 2>/dev/null; then
+    failed+=("$dir")
+    continue
+  fi
   freed=$((freed + size))
   cleaned+=("$dir")
 done
 
-jq -nc --argjson freed "$freed" \
-  --args '{status: "cleaned", freed_kb: $freed,
+status=cleaned
+next=""
+if ((${#failed[@]} > 0)); then
+  status=partial
+  next="ask the user to run: sudo rm -rf$(printf ' %q/target' "${failed[@]}")"
+fi
+
+jq -nc --arg status "$status" --arg next "$next" --argjson freed "$freed" \
+  --args '{status: $status, freed_kb: $freed,
     cleaned: [$ARGS.positional[] | select(startswith("C:")) | .[2:]],
-    skipped: [$ARGS.positional[] | select(startswith("S:")) | .[2:]]}' \
-  "${cleaned[@]/#/C:}" "${skipped[@]/#/S:}"
+    skipped: [$ARGS.positional[] | select(startswith("S:")) | .[2:]],
+    failed: [$ARGS.positional[] | select(startswith("F:")) | .[2:]]}
+    + (if $next == "" then {} else {next: $next} end)' \
+  "${cleaned[@]/#/C:}" "${skipped[@]/#/S:}" "${failed[@]/#/F:}"
+[[ "$status" == cleaned ]] || exit 1
