@@ -805,6 +805,8 @@ enum Leave {
     Row(Target, usize),
     Account(usize),
     Close,
+    /// Nowhere: a Save or Enter that was refused.
+    Stay,
 }
 
 impl Leave {
@@ -813,6 +815,7 @@ impl Leave {
             Self::Row(t, c) => format!("row {t:?} cell {c}"),
             Self::Account(i) => format!("account {i}"),
             Self::Close => "close the window".to_owned(),
+            Self::Stay => "stay on the row".to_owned(),
         }
     }
 }
@@ -1119,6 +1122,7 @@ impl Proto {
                 self.edit = None;
                 self.open_account(i, "click");
             }
+            Leave::Stay => {}
             Leave::Close => {
                 self.closing = true;
                 ctx.send_viewport_cmd(ViewportCommand::Close);
@@ -1174,6 +1178,9 @@ impl Proto {
                 "refused",
                 json!({ "target": format!("{target:?}"), "via": via, "message": msg }),
             );
+            // The red status line went unnoticed, so every refusal says why in a dialog.
+            self.leave_refused = Some(msg.clone());
+            self.leave_prompt = Some(Leave::Stay);
             self.status = msg;
             return false;
         }
@@ -2251,11 +2258,16 @@ impl Proto {
             .map_or_else(String::new, |e| e.fields.cells[c].clone());
         let focus_wanted =
             surface == self.active_surface() && self.edit.as_ref().and_then(|e| e.focus) == Some(c);
-        if focus_wanted {
+        // Keep asking until the field has focus: a request made while a dialog is closing
+        // is dropped. The text arrives selected, so typing replaces it.
+        if focus_wanted && self.leave_prompt.is_none() {
             ctx.memory_mut(|m| m.request_focus(id));
-            if let Some(e) = &mut self.edit {
-                e.focus = None;
-            }
+            let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(text.chars().count()),
+            )));
+            state.store(ui.ctx(), id);
         }
         let mut te = TextEdit::singleline(&mut text).id(id).desired_width(width);
         if c >= 5 {
@@ -2276,6 +2288,12 @@ impl Proto {
         }
         self.edit_ids_now.insert(id);
         self.h.track(&r, name);
+        if r.has_focus()
+            && let Some(e) = &mut self.edit
+            && e.focus == Some(c)
+        {
+            e.focus = None;
+        }
         if (r.gained_focus() || r.changed()) && self.edit.is_none() {
             self.start_edit(Target::Draft, c, "bar");
             if let Some(e) = &mut self.edit {
