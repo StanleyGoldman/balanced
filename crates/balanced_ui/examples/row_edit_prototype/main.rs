@@ -862,6 +862,9 @@ struct Proto {
     selected: Option<Target>,
     edit: Option<Edit>,
     leave_prompt: Option<Leave>,
+    /// Why the row being left can't be saved; the leave prompt then offers only Continue
+    /// editing and Discard.
+    leave_refused: Option<String>,
     prompt_always: bool,
     closing: bool,
     /// XWayland ignores `with_maximized` at creation, so maximize again once the window is up.
@@ -898,6 +901,7 @@ impl Proto {
             selected: None,
             edit: None,
             leave_prompt: None,
+            leave_refused: None,
             prompt_always: false,
             closing: false,
             maximize_sent: false,
@@ -1078,8 +1082,11 @@ impl Proto {
                 json!({ "to": leave.text(), "outcome": "refused", "message": msg }),
             );
             let e = self.edit.as_mut().unwrap();
-            e.error = Some((col, msg));
+            e.error = Some((col, msg.clone()));
             e.focus = Some(col);
+            self.leave_refused = Some(msg);
+            self.leave_prompt = Some(leave);
+            self.h.screenshot("leave-refused");
             return;
         }
         if self.o[ALWAYS_SAVE] {
@@ -1097,6 +1104,7 @@ impl Proto {
             json!({ "to": leave.text(), "outcome": "prompt", "changed": e.changed() }),
         );
         self.prompt_always = false;
+        self.leave_refused = None;
         self.leave_prompt = Some(leave);
         self.h.screenshot("leave-prompt");
     }
@@ -1236,6 +1244,7 @@ impl Proto {
 
     fn cancel(&mut self, via: &str) {
         // The row the prompt asks about is gone, so the prompt goes with it.
+        self.leave_refused = None;
         if self.leave_prompt.take().is_some() {
             self.h.event("leave_prompt", json!({ "choice": "dismissed", "via": via }));
         }
@@ -1658,7 +1667,28 @@ impl Proto {
             .unwrap_or_default();
         let mut choice = None;
         let mut always = self.prompt_always;
+        let refused = self.leave_refused.clone();
         let modal = egui::Modal::new(Id::new("leave_prompt")).show(ctx, |ui| {
+            if let Some(msg) = &refused {
+                // A row that can't be saved: Enter and Esc keep editing, Discard takes a click.
+                ui.set_width(380.0);
+                ui.heading("Can't save this transaction");
+                ui.label(msg);
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let r = ui.add(Button::new("Continue editing").min_size(vec2(120.0, 0.0)));
+                    self.h.track(&r, "refused prompt: Continue editing");
+                    if r.clicked() || ctx.input(|i| i.key_pressed(Key::Enter)) {
+                        choice = Some(Choice::Continue);
+                    }
+                    let r = ui.button("Discard changes");
+                    self.h.track(&r, "refused prompt: Discard changes");
+                    if r.clicked() {
+                        choice = Some(Choice::Discard);
+                    }
+                });
+                return;
+            }
             ui.set_width(380.0);
             ui.heading("Save this transaction?");
             ui.label(format!(
@@ -1696,6 +1726,7 @@ impl Proto {
             return;
         };
         self.leave_prompt = None;
+        self.leave_refused = None;
         match choice {
             Choice::Save => {
                 self.h.event(
@@ -1719,10 +1750,13 @@ impl Proto {
                 self.perform(ctx, leave);
             }
             Choice::Continue => {
-                self.h
-                    .event("leave_prompt", json!({ "choice": "continue editing" }));
+                self.h.event(
+                    "leave_prompt",
+                    json!({ "choice": "continue editing", "refused": refused.is_some() }),
+                );
                 if let Some(e) = &mut self.edit {
-                    e.focus = Some(e.last_col);
+                    // Back to the field that stopped the save, or where the user was.
+                    e.focus = Some(e.error.as_ref().map_or(e.last_col, |(col, _)| *col));
                 }
             }
         }
