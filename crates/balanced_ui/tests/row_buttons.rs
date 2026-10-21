@@ -126,6 +126,13 @@ fn cursor_on_row_of(harness: &Harness<'static, App>, label: &str) -> bool {
         .any(|cell| cell.rect().y_range().contains(row))
 }
 
+/// Whether a label shows `text`, as the Status bar and Dialogs show messages.
+fn shows_text(harness: &Harness<'static, App>, text: &str) -> bool {
+    harness
+        .query_all_by_role(Role::Label)
+        .any(|label| label.accesskit_node().value().as_deref() == Some(text))
+}
+
 /// Whether a cell is labelled `label`.
 fn shows(harness: &Harness<'static, App>, label: &str) -> bool {
     harness.query_by_role_and_label(Role::Cell, label).is_some()
@@ -356,7 +363,7 @@ fn clicking_split_says_the_split_view_is_not_available_yet() {
 
     click_button(&mut harness, "Split");
 
-    assert!(harness.query_by_label("Not available yet").is_some());
+    assert!(shows_text(&harness, "Not available yet"));
 }
 
 #[test]
@@ -418,7 +425,7 @@ fn enter_on_an_item_of_mores_menu_closes_the_menu() {
 }
 
 #[test]
-fn clicking_save_on_an_amount_that_cant_be_read_saves_nothing() {
+fn clicking_save_on_an_amount_that_cant_be_read_says_the_row_cant_be_saved() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     rename_fresh_market(&mut harness);
@@ -427,8 +434,7 @@ fn clicking_save_on_an_amount_that_cant_be_read_saves_nothing() {
 
     click_button(&mut harness, "Save");
 
-    assert_eq!(editor(&harness, "Payment").as_deref(), Some("12.345"));
-    assert!(!can_undo(&mut harness));
+    assert!(shows_text(&harness, "Can't save this transaction"));
 }
 
 #[test]

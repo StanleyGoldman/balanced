@@ -184,7 +184,9 @@ impl DataFileRefusal {
         match outcome {
             DialogOutcome::Open => false,
             DialogOutcome::Accepted | DialogOutcome::Cancelled => true,
-            DialogOutcome::Back => unreachable!("a notice has no Back button"),
+            DialogOutcome::Back | DialogOutcome::Discarded => {
+                unreachable!("a notice has no Back or Discard button")
+            }
         }
     }
 

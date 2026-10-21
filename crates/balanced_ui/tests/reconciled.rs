@@ -165,17 +165,21 @@ fn editing(harness: &Harness<'static, App>) -> bool {
         .any(|node| node.accesskit_node().label().as_deref() != Some("Search"))
 }
 
-/// The Dialog's Cancel button, not the one in the editing row's toolbar behind it.
-fn dialog_cancel<'tree>(harness: &'tree Harness<'static, App>) -> egui_kittest::Node<'tree> {
+/// The Dialog's button labelled `label`, not a button of the same name in the editing
+/// row's toolbar behind it.
+fn dialog_button<'tree>(
+    harness: &'tree Harness<'static, App>,
+    label: &'tree str,
+) -> egui_kittest::Node<'tree> {
     harness
-        .query_all_by_role_and_label(Role::Button, "Cancel")
-        .find(|cancel| {
-            cancel
+        .query_all_by_role_and_label(Role::Button, label)
+        .find(|button| {
+            button
                 .accesskit_node()
                 .parent()
                 .is_none_or(|parent| parent.role() != Role::Toolbar)
         })
-        .expect("the Dialog has a Cancel button")
+        .expect("the Dialog has the button")
 }
 
 #[test]
@@ -248,7 +252,7 @@ fn cancel_saves_nothing_and_keeps_the_row_open() {
     let mut harness = everyday_checking();
     commit(&mut harness, "Payment", "Maple Property Management", "1500");
 
-    dialog_cancel(&harness).click();
+    dialog_button(&harness, "Cancel").click();
     harness.run();
     let open = editing(&harness);
     // Throws the row's changes away, showing what the ledger holds.
@@ -412,27 +416,99 @@ fn a_reconciled_amount_asks_on_save_not_on_leaving_its_cell() {
     assert!(asks(&harness, RENT_CONFIRM));
 }
 
-#[test]
-fn opening_another_account_says_why_a_changed_reconciled_amount_was_not_saved() {
-    let mut harness = everyday_checking();
-    click_cell(&mut harness, "Payment", "Maple Property Management");
-    type_text(&mut harness, "1500");
-    press(&mut harness, Modifiers::NONE, Key::Tab);
+/// Changes the rent's Payment to 1500, keeps it in the row with Tab, then leaves the
+/// row as `leave` does, and answers the leave-row prompt with Save.
+fn change_the_rent_then_leave_and_save(
+    harness: &mut Harness<'static, App>,
+    leave: impl FnOnce(&mut Harness<'static, App>),
+) {
+    click_cell(harness, "Payment", "Maple Property Management");
+    type_text(harness, "1500");
+    press(harness, Modifiers::NONE, Key::Tab);
+    leave(harness);
+    dialog_button(harness, "Save").click();
+    harness.run();
+}
 
+/// Opens Visa Rewards from the Account bar.
+fn open_visa_rewards(harness: &mut Harness<'static, App>) {
     harness
         .get_by_role_and_label(Role::Button, "Visa Rewards")
         .click();
     harness.run();
+}
 
-    let shown: Vec<String> = harness
-        .get_by_role(Role::Status)
-        .query_all_by_role(Role::Label)
-        .filter_map(|label| label.accesskit_node().value())
-        .collect();
-    assert_eq!(
-        shown,
-        [
-            "The changed row wasn't saved: a reconciled transaction's amount changes only once you confirm it."
-        ]
+#[test]
+fn saving_a_changed_reconciled_amount_as_another_account_opens_asks_to_confirm_it() {
+    let mut harness = everyday_checking();
+
+    change_the_rent_then_leave_and_save(&mut harness, open_visa_rewards);
+
+    assert!(asks(&harness, RENT_CONFIRM));
+}
+
+#[test]
+fn confirming_the_amount_as_another_account_opens_saves_it_and_opens_the_account() {
+    let mut harness = everyday_checking();
+    change_the_rent_then_leave_and_save(&mut harness, open_visa_rewards);
+
+    harness
+        .get_by_role_and_label(Role::Button, "Change Amount")
+        .click();
+    harness.run();
+
+    // Visa Rewards is open, and the save can be undone.
+    assert!(
+        !column(&harness, "Payee")
+            .iter()
+            .any(|payee| payee == "Maple Property Management")
     );
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    let undo = harness
+        .get_by_role_and_label(Role::Button, "Undo Ctrl+Z")
+        .accesskit_node()
+        .is_disabled();
+    assert!(!undo);
+}
+
+#[test]
+fn cancelling_the_confirm_as_another_row_is_clicked_stays_on_the_row_and_asks_no_more() {
+    let mut harness = everyday_checking();
+    change_the_rent_then_leave_and_save(&mut harness, |harness| {
+        click_cell(harness, "Payee", "Fresh Market");
+    });
+
+    harness
+        .get_by_role_and_label(Role::Button, "Cancel")
+        .click();
+    harness.run();
+
+    assert!(cursor_on(&harness, "Payment", "Maple Property Management"));
+    assert!(editing(&harness));
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Continue editing")
+            .is_none()
+    );
+}
+
+#[test]
+fn an_accepted_amount_the_ledger_refuses_says_why() {
+    let mut harness = everyday_checking();
+    // Too large for the account's balance to hold.
+    commit(
+        &mut harness,
+        "Payment",
+        "Maple Property Management",
+        "792281625142643375935439503.35",
+    );
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert!(asks(&harness, "Can't save this transaction"));
+    assert!(asks(
+        &harness,
+        "That change would make a balance too large to hold."
+    ));
 }

@@ -233,6 +233,27 @@ dialog-reconciled-amount-change = Change Amount
 # back to Cleared.
 dialog-unreconcile-message = Un-reconcile this transaction? It has been matched against a statement, and will be marked Cleared. { $payee }, { $date }, { $amount }
 dialog-unreconcile-accept = Mark Cleared
+# Asks, as the user leaves a Register row with changes not yet saved, whether to save
+# them.
+dialog-leave-row-message = Save the changed transaction?
+# Asks, as the user leaves the Register's filled-in new transaction row, whether to
+# add it.
+dialog-leave-row-draft-message = Add the new transaction?
+dialog-leave-row-save = Save
+dialog-leave-row-add = Add
+# Stays on the row, keeping its changes.
+dialog-leave-row-continue = Continue editing
+# Throws the row's changes away.
+dialog-leave-row-discard = Discard
+# Sets the Preference dialog-preferences-save-without-asking names.
+dialog-leave-row-always = Always save without asking
+# Heads the Dialog that says why a Register row's save was refused. The reason
+# follows below it.
+dialog-cant-save-title = Can't save this transaction
+# Stays on the row with the field at fault open, keeping the row's changes.
+dialog-cant-save-continue = Continue editing
+# Throws the row's changes away.
+dialog-cant-save-discard = Discard changes
 dialog-ok = OK
 dialog-new-category-title = New Category
 dialog-new-category-name = Name
@@ -276,6 +297,10 @@ dialog-preferences-payee-recall = Fill in a new transaction from its payee's las
 # Typing the start of a payee or category fills in the rest of the first one that
 # starts with it, selected, for Tab or Enter to take.
 dialog-preferences-inline-completion = Complete payees and categories as you type
+# Enter or Ctrl+Enter, saving a Register row, opens the next row's cell in the same
+# column. When off, the saved row stays highlighted with no cell open.
+dialog-preferences-enter-moves-to-next-row = Enter moves to the next row
+dialog-preferences-save-without-asking = Save a changed transaction without asking
 dialog-preferences-group-account-bar = { -account-bar }
 # Each group heading in the Account bar shows the sum of its accounts' balances.
 dialog-preferences-group-totals = Show group totals

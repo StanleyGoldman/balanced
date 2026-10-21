@@ -66,6 +66,10 @@ _Avoid_: New row, blank row, entry row
 The register row being changed. Its changes are kept back until the row is saved, and Esc throws them away. It holds the Save, Cancel, Split and More actions buttons; the draft row has Add in place of Save.
 _Avoid_: Open row, active row, entry row
 
+**Leave-row prompt**:
+The Dialog that asks, as a changed editing row is left, whether to save it (Add on the draft row), continue editing it, or discard its changes. The "Save a changed transaction without asking" Preference skips it and saves.
+_Avoid_: Save prompt, unsaved-changes dialog
+
 **Cell cursor**:
 The outline marking the one register cell that keys act on. A row with the cell cursor but not being edited is highlighted.
 _Avoid_: Selection, focus cell

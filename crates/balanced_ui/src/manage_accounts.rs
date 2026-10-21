@@ -473,7 +473,9 @@ pub(crate) fn show(
                 ManageAccountsOutcome::Open
             }
         },
-        DialogOutcome::Back => unreachable!("a heavy Dialog has no Back button"),
+        DialogOutcome::Back | DialogOutcome::Discarded => {
+            unreachable!("a heavy Dialog has no Back or Discard button")
+        }
         DialogOutcome::Cancelled => ManageAccountsOutcome::Closed,
     }
 }
@@ -532,7 +534,9 @@ fn show_confirm(
         DialogOutcome::Open => return,
         DialogOutcome::Accepted => form.confirmed(confirm),
         DialogOutcome::Cancelled => {}
-        DialogOutcome::Back => unreachable!("a confirm has no Back button"),
+        DialogOutcome::Back | DialogOutcome::Discarded => {
+            unreachable!("a confirm has no Back or Discard button")
+        }
     }
     if let Some(dialog) = form.confirm.take() {
         form.focus_return = Some(dialog.close(ctx));

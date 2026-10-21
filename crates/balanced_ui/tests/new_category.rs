@@ -100,17 +100,21 @@ fn field(harness: &Harness<'static, App>, label: &str) -> Option<String> {
         .map(|node| node.accesskit_node().value().unwrap_or_default())
 }
 
-/// The Dialog's Cancel button, not the one in the editing row's toolbar behind it.
-fn dialog_cancel<'tree>(harness: &'tree Harness<'static, App>) -> egui_kittest::Node<'tree> {
+/// The Dialog's button labelled `label`, not a button of the same name in the editing
+/// row's toolbar behind it.
+fn dialog_button<'tree>(
+    harness: &'tree Harness<'static, App>,
+    label: &'tree str,
+) -> egui_kittest::Node<'tree> {
     harness
-        .query_all_by_role_and_label(Role::Button, "Cancel")
-        .find(|cancel| {
-            cancel
+        .query_all_by_role_and_label(Role::Button, label)
+        .find(|button| {
+            button
                 .accesskit_node()
                 .parent()
                 .is_none_or(|parent| parent.role() != Role::Toolbar)
         })
-        .expect("the Dialog has a Cancel button")
+        .expect("the Dialog has the button")
 }
 
 #[test]
@@ -241,7 +245,7 @@ fn an_unknown_parent_shows_inline_and_keeps_the_dialog_open() {
 fn cancel_goes_back_to_the_cell_edit_with_the_typed_text() {
     let mut harness = new_category_for("Pets");
 
-    dialog_cancel(&harness).click();
+    dialog_button(&harness, "Cancel").click();
     harness.run();
 
     assert!(!dialog_open(&harness));

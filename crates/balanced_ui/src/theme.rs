@@ -368,12 +368,6 @@ impl Theme {
         Stroke::new(1.0, self.palette.accent)
     }
 
-    /// The outline of the draft row cell a refused row still needs: the cell cursor's
-    /// outline, in the colour of errors.
-    pub(crate) fn missing_cell_stroke(&self) -> Stroke {
-        Stroke::new(1.0, self.palette.negative)
-    }
-
     /// The fill behind Register row `row`, counting from 0 at the top: the even rows,
     /// while rows alternate. Paint it before the row's content and gridlines. Only the
     /// Register stripes, so the style leaves `Visuals::striped` off.

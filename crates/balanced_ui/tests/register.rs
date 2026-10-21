@@ -14,19 +14,37 @@ use icu_calendar::Date;
 
 /// The App on stub data, in the test locale, wide enough to show every Register column.
 fn app() -> Harness<'static, App> {
+    app_with(PreferencesFile::for_tests())
+}
+
+/// The App as [`app`] makes it, keeping its Preferences in `file`.
+fn app_with(file: PreferencesFile) -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
-        .build_eframe(|cc| {
+        .build_eframe(move |cc| {
             App::on_ledger(
                 cc,
                 Localizer::for_tests(),
                 Ledger::stub(),
                 Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
-                PreferencesFile::for_tests(),
+                file,
             )
         });
     harness.run();
     harness
+}
+
+/// The App as [`app`] makes it, with "Enter moves to the next row" turned off in
+/// `preferences.toml`, which lives in the returned directory.
+fn app_with_enter_moving_off() -> (tempfile::TempDir, Harness<'static, App>) {
+    let dir = tempfile::tempdir().expect("the test machine can make a temporary directory");
+    std::fs::write(
+        dir.path().join("preferences.toml"),
+        "version = 2\nenter_moves_to_next_row = false\n",
+    )
+    .expect("the test can write the preferences file");
+    let harness = app_with(PreferencesFile::in_dir(dir.path()));
+    (dir, harness)
 }
 
 /// Opens the account named `name` from the Account bar.
@@ -88,6 +106,14 @@ fn editing(harness: &Harness<'static, App>) -> bool {
         .any(|node| node.accesskit_node().label().as_deref() != Some("Search"))
 }
 
+/// Answers the "Can't save this transaction" Dialog with Continue editing.
+fn continue_editing(harness: &mut Harness<'static, App>) {
+    harness
+        .get_by_role_and_label(Role::Button, "Continue editing")
+        .click();
+    harness.run();
+}
+
 /// The label of the cell under the cell cursor.
 fn cursor(harness: &Harness<'static, App>) -> String {
     let mut cursors = harness
@@ -125,6 +151,23 @@ fn sort_by(harness: &mut Harness<'static, App>, title: &str) {
         .get_by_role_and_label(Role::ColumnHeader, title)
         .click();
     harness.run();
+}
+
+/// The Dialog's button labelled `label`, not a button of the same name in the editing
+/// row's toolbar behind it.
+fn dialog_button<'tree>(
+    harness: &'tree Harness<'static, App>,
+    label: &'tree str,
+) -> egui_kittest::Node<'tree> {
+    harness
+        .query_all_by_role_and_label(Role::Button, label)
+        .find(|button| {
+            button
+                .accesskit_node()
+                .parent()
+                .is_none_or(|parent| parent.role() != Role::Toolbar)
+        })
+        .expect("the Dialog has the button")
 }
 
 #[test]
@@ -654,16 +697,19 @@ fn escape_cancels_the_edit_and_restores_the_saved_text() {
 }
 
 #[test]
-fn clicking_another_rows_cell_saves_the_edit() {
+fn clicking_another_rows_cell_keeps_the_edit_and_saves_it_on_save() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
     type_text(&mut harness, "Corner Shop");
 
     click_cell(&mut harness, "Costco");
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    harness.run();
 
     harness.get_by_role_and_label(Role::Cell, "Corner Shop");
     assert!(!editing(&harness));
+    assert_eq!(undo_redo_disabled(&mut harness), (false, true));
 }
 
 #[test]
@@ -976,6 +1022,100 @@ fn enter_on_an_unchanged_row_saves_nothing_and_opens_the_next_row() {
 }
 
 #[test]
+fn with_enter_moves_to_the_next_row_off_enter_saves_and_leaves_the_row_highlighted() {
+    let (_dir, mut harness) = app_with_enter_moving_off();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert!(!editing(&harness));
+    assert_eq!(cursor(&harness), "Corner Shop");
+    assert_eq!(undo_redo_disabled(&mut harness), (false, true));
+}
+
+#[test]
+fn with_enter_moves_to_the_next_row_off_ctrl_enter_saves_and_leaves_the_row_highlighted() {
+    let (_dir, mut harness) = app_with_enter_moving_off();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    press(&mut harness, Modifiers::COMMAND, Key::Enter);
+
+    assert!(!editing(&harness));
+    assert_eq!(
+        cursor(&harness),
+        cell_of(&harness, "Category", "Corner Shop")
+    );
+    assert_eq!(undo_redo_disabled(&mut harness), (false, true));
+}
+
+#[test]
+fn with_enter_moves_to_the_next_row_off_enter_on_an_unchanged_row_leaves_it_highlighted() {
+    let (_dir, mut harness) = app_with_enter_moving_off();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert!(!editing(&harness));
+    assert_eq!(cursor(&harness), "Fresh Market");
+}
+
+#[test]
+fn with_enter_moves_to_the_next_row_off_enter_on_the_draft_row_still_opens_a_fresh_one() {
+    let (_dir, mut harness) = app_with_enter_moving_off();
+    open(&mut harness, "Everyday Checking");
+    // The Date cell's field takes a date one key at a time.
+    for key in "10/15/2026".chars() {
+        type_text(&mut harness, &key.to_string());
+    }
+    // Date, Num, Payee.
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    type_text(&mut harness, "Corner Cafe");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    type_text(&mut harness, "Food & Dining:Groceries");
+    // Category, Memo, Payment.
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    type_text(&mut harness, "12");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    let top = |cell: &egui_kittest::Node<'_>| cell.rect().top();
+    let added = top(&harness.get_by_role_and_label(Role::Cell, "Corner Cafe"));
+    let cursor_cell = harness
+        .query_all_by_role(Role::Cell)
+        .find(|cell| cell.accesskit_node().is_selected() == Some(true))
+        .expect("a cell holds the cell cursor");
+    assert_eq!(cursor_cell.accesskit_node().label().unwrap_or_default(), "");
+    assert!(top(&cursor_cell) > added);
+}
+
+#[test]
+fn with_enter_moves_to_the_next_row_off_a_refused_save_keeps_the_cell_open() {
+    let (_dir, mut harness) = app_with_enter_moving_off();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "86.42");
+    // Too large for the account's balance to hold.
+    type_text(&mut harness, "792281625142643375935439503.35");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    continue_editing(&mut harness);
+
+    assert_eq!(
+        editor(&harness, "Payment").as_deref(),
+        Some("792,281,625,142,643,375,935,439,503.35")
+    );
+    assert_eq!(undo_redo_disabled(&mut harness), (true, true));
+}
+
+#[test]
 fn escape_throws_away_every_change_to_the_row_and_leaves_it_highlighted() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
@@ -1017,13 +1157,15 @@ fn escape_with_no_cell_open_throws_away_the_rows_changes() {
 }
 
 #[test]
-fn leaving_a_changed_row_saves_it() {
+fn leaving_a_changed_row_and_answering_save_saves_it() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
     type_text(&mut harness, "Corner Shop");
 
     click_cell(&mut harness, "Bean There");
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    harness.run();
     let saved = undo_redo_disabled(&mut harness);
     press(&mut harness, Modifiers::COMMAND, Key::Z);
 
@@ -1032,24 +1174,21 @@ fn leaving_a_changed_row_saves_it() {
 }
 
 #[test]
-fn opening_another_account_saves_the_changed_row() {
+fn opening_another_account_and_answering_save_saves_the_changed_row() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
     type_text(&mut harness, "Corner Shop");
-
     open(&mut harness, "Visa Rewards");
-    open(&mut harness, "Everyday Checking");
 
-    assert!(
-        column(&harness, "Payee")
-            .iter()
-            .any(|cell| cell == "Corner Shop")
-    );
+    dialog_button(&harness, "Save").click();
+    harness.run();
+
+    assert_eq!(undo_redo_disabled(&mut harness), (false, true));
 }
 
 #[test]
-fn closing_the_window_saves_the_changed_row() {
+fn the_window_closing_without_asking_saves_the_changed_row() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
@@ -1072,6 +1211,7 @@ fn a_save_the_ledger_refuses_changes_nothing_and_keeps_the_row_open() {
     type_text(&mut harness, "792281625142643375935439503.35");
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
+    continue_editing(&mut harness);
 
     assert_eq!(
         editor(&harness, "Payment").as_deref(),
@@ -1094,6 +1234,10 @@ fn leaving_a_row_whose_save_the_ledger_refuses_brings_the_cursor_back_to_it() {
     type_text(&mut harness, "792281625142643375935439503.35");
 
     click_cell(&mut harness, "Bean There");
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    // The prompt's answer, the save, the ledger's refusal, then the Dialog saying so.
+    harness.run_steps(8);
+    continue_editing(&mut harness);
 
     assert_eq!(
         editor(&harness, "Payment").as_deref(),
@@ -1359,7 +1503,7 @@ fn enter_on_split_says_the_split_view_is_not_available_yet() {
 }
 
 #[test]
-fn enter_on_an_unknown_category_without_a_highlight_keeps_editing_and_says_why() {
+fn enter_on_an_unknown_category_without_a_highlight_says_why_and_keeps_editing() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Auto & Transport:Fuel");
@@ -1367,9 +1511,10 @@ fn enter_on_an_unknown_category_without_a_highlight_keeps_editing_and_says_why()
     press(&mut harness, Modifiers::NONE, Key::ArrowUp);
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
+    harness.get_by_label("No category has that name. Pick one from the list, or create it.");
+    continue_editing(&mut harness);
 
     assert_eq!(editor(&harness, "Category").as_deref(), Some("Pets"));
-    harness.get_by_label("No category has that name. Pick one from the list, or create it.");
 }
 
 #[test]
@@ -1476,7 +1621,7 @@ fn an_amount_with_excess_decimal_places_stays_in_edit_mode() {
     click_cell(&mut harness, "86.42");
     type_text(&mut harness, "12.345");
 
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
 
     assert_eq!(editor(&harness, "Payment").as_deref(), Some("12.345"));
     assert_eq!(payment_of(&harness, "Fresh Market"), "86.42");
@@ -1489,7 +1634,7 @@ fn an_amount_with_excess_decimal_places_shows_why_in_a_bubble() {
     click_cell(&mut harness, "86.42");
     type_text(&mut harness, "12.345");
 
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
 
     let bubble = harness.query_by_label("USD amounts have 2 decimal places");
     assert!(bubble.is_some(), "no error bubble");
@@ -1502,20 +1647,20 @@ fn an_amount_written_with_the_wrong_marks_names_the_locale_marks() {
     click_cell(&mut harness, "86.42");
     type_text(&mut harness, "1,5");
 
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
 
     let message = "Write amounts with “.” as the decimal mark and “,” between thousands.";
     assert!(harness.query_by_label(message).is_some(), "no error bubble");
 }
 
 #[test]
-fn leaving_a_refused_amount_keeps_the_cell_in_edit_mode() {
+fn leaving_a_refused_amount_for_another_cell_of_its_row_keeps_the_cell_in_edit_mode() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "86.42");
     type_text(&mut harness, "12.345");
 
-    click_cell(&mut harness, "Bean There");
+    click_cell(&mut harness, "Fresh Market");
     type_text(&mut harness, "6");
 
     assert_eq!(editor(&harness, "Payment").as_deref(), Some("12.3456"));
@@ -1600,7 +1745,7 @@ fn changing_a_refused_amount_clears_its_error() {
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "86.42");
     type_text(&mut harness, "12.345");
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
 
     press(&mut harness, Modifiers::NONE, Key::Backspace);
 

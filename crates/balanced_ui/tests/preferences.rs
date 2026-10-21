@@ -9,7 +9,7 @@ use std::path::Path;
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
-use eframe::egui::accesskit::Role;
+use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::{FontFamily, Key};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
@@ -87,6 +87,8 @@ fn dark_then_ok_applies_the_dark_theme_and_writes_the_file() {
          gridlines = \"off\"\n\
          payee_recall = true\n\
          inline_completion = true\n\
+         enter_moves_to_next_row = true\n\
+         save_without_asking = false\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
@@ -182,6 +184,8 @@ fn the_other_display_preferences_apply_and_are_saved_on_ok() {
          gridlines = \"off\"\n\
          payee_recall = true\n\
          inline_completion = true\n\
+         enter_moves_to_next_row = true\n\
+         save_without_asking = false\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
@@ -235,6 +239,12 @@ fn the_register_preferences_are_saved_on_ok() {
     click(&mut harness, Role::CheckBox, "Alternating rows");
     click(&mut harness, Role::CheckBox, "Today divider");
     click(&mut harness, Role::RadioButton, "Both");
+    click(&mut harness, Role::CheckBox, "Enter moves to the next row");
+    click(
+        &mut harness,
+        Role::CheckBox,
+        "Save a changed transaction without asking",
+    );
     click(&mut harness, Role::Button, "OK");
 
     assert_eq!(
@@ -250,6 +260,8 @@ fn the_register_preferences_are_saved_on_ok() {
          gridlines = \"both\"\n\
          payee_recall = true\n\
          inline_completion = true\n\
+         enter_moves_to_next_row = false\n\
+         save_without_asking = true\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
@@ -295,6 +307,8 @@ fn the_account_bar_preferences_are_saved_on_ok() {
          gridlines = \"off\"\n\
          payee_recall = true\n\
          inline_completion = true\n\
+         enter_moves_to_next_row = true\n\
+         save_without_asking = false\n\
          group_totals = true\n\
          net_worth_placement = \"status_bar\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
@@ -308,6 +322,18 @@ fn heading_total(harness: &Harness<'static, App>, section: &str) -> Option<Strin
         .get_by_role_and_label(Role::Button, section)
         .accesskit_node()
         .value()
+}
+
+#[test]
+fn enter_moves_to_the_next_row_is_on_by_default() {
+    let dir = config_dir();
+    let mut harness = app_in(dir.path());
+    open_preferences(&mut harness);
+    show_group(&mut harness, "Register");
+
+    let checkbox = harness.get_by_role_and_label(Role::CheckBox, "Enter moves to the next row");
+
+    assert_eq!(checkbox.accesskit_node().toggled(), Some(Toggled::True));
 }
 
 #[test]

@@ -504,20 +504,20 @@ fn a_memo_typed_before_the_payee_is_kept() {
 }
 
 #[test]
-fn a_recalled_category_clears_the_missing_category_bubble() {
+fn a_recalled_category_lets_a_draft_row_refused_for_its_category_be_added() {
     let mut harness = everyday_checking();
     type_text(&mut harness, "10/15/2026");
     press(&mut harness, Modifiers::COMMAND, Key::Enter);
     harness.get_by_label("Category is missing");
-    // The refused post put the cursor on Category; back to Payee.
+    click(&mut harness, Role::Button, "Continue editing");
+    // Continue editing put the cursor on Category; back to Payee.
     press(&mut harness, Modifiers::SHIFT, Key::Tab);
     type_text(&mut harness, "Trattoria Roma");
-
-    // Category, then Memo: the Category cell is closed again, so its bubble would show.
-    press(&mut harness, Modifiers::NONE, Key::Tab);
     press(&mut harness, Modifiers::NONE, Key::Tab);
 
-    assert!(harness.query_by_label("Category is missing").is_none());
+    press(&mut harness, Modifiers::COMMAND, Key::Enter);
+
+    assert_eq!(draft_row(&harness), ["", "", "", "", "", "", ""]);
 }
 
 #[test]

@@ -39,6 +39,7 @@ use crate::register_model::{
     SortKey, TodayDivider,
 };
 use crate::row_changes::RowChanges;
+use crate::save_refusal::{RefusalAnswer, SaveRefusal};
 use crate::theme::Theme;
 
 /// The narrowest Payee and Category get before the Register scrolls sideways.
@@ -552,9 +553,9 @@ struct CellEdit {
     /// text before it.
     completion: Option<usize>,
     list: Option<ListState>,
-    /// Why the last commit was refused, shown in a bubble below the cell until the
-    /// text changes.
-    error: Option<AmountParseError>,
+    /// Why the last commit was refused, until the text changes. An amount's reason
+    /// shows in a bubble below the cell.
+    refusal: Option<SaveRefusal>,
     /// The result of the arithmetic typed so far, for the bubble below the cell, or
     /// `None` while the text is no arithmetic that can be read.
     preview: Option<Preview>,
@@ -608,6 +609,14 @@ impl Edit {
         editor_id(self.cell())
     }
 
+    /// Why the last commit was refused, while the edit stays open saying so.
+    fn refusal(&self) -> Option<SaveRefusal> {
+        match self {
+            Self::Text(edit) => edit.refusal.clone(),
+            Self::Date(edit) => edit.date.is_rejected().then_some(SaveRefusal::Date),
+        }
+    }
+
     /// Whether the last commit was refused, so the edit stays open with its message.
     fn is_rejected(&self) -> bool {
         match self {
@@ -630,11 +639,11 @@ struct DateCellEdit {
 }
 
 impl CellEdit {
-    /// The edit after a commit refused by `error`, which it shows until the text
+    /// The edit after a commit refused for `refusal`, which it keeps until the text
     /// changes.
-    fn refused(self, error: AmountParseError) -> Self {
+    fn refused(self, refusal: SaveRefusal) -> Self {
         Self {
-            error: Some(error),
+            refusal: Some(refusal),
             ..self
         }
     }
@@ -872,8 +881,11 @@ pub(crate) struct Register {
     /// The save of a transaction's row sent to the ledger, until a later snapshot
     /// shows whether it was applied.
     saving: Option<Saving>,
+    /// The changed row being left, from when leaving it asks until the answer is
+    /// carried out.
+    leaving: Option<Leaving>,
     /// The cell that opens for editing on the next frame, once a save has gone
-    /// through or been refused.
+    /// through or been refused, or the leave-row prompt has been answered.
     open_after_save: Option<CellAddress>,
     /// The draft row, formatted, with the draft it shows. It is rebuilt when the draft
     /// changes or the transactions' rows are rebuilt. `None` while the account can't
@@ -882,9 +894,15 @@ pub(crate) struct Register {
     /// The generation of the snapshot a post was sent against, until a later snapshot
     /// shows whether the ledger applied it. A rejected post keeps the draft.
     posted_at: Option<Generation>,
-    /// The cell a refused draft row still needs, outlined with a bubble saying so
-    /// until it is filled.
-    missing: Option<Missing>,
+    /// The save of the editing row the ledger refused, saying why, until the Register
+    /// catches up with the refusal.
+    ledger_refusal: Option<StatusMessage>,
+    /// A refused save, from when the "Can't save this transaction" Dialog opens until
+    /// its answer is carried out.
+    refused: Option<Refused>,
+    /// The cell at fault in a refused save, which opens with its text selected on the
+    /// next frame the Register has the keyboard, once Continue editing answers.
+    refocus: Option<Refocus>,
     /// Whether the draft row is to scroll into view on the next frame.
     reveal_draft: bool,
     /// The columns shown, left to right, as the column chooser last left them.
@@ -1015,8 +1033,16 @@ impl Register {
     /// closed; a post that `view` shows applied empties the draft row, and stays in
     /// view until the filter changes; and a save of a transaction's row that `view`
     /// shows applied drops its changes and opens the cell it moves on to, while a
-    /// refused one opens the cell it started from again.
-    fn catch_up(&mut self, summary: &AccountSummary, view: &LedgerView) {
+    /// refused one opens the cell it started from again. A save or post that leaving
+    /// the row chose sends what left it once applied, and brings the cell cursor back
+    /// to the row when refused.
+    fn catch_up(
+        &mut self,
+        ctx: &egui::Context,
+        summary: &AccountSummary,
+        view: &LedgerView,
+        commands: &CommandSender,
+    ) {
         let account = summary.account().id();
         if self.model.as_ref().map(RegisterModel::account) != Some(account) {
             self.start_over();
@@ -1024,29 +1050,58 @@ impl Register {
                 self.go_to_draft_row();
             }
         }
-        if let Some(sent_at) = self.posted_at.take()
-            && view.generation() != sent_at
-        {
-            if self.filter.is_set()
-                && let Some(model) = &self.model
-            {
-                self.filter.keep(model.added(summary));
+        if let Some(sent_at) = self.posted_at.take() {
+            let left = self.take_saved_leaving();
+            if view.generation() != sent_at {
+                if self.filter.is_set()
+                    && let Some(model) = &self.model
+                {
+                    self.filter.keep(model.added(summary));
+                }
+                self.unsaved.draft = Draft::default();
+                match left {
+                    // The cell cursor stays where leaving took it.
+                    Some(left) => {
+                        self.open_after_save = left.resume;
+                        left.carry_on(commands);
+                    }
+                    None => self.go_to_draft_row(),
+                }
+            } else if let Some(message) = self.ledger_refusal.take() {
+                // The ledger refused the post, saying why.
+                let at = left
+                    .as_ref()
+                    .map(|left| left.from)
+                    .or_else(|| self.unsaved.reopened_cell())
+                    .unwrap_or(CellAddress::draft(RegisterColumn::Date));
+                let refusal = SaveRefusal::Status(message);
+                self.refuse(ctx, commands, refusal, at, None, left);
             }
-            self.unsaved.draft = Draft::default();
-            self.missing = None;
-            self.go_to_draft_row();
         }
         if let Some(saving) = self.saving.take() {
             if view.generation() != saving.at {
                 self.unsaved.changes = None;
                 self.open_after_save = saving.next;
+                if let Some(left) = self.take_saved_leaving() {
+                    self.open_after_save = left.resume.or(saving.next);
+                    left.carry_on(commands);
+                }
+            } else if let Some(message) = self.ledger_refusal.take() {
+                // The ledger refused the save, sent at once or once the confirm was
+                // accepted, saying why: the row keeps its changes.
+                let left = self.take_saved_leaving();
+                let refusal = SaveRefusal::Status(message);
+                self.refuse(ctx, commands, refusal, saving.from, None, left);
             } else if saving.confirm == Confirm::Asked {
                 // The confirm is still open.
                 self.saving = Some(saving);
             } else {
-                // The ledger refused the save, or the confirm was cancelled: the row
-                // keeps its changes, and the cell opens again.
+                // The confirm was cancelled: the row keeps its changes, the cell
+                // cursor comes back to it at once, so it isn't left again, and its cell
+                // opens again. What left the row, if anything, doesn't go on.
+                self.cursor = Some(saving.from);
                 self.open_after_save = Some(saving.from);
+                self.take_saved_leaving();
             }
         }
         if let Some(id) = self.go_to.take() {
@@ -1059,68 +1114,227 @@ impl Register {
         }
     }
 
-    /// Settles what this frame's keys and clicks changed: an edit that refused to let
-    /// the keyboard go keeps the cell cursor, a button waiting for keyboard focus that
-    /// wasn't drawn stops waiting, a transaction's row the cursor left saves its
-    /// changes, a filled cell drops its outline, and `draft_row`, taken for the frame,
+    /// Settles what this frame's keys and clicks changed: a button waiting for keyboard
+    /// focus that wasn't drawn stops waiting, and `draft_row`, taken for the frame,
     /// comes back up to date with the draft, as the changed row does with the changes.
     fn end_frame(
         &mut self,
         model: &RegisterModel,
         draft_row: Option<DraftRow>,
         draft_frame: DraftFrame<'_>,
-        commands: &CommandSender,
     ) {
-        if std::mem::take(&mut self.refused_leave)
-            && let Some(edit) = &self.edit
-        {
-            self.cursor = Some(edit.cell());
-        }
         if self.buttons.is_none() {
             // The editing row is out of view, so no button can take the keyboard.
             self.focus_button = None;
         }
-        self.save_left_row(model, draft_frame.view.generation(), commands);
-        let draft = &self.unsaved.draft;
-        self.missing = self.missing.filter(|&missing| draft.lacks(missing));
+        // A click on another row leaves the cell cursor there, and the refused edit
+        // stops it leaving the row once asked about.
         self.draft_row = draft_row;
         self.refresh_draft_row(draft_frame, false);
         self.changed_row = draft_frame.changed_row(model, self.unsaved.changes.as_ref());
     }
 
-    /// Saves the changes to a transaction's row, one of `model`'s, once the cell cursor
-    /// has left it, against the snapshot of `generation`. The row keeps its changes
-    /// until the ledger answers: a refused save brings the cursor back to it, with the
-    /// cell edited last open again.
-    // TODO(#423): leaving a changed row asks Save, Continue editing or Discard first.
-    fn save_left_row(
+    /// Settles an edit that refused to let the keyboard leave its cell this frame: a
+    /// click within its row leaves the cell cursor on it, the Status bar saying why
+    /// where no bubble does, and a click on another row leaves a row that can't be
+    /// saved, which the "Can't save this transaction" Dialog says.
+    fn settle_refused_leave(&mut self, ctx: &egui::Context, commands: &CommandSender) {
+        if std::mem::take(&mut self.refused_leave)
+            && let Some(refusal) = self.edit.as_ref().and_then(Edit::refusal)
+            && let Some(edit) = self.edit.take()
+        {
+            let at = edit.cell();
+            if self.cursor.is_none_or(|cursor| cursor.row == at.row) {
+                // The edit keeps the cell cursor, and says why outside the bubble a
+                // date or amount shows.
+                self.cursor = Some(at);
+                self.edit = Some(edit);
+                say_in_status_bar(refusal, commands);
+                return;
+            }
+            // A click on another row leaves a row that can't be saved.
+            let leaving = Leaving {
+                from: at,
+                then: None,
+                resume: None,
+                step: LeaveStep::Asked,
+            };
+            self.refuse(ctx, commands, refusal, at, Some(edit), Some(leaving));
+        }
+    }
+
+    /// Asks about leaving the changed row, a filled draft row or a transaction's row
+    /// with changes, once the cell cursor has left it, unless its save is already on
+    /// its way. A cell the move opened, such as Tab's, closes while the prompt is open
+    /// and opens again once the row is saved or its changes thrown away. An edit that
+    /// refused to let the keyboard go is settled first.
+    fn ask_if_left(
         &mut self,
-        model: &RegisterModel,
-        generation: Generation,
+        ctx: &egui::Context,
+        preferences: &Preferences,
         commands: &CommandSender,
     ) {
-        let Some(changes) = self
-            .unsaved
-            .changes
-            .as_ref()
-            .filter(|_| self.saving.is_none())
-        else {
-            return;
-        };
-        let row = RowId::Transaction(changes.transaction());
-        if self.cursor.map(|cursor| cursor.row) == Some(row) {
+        self.settle_refused_leave(ctx, commands);
+        if self.leaving.is_some()
+            || self.refused.is_some()
+            || self.saving.is_some()
+            || self.posted_at.is_some()
+        {
             return;
         }
         let Some(from) = self.unsaved.reopened_cell() else {
             return;
         };
-        let confirm = send_save(changes, Rows::new(model, None, None), commands);
-        self.saving = Some(Saving {
-            at: generation,
-            from,
-            next: None,
-            confirm,
+        if self.cursor.map(|cursor| cursor.row) == Some(from.row) {
+            return;
+        }
+        let resume = self.edit.take().map(|edit| {
+            ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+            edit.cell()
         });
+        let leaving = Leaving {
+            from,
+            then: None,
+            resume,
+            step: LeaveStep::Asked,
+        };
+        self.ask_to_leave(ctx, leaving, preferences, commands);
+    }
+
+    /// Whether the Register may be left for `then` at once, as the Main view moves on:
+    /// to another account, another tab, another data file, an undo, or the window
+    /// closing. The cell being edited is kept in its row first. A changed row is not
+    /// left: the leave-row prompt asks about it, or, with "Save a changed transaction
+    /// without asking" on, it saves, and `then` is sent once the row is saved or its
+    /// changes thrown away.
+    pub(crate) fn leave(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        preferences: &Preferences,
+        commands: &CommandSender,
+        then: AppCommand,
+    ) -> bool {
+        if self.leaving.is_some() || self.refused.is_some() {
+            return false;
+        }
+        if let Some(edit) = &self.edit {
+            ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+        }
+        if let Some((edit, refusal)) =
+            self.keep_open_edit(i18n, PayeeRecall::of(preferences), commands)
+        {
+            let at = edit.cell();
+            let leaving = Leaving {
+                from: at,
+                then: Some(then),
+                resume: None,
+                step: LeaveStep::Asked,
+            };
+            self.refuse(ctx, commands, refusal, at, Some(edit), Some(leaving));
+            return false;
+        }
+        let Some(from) = self.unsaved.reopened_cell() else {
+            return true;
+        };
+        let leaving = Leaving {
+            from,
+            then: Some(then),
+            resume: None,
+            step: LeaveStep::Asked,
+        };
+        self.ask_to_leave(ctx, leaving, preferences, commands);
+        false
+    }
+
+    /// Asks about `leaving` the changed row, or answers Save at once when the
+    /// Preferences say to save without asking. A draft row that can't be added says
+    /// why instead.
+    fn ask_to_leave(
+        &mut self,
+        ctx: &egui::Context,
+        mut leaving: Leaving,
+        preferences: &Preferences,
+        commands: &CommandSender,
+    ) {
+        if leaving.from.row == RowId::Draft
+            && let Some(missing) = self.unsaved.draft.missing()
+        {
+            self.refuse_missing(ctx, commands, missing, Some(leaving));
+            return;
+        }
+        leaving.step = if preferences.save_without_asking {
+            // The next frame saves.
+            ctx.request_repaint();
+            LeaveStep::Answered(LeaveAnswer::Save)
+        } else {
+            let row = match leaving.from.row {
+                RowId::Draft => LeftRow::Draft,
+                RowId::Transaction(_) => LeftRow::Transaction,
+            };
+            commands.send(AppCommand::OpenDialog(DialogKind::LeaveRow(row)));
+            LeaveStep::Asked
+        };
+        self.leaving = Some(leaving);
+    }
+
+    /// Takes `answer`, the leave-row prompt's, which the next frame carries out.
+    pub(crate) fn answer_leave(&mut self, answer: LeaveAnswer) {
+        if let Some(leaving) = &mut self.leaving {
+            leaving.step = LeaveStep::Answered(answer);
+        }
+    }
+
+    /// Carries out the answer to leaving the changed row, if one came since the last
+    /// frame. Save sends the save, or adds the draft row, and what left the row goes
+    /// on once the ledger applies it; Discard throws the changes away and lets it go
+    /// on at once; Continue editing brings the cell cursor back and opens the cell
+    /// again.
+    fn settle_leaving(&mut self, ctx: &egui::Context, keys: &KeyContext<'_>) {
+        let Some(leaving) = self.leaving.take() else {
+            return;
+        };
+        let LeaveStep::Answered(answer) = leaving.step else {
+            self.leaving = Some(leaving);
+            return;
+        };
+        match answer {
+            LeaveAnswer::ContinueEditing => {
+                self.cursor = Some(leaving.from);
+                self.open_after_save = Some(leaving.from);
+            }
+            LeaveAnswer::Discard => {
+                self.discard_row(leaving.from.row);
+                self.open_after_save = leaving.resume;
+                leaving.carry_on(keys.commands);
+            }
+            LeaveAnswer::Save => {
+                if leaving.from.row == RowId::Draft {
+                    if let Err(missing) = self.post(keys) {
+                        self.refuse_missing(ctx, keys.commands, missing, Some(leaving));
+                        return;
+                    }
+                } else if let Some(changes) = &self.unsaved.changes {
+                    let confirm = send_save(changes, keys.rows, keys.commands);
+                    self.saving = Some(Saving {
+                        at: keys.generation,
+                        from: leaving.from,
+                        next: None,
+                        confirm,
+                    });
+                }
+                self.leaving = Some(Leaving {
+                    step: LeaveStep::Saving,
+                    ..leaving
+                });
+            }
+        }
+    }
+
+    /// Takes the leaving whose save is on its way, now that the ledger has answered.
+    fn take_saved_leaving(&mut self) -> Option<Leaving> {
+        self.leaving
+            .take_if(|leaving| leaving.step == LeaveStep::Saving)
     }
 
     /// Starts the Register over for another account: sorted by date and unfiltered,
@@ -1136,8 +1350,11 @@ impl Register {
         self.unsaved = Unsaved::default();
         self.changed_row = None;
         self.saving = None;
+        self.leaving = None;
         self.open_after_save = None;
-        self.missing = None;
+        self.ledger_refusal = None;
+        self.refused = None;
+        self.refocus = None;
         self.posted_at = None;
         self.paste_target = None;
         self.pasting = None;
@@ -1297,9 +1514,9 @@ impl Register {
         }
     }
 
-    /// Keeps the cell being edited, if any, in its row, closes its editor, and saves a
-    /// transaction's row's changes, as a Shortcut does before it acts. The draft row
-    /// is not added.
+    /// Keeps the cell being edited, if any, in its row and closes its editor, as a
+    /// Shortcut does before it acts. Nothing is saved: a Shortcut that leaves the row
+    /// asks about it, as any other way of leaving does.
     pub(crate) fn commit_edit(
         &mut self,
         ctx: &egui::Context,
@@ -1310,20 +1527,31 @@ impl Register {
         if let Some(edit) = &self.edit {
             ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
         }
-        self.save_on_leaving(i18n, preferences, commands);
+        if let Some((_, refusal)) =
+            self.keep_open_edit(i18n, PayeeRecall::of(preferences), commands)
+        {
+            say_in_status_bar(refusal, commands);
+        }
+    }
+
+    /// Throws away the changes to transaction `id`'s row, which is being deleted.
+    pub(crate) fn discard_deleted_row(&mut self, id: TransactionId) {
+        self.unsaved.discard(RowId::Transaction(id));
     }
 
     /// Keeps the cell being edited, if any, in its row, and saves the changes to a
-    /// transaction's row, as the editing row is left: when the Register gives way to
-    /// another account's or another data file's, when the window closes, or when a
-    /// Shortcut acts.
-    pub(crate) fn save_on_leaving(
+    /// transaction's row with no prompt, as the window closes without having asked.
+    pub(crate) fn save_on_closing(
         &mut self,
         i18n: &Localizer,
         preferences: &Preferences,
         commands: &CommandSender,
     ) {
-        self.keep_open_edit(i18n, PayeeRecall::of(preferences), commands);
+        if let Some((_, refusal)) =
+            self.keep_open_edit(i18n, PayeeRecall::of(preferences), commands)
+        {
+            say_in_status_bar(refusal, commands);
+        }
         if let Some(model) = &self.model {
             let rows = Rows::new(model, None, self.changed_row.as_ref());
             self.unsaved.save_silently(rows, commands);
@@ -1331,26 +1559,44 @@ impl Register {
     }
 
     /// Keeps the cell being edited, if any, in its row, against the rows shown last
-    /// frame, and closes its edit. A refused edit is dropped, leaving the row as it was.
+    /// frame, and closes its edit. A refused edit is returned with why, leaving the row
+    /// as it was.
     fn keep_open_edit(
         &mut self,
         i18n: &Localizer,
         payee_recall: PayeeRecall,
         commands: &CommandSender,
-    ) {
-        let Some(edit) = self.edit.take() else {
-            return;
-        };
+    ) -> Option<(Edit, SaveRefusal)> {
+        let edit = self.edit.take()?;
         let (Some(model), Some(choices)) = (&self.model, &self.choices) else {
-            return;
+            return None;
         };
         let draft_row = self.draft_row.as_ref().map(|draft| &draft.row);
         let rows = Rows::new(model, draft_row, self.changed_row.as_ref());
         let unsaved = &mut self.unsaved;
-        let _refused = match edit {
-            Edit::Text(edit) => commit(&edit, rows, choices, payee_recall, commands, unsaved),
-            Edit::Date(mut edit) => commit_date(i18n, &mut edit, rows, commands, unsaved),
-        };
+        match edit {
+            Edit::Text(edit) => match commit(&edit, rows, choices, payee_recall, commands, unsaved)
+            {
+                Commit::Done => None,
+                Commit::Refused(refusal) => Some((Edit::Text(edit), refusal)),
+            },
+            Edit::Date(mut edit) => match commit_date(i18n, &mut edit, rows, commands, unsaved) {
+                Commit::Done => None,
+                Commit::Refused(refusal) => Some((Edit::Date(edit), refusal)),
+            },
+        }
+    }
+
+    /// Hands the Register the ledger's refusal of a save, `message`, which the
+    /// "Can't save this transaction" Dialog says once the Register catches up with it.
+    /// Returns it when no save of the editing row is waiting on the ledger, such as a
+    /// save as another row's changes start, which the Status bar says instead.
+    pub(crate) fn save_refused(&mut self, message: StatusMessage) -> Option<StatusMessage> {
+        if self.saving.is_none() && self.posted_at.is_none() {
+            return Some(message);
+        }
+        self.ledger_refusal = Some(message);
+        None
     }
 
     /// Tells the Register that the confirm a save of its editing row asked for was
@@ -1388,7 +1634,8 @@ impl Register {
                 .send(AppCommand::ShowStatus(StatusMessage::NoPasteTarget));
             return;
         };
-        if !self.commit_open_edit(ctx, keys) {
+        if let Some((edit, refusal)) = self.commit_open_edit(ctx, keys) {
+            self.keep_refused_open(edit, refusal, keys.commands);
             return;
         }
         self.cursor = Some(target);
@@ -1419,11 +1666,10 @@ impl Register {
         preferences: &Preferences,
         today: Date<Iso>,
     ) {
-        let columns = &preferences.register_columns;
-        self.show_columns(columns);
+        self.show_columns(&preferences.register_columns);
         let account = summary.account().id();
         let closed = summary.account().is_closed();
-        self.catch_up(summary, view);
+        self.catch_up(ui.ctx(), summary, view, commands);
         let today_divider = today_divider(preferences, today);
         let (model, rebuilt) = self.take_model(summary, view, today, today_divider, i18n);
         self.filter_bar(ui, i18n, &model);
@@ -1448,6 +1694,7 @@ impl Register {
             draft_frame,
             choices: &choices,
             payee_recall: PayeeRecall::of(preferences),
+            after_enter: AfterEnter::of(preferences),
             commands,
         };
         let key_scroll_offset = self.handle_keys(ui.ctx(), &keys);
@@ -1462,27 +1709,13 @@ impl Register {
                 let register_id = ui.id();
                 let scroll_offset = key_scroll_offset
                     .or_else(|| centre_on.map(|index| centring_offset(ui, row_height, index)));
-                let mut table = TableBuilder::new(ui)
-                    .id_salt(("register", account))
-                    // The rows stripe themselves, so the Today divider takes no stripe.
-                    .striped(false)
-                    .resizable(false)
-                    .cell_layout(Layout::left_to_right(Align::Center))
-                    .auto_shrink(false)
-                    .max_scroll_height(f32::INFINITY);
-                for &column in &self.shown {
-                    table = table.column(column.width(theme, widths));
-                }
-                if let Some(offset) = scroll_offset {
-                    table = table.vertical_scroll_offset(offset);
-                }
-                table
+                register_table(ui, account, &self.shown, theme, widths, scroll_offset)
                     .header(row_height, |mut header| {
                         let frame = HeaderFrame {
                             i18n,
                             theme,
                             commands,
-                            columns,
+                            columns: &preferences.register_columns,
                             kind: summary.account().kind(),
                         };
                         let shown = self.shown.clone();
@@ -1517,7 +1750,10 @@ impl Register {
                         self.body(body, frame, row_height, pitch);
                     });
             });
-        self.end_frame(&model, draft_row, draft_frame, commands);
+        self.end_frame(&model, draft_row, draft_frame);
+        // The cell cursor has left the row only once an edit that refused to let the
+        // keyboard go has kept it.
+        self.ask_if_left(ui.ctx(), preferences, commands);
         self.model = Some(model);
         self.choices = Some(choices);
     }
@@ -1709,8 +1945,13 @@ impl Register {
         if column == RegisterColumn::Category && row.other_side().is_some() {
             response.context_menu(|ui| action = action.or(go_to_item(ui, i18n, row)));
         }
-        // A refused date keeps the cell cursor until it is fixed or cancelled.
-        if response.clicked() && !self.edit.as_ref().is_some_and(Edit::is_rejected) {
+        // A refused date keeps the cell cursor in its row until it is fixed or
+        // cancelled. A click on another row leaves a row that can't be saved.
+        let held = self
+            .edit
+            .as_ref()
+            .is_some_and(|edit| edit.is_rejected() && edit.cell().row == row.id());
+        if response.clicked() && !held {
             if matches!(column.field(row), Some(CellField::Amount(_))) {
                 self.paste_target = Some(address);
             }
@@ -1719,21 +1960,6 @@ impl Register {
         }
         if let (Some(action), Some(id)) = (action, row.transaction()) {
             self.act(id, action, commands);
-        }
-        let editing = self
-            .edit
-            .as_ref()
-            .is_some_and(|edit| edit.cell() == address);
-        if let Some(missing) = self.missing
-            && address == CellAddress::draft(missing_column(missing))
-            && !editing
-        {
-            let rect = ui.max_rect();
-            ui.painter()
-                .rect_stroke(rect, 0.0, theme.missing_cell_stroke(), StrokeKind::Inside);
-            let id = register_id.with("register_missing");
-            let colour = ui.visuals().error_fg_color;
-            floating_bubble(ui, id, rect, missing.message(i18n), colour);
         }
         match &self.edit {
             Some(Edit::Text(edit)) if edit.cell == address => self.edit_cell(ui, frame, column),
@@ -1868,14 +2094,14 @@ impl Register {
                 frame.commands,
                 &mut self.unsaved,
             ) {
-                // A refused category leaves the row as it was; the Status bar says why.
-                Commit::Done | Commit::Refused => {}
-                Commit::Unreadable(error) => {
+                Commit::Done => {}
+                Commit::Refused(refusal) => {
                     // Leaving the cell is refused too: the edit keeps the keyboard, and
-                    // the cell cursor comes back to it once the rows are laid out.
+                    // the cell cursor comes back to it once the rows are laid out, or
+                    // leaving the row says why.
                     ui.memory_mut(|memory| memory.request_focus(edit.editor_id()));
                     self.refused_leave = true;
-                    let edit = edit.refused(error);
+                    let edit = edit.refused(refusal);
                     bubble(ui, frame.i18n, &edit, cell);
                     self.edit = Some(Edit::Text(edit));
                 }
@@ -1956,7 +2182,7 @@ impl Register {
             keypad::Outcome::Taken(text) => {
                 edit.keypad = None;
                 edit.text = text;
-                edit.error = None;
+                edit.refusal = None;
                 edit.preview = preview(frame.i18n, edit);
                 edit.handed_back = true;
                 focus_at_end(ctx, edit);
@@ -1995,9 +2221,9 @@ impl Register {
                 frame.rows,
                 frame.commands,
                 &mut self.unsaved,
-            ) == Commit::Refused
+            ) != Commit::Done
         {
-            self.cursor = Some(edit.cell);
+            self.refused_leave = true;
             self.edit = Some(Edit::Date(edit));
         }
     }
@@ -2020,6 +2246,10 @@ impl Register {
     /// Enter, Tab and Esc are taken before the cell editor is added, which would
     /// otherwise act on them first.
     fn handle_keys(&mut self, ctx: &egui::Context, keys: &KeyContext<'_>) -> Option<f32> {
+        // An answer to the leave-row prompt, or to a refused save, moves the cell cursor
+        // before keys act.
+        self.settle_leaving(ctx, keys);
+        self.settle_refusal(keys.commands);
         // A paste from the Calculator opens its cell's edit first, which then takes
         // the keys.
         self.take_paste(ctx, keys);
@@ -2034,6 +2264,9 @@ impl Register {
         if let Some(cell) = self.open_after_save.take() {
             return self.open_saved_cell(ctx, keys, cell);
         }
+        if let Some(refocus) = self.refocus.take() {
+            return self.open_refocused(ctx, keys, refocus);
+        }
         let cursor = self.cursor?;
         if let Some(moved) = self.resume_category_edit(ctx, keys, cursor) {
             return moved.scroll_offset;
@@ -2045,23 +2278,13 @@ impl Register {
             || cursor.row == RowId::Draft
             || self.unsaved.is_changed(cursor.row);
         if saves && ctx.input_mut(|input| input.consume_key(Modifiers::COMMAND, Key::Enter)) {
-            if self.commit_open_edit(ctx, keys) {
-                return self.save_row(ctx, keys, cursor, AfterSave::NextRow);
-            }
+            let Some((edit, refusal)) = self.commit_open_edit(ctx, keys) else {
+                return self.save_row(ctx, keys, cursor, keys.after_enter);
+            };
+            self.refuse(ctx, keys.commands, refusal, edit.cell(), Some(edit), None);
             return None;
         }
-        let tab = (!self.tabs.is_empty()).then(|| self.tabs.remove(0));
-        if !self.tabs.is_empty() {
-            // Each Tab acts on the cell the one before it opened, so the rest wait.
-            ctx.request_repaint();
-        }
-        let tab = tab.map(|modifiers| {
-            if modifiers.shift {
-                Move::PreviousEditable
-            } else {
-                Move::NextEditable
-            }
-        });
+        let tab = self.next_tab(ctx);
         match self.edit.take() {
             Some(Edit::Text(edit)) => return self.handle_edit_keys(ctx, keys, edit, cursor, tab),
             Some(Edit::Date(edit)) => return self.handle_date_keys(ctx, keys, edit, cursor, tab),
@@ -2122,6 +2345,23 @@ impl Register {
             self.start_edit(ctx, keys, EditStart::Empty);
         }
         None
+    }
+
+    /// The move the first Tab press queued for the Register asks for, taken from the
+    /// queue, if there is one. Each Tab acts on the cell the one before it opened, so
+    /// the rest wait for later frames.
+    fn next_tab(&mut self, ctx: &egui::Context) -> Option<Move> {
+        let tab = (!self.tabs.is_empty()).then(|| self.tabs.remove(0));
+        if !self.tabs.is_empty() {
+            ctx.request_repaint();
+        }
+        tab.map(|modifiers| {
+            if modifiers.shift {
+                Move::PreviousEditable
+            } else {
+                Move::NextEditable
+            }
+        })
     }
 
     /// Acts on this frame's keys for `edit`, the cell being edited under `cursor`,
@@ -2212,7 +2452,7 @@ impl Register {
         &mut self,
         ctx: &egui::Context,
         keys: &KeyContext<'_>,
-        mut edit: CellEdit,
+        edit: CellEdit,
         cursor: CellAddress,
         leave: Leave,
     ) -> Option<f32> {
@@ -2225,20 +2465,27 @@ impl Register {
             &mut self.unsaved,
         ) {
             Commit::Done => {}
-            Commit::Refused => {
-                edit.list = None;
-                ctx.memory_mut(|memory| memory.request_focus(edit.editor_id()));
-                self.edit = Some(Edit::Text(edit));
+            Commit::Refused(refusal) if leave == Leave::Enter => {
+                let at = edit.cell;
+                self.refuse(
+                    ctx,
+                    keys.commands,
+                    refusal,
+                    at,
+                    Some(Edit::Text(edit)),
+                    None,
+                );
                 return None;
             }
-            Commit::Unreadable(error) => {
-                self.edit = Some(Edit::Text(edit.refused(error)));
+            Commit::Refused(refusal) => {
+                ctx.memory_mut(|memory| memory.request_focus(edit.editor_id()));
+                self.keep_refused_open(Edit::Text(edit), refusal, keys.commands);
                 return None;
             }
         }
         ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
         let step = match leave {
-            Leave::Enter => return self.save_row(ctx, keys, cursor, AfterSave::NextRow),
+            Leave::Enter => return self.save_row(ctx, keys, cursor, keys.after_enter),
             Leave::Next => Move::Next,
             Leave::Tab(step) if self.tabs_into_buttons(cursor, step, keys.rows) => {
                 return self.focus_save();
@@ -2335,20 +2582,31 @@ impl Register {
             return None;
         }
         if enter || tab.is_some() {
-            if commit_date(
+            if let Commit::Refused(refusal) = commit_date(
                 keys.i18n,
                 &mut edit,
                 keys.rows,
                 keys.commands,
                 &mut self.unsaved,
-            ) == Commit::Refused
-            {
-                self.edit = Some(Edit::Date(edit));
+            ) {
+                if enter {
+                    let at = edit.cell;
+                    self.refuse(
+                        ctx,
+                        keys.commands,
+                        refusal,
+                        at,
+                        Some(Edit::Date(edit)),
+                        None,
+                    );
+                } else {
+                    self.edit = Some(Edit::Date(edit));
+                }
                 return None;
             }
             ctx.memory_mut(|memory| memory.surrender_focus(editor_id(edit.cell)));
             if enter {
-                return self.save_row(ctx, keys, cursor, AfterSave::NextRow);
+                return self.save_row(ctx, keys, cursor, keys.after_enter);
             }
             let step = tab?;
             if self.tabs_into_buttons(cursor, step, keys.rows) {
@@ -2412,8 +2670,13 @@ impl Register {
                             row,
                             column: RegisterColumn::Date,
                         });
-                if self.commit_open_edit(ctx, keys) {
-                    self.save_row(ctx, keys, cursor, AfterSave::Stay);
+                match self.commit_open_edit(ctx, keys) {
+                    None => {
+                        self.save_row(ctx, keys, cursor, AfterEnter::SameRow);
+                    }
+                    Some((edit, refusal)) => {
+                        self.refuse(ctx, keys.commands, refusal, edit.cell(), Some(edit), None);
+                    }
                 }
             }
             RowButton::Cancel => {
@@ -2605,7 +2868,7 @@ impl Register {
             text,
             completion: None,
             list: None,
-            error: None,
+            refusal: None,
             preview: None,
             keypad: None,
             handed_back: false,
@@ -2616,12 +2879,13 @@ impl Register {
 
     /// Keeps the cell being edited, if any, in its row, and closes its editor, as
     /// Ctrl+Enter does before it saves the row. A highlighted list entry is taken
-    /// first. Returns whether the edit, if any, was kept; a refused one stays open,
-    /// saying why.
-    fn commit_open_edit(&mut self, ctx: &egui::Context, keys: &KeyContext<'_>) -> bool {
-        let Some(edit) = self.edit.take() else {
-            return true;
-        };
+    /// first. A refused edit is returned with why, its editor still focused.
+    fn commit_open_edit(
+        &mut self,
+        ctx: &egui::Context,
+        keys: &KeyContext<'_>,
+    ) -> Option<(Edit, SaveRefusal)> {
+        let edit = self.edit.take()?;
         let editor = edit.editor_id();
         let refused = match edit {
             Edit::Text(mut edit) => {
@@ -2637,46 +2901,166 @@ impl Register {
                     &mut self.unsaved,
                 ) {
                     Commit::Done => None,
-                    Commit::Refused => {
-                        edit.list = None;
-                        Some(Edit::Text(edit))
-                    }
-                    Commit::Unreadable(error) => Some(Edit::Text(edit.refused(error))),
+                    Commit::Refused(refusal) => Some((Edit::Text(edit), refusal)),
                 }
             }
-            Edit::Date(mut edit) => {
-                let commit = commit_date(
-                    keys.i18n,
-                    &mut edit,
-                    keys.rows,
-                    keys.commands,
-                    &mut self.unsaved,
-                );
-                (commit == Commit::Refused).then_some(Edit::Date(edit))
-            }
+            Edit::Date(mut edit) => match commit_date(
+                keys.i18n,
+                &mut edit,
+                keys.rows,
+                keys.commands,
+                &mut self.unsaved,
+            ) {
+                Commit::Done => None,
+                Commit::Refused(refusal) => Some((Edit::Date(edit), refusal)),
+            },
         };
         if refused.is_none() {
             ctx.memory_mut(|memory| memory.surrender_focus(editor));
         }
-        self.edit = refused;
-        self.edit.is_none()
+        refused
+    }
+
+    /// Keeps `edit` open after a commit that moved within the row was refused for
+    /// `refusal`, saying why where it says it outside a save: an amount in its bubble, a
+    /// category in the Status bar, and a date in its own bubble.
+    fn keep_refused_open(&mut self, edit: Edit, refusal: SaveRefusal, commands: &CommandSender) {
+        self.edit = Some(match edit {
+            Edit::Text(mut edit) => {
+                edit.list = None;
+                say_in_status_bar(refusal.clone(), commands);
+                Edit::Text(edit.refused(refusal))
+            }
+            Edit::Date(edit) => Edit::Date(edit),
+        });
+    }
+
+    /// Opens the "Can't save this transaction" Dialog saying `refusal`, with `at` the
+    /// cell at fault and `edit` its refused edit, if any, which closes meanwhile.
+    /// `leaving` is what left the row, if leaving it started the save; it goes on if the
+    /// row's changes are thrown away.
+    fn refuse(
+        &mut self,
+        ctx: &egui::Context,
+        commands: &CommandSender,
+        refusal: SaveRefusal,
+        at: CellAddress,
+        edit: Option<Edit>,
+        leaving: Option<Leaving>,
+    ) {
+        if let Some(edit) = &edit {
+            ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+        }
+        // A text edit opens again as it was, with no bubble, since the Dialog said why.
+        // A date opens again from the row, its whole date selected.
+        let edit = match edit {
+            Some(Edit::Text(edit)) => Some(CellEdit {
+                refusal: None,
+                list: None,
+                keypad: None,
+                handed_back: false,
+                ..edit
+            }),
+            Some(Edit::Date(_)) | None => None,
+        };
+        self.refused = Some(Refused {
+            at,
+            edit,
+            leaving,
+            answer: None,
+        });
+        commands.send(AppCommand::OpenDialog(DialogKind::CantSave(refusal)));
+    }
+
+    /// Opens the "Can't save this transaction" Dialog for a draft row that lacks the
+    /// cell `missing`, which is the cell at fault. `leaving` is as for [`Self::refuse`].
+    fn refuse_missing(
+        &mut self,
+        ctx: &egui::Context,
+        commands: &CommandSender,
+        missing: Missing,
+        leaving: Option<Leaving>,
+    ) {
+        let at = CellAddress::draft(missing_column(missing));
+        let refusal = SaveRefusal::Missing(missing);
+        self.refuse(ctx, commands, refusal, at, None, leaving);
+    }
+
+    /// Takes `answer`, the "Can't save this transaction" Dialog's, which the next frame
+    /// carries out.
+    pub(crate) fn answer_refusal(&mut self, answer: RefusalAnswer) {
+        if let Some(refused) = &mut self.refused {
+            refused.answer = Some(answer);
+        }
+    }
+
+    /// Carries out the answer to a refused save, if one came since the last frame.
+    /// Continue editing brings the cell cursor back to the cell at fault, which opens
+    /// once the Register has the keyboard again; Discard throws the row's changes away
+    /// and lets what left the row, if anything, go on.
+    fn settle_refusal(&mut self, commands: &CommandSender) {
+        let Some(Refused {
+            at,
+            edit,
+            leaving,
+            answer: Some(answer),
+        }) = self.refused.take_if(|refused| refused.answer.is_some())
+        else {
+            return;
+        };
+        match answer {
+            RefusalAnswer::ContinueEditing => {
+                self.cursor = Some(at);
+                self.refocus = Some(Refocus { at, edit });
+            }
+            RefusalAnswer::Discard => {
+                self.discard_row(at.row);
+                if let Some(leaving) = leaving {
+                    self.open_after_save = leaving.resume;
+                    leaving.carry_on(commands);
+                }
+            }
+        }
+    }
+
+    /// Opens the cell at fault in a refused save, as Continue editing left it, with its
+    /// text selected, and returns the scroll offset that brings it into view.
+    fn open_refocused(
+        &mut self,
+        ctx: &egui::Context,
+        keys: &KeyContext<'_>,
+        Refocus { at, edit }: Refocus,
+    ) -> Option<f32> {
+        let index = keys.rows.position(at.row)?;
+        self.cursor = Some(at);
+        match edit {
+            Some(edit) => self.edit = Some(Edit::Text(edit)),
+            None => self.start_edit(ctx, keys, EditStart::Saved),
+        }
+        if let Some(Edit::Text(edit)) = &self.edit {
+            focus_selecting_all(ctx, edit);
+        }
+        self.lines_in_view?.offset_showing(keys.rows.line_of(index))
     }
 
     /// Saves the row of `cursor`, the editing row, as Enter, Ctrl+Enter and the Save
     /// button do, and returns the scroll offset that brings the cell cursor into view
     /// when it has left it. The draft row is added. A transaction's changes are sent as
-    /// one Command, and once the ledger applies it the cell cursor goes where `after`
-    /// says; a refused save keeps the changes and opens the cell again. A row with no
-    /// changes moves on at once.
+    /// one Command, and once the ledger applies it the next row's cell in the same
+    /// column opens, or the row stays highlighted, as `after` says; a refused save keeps
+    /// the changes and opens the cell again. A row with no changes moves on at once, or
+    /// stays highlighted.
     fn save_row(
         &mut self,
         ctx: &egui::Context,
         keys: &KeyContext<'_>,
         cursor: CellAddress,
-        after: AfterSave,
+        after: AfterEnter,
     ) -> Option<f32> {
         if cursor.row == RowId::Draft {
-            self.post(keys);
+            if let Err(missing) = self.post(keys) {
+                self.refuse_missing(ctx, keys.commands, missing, None);
+            }
             return None;
         }
         let Some(changes) = self
@@ -2685,17 +3069,16 @@ impl Register {
             .as_ref()
             .filter(|_| self.unsaved.is_changed(cursor.row))
         else {
-            return match after {
-                AfterSave::NextRow => {
-                    let moved = self.move_cursor(cursor, Move::Down, keys.rows)?;
-                    self.start_edit(ctx, keys, EditStart::Saved);
-                    moved.scroll_offset
-                }
-                AfterSave::Stay => None,
-            };
+            match after {
+                AfterEnter::NextRow => {}
+                AfterEnter::SameRow => return None,
+            }
+            let moved = self.move_cursor(cursor, Move::Down, keys.rows)?;
+            self.start_edit(ctx, keys, EditStart::Saved);
+            return moved.scroll_offset;
         };
         let next = match after {
-            AfterSave::NextRow => keys
+            AfterEnter::NextRow => keys
                 .rows
                 .position(cursor.row)
                 .and_then(|index| keys.rows.get(index + 1))
@@ -2703,7 +3086,7 @@ impl Register {
                     row: row.id(),
                     column: cursor.column,
                 }),
-            AfterSave::Stay => None,
+            AfterEnter::SameRow => None,
         };
         let confirm = send_save(changes, keys.rows, keys.commands);
         self.saving = Some(Saving {
@@ -2733,41 +3116,21 @@ impl Register {
     /// open: the draft row empties, and a transaction's row shows its saved values.
     fn discard_row(&mut self, row: RowId) {
         self.unsaved.discard(row);
-        if row == RowId::Draft {
-            self.missing = None;
-        }
     }
 
     /// Adds the draft row to the account. Once the ledger applies it, the draft row
     /// empties and the cell cursor goes to its first cell; a rejected post keeps the
-    /// draft, and the Status bar says why. A row missing a cell the transaction needs
-    /// is refused: the cursor goes to the first such cell, outlined, with a bubble
-    /// saying what is missing.
-    fn post(&mut self, keys: &KeyContext<'_>) {
-        match self
+    /// draft. A row missing a cell the transaction needs is refused, sending nothing,
+    /// with the first such cell.
+    fn post(&mut self, keys: &KeyContext<'_>) -> Result<(), Missing> {
+        let command = self
             .unsaved
             .draft
-            .posting(keys.account, keys.draft_frame.currency)
-        {
-            Ok(command) => {
-                keys.commands.send(AppCommand::Domain(command));
-                self.posted_at = Some(keys.generation);
-            }
-            Err(missing) => {
-                self.missing = Some(missing);
-                self.cursor = Some(CellAddress::draft(missing_column(missing)));
-            }
-        }
+            .posting(keys.account, keys.draft_frame.currency)?;
+        keys.commands.send(AppCommand::SaveRow(command));
+        self.posted_at = Some(keys.generation);
+        Ok(())
     }
-}
-
-/// Where the cell cursor goes once a save of a transaction's row is applied.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AfterSave {
-    /// To the next row's cell in the same column, which opens, as Enter does.
-    NextRow,
-    /// Nowhere: it stays on the saved row, highlighted, as the Save button does.
-    Stay,
 }
 
 /// The draft row cell that `missing` names.
@@ -2792,6 +3155,27 @@ fn focus_at_end(ctx: &egui::Context, edit: &CellEdit) {
     ctx.memory_mut(|memory| memory.request_focus(id));
 }
 
+/// Gives `edit`'s editor keyboard focus, with its whole text selected to type over.
+fn focus_selecting_all(ctx: &egui::Context, edit: &CellEdit) {
+    let id = edit.editor_id();
+    let mut state = TextEditState::load(ctx, id).unwrap_or_default();
+    state.cursor.set_char_range(Some(CCursorRange::two(
+        CCursor::new(0),
+        CCursor::new(edit.text.chars().count()),
+    )));
+    state.store(ctx, id);
+    ctx.memory_mut(|memory| memory.request_focus(id));
+}
+
+/// Says in the Status bar why a commit that moved within the row was refused, when the
+/// Status bar is where `refusal` is said: a category no category is named. A refused
+/// amount or date says why in its bubble instead.
+fn say_in_status_bar(refusal: SaveRefusal, commands: &CommandSender) {
+    if let SaveRefusal::Status(message) = refusal {
+        commands.send(AppCommand::ShowStatus(message));
+    }
+}
+
 /// Brings `edit` up to date with its text, just changed: its list narrows to the
 /// matching choices, typing completes it, and its error and preview start over.
 fn text_changed(ctx: &egui::Context, frame: &BodyFrame<'_>, edit: &mut CellEdit) {
@@ -2803,7 +3187,7 @@ fn text_changed(ctx: &egui::Context, frame: &BodyFrame<'_>, edit: &mut CellEdit)
         // Deleting a completion keeps the typed text for Tab and Enter too.
         edit.highlight_none();
     }
-    edit.error = None;
+    edit.refusal = None;
     edit.preview = preview(frame.i18n, edit);
 }
 
@@ -3003,6 +3387,7 @@ struct KeyContext<'a> {
     draft_frame: DraftFrame<'a>,
     choices: &'a FieldChoices,
     payee_recall: PayeeRecall,
+    after_enter: AfterEnter,
     commands: &'a CommandSender,
 }
 
@@ -3020,6 +3405,27 @@ impl PayeeRecall {
             Self::On
         } else {
             Self::Off
+        }
+    }
+}
+
+/// Where the cell cursor goes once a save of a transaction's row is applied: as the
+/// Preferences say after Enter or Ctrl+Enter, and to the same row after the Save
+/// button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AfterEnter {
+    /// The next row's cell in the same column opens for editing.
+    NextRow,
+    /// The saved row stays highlighted, with no cell open.
+    SameRow,
+}
+
+impl AfterEnter {
+    fn of(preferences: &Preferences) -> Self {
+        if preferences.enter_moves_to_next_row {
+            Self::NextRow
+        } else {
+            Self::SameRow
         }
     }
 }
@@ -3055,15 +3461,12 @@ fn open_split_view(row: &RegisterRow, column: RegisterColumn, commands: &Command
 }
 
 /// Whether a commit went through.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Commit {
     /// The value is kept in the row, or matched the row's, or its row is gone.
     Done,
-    /// The value can't be kept, so the row is unchanged: a category no category is
-    /// named (the Status bar says so), or a refused date (its bubble says so).
-    Refused,
-    /// The amount's text can't be read, for this reason, so the row is unchanged.
-    Unreadable(AmountParseError),
+    /// The value can't be kept, for this reason, so the row is unchanged.
+    Refused(SaveRefusal),
 }
 
 /// Keeps `edit`'s text, trimmed, in its row, unless it matches what the row shows: in
@@ -3086,8 +3489,7 @@ fn commit(
     let change = match &edit.field {
         EditField::Text(field) => {
             let Ok(change) = field.edit(row, text, choices) else {
-                commands.send(AppCommand::ShowStatus(StatusMessage::NoSuchCategory));
-                return Commit::Refused;
+                return Commit::Refused(SaveRefusal::Status(StatusMessage::NoSuchCategory));
             };
             change
         }
@@ -3103,7 +3505,10 @@ fn commit(
             side,
         } => match amount_edit(row, *side, text, reader, *currency) {
             Ok(change) => change,
-            Err(error) => return Commit::Unreadable(error),
+            Err(error) => {
+                let currency = *currency;
+                return Commit::Refused(SaveRefusal::Amount { error, currency });
+            }
         },
     };
     match (change, row.transaction()) {
@@ -3134,8 +3539,8 @@ fn amount_change_asks_first(status: ClearedStatus) -> bool {
 struct Unsaved {
     draft: Draft,
     changes: Option<RowChanges>,
-    /// The column of the cell whose value was kept last among the changes, which a
-    /// refused save opens again.
+    /// The column of the cell whose value was kept last, in the draft or among the
+    /// changes, which a refused save, or staying on a row being left, opens again.
     last_column: Option<RegisterColumn>,
 }
 
@@ -3152,6 +3557,7 @@ impl Unsaved {
     ) {
         let RowId::Transaction(transaction) = cell.row else {
             self.draft.edit(edit);
+            self.last_column = Some(cell.column);
             return;
         };
         let Some(saved) = rows.saved(cell.row) else {
@@ -3198,20 +3604,24 @@ impl Unsaved {
         }
     }
 
-    /// The cell a refused save of the changes to a transaction's row opens again: the
-    /// one whose value was kept last.
+    /// The cell of the changed row, a transaction's with changes or else a filled
+    /// draft row, that a refused save, or staying on the row as it is left, opens
+    /// again: the one whose value was kept last. `None` when nothing is unsaved.
     fn reopened_cell(&self) -> Option<CellAddress> {
-        let changes = self.changes.as_ref()?;
+        let row = match &self.changes {
+            Some(changes) => RowId::Transaction(changes.transaction()),
+            None if self.is_changed(RowId::Draft) => RowId::Draft,
+            None => return None,
+        };
         Some(CellAddress {
-            row: RowId::Transaction(changes.transaction()),
+            row,
             column: self.last_column.unwrap_or(RegisterColumn::Date),
         })
     }
 
-    /// Saves the changes to a transaction's row, if any, as its Register goes: they
-    /// are sent at once, or through the confirm when they change a Reconciled amount,
-    /// and are no longer kept whatever the ledger makes of them.
-    // TODO(#423): leaving a changed row asks Save, Continue editing or Discard first.
+    /// Saves the changes to a transaction's row, if any, with no prompt: they are sent
+    /// at once, or through the confirm when they change a Reconciled amount, and are no
+    /// longer kept whatever the ledger makes of them.
     fn save_silently(&mut self, rows: Rows<'_>, commands: &CommandSender) {
         if let Some(changes) = self.changes.take() {
             send_save(&changes, rows, commands);
@@ -3238,7 +3648,7 @@ fn send_save(changes: &RowChanges, rows: Rows<'_>, commands: &CommandSender) -> 
         }));
         Confirm::Asked
     } else {
-        commands.send(AppCommand::Domain(save));
+        commands.send(AppCommand::SaveRow(save));
         Confirm::NotAsked
     }
 }
@@ -3265,6 +3675,84 @@ struct Saving {
     /// The cell that opens once the save is applied, if any.
     next: Option<CellAddress>,
     confirm: Confirm,
+}
+
+/// A refused save of the editing row, from when the "Can't save this transaction"
+/// Dialog opens until its answer is carried out.
+#[derive(Debug, Clone)]
+struct Refused {
+    /// The cell at fault, which opens again on Continue editing.
+    at: CellAddress,
+    /// The refused text edit, which opens again as it was on Continue editing. `None`
+    /// when the cell opens from the row.
+    edit: Option<CellEdit>,
+    /// What left the row, if leaving it started the save, which goes on once the row's
+    /// changes are thrown away.
+    leaving: Option<Leaving>,
+    answer: Option<RefusalAnswer>,
+}
+
+/// The cell at fault in a refused save, and its refused text edit, if any, which open
+/// once Continue editing answers.
+#[derive(Debug, Clone)]
+struct Refocus {
+    at: CellAddress,
+    edit: Option<CellEdit>,
+}
+
+/// The answer to the leave-row prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LeaveAnswer {
+    /// Save the row, or add the draft row, then leave it.
+    Save,
+    /// Stay on the row, with its cell open again.
+    ContinueEditing,
+    /// Throw away the row's changes, then leave it.
+    Discard,
+}
+
+/// Which kind of changed row is being left. The leave-row prompt's first button reads
+/// Add on the draft row and Save on a transaction's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LeftRow {
+    Draft,
+    Transaction,
+}
+
+/// The changed row being left, from when leaving it asks until the answer is carried
+/// out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Leaving {
+    /// The cell that opens again when the user stays, or the save is refused.
+    from: CellAddress,
+    /// What left the row, sent once the row is saved or its changes thrown away.
+    /// `None` when the cell cursor left it for another row of the Register, which it
+    /// already has.
+    then: Option<AppCommand>,
+    /// The cell the move to another row opened, which opens again once the row is
+    /// saved or its changes thrown away.
+    resume: Option<CellAddress>,
+    step: LeaveStep,
+}
+
+impl Leaving {
+    /// Sends what left the row, now that the row is saved or its changes thrown away.
+    fn carry_on(self, commands: &CommandSender) {
+        if let Some(then) = self.then {
+            commands.send(then);
+        }
+    }
+}
+
+/// How far leaving a changed row has got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeaveStep {
+    /// The leave-row prompt is open.
+    Asked,
+    /// The answer, which the next frame carries out.
+    Answered(LeaveAnswer),
+    /// The save or post the answer chose is on its way to the ledger.
+    Saving,
 }
 
 /// The edit that saves `text`, already trimmed, as the amount of `row` on `side`,
@@ -3311,7 +3799,7 @@ fn commit_date(
             unsaved.keep(rows, edit.cell, TransactionEdit::Date(date), commands);
             Commit::Done
         }
-        date_field::Commit::Rejected => Commit::Refused,
+        date_field::Commit::Rejected => Commit::Refused(SaveRefusal::Date),
     }
 }
 
@@ -3513,13 +4001,19 @@ fn bubble(ui: &egui::Ui, i18n: &Localizer, edit: &CellEdit, cell: Rect) {
     else {
         return;
     };
-    let (text, colour) = match (edit.error, &edit.preview) {
-        (Some(error), _) => (
-            amount_field::error_text(i18n, error, reader, *currency),
+    let (text, colour) = match (&edit.refusal, &edit.preview) {
+        (Some(SaveRefusal::Amount { error, .. }), _) => (
+            amount_field::error_text(i18n, *error, reader, *currency),
             ui.visuals().error_fg_color,
         ),
-        (None, Some(preview)) => (preview.text(i18n), ui.visuals().text_color()),
-        (None, None) => return,
+        (
+            Some(SaveRefusal::Date | SaveRefusal::Missing(_) | SaveRefusal::Status(_)) | None,
+            Some(preview),
+        ) => (preview.text(i18n), ui.visuals().text_color()),
+        (
+            Some(SaveRefusal::Date | SaveRefusal::Missing(_) | SaveRefusal::Status(_)) | None,
+            None,
+        ) => return,
     };
     floating_bubble(ui, edit.editor_id().with("bubble"), cell, text, colour);
 }
@@ -3549,6 +4043,33 @@ fn preview(i18n: &Localizer, edit: &CellEdit) -> Option<Preview> {
         return None;
     };
     Preview::of(i18n, reader, *currency, &edit.text)
+}
+
+/// The Register's table of `account` in `ui`, with `columns` at their widths, scrolled
+/// to `scroll_offset` when it is set.
+fn register_table<'a>(
+    ui: &'a mut egui::Ui,
+    account: AccountId,
+    columns: &[RegisterColumn],
+    theme: &Theme,
+    widths: &ColumnWidths,
+    scroll_offset: Option<f32>,
+) -> TableBuilder<'a> {
+    let mut table = TableBuilder::new(ui)
+        .id_salt(("register", account))
+        // The rows stripe themselves, so the Today divider takes no stripe.
+        .striped(false)
+        .resizable(false)
+        .cell_layout(Layout::left_to_right(Align::Center))
+        .auto_shrink(false)
+        .max_scroll_height(f32::INFINITY);
+    for &column in columns {
+        table = table.column(column.width(theme, widths));
+    }
+    if let Some(offset) = scroll_offset {
+        table = table.vertical_scroll_offset(offset);
+    }
+    table
 }
 
 /// The scroll offset that puts row `index` in the middle of a Register filling `ui`,
@@ -4488,7 +5009,7 @@ mod tests {
         let fresh_market = harness.state().transaction("Fresh Market");
         assert_eq!(
             receiver.try_iter().collect::<Vec<_>>(),
-            [AppCommand::Domain(DomainCommand::Compound(vec![
+            [AppCommand::SaveRow(DomainCommand::Compound(vec![
                 DomainCommand::EditTransaction {
                     transaction: fresh_market,
                     edit: TransactionEdit::Payee("Corner Shop".to_owned()),
@@ -4511,7 +5032,7 @@ mod tests {
         let rent = harness.state().transaction("Maple Property Management");
         assert_eq!(
             receiver.try_iter().collect::<Vec<_>>(),
-            [AppCommand::Domain(DomainCommand::Compound(vec![
+            [AppCommand::SaveRow(DomainCommand::Compound(vec![
                 DomainCommand::EditTransaction {
                     transaction: rent,
                     edit: TransactionEdit::Number(None),
@@ -4538,7 +5059,7 @@ mod tests {
     }
 
     #[test]
-    fn a_refused_amount_sends_nothing() {
+    fn a_refused_amount_saves_nothing_and_says_why() {
         let (mut harness, receiver) = register();
         click_cell(&mut harness, "86.42");
         harness.event(Event::Text("12.345".to_owned()));
@@ -4546,7 +5067,16 @@ mod tests {
 
         press(&mut harness, Key::Enter);
 
-        assert_eq!(receiver.try_iter().collect::<Vec<_>>(), []);
+        let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
+        assert_eq!(
+            receiver.try_iter().collect::<Vec<_>>(),
+            [AppCommand::OpenDialog(DialogKind::CantSave(
+                SaveRefusal::Amount {
+                    error: AmountParseError::TooManyDecimalPlaces { decimal_places: 2 },
+                    currency: usd,
+                }
+            ))]
+        );
     }
 
     #[test]
@@ -4569,13 +5099,15 @@ mod tests {
             harness.event(Event::Text(c.to_string()));
             harness.run();
         }
-        // Enter adds the row, which is refused for its missing category: the cursor
-        // goes to the Category cell.
-        press(&mut harness, Key::Enter);
-        press(&mut harness, Key::ArrowLeft);
+        // Date, Num, Payee, as the App's `raw_input_hook` hands Tab to the Register.
+        for _ in 0..2 {
+            harness.state_mut().register.press_tab(Modifiers::NONE);
+            harness.run();
+        }
         harness.event(Event::Text("Corner Cafe".to_owned()));
         harness.run();
-        press(&mut harness, Key::Enter);
+        harness.state_mut().register.press_tab(Modifiers::NONE);
+        harness.run();
         harness.event(Event::Text("Food & Dining:Groceries".to_owned()));
         harness.run();
 
@@ -4584,7 +5116,7 @@ mod tests {
         let posted = receiver.try_iter().any(|command| {
             matches!(
                 command,
-                AppCommand::Domain(DomainCommand::PostTransaction { .. })
+                AppCommand::SaveRow(DomainCommand::PostTransaction { .. })
             )
         });
         assert!(posted);

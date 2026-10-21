@@ -207,7 +207,6 @@ impl App {
     /// the view it closed on, and the new file goes to the top of the Recent files and
     /// opens on the view it last closed on, or else from scratch on the tab shown.
     fn switch_data_file(&mut self, ledger: Ledger, path: PathBuf) {
-        self.save_editing_row();
         self.note_closed();
         let listed = listed(path);
         self.recent_files.note_opened(listed.clone());
@@ -220,20 +219,29 @@ impl App {
         self.reopen_last_view();
     }
 
+    /// Whether the Main view may go on to `then` at once, leaving the Register's
+    /// editing row. A changed row asks first, and `then` is sent once the row is saved
+    /// or its changes thrown away.
+    fn leave_editing_row(&mut self, ctx: &egui::Context, then: AppCommand) -> bool {
+        self.main_window
+            .leave_editing_row(ctx, &self.i18n, &self.preferences, &self.commands, then)
+    }
+
     /// Saves the changes to the Register's editing row into the open ledger at once,
-    /// with no confirm, as the Register goes: for another account's, another data
-    /// file's, or the window closing. A refused save shows in the Status bar.
-    // TODO(#423): ask Save, Continue editing or Discard first.
+    /// with no prompt or confirm, as the window closes without having asked. A refused
+    /// save shows in the Status bar.
     fn save_editing_row(&mut self) {
         let (commands, saves) = self.commands.with_own_channel();
         self.main_window
             .save_editing_row(&self.i18n, &self.preferences, &commands);
         for command in saves.try_iter() {
             match command {
-                AppCommand::Domain(command) => self.apply_domain(command),
+                AppCommand::Domain(command) | AppCommand::SaveRow(command) => {
+                    self.apply_domain(command);
+                }
                 AppCommand::ShowStatus(message) => self.main_window.show_status(message),
-                // The confirm a Reconciled amount change asks for can't open over a
-                // Register that is going, so that row's changes are not saved.
+                // The confirm a Reconciled amount change asks for can't open as the
+                // window closes, so that row's changes are not saved.
                 AppCommand::OpenDialog(kind) => {
                     tracing::error!(
                         ?kind,
@@ -272,6 +280,18 @@ impl App {
         if let Err(error) = ledger.apply(command) {
             let message = StatusMessage::refusal(error, &ledger.snapshot());
             self.main_window.show_status(message);
+        }
+    }
+
+    /// Applies `command`, a save of the Register's editing row, to the open ledger. A
+    /// refused save goes back to the Register to say why.
+    fn save_row(&mut self, command: DomainCommand) {
+        let Session::Open { ledger, .. } = &mut self.session else {
+            return;
+        };
+        if let Err(error) = ledger.apply(command) {
+            let message = StatusMessage::refusal(error, &ledger.snapshot());
+            self.main_window.save_refused(message);
         }
     }
 
@@ -317,10 +337,13 @@ impl App {
     }
 
     /// Creates an empty data file at `path` and switches to it, replacing any other
-    /// file there, or shows why it can't.
+    /// file there, or shows why it can't. A changed editing row asks first.
     fn new_data_file(&mut self, ctx: &egui::Context, path: PathBuf) {
         if self.is_open_file(&path) {
             self.refuse_data_file(ctx, DataFileRefusal::open_file_not_replaced(&path));
+            return;
+        }
+        if !self.leave_editing_row(ctx, AppCommand::NewDataFile(path.clone())) {
             return;
         }
         match create_replacing(&path) {
@@ -336,9 +359,12 @@ impl App {
     }
 
     /// Opens the data file at `path` and switches to it, or shows why it can't. The
-    /// open file, picked again, stays as it is.
+    /// open file, picked again, stays as it is. A changed editing row asks first.
     fn open_data_file(&mut self, ctx: &egui::Context, path: PathBuf) {
         if self.is_open_file(&path) {
+            return;
+        }
+        if !self.leave_editing_row(ctx, AppCommand::OpenDataFile(path.clone())) {
             return;
         }
         match Ledger::open(&path) {
@@ -359,6 +385,7 @@ impl App {
         };
         match command {
             AppCommand::Domain(command) => self.apply_domain(command),
+            AppCommand::SaveRow(command) => self.save_row(command),
             AppCommand::SubmitForm(command) => {
                 if let Some(ledger) = ledger {
                     let result = ledger.apply(command).map(drop);
@@ -366,7 +393,8 @@ impl App {
                 }
             }
             AppCommand::Undo => {
-                if let Some(ledger) = ledger
+                if self.leave_editing_row(ctx, AppCommand::Undo)
+                    && let Session::Open { ledger, .. } = &mut self.session
                     && let Err(error) = ledger.undo()
                 {
                     let message = StatusMessage::refusal(error, &ledger.snapshot());
@@ -374,7 +402,8 @@ impl App {
                 }
             }
             AppCommand::Redo => {
-                if let Some(ledger) = ledger
+                if self.leave_editing_row(ctx, AppCommand::Redo)
+                    && let Session::Open { ledger, .. } = &mut self.session
                     && let Err(error) = ledger.redo()
                 {
                     let message = StatusMessage::refusal(error, &ledger.snapshot());
@@ -382,19 +411,21 @@ impl App {
                 }
             }
             AppCommand::Navigate(route) => {
-                if self.main_window.replaces_register(route) {
-                    self.save_editing_row();
+                if !self.main_window.leaves_register(route)
+                    || self.leave_editing_row(ctx, AppCommand::Navigate(route))
+                {
+                    self.main_window.navigate(route);
                 }
-                self.main_window.navigate(route);
             }
             AppCommand::GoToTransaction {
                 account,
                 transaction,
             } => {
-                if self.main_window.replaces_register(Route::Account(account)) {
-                    self.save_editing_row();
+                if !self.main_window.leaves_register(Route::Account(account))
+                    || self.leave_editing_row(ctx, command)
+                {
+                    self.main_window.go_to_transaction(account, transaction);
                 }
-                self.main_window.go_to_transaction(account, transaction);
             }
             AppCommand::GoToDate(date) => self.main_window.go_to_date(date),
             AppCommand::GoToDraftRow => {
@@ -476,9 +507,15 @@ impl App {
 }
 
 impl eframe::App for App {
-    /// Applies every Command sent since the last frame, then shows the open
-    /// Preferences Dialog's draft, or else the Preferences in use.
+    /// Keeps the window open while a changed editing row asks about leaving it, then
+    /// applies every Command sent since the last frame, and shows the open Preferences
+    /// Dialog's draft, or else the Preferences in use.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.input(|input| input.viewport().close_requested())
+            && !self.leave_editing_row(ctx, AppCommand::Quit)
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
         while let Ok(command) = self.command_receiver.try_recv() {
             self.apply(ctx, command);
         }
@@ -524,8 +561,9 @@ impl eframe::App for App {
         self.main_window.layout().save(storage);
     }
 
-    /// Saves the changes to the Register's editing row, with no confirm, and the view
-    /// the Main window shows as the one the open data file closed on.
+    /// Saves the changes to the Register's editing row, with no prompt, in case the
+    /// window closed without asking, and the view the Main window shows as the one the
+    /// open data file closed on.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.save_editing_row();
         self.note_closed();

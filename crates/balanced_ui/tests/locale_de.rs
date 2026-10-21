@@ -343,3 +343,74 @@ fn the_editing_rows_buttons_read_in_german() {
     });
     assert_eq!(shown, [1, 1, 1, 1]);
 }
+
+#[test]
+fn the_enter_moves_to_the_next_row_preference_reads_german() {
+    let mut harness = app();
+    open(&mut harness, "Extras");
+    open(&mut harness, "Einstellungen …");
+
+    // The group names fall back to en-US text.
+    harness.get_by_role_and_label(Role::Tab, "Register").click();
+    harness.run();
+
+    harness.get_by_role_and_label(Role::CheckBox, "Mit »Eingabe« zur nächsten Zeile gehen");
+}
+
+#[test]
+fn the_leave_row_prompt_reads_german() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    harness
+        .get_by_role_and_label(Role::Cell, "Fresh Market")
+        .click();
+    harness.run();
+    type_text(&mut harness, "Corner Shop");
+
+    harness
+        .get_by_role_and_label(Role::Cell, "Bean There")
+        .click();
+    harness.run();
+
+    harness.get_by_label("Geänderte Buchung speichern?");
+    harness.get_by_role_and_label(Role::Button, "Speichern");
+    harness.get_by_role_and_label(Role::Button, "Weiter bearbeiten");
+    harness.get_by_role_and_label(Role::Button, "Verwerfen");
+    harness.get_by_role_and_label(Role::CheckBox, "Immer ohne Nachfrage speichern");
+}
+
+#[test]
+fn the_leave_row_prompt_on_the_draft_row_reads_german() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    type_keys(&mut harness, "15.10.2026");
+    // Date, Num, Payee, Category.
+    for _ in 0..3 {
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+    }
+    type_text(&mut harness, "Food & Dining:Groceries");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    harness
+        .get_by_role_and_label(Role::Cell, "Fresh Market")
+        .click();
+    harness.run();
+
+    harness.get_by_label("Neue Buchung hinzufügen?");
+    harness.get_by_role_and_label(Role::Button, "Hinzufügen");
+}
+
+#[test]
+fn the_cant_save_dialog_reads_german() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    harness.get_by_role_and_label(Role::Cell, "86,42").click();
+    harness.run();
+    type_text(&mut harness, "1,2,3");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    harness.get_by_label("Diese Buchung kann nicht gespeichert werden");
+    harness.get_by_role_and_label(Role::Button, "Weiter bearbeiten");
+    harness.get_by_role_and_label(Role::Button, "Änderungen verwerfen");
+}
