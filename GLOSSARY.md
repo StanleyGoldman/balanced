@@ -62,6 +62,18 @@ _Avoid_: Transaction list, ledger view
 The empty row at the bottom of a register where the user types a new transaction; it becomes a transaction when added.
 _Avoid_: New row, blank row, entry row
 
+**Editing row**:
+The register row being changed. Its changes are kept back until the row is saved, and Esc throws them away. It holds the Save, Cancel, Split and More actions buttons; the draft row has Add in place of Save.
+_Avoid_: Open row, active row, entry row
+
+**Cell cursor**:
+The outline marking the one register cell that keys act on. A row with the cell cursor but not being edited is highlighted.
+_Avoid_: Selection, focus cell
+
+**Split dialog**:
+The Dialog where a transaction's split lines are edited. The lines stay pending until the row is saved.
+_Avoid_: Split view, split panel
+
 **Payee recall**:
 Filling a draft row's empty cells from the latest transaction, in any account, with the payee just entered. A payee remembers only what its transactions say, so editing or deleting the latest one changes what it recalls.
 _Avoid_: QuickFill, memorized payee, autofill
