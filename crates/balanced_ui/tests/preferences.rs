@@ -87,6 +87,7 @@ fn dark_then_ok_applies_the_dark_theme_and_writes_the_file() {
          gridlines = \"off\"\n\
          payee_recall = true\n\
          inline_completion = true\n\
+         save_without_asking = false\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
@@ -182,6 +183,7 @@ fn the_other_display_preferences_apply_and_are_saved_on_ok() {
          gridlines = \"off\"\n\
          payee_recall = true\n\
          inline_completion = true\n\
+         save_without_asking = false\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
@@ -235,6 +237,11 @@ fn the_register_preferences_are_saved_on_ok() {
     click(&mut harness, Role::CheckBox, "Alternating rows");
     click(&mut harness, Role::CheckBox, "Today divider");
     click(&mut harness, Role::RadioButton, "Both");
+    click(
+        &mut harness,
+        Role::CheckBox,
+        "Save a changed transaction without asking",
+    );
     click(&mut harness, Role::Button, "OK");
 
     assert_eq!(
@@ -250,6 +257,7 @@ fn the_register_preferences_are_saved_on_ok() {
          gridlines = \"both\"\n\
          payee_recall = true\n\
          inline_completion = true\n\
+         save_without_asking = true\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
@@ -295,6 +303,7 @@ fn the_account_bar_preferences_are_saved_on_ok() {
          gridlines = \"off\"\n\
          payee_recall = true\n\
          inline_completion = true\n\
+         save_without_asking = false\n\
          group_totals = true\n\
          net_worth_placement = \"status_bar\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\

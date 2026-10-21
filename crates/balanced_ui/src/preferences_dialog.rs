@@ -150,6 +150,10 @@ impl PreferencesForm {
             &mut draft.inline_completion,
             fl!(i18n, "dialog-preferences-inline-completion"),
         );
+        ui.checkbox(
+            &mut draft.save_without_asking,
+            fl!(i18n, "dialog-preferences-save-without-asking"),
+        );
     }
 
     /// The Account bar group: what the Account bar shows.

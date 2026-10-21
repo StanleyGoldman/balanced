@@ -402,26 +402,34 @@ fn a_reconciled_amount_asks_on_save_not_on_leaving_its_cell() {
 }
 
 #[test]
-fn opening_another_account_says_why_a_changed_reconciled_amount_was_not_saved() {
+fn saving_a_changed_reconciled_amount_as_another_account_opens_asks_to_confirm_it_first() {
     let mut harness = everyday_checking();
     click_cell(&mut harness, "Payment", "Maple Property Management");
     type_text(&mut harness, "1500");
     press(&mut harness, Modifiers::NONE, Key::Tab);
-
     harness
         .get_by_role_and_label(Role::Button, "Visa Rewards")
         .click();
     harness.run();
 
-    let shown: Vec<String> = harness
-        .get_by_role(Role::Status)
-        .query_all_by_role(Role::Label)
-        .filter_map(|label| label.accesskit_node().value())
-        .collect();
-    assert_eq!(
-        shown,
-        [
-            "The changed row wasn't saved: a reconciled transaction's amount changes only once you confirm it."
-        ]
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    harness.run();
+    let confirming = harness.query_by_label_contains("Change its amount to -1,500.00?");
+    assert!(confirming.is_some());
+    harness
+        .get_by_role_and_label(Role::Button, "Change Amount")
+        .click();
+    harness.run();
+
+    // Visa Rewards opened once the amount was saved.
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Cell, "1,500.00")
+            .is_none()
     );
+    harness
+        .get_by_role_and_label(Role::Button, "Everyday Checking")
+        .click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Cell, "1,500.00");
 }

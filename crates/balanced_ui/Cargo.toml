@@ -166,3 +166,7 @@ required-features = ["test-support"]
 
 [lints]
 workspace = true
+
+[[test]]
+name = "leave_row"
+required-features = ["test-support"]

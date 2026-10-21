@@ -112,6 +112,9 @@ pub(crate) struct Preferences {
     /// Typing in a Payee or Category cell completes the text with the rest of the
     /// first entry that starts with it (Inline completion).
     pub(crate) inline_completion: bool,
+    /// Leaving a changed Register row saves it, without the leave-row prompt asking
+    /// first.
+    pub(crate) save_without_asking: bool,
     /// Each Account bar heading shows its section's total.
     pub(crate) group_totals: bool,
     pub(crate) net_worth_placement: NetWorthPlacement,
@@ -133,6 +136,7 @@ impl Default for Preferences {
             gridlines: Gridlines::default(),
             payee_recall: true,
             inline_completion: true,
+            save_without_asking: false,
             group_totals: false,
             net_worth_placement: NetWorthPlacement::default(),
             register_columns: RegisterColumns::default(),
@@ -316,6 +320,7 @@ mod tests {
             gridlines: Gridlines::Both,
             payee_recall: false,
             inline_completion: false,
+            save_without_asking: true,
             group_totals: true,
             net_worth_placement: NetWorthPlacement::StatusBar,
             register_columns,
@@ -402,6 +407,7 @@ mod tests {
             gridlines: Gridlines::Both,
             payee_recall: true,
             inline_completion: true,
+            save_without_asking: false,
             group_totals: true,
             net_worth_placement: NetWorthPlacement::StatusBar,
             register_columns,
@@ -652,6 +658,7 @@ mod tests {
              gridlines = \"off\"\n\
              payee_recall = true\n\
              inline_completion = true\n\
+             save_without_asking = false\n\
              group_totals = false\n\
              net_worth_placement = \"account_bar\"\n\
              register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\

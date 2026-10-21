@@ -80,7 +80,9 @@ impl Welcome {
                 commands.send(AppCommand::ChooseDataFile(self.dialog.form));
             }
             DialogOutcome::Cancelled => commands.send(AppCommand::Quit),
-            DialogOutcome::Back => unreachable!("the welcome Dialog has no Back button"),
+            DialogOutcome::Back | DialogOutcome::Discarded => {
+                unreachable!("the welcome Dialog has no Back or Discard button")
+            }
         }
     }
 }
