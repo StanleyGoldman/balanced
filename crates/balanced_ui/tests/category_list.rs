@@ -371,18 +371,32 @@ fn down_and_up_move_the_selection_through_the_rows_shown() {
 }
 
 #[test]
-fn left_collapses_the_selected_row_and_right_expands_it() {
+fn left_collapses_the_selected_row() {
     let mut harness = category_list();
     click_row(&mut harness, "Restaurants");
 
     press(&mut harness, Key::ArrowLeft);
-    let collapsed = (expanded(&harness, "Restaurants"), categories(&harness));
+
+    assert_eq!(expanded(&harness, "Restaurants"), Some(false));
+    assert_eq!(
+        categories(&harness)[4..7],
+        ["Groceries", "Restaurants", "Home"]
+    );
+}
+
+#[test]
+fn right_expands_the_selected_row() {
+    let mut harness = category_list();
+    click_row(&mut harness, "Restaurants");
+    press(&mut harness, Key::ArrowLeft);
+
     press(&mut harness, Key::ArrowRight);
 
-    assert_eq!(collapsed.0, Some(false));
-    assert!(!collapsed.1.contains(&"Coffee Shops".to_owned()));
     assert_eq!(expanded(&harness, "Restaurants"), Some(true));
-    assert!(categories(&harness).contains(&"Coffee Shops".to_owned()));
+    assert_eq!(
+        categories(&harness)[4..8],
+        ["Groceries", "Restaurants", "Coffee Shops", "Home"]
+    );
 }
 
 #[test]

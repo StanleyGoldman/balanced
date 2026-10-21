@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
 
-//! A square button showing a painted triangle, for arrows egui's fonts lack.
+//! Painted triangles, for arrows egui's fonts lack: a square button showing one, and the
+//! fold triangle of a heading or a tree row.
 
 use eframe::egui::{
     self, Color32, Rect, Response, Sense, Shape, Stroke, WidgetInfo, WidgetType, vec2,

@@ -4,6 +4,7 @@
 //! each account, and what they total.
 
 use std::collections::HashMap;
+use std::hash::Hash;
 
 use crate::{
     AccountId, AccountSummary, Allocation, Category, CategoryId, CurrencyCode, Money, MoneyError,
@@ -34,15 +35,6 @@ impl Usage {
             .total
             .clone()
             .and_then(|total| total.checked_add(amount));
-    }
-
-    /// The same usage, with `other`'s transactions and split lines as well.
-    fn include(&mut self, other: &Self) {
-        self.count += other.count;
-        self.total = self
-            .total
-            .clone()
-            .and_then(|total| total.checked_add(other.total.clone()?));
     }
 
     /// How many transactions and split lines there are. A split counts once for each
@@ -80,14 +72,23 @@ impl UsageCounts {
         }
     }
 
-    /// The usage of `categories` and `accounts` in `accounts`' transactions. Each
-    /// category comes after the category it sits under.
+    /// The usage of `categories` and `accounts` in `accounts`' transactions.
     pub(crate) fn count(
         categories: &[Category],
         accounts: &[AccountSummary],
         currency: CurrencyCode,
     ) -> Self {
         let mut counts = Self::empty(currency);
+        let parents: HashMap<CategoryId, Option<CategoryId>> = categories
+            .iter()
+            .map(|category| (category.id(), category.parent()))
+            .collect();
+        // The category and every category above it, up to the top of the tree. A tree
+        // has no loops, so the walk ends within as many steps as there are categories.
+        let with_parents = |id: CategoryId| {
+            std::iter::successors(Some(id), |child| parents.get(child).copied().flatten())
+                .take(categories.len())
+        };
         // The account each transaction is in, to find where a transfer goes.
         let held_in: HashMap<TransactionId, AccountId> = accounts
             .iter()
@@ -108,18 +109,30 @@ impl UsageCounts {
             let transaction = entry.transaction();
             let amount = transaction.amount();
             match transaction.allocation() {
-                Allocation::Category(category) => counts.add_category(*category, amount),
+                Allocation::Category(category) => {
+                    for id in with_parents(*category) {
+                        add(&mut counts.categories, id, &counts.none, amount);
+                    }
+                }
                 Allocation::Transfer(other_side) => {
-                    counts.add_transfer(account_of(*other_side), amount);
+                    add(
+                        &mut counts.transfers,
+                        account_of(*other_side),
+                        &counts.none,
+                        amount,
+                    );
                 }
                 Allocation::Split(lines) => {
                     for line in lines {
                         match line.target() {
                             SplitTarget::Category(category) => {
-                                counts.add_category(category, line.amount());
+                                for id in with_parents(category) {
+                                    add(&mut counts.categories, id, &counts.none, line.amount());
+                                }
                             }
                             SplitTarget::Transfer(other_side) => {
-                                counts.add_transfer(account_of(other_side), line.amount());
+                                let account = account_of(other_side);
+                                add(&mut counts.transfers, account, &counts.none, line.amount());
                             }
                         }
                     }
@@ -127,36 +140,7 @@ impl UsageCounts {
                 Allocation::OpeningBalance => {}
             }
         }
-        // Deepest first, so each subcategory holds its own subcategories' usage by the
-        // time it is added to its parent.
-        for category in categories.iter().rev() {
-            let (Some(parent), Some(usage)) = (
-                category.parent(),
-                counts.categories.get(&category.id()).cloned(),
-            ) else {
-                continue;
-            };
-            counts
-                .categories
-                .entry(parent)
-                .or_insert_with(|| counts.none.clone())
-                .include(&usage);
-        }
         counts
-    }
-
-    fn add_transfer(&mut self, id: AccountId, amount: Money) {
-        self.transfers
-            .entry(id)
-            .or_insert_with(|| self.none.clone())
-            .add(amount);
-    }
-
-    fn add_category(&mut self, id: CategoryId, amount: Money) {
-        self.categories
-            .entry(id)
-            .or_insert_with(|| self.none.clone())
-            .add(amount);
     }
 
     /// Category `id`'s usage, its subcategories' at every depth included.
@@ -169,6 +153,15 @@ impl UsageCounts {
     pub(crate) fn transfer(&self, id: AccountId) -> &Usage {
         self.transfers.get(&id).unwrap_or(&self.none)
     }
+}
+
+/// Adds one transaction or split line of `amount` to `key`'s usage in `usages`, which
+/// starts at `none`.
+fn add<K: Eq + Hash>(usages: &mut HashMap<K, Usage>, key: K, none: &Usage, amount: Money) {
+    usages
+        .entry(key)
+        .or_insert_with(|| none.clone())
+        .add(amount);
 }
 
 #[cfg(test)]
@@ -185,11 +178,12 @@ mod tests {
     };
 
     fn usd(amount: Decimal) -> Money {
-        Money::new(amount, CurrencyCode::new("USD").unwrap()).unwrap()
+        let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
+        Money::new(amount, usd).expect("the tests' amounts have two decimal places")
     }
 
     fn date(day: u8) -> Date<Iso> {
-        Date::try_new_iso(2026, 9, day).unwrap()
+        Date::try_new_iso(2026, 9, day).expect("the tests' days are in September 2026")
     }
 
     const FOOD: CategoryId = CategoryId::new(0);

@@ -15,7 +15,7 @@ use eframe::egui::{
     TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, TableBuilder};
-use icu_locale::Locale;
+use icu_locale::{LanguageIdentifier, Locale};
 
 use crate::dialog::{DialogOutcome, HeavyDialog, OpenDialog};
 use crate::formatted_amount::FormattedAmount;
@@ -32,7 +32,8 @@ pub(crate) struct CategoryListForm {
     /// The categories whose subcategories are hidden.
     folded: HashSet<CategoryId>,
     /// The index in the model of each row shown, top to bottom: every row but those
-    /// under a folded category. `None` once the model or the folds change.
+    /// under a folded category. `None` once the model or the folds change, so each
+    /// index is in range of the model it was built from.
     shown: Option<Vec<usize>>,
     /// The selected row, which is the tree's one Tab stop.
     selected: Option<RowKey>,
@@ -118,6 +119,7 @@ struct ListModel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Source {
     generation: Generation,
+    text_language: LanguageIdentifier,
     formatting_locale: Locale,
 }
 
@@ -125,6 +127,7 @@ impl Source {
     fn of(view: &LedgerView, i18n: &Localizer) -> Self {
         Self {
             generation: view.generation(),
+            text_language: i18n.text_language().clone(),
             formatting_locale: i18n.formatting_locale().clone(),
         }
     }
@@ -155,9 +158,9 @@ impl ListModel {
             let key = RowKey::Category(category.id());
             let usage = view.category_usage(category.id());
             let under = children.get(&Some(category.id()));
-            let mut row = ListRow::new(i18n, key, depth, category.name().to_owned(), usage);
-            row.has_children = under.is_some();
-            rows.push(row);
+            let name = category.name().to_owned();
+            let has_children = under.is_some();
+            rows.push(ListRow::new(i18n, key, depth, name, has_children, usage));
             pending.extend(
                 under
                     .into_iter()
@@ -170,23 +173,45 @@ impl ListModel {
             let account = summary.account();
             let usage = view.transfer_usage(account.id());
             let name = transfer_text(account.name());
-            rows.push(ListRow::new(
-                i18n,
-                RowKey::Transfer(account.id()),
-                0,
-                name,
-                usage,
-            ));
+            let key = RowKey::Transfer(account.id());
+            rows.push(ListRow::new(i18n, key, 0, name, false, usage));
         }
         Self {
             source: Source::of(view, i18n),
             rows,
         }
     }
+
+    /// The index of each row shown while the categories in `folded` are folded.
+    fn shown(&self, folded: &HashSet<CategoryId>) -> Vec<usize> {
+        let mut shown = Vec::with_capacity(self.rows.len());
+        // The depth of the folded category whose subcategories are being passed over.
+        let mut passing: Option<usize> = None;
+        for (index, row) in self.rows.iter().enumerate() {
+            let under_fold = matches!(row.key, RowKey::Category(_))
+                && passing.is_some_and(|depth| row.depth > depth);
+            if under_fold {
+                continue;
+            }
+            passing = match row.key {
+                RowKey::Category(id) if folded.contains(&id) => Some(row.depth),
+                RowKey::Category(_) | RowKey::Transfer(_) => None,
+            };
+            shown.push(index);
+        }
+        shown
+    }
 }
 
 impl ListRow {
-    fn new(i18n: &Localizer, key: RowKey, depth: usize, name: String, usage: &Usage) -> Self {
+    fn new(
+        i18n: &Localizer,
+        key: RowKey,
+        depth: usize,
+        name: String,
+        has_children: bool,
+        usage: &Usage,
+    ) -> Self {
         let count = usage.count();
         let total = match usage.total() {
             Ok(total) if count > 0 => Some(FormattedAmount::new(i18n, total, AmountStyle::Symbol)),
@@ -210,33 +235,13 @@ impl ListRow {
             key,
             depth,
             name,
-            has_children: false,
-            count: i18n.format_number(i64::try_from(count).unwrap_or(i64::MAX)),
+            has_children,
+            count: i18n.format_number(
+                i64::try_from(count).expect("a ledger holds fewer than 2^63 transactions"),
+            ),
             total,
             description,
         }
-    }
-}
-
-impl ListModel {
-    /// The index of each row shown while the categories in `folded` are folded.
-    fn shown(&self, folded: &HashSet<CategoryId>) -> Vec<usize> {
-        let mut shown = Vec::with_capacity(self.rows.len());
-        // The depth of the folded category whose subcategories are being passed over.
-        let mut passing: Option<usize> = None;
-        for (index, row) in self.rows.iter().enumerate() {
-            let under_fold = matches!(row.key, RowKey::Category(_))
-                && passing.is_some_and(|depth| row.depth > depth);
-            if under_fold {
-                continue;
-            }
-            passing = match row.key {
-                RowKey::Category(id) if folded.contains(&id) => Some(row.depth),
-                RowKey::Category(_) | RowKey::Transfer(_) => None,
-            };
-            shown.push(index);
-        }
-        shown
     }
 }
 
@@ -298,6 +303,7 @@ impl CategoryListForm {
             })
             .body(|body| {
                 body.rows(row_height, shown.len(), |mut table_row| {
+                    // egui asks only for rows below `shown.len()`.
                     let row = &model.rows[shown[table_row.index()]];
                     let selected = self.selected == Some(row.key);
                     let state = RowState {
@@ -369,21 +375,32 @@ impl CategoryListForm {
                     self.shown = None;
                 }
             }
-            TableAction::Down | TableAction::Up => {
-                let Some(at) = self.selected.and_then(place) else {
-                    return;
-                };
-                let to = match action {
-                    TableAction::Down => (at + 1).min(shown.len() - 1),
-                    TableAction::Up | TableAction::Select(_) | TableAction::Toggle(_) => {
-                        at.saturating_sub(1)
-                    }
-                    TableAction::SetFold(..) => at,
-                };
-                self.select(model.rows[shown[to]].key);
-                self.scroll_to = self.scrolled.and_then(|view| row_in_view(view, to, pitch));
+            // The selected row is one of `shown`, so `shown` has a row at `at` and its
+            // neighbours are in range.
+            TableAction::Down => {
+                if let Some(at) = self.selected.and_then(place) {
+                    self.step_to(model, (at + 1).min(shown.len() - 1), pitch);
+                }
+            }
+            TableAction::Up => {
+                if let Some(at) = self.selected.and_then(place) {
+                    self.step_to(model, at.saturating_sub(1), pitch);
+                }
             }
         }
+    }
+
+    /// Selects the row shown at `place`, scrolling it into view, in `model`, whose
+    /// rows are `pitch` apart.
+    fn step_to(&mut self, model: &ListModel, place: usize, pitch: f32) {
+        let Some(&index) = self.shown.as_deref().and_then(|shown| shown.get(place)) else {
+            return;
+        };
+        // `shown` holds indices into the model it was built from.
+        self.select(model.rows[index].key);
+        self.scroll_to = self
+            .scrolled
+            .and_then(|view| row_in_view(view, place, pitch));
     }
 
     /// Selects the row `key`, which takes keyboard focus once it is drawn.
@@ -485,7 +502,7 @@ fn name_cell(
         action = Some(TableAction::Select(row.key));
     }
     if response.has_focus() {
-        action = row_keys(ui, row).or(action);
+        action = row_keys(ui, response.id, row).or(action);
     }
     if row.has_children
         && fold_triangle_button(ui, i18n, row, slot, state.fold).clicked()
@@ -496,10 +513,10 @@ fn name_cell(
     action
 }
 
-/// The keys the focused name of `row` takes from egui's focus moves: ↑ and ↓ move the
-/// selection, and ← and → fold and unfold a row with categories under it.
-fn row_keys(ui: &egui::Ui, row: &ListRow) -> Option<TableAction> {
-    let id = Id::new(("category_list_row", row.key));
+/// The keys the focused name of `row`, widget `id`, takes from egui's focus moves: ↑
+/// and ↓ move the selection, and ← and → fold and unfold a row with categories under
+/// it.
+fn row_keys(ui: &egui::Ui, id: Id, row: &ListRow) -> Option<TableAction> {
     ui.memory_mut(|memory| {
         memory.set_focus_lock_filter(
             id,
