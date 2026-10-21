@@ -142,6 +142,10 @@ impl PreferencesForm {
                 );
             }
         });
+        ui.checkbox(
+            &mut draft.payee_recall,
+            fl!(i18n, "dialog-preferences-payee-recall"),
+        );
     }
 
     /// The Account bar group: what the Account bar shows.
