@@ -1851,9 +1851,8 @@ impl Proto {
                         ui.strong("Balance");
                     });
                 });
-                header.col(|ui| {
-                    ui.strong("Actions");
-                });
+                // Quicken leaves the Actions column's header blank.
+                header.col(|_| {});
             })
             .body(|body| {
                 body.rows(row_h, total, |mut row| {
