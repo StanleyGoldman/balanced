@@ -974,15 +974,21 @@ impl Proto {
             .show(ctx, |ui| {
                 Frame::popup(ui.style()).show(ui, |ui| {
                     let (y, m) = self.cal_view;
+                    // Drawn as the built calendar draws it (`date_field.rs`, #91): square days
+                    // one row high, flat, the selected day filled and today outlined, the title
+                    // spanning the five day columns between ◀ and ▶.
+                    let d = self.theme.row_height();
+                    let size = vec2(d, d);
+                    let gap = ui.spacing().item_spacing.x;
+                    let cal_w = 7.0 * d + 6.0 * gap;
                     ui.horizontal(|ui| {
-                        let prev = ui.add(Button::new("◀").min_size(vec2(26.0, 22.0)));
+                        let prev = flat_cell(ui, size, "◀", false, false);
                         self.h.track(&prev, "calendar: previous month");
-                        ui.allocate_ui_with_layout(
-                            vec2(130.0, 22.0),
-                            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                            |ui| ui.label(RichText::new(format!("{} {y}", month_name(m))).strong()),
+                        ui.add_sized(
+                            vec2(5.0 * d + 4.0 * gap, d),
+                            egui::Label::new(format!("{} {y}", month_name(m))),
                         );
-                        let next = ui.add(Button::new("▶").min_size(vec2(26.0, 22.0)));
+                        let next = flat_cell(ui, size, "▶", false, false);
                         self.h.track(&next, "calendar: next month");
                         let delta = if prev.is_pointer_button_down_on() {
                             Some(-1)
@@ -998,51 +1004,49 @@ impl Proto {
                             }
                         }
                     });
-                    ui.add_space(2.0);
                     let first = days_from_civil(y, m, 1);
                     let lead = weekday(first);
                     let n = days_in_month(y, m);
-                    egui::Grid::new("calendar_grid")
-                        .spacing(vec2(2.0, 2.0))
-                        .show(ui, |ui| {
-                            for w in ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] {
-                                ui.allocate_ui(vec2(30.0, 18.0), |ui| {
-                                    ui.centered_and_justified(|ui| {
-                                        ui.label(RichText::new(w).small().weak());
-                                    });
-                                });
-                            }
-                            ui.end_row();
-                            for cell in 0..42 {
-                                let day = cell - lead + 1;
+                    ui.horizontal(|ui| {
+                        for w in ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] {
+                            let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                            ui.painter().text(
+                                rect.center(),
+                                Align2::CENTER_CENTER,
+                                w,
+                                TextStyle::Small.resolve(ui.style()),
+                                ui.visuals().weak_text_color(),
+                            );
+                        }
+                    });
+                    // Only the weeks this month touches.
+                    let weeks = (lead + n + 6) / 7;
+                    for week in 0..weeks {
+                        ui.horizontal(|ui| {
+                            for col in 0..7 {
+                                let day = week * 7 + col - lead + 1;
                                 if (1..=n).contains(&day) {
                                     let date = first + day - 1;
-                                    let selected = date == self.date;
-                                    let mut b = Button::new(day.to_string())
-                                        .min_size(vec2(30.0, 24.0))
-                                        .selected(selected);
-                                    if date == TODAY && !selected {
-                                        b = b.stroke(Stroke::new(
-                                            1.5,
-                                            ui.visuals().selection.bg_fill,
-                                        ));
-                                    }
-                                    let r = ui.add(b);
+                                    let r = flat_cell(
+                                        ui,
+                                        size,
+                                        &day.to_string(),
+                                        date == self.date,
+                                        date == TODAY,
+                                    );
                                     self.h.track(&r, format!("calendar day {day}"));
                                     if r.is_pointer_button_down_on() {
                                         pick = Some(date);
                                     }
                                 } else {
-                                    ui.allocate_space(vec2(30.0, 24.0));
-                                }
-                                if cell % 7 == 6 {
-                                    ui.end_row();
+                                    ui.allocate_exact_size(size, Sense::hover());
                                 }
                             }
                         });
+                    }
                     if self.o[TODAY_BUTTON] {
-                        ui.add_space(2.0);
-                        let r = ui.add_sized(vec2(212.0, 24.0), Button::new("Today"));
+                        ui.separator();
+                        let r = ui.add_sized(vec2(cal_w, d), Button::new("Today").frame(false));
                         self.h.track(&r, "calendar: Today");
                         if r.is_pointer_button_down_on() {
                             pick = Some(TODAY);
@@ -2253,4 +2257,27 @@ fn main() -> eframe::Result {
             Ok(Box::new(proto))
         }),
     )
+}
+
+/// A flat square cell, as the built calendar draws its days and ◀ ▶: filled when
+/// selected or hovered, outlined when it is today. It never takes focus.
+fn flat_cell(ui: &mut Ui, size: egui::Vec2, text: &str, selected: bool, today: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(size, Sense::CLICK);
+    let visuals = ui.style().interact(&response);
+    if selected {
+        ui.painter().rect_filled(rect, 0.0, ui.visuals().selection.bg_fill);
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, visuals.weak_bg_fill);
+    }
+    if today {
+        ui.painter().rect_stroke(rect, 0.0, visuals.fg_stroke, egui::StrokeKind::Inside);
+    }
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        TextStyle::Body.resolve(ui.style()),
+        visuals.text_color(),
+    );
+    response
 }
