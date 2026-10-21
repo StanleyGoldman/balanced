@@ -1234,8 +1234,8 @@ impl Proto {
             .collapsible(false)
             .resizable(false)
             .anchor(Align2::CENTER_CENTER, vec2(0.0, -80.0))
+            .auto_sized()
             .show(ctx, |ui| {
-                ui.label("Date keys t m h y r + −, arrows; Alt+Down opens the calendar");
                 ui.horizontal(|ui| self.date_widget(ui, ctx, "go to date"));
                 // The calendar takes Enter and Esc while open; otherwise they act on the box.
                 let focused = ctx.memory(|m| m.has_focus(self.date_id()));
