@@ -515,3 +515,88 @@ fn clicking_away_from_a_refused_date_keeps_the_edit_and_its_message() {
     assert_eq!(field(&harness), "5//");
     assert_eq!(date_of(&harness, "Fresh Market"), "9/5/2026");
 }
+
+#[test]
+fn today_picks_todays_date_from_another_month() {
+    let mut harness = app();
+    edit_date(&mut harness, "9/5/2026");
+    press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+
+    harness.get_by_role_and_label(Role::Button, "Today").click();
+    harness.run();
+
+    assert_eq!(field(&harness), "10/14/2026");
+    assert!(!shows(&harness, "September 2026"));
+    assert!(!shows(&harness, "October 2026"));
+}
+
+/// The label of the calendar day marked as selected, if any.
+fn marked(harness: &Harness<'static, App>) -> Option<String> {
+    harness
+        .query_all_by_role(Role::Button)
+        .find(|day| day.accesskit_node().is_selected() == Some(true))
+        .and_then(|day| day.accesskit_node().label())
+}
+
+#[test]
+fn keys_move_the_marked_day_and_the_calendar_follows_it() {
+    for (key, day, month) in [
+        (Key::ArrowRight, "9/6/2026", "September 2026"),
+        (Key::ArrowLeft, "9/4/2026", "September 2026"),
+        (Key::ArrowDown, "9/12/2026", "September 2026"),
+        (Key::ArrowUp, "8/29/2026", "August 2026"),
+        (Key::PageDown, "10/5/2026", "October 2026"),
+        (Key::PageUp, "8/5/2026", "August 2026"),
+    ] {
+        let mut harness = app();
+        edit_date(&mut harness, "9/5/2026");
+        press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+
+        press(&mut harness, Modifiers::NONE, key);
+
+        assert_eq!(marked(&harness).as_deref(), Some(day), "{key:?}");
+        assert!(shows(&harness, month), "{key:?} shows {month}");
+        assert_eq!(field(&harness), "9/5/2026", "{key:?}");
+    }
+}
+
+#[test]
+fn enter_picks_the_marked_day_and_keeps_the_field_open() {
+    let mut harness = app();
+    edit_date(&mut harness, "9/5/2026");
+    press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+    press(&mut harness, Modifiers::NONE, Key::PageDown);
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(field(&harness), "10/6/2026");
+    assert!(!shows(&harness, "October 2026"));
+    assert_eq!(date_of(&harness, "Fresh Market"), "9/5/2026");
+}
+
+#[test]
+fn esc_closes_the_calendar_without_picking_the_marked_day() {
+    let mut harness = app();
+    edit_date(&mut harness, "9/5/2026");
+    press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+
+    assert!(!shows(&harness, "September 2026"));
+    assert_eq!(field(&harness), "9/5/2026");
+}
+
+#[test]
+fn shortcut_keys_move_the_field_again_once_the_calendar_closes() {
+    let mut harness = app();
+    edit_date(&mut harness, "9/5/2026");
+    press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+
+    press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+    press(&mut harness, Modifiers::NONE, Key::PageDown);
+
+    assert_eq!(field(&harness), "10/6/2026");
+}

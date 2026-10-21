@@ -1798,7 +1798,8 @@ impl Register {
     /// Acts on this frame's keys for `edit`, the Date cell being edited under `cursor`,
     /// with `tab` the move a Tab press asks for, and returns the scroll offset that
     /// brings the cell cursor into view when it has left it. The first Esc closes the
-    /// calendar and the next cancels the edit; a refused date keeps the edit open.
+    /// calendar and the next cancels the edit. Enter picks the calendar's marked day
+    /// while it is open, and otherwise commits; a refused date keeps the edit open.
     fn handle_date_keys(
         &mut self,
         ctx: &egui::Context,
@@ -1819,6 +1820,10 @@ impl Register {
             } else {
                 ctx.memory_mut(|memory| memory.surrender_focus(editor_id(edit.cell)));
             }
+            return None;
+        }
+        if enter && edit.date.pick_marked() {
+            self.edit = Some(Edit::Date(edit));
             return None;
         }
         if enter || tab.is_some() {

@@ -370,6 +370,8 @@ field-date-calendar = Calendar
     .tooltip = Calendar (Alt+Down)
 field-date-previous-month = Previous month
 field-date-next-month = Next month
+# The button under the calendar that picks today's date.
+field-date-today = Today
 
 ## Status bar
 

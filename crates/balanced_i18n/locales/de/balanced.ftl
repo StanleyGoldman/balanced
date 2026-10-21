@@ -99,6 +99,7 @@ register-transaction-count =
        *[other] { $count } Buchungen
     }
 
+
 ## Dialogs
 
 dialog-cancel = Abbrechen
@@ -153,3 +154,7 @@ dialog-welcome-create = Neue Datendatei erstellen …
 dialog-welcome-open = Vorhandene Datendatei öffnen …
 dialog-welcome-continue = Weiter
 dialog-welcome-quit = Beenden
+
+## Date field
+
+field-date-today = Heute
