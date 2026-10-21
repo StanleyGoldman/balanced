@@ -18,7 +18,8 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 - Tests run against a real in-memory `Ledger`, not mocks.
 - A test that needs a write to fail breaks the path, not the permissions. CI runs as root, which writes through a read-only directory or file, so a `chmod` test passes locally and fails in CI. Make the name longer than the 255-byte limit, or put a directory where the file would go.
 - A test that a sum overflows `Money` reaches it through an `Amount` edit (`Decimal::MAX.trunc() / dec!(100)`), not through `Ledger::with_accounts`. The data file holds each amount as an `i64` of minor units, so a ledger built with an amount that large panics in setup with `AmountOutOfRange`, while an edit is checked against `Money` before it is written. `an_edit_that_takes_the_cleared_balance_out_of_range_is_rejected` in `crates/balanced_core/src/ledger.rs` shows the shape.
-- `unwrap()` belongs in a `#[test]` function. A helper function in test code writes `expect("why this can't fail")`. Review enforces this, not clippy: `allow-unwrap-in-tests` (`clippy.toml`) lets `unwrap()` through anywhere under `#[cfg(test)]`, helpers included.
+- `unwrap()` belongs in a `#[test]` function. A helper function in test code writes `expect("why this can't fail")`. Under `#[cfg(test)]` review enforces this, not clippy: `allow-unwrap-in-tests` (`clippy.toml`) lets `unwrap()` through anywhere there, helpers included. In an integration test file under `tests/`, clippy rejects `unwrap()` and `unwrap_err()` in a helper, since only the `#[test]` functions count as tests there.
+- A changed `insta` text snapshot fails its test and leaves a `.snap.new` beside the `.snap`. Read the diff (`cargo insta pending-snapshots`, or the test's output), then accept it with `cargo insta accept`. Moving `.snap.new` over by hand keeps an `assertion_line:` header that the committed snapshots don't carry.
 
 ## UI tests
 
