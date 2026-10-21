@@ -13,7 +13,7 @@ Prefer a core unit test to a UI test, and a UI interaction test to an image snap
 - Each test checks one behaviour, with setup, action and checks visibly separated.
 - Prefer exact comparisons (`assert_eq!`) to partial ones (`contains`).
 - Keep fixtures small and tests fast. Mutation testing runs the suite once for every mutant.
-- Spell a partly typed name in a test as a fragment `typos` reads as a word or leaves alone, such as "Tratt" for Trattoria Roma or "Fres" for Fresh Market. `cargo xtask ci` runs `typos` over test code, and it rejects fragments it reads as misspellings, such as "Fre", and test names such as `entrys`.
+- Spell a partly typed name in a test as a fragment `typos` reads as a word or leaves alone, such as "Tratt" for Trattoria Roma or "Fres" for Fresh Market. `cargo xtask ci` runs `typos` over test code and test names, and it rejects a fragment or a name it reads as a misspelled word. The same goes for any doc that quotes such a fragment.
 - Test behaviour that could plausibly break, and skip trivial wiring.
 - Tests run against a real in-memory `Ledger`, not mocks.
 - A test that needs a write to fail breaks the path, not the permissions. CI runs as root, which writes through a read-only directory or file, so a `chmod` test passes locally and fails in CI. Make the name longer than the 255-byte limit, or put a directory where the file would go.
