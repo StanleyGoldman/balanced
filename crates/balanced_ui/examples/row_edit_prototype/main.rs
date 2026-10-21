@@ -1142,6 +1142,9 @@ impl Proto {
             return true;
         };
         let col = e.last_col;
+        // A click on Save is deliberate, so it saves and stays; only keys move on to the
+        // next row. Add still opens a fresh draft row.
+        let next_row = follow && via != "button";
         if !e.dirty() {
             let target = e.target;
             self.h.event(
@@ -1152,7 +1155,7 @@ impl Proto {
             // An unchanged save still closes the row the way a changed one does.
             if let Target::Txn(id) = target {
                 self.selected = Some(target);
-                if follow {
+                if next_row {
                     self.follow_save(id, col);
                 }
             }
@@ -1211,7 +1214,7 @@ impl Proto {
             if e.target == Target::Draft {
                 self.start_edit(Target::Draft, 0, "after add");
                 self.scroll_to = Some(usize::MAX);
-            } else {
+            } else if next_row {
                 self.follow_save(id, col);
             }
         }
