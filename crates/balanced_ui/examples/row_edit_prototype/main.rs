@@ -1461,7 +1461,9 @@ impl eframe::App for Proto {
                 if let Some(e) = &mut self.edit {
                     e.split_open = false;
                 }
-            } else if in_edit {
+            } else if in_edit || focused.is_none() {
+                // egui surrenders a text field's focus on Esc before `ui` runs, so a field's Esc
+                // arrives here with nothing focused.
                 self.cancel("Esc");
             }
         }
