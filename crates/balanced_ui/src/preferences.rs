@@ -115,6 +115,9 @@ pub(crate) struct Preferences {
     /// Enter or Ctrl+Enter, saving a Register row, opens the next row's cell in the
     /// same column, rather than leaving the saved row highlighted.
     pub(crate) enter_moves_to_next_row: bool,
+    /// Leaving a changed Register row saves it, without the leave-row prompt asking
+    /// first.
+    pub(crate) save_without_asking: bool,
     /// Each Account bar heading shows its section's total.
     pub(crate) group_totals: bool,
     pub(crate) net_worth_placement: NetWorthPlacement,
@@ -137,6 +140,7 @@ impl Default for Preferences {
             payee_recall: true,
             inline_completion: true,
             enter_moves_to_next_row: true,
+            save_without_asking: false,
             group_totals: false,
             net_worth_placement: NetWorthPlacement::default(),
             register_columns: RegisterColumns::default(),
@@ -321,6 +325,7 @@ mod tests {
             payee_recall: false,
             inline_completion: false,
             enter_moves_to_next_row: false,
+            save_without_asking: true,
             group_totals: true,
             net_worth_placement: NetWorthPlacement::StatusBar,
             register_columns,
@@ -408,6 +413,7 @@ mod tests {
             payee_recall: true,
             inline_completion: true,
             enter_moves_to_next_row: true,
+            save_without_asking: false,
             group_totals: true,
             net_worth_placement: NetWorthPlacement::StatusBar,
             register_columns,
@@ -673,6 +679,7 @@ mod tests {
              payee_recall = true\n\
              inline_completion = true\n\
              enter_moves_to_next_row = true\n\
+             save_without_asking = false\n\
              group_totals = false\n\
              net_worth_placement = \"account_bar\"\n\
              register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\

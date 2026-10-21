@@ -104,6 +104,7 @@ fn unticking_memo_hides_it_and_saves_it_as_hidden() {
          payee_recall = true\n\
          inline_completion = true\n\
          enter_moves_to_next_row = true\n\
+         save_without_asking = false\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
@@ -141,6 +142,7 @@ fn moving_payee_up_puts_it_before_num_and_saves_the_order() {
          payee_recall = true\n\
          inline_completion = true\n\
          enter_moves_to_next_row = true\n\
+         save_without_asking = false\n\
          group_totals = false\n\
          net_worth_placement = \"account_bar\"\n\
          register_columns = [\"date\", \"payee\", \"num\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\

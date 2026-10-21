@@ -117,6 +117,18 @@ dialog-reconciled-amount-change = Betrag ändern
 # Coined. "Abgleich" and "Bestätigt" follow the Clr column's GnuCash terms.
 dialog-unreconcile-message = Abgleich dieser Buchung aufheben? Die Buchung wurde mit einem Kontoauszug abgeglichen und wird auf „Bestätigt“ gesetzt. { $payee }, { $date }, { $amount }
 dialog-unreconcile-accept = Auf „Bestätigt“ setzen
+dialog-leave-row-message = Geänderte Buchung speichern?
+# Coined from GnuCash's "Hinzufügen" and "Buchung".
+dialog-leave-row-draft-message = Neue Buchung hinzufügen?
+dialog-leave-row-save = Speichern
+dialog-leave-row-add = Hinzufügen
+# Coined.
+dialog-leave-row-continue = Weiter bearbeiten
+dialog-leave-row-discard = Verwerfen
+# Coined after LibreOffice's "Beim Schließen immer eine neue Version speichern".
+dialog-leave-row-always = Immer ohne Nachfrage speichern
+# Coined from GnuCash's "Geänderte Buchung speichern?".
+dialog-preferences-save-without-asking = Geänderte Buchung ohne Nachfrage speichern
 dialog-close-account-close = Schließen
 dialog-delete-account-delete = Löschen
 dialog-new-account-back = Zurück

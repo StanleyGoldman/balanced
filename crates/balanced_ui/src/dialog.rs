@@ -20,6 +20,9 @@ pub(crate) enum DialogOutcome {
     Accepted,
     /// The user pressed Back, which only a Dialog with steps has.
     Back,
+    /// The user clicked Discard, which only a Dialog asking whether to keep changes
+    /// has.
+    Discarded,
     /// The user pressed Cancel or Esc, or clicked the dimmed window behind it.
     Cancelled,
 }
@@ -105,7 +108,8 @@ impl FocusReturn {
 
 /// A light Dialog: no title bar, a fixed width, its body above a row with its default
 /// button and Cancel, and Back before them in a Dialog with steps. A notice has its
-/// default button alone. The default button has first focus.
+/// default button alone. A Dialog asking whether to keep changes has Discard at the
+/// far left, which no key presses. The default button has first focus.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LightDialog {
     id: Id,
@@ -113,6 +117,7 @@ pub(crate) struct LightDialog {
     /// Cancel's text, or `None` for a notice, which Esc still closes.
     cancel: Option<String>,
     back: Option<String>,
+    discard: Option<String>,
     backdrop: Color32,
     /// Whether the body has a popup of its own open, or the press that closed one is
     /// still held, so that a click on the dimmed window closes only the popup.
@@ -128,6 +133,7 @@ impl LightDialog {
             accept,
             cancel: Some(cancel),
             back: None,
+            discard: None,
             backdrop: theme.backdrop(),
             body_popup: false,
         }
@@ -141,6 +147,7 @@ impl LightDialog {
             accept,
             cancel: None,
             back: None,
+            discard: None,
             backdrop: theme.backdrop(),
             body_popup: false,
         }
@@ -150,6 +157,15 @@ impl LightDialog {
     pub(crate) fn with_back(self, back: String) -> Self {
         Self {
             back: Some(back),
+            ..self
+        }
+    }
+
+    /// The same Dialog, with a Discard button reading `discard` at the far left of its
+    /// row of buttons.
+    pub(crate) fn with_discard(self, discard: String) -> Self {
+        Self {
+            discard: Some(discard),
             ..self
         }
     }
@@ -178,6 +194,7 @@ impl LightDialog {
             accept,
             cancel,
             back,
+            discard,
             backdrop,
             body_popup,
         } = self;
@@ -194,19 +211,25 @@ impl LightDialog {
                 let width = Theme::LIGHT_DIALOG_WIDTH.min(inner.x);
                 ui.set_width(width);
                 body_area(ui, inner.y, |ui| body(ui, &mut dialog.form));
-                let (accept, cancel, back) = buttons(ui, accept, cancel, back);
+                let buttons = buttons(ui, accept, cancel, back, discard);
                 if first_frame {
-                    accept.request_focus();
+                    buttons.accept.request_focus();
                 }
-                (accept, cancel, back)
+                buttons
             });
-        let (accept, cancel, back) = &modal.inner;
-        if accept.clicked()
-            || (modal.is_top_modal && enter_pressed(ctx, cancel.as_ref(), back.as_ref()))
-        {
+        let Buttons {
+            accept,
+            cancel,
+            back,
+            discard,
+        } = &modal.inner;
+        let others = [cancel.as_ref(), back.as_ref(), discard.as_ref()];
+        if accept.clicked() || (modal.is_top_modal && enter_pressed(ctx, others)) {
             DialogOutcome::Accepted
         } else if back.as_ref().is_some_and(Response::clicked) {
             DialogOutcome::Back
+        } else if discard.as_ref().is_some_and(Response::clicked) {
+            DialogOutcome::Discarded
         } else if cancel.as_ref().is_some_and(Response::clicked)
             || (!(body_popup && modal.backdrop_response.clicked()) && modal.should_close())
         {
@@ -368,9 +391,10 @@ impl HeavyDialog {
         let focused_before = ctx.memory(egui::Memory::focused);
         let shown = heavy.show(ctx, |ui| {
             let fitted_width = size.fitted_width(title_row, room.width());
-            let (accept, cancel, _) = heavy_contents(ui, fitted_width, accept, cancel, |ui| {
-                body(ui, &mut dialog.form);
-            });
+            let Buttons { accept, cancel, .. } =
+                heavy_contents(ui, fitted_width, accept, cancel, |ui| {
+                    body(ui, &mut dialog.form);
+                });
             let cancel = cancel.expect("a heavy Dialog has Cancel");
             let body_took_focus = ctx.memory(egui::Memory::focused) != focused_before;
             if first_frame && !body_took_focus {
@@ -402,7 +426,7 @@ impl HeavyDialog {
                 && !popup_open
                 && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape))
         };
-        if accept.clicked() || (is_top && enter_pressed(ctx, Some(&cancel), None)) {
+        if accept.clicked() || (is_top && enter_pressed(ctx, [Some(&cancel)])) {
             DialogOutcome::Accepted
         } else if cancel.clicked() || closed || backdrop.clicked() || escape() {
             DialogOutcome::Cancelled
@@ -491,19 +515,19 @@ fn heavy_contents(
     accept: String,
     cancel: String,
     body: impl FnOnce(&mut egui::Ui),
-) -> (Response, Option<Response>, Option<Response>) {
+) -> Buttons {
     if let Some(width) = fitted_width {
         ui.set_width(width);
         body(ui);
         // An auto-sized window offers all the room it may grow to, which the buttons'
         // row would centre itself in.
         let row = Vec2::new(ui.available_width(), button_height(ui));
-        ui.allocate_ui(row, |ui| buttons(ui, accept, Some(cancel), None))
+        ui.allocate_ui(row, |ui| buttons(ui, accept, Some(cancel), None, None))
             .inner
     } else {
         let height = ui.available_height();
         body_area(ui, height, body);
-        buttons(ui, accept, Some(cancel), None)
+        buttons(ui, accept, Some(cancel), None, None)
     }
 }
 
@@ -531,30 +555,52 @@ fn button_height(ui: &egui::Ui) -> f32 {
         .max(spacing.interact_size.y)
 }
 
+/// A Dialog's row of buttons, as drawn: its default button, and whichever of the others
+/// it has.
+struct Buttons {
+    accept: Response,
+    cancel: Option<Response>,
+    back: Option<Response>,
+    discard: Option<Response>,
+}
+
 /// A Dialog's default button reading `accept`, any Cancel button reading `cancel` and
-/// any Back button reading `back`, at the right edge of `ui`.
+/// any Back button reading `back`, at the right edge of `ui`, and any Discard button
+/// reading `discard` at its left edge.
 fn buttons(
     ui: &mut egui::Ui,
     accept: String,
     cancel: Option<String>,
     back: Option<String>,
-) -> (Response, Option<Response>, Option<Response>) {
+    discard: Option<String>,
+) -> Buttons {
     // Right to left, so the default button sits left of Cancel at the right edge, and
     // Back left of the default button.
     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
         let cancel = cancel.map(|cancel| ui.add(Button::new(cancel)));
         let accept = ui.add(Button::new(accept));
         let back = back.map(|back| ui.add(Button::new(back)));
-        (accept, cancel, back)
+        // Left to right in the room the others leave, so it sits at the left edge.
+        let discard = discard.map(|discard| {
+            ui.with_layout(Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(Button::new(discard))
+            })
+            .inner
+        });
+        Buttons {
+            accept,
+            cancel,
+            back,
+            discard,
+        }
     })
     .inner
 }
 
 /// Whether Enter pressed a Dialog's default button: Enter presses it unless focus is
-/// on `cancel` or `back`, which Enter presses instead.
-fn enter_pressed(ctx: &egui::Context, cancel: Option<&Response>, back: Option<&Response>) -> bool {
-    let other_button_focused =
-        cancel.is_some_and(Response::has_focus) || back.is_some_and(Response::has_focus);
+/// on one of the `others`, which Enter presses instead.
+fn enter_pressed<const N: usize>(ctx: &egui::Context, others: [Option<&Response>; N]) -> bool {
+    let other_button_focused = others.into_iter().flatten().any(Response::has_focus);
     !other_button_focused && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter))
 }
 

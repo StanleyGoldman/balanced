@@ -672,16 +672,19 @@ fn escape_cancels_the_edit_and_restores_the_saved_text() {
 }
 
 #[test]
-fn clicking_another_rows_cell_saves_the_edit() {
+fn clicking_another_rows_cell_keeps_the_edit_and_saves_it_on_save() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
     type_text(&mut harness, "Corner Shop");
 
     click_cell(&mut harness, "Costco");
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    harness.run();
 
     harness.get_by_role_and_label(Role::Cell, "Corner Shop");
     assert!(!editing(&harness));
+    assert_eq!(undo_redo_disabled(&mut harness), (false, true));
 }
 
 #[test]
@@ -784,7 +787,7 @@ fn an_edit_starts_with_the_text_cursor_at_the_end() {
 }
 
 #[test]
-fn tab_on_the_last_transactions_last_cell_saves_the_row_and_edits_the_draft_rows_date() {
+fn tab_on_the_last_transactions_last_cell_asks_then_saves_the_row_and_edits_the_draft_rows_date() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     // The November rent's Deposit, the last transaction's last cell.
@@ -793,6 +796,8 @@ fn tab_on_the_last_transactions_last_cell_saves_the_row_and_edits_the_draft_rows
     type_text(&mut harness, "70");
 
     press(&mut harness, Modifiers::NONE, Key::Tab);
+    // Leaving the row asks; Enter answers Save.
+    press(&mut harness, Modifiers::NONE, Key::Enter);
 
     let deposits = column(&harness, "Deposit");
     // The last transaction's, above the draft row's.
@@ -1118,13 +1123,15 @@ fn escape_on_the_highlighted_row_throws_away_its_changes() {
 }
 
 #[test]
-fn leaving_a_changed_row_saves_it() {
+fn leaving_a_changed_row_and_answering_save_saves_it() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
     type_text(&mut harness, "Corner Shop");
 
     click_cell(&mut harness, "Bean There");
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    harness.run();
     let saved = undo_redo_disabled(&mut harness);
     press(&mut harness, Modifiers::COMMAND, Key::Z);
 
@@ -1133,24 +1140,21 @@ fn leaving_a_changed_row_saves_it() {
 }
 
 #[test]
-fn opening_another_account_saves_the_changed_row() {
+fn opening_another_account_and_answering_save_saves_the_changed_row() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
     type_text(&mut harness, "Corner Shop");
-
     open(&mut harness, "Visa Rewards");
-    open(&mut harness, "Everyday Checking");
 
-    assert!(
-        column(&harness, "Payee")
-            .iter()
-            .any(|cell| cell == "Corner Shop")
-    );
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    harness.run();
+
+    assert_eq!(undo_redo_disabled(&mut harness), (false, true));
 }
 
 #[test]
-fn closing_the_window_saves_the_changed_row() {
+fn the_window_closing_without_asking_saves_the_changed_row() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
@@ -1195,6 +1199,8 @@ fn leaving_a_row_whose_save_the_ledger_refuses_brings_the_cursor_back_to_it() {
     type_text(&mut harness, "792281625142643375935439503.35");
 
     click_cell(&mut harness, "Bean There");
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    harness.run();
 
     assert_eq!(
         editor(&harness, "Payment").as_deref(),

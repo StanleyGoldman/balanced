@@ -275,13 +275,33 @@ fn alt_released_after_a_chord_opens_no_menu() {
 }
 
 #[test]
-fn a_shortcut_pressed_mid_edit_saves_the_row_first() {
+fn a_shortcut_pressed_mid_edit_that_leaves_the_row_asks_first() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
     type_text(&mut harness, "Corner Shop");
 
-    press(&mut harness, Modifiers::COMMAND, Key::Q);
+    // New Transaction, which goes to the draft row.
+    press(&mut harness, Modifiers::COMMAND, Key::N);
+
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Continue editing")
+            .is_some()
+    );
+}
+
+#[test]
+fn a_shortcut_pressed_mid_edit_keeps_the_cell_for_the_save() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    // New Transaction, which goes to the draft row and asks first.
+    press(&mut harness, Modifiers::COMMAND, Key::N);
+
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    harness.run();
     // Throws away any change to the row that wasn't saved.
     press(&mut harness, Modifiers::NONE, Key::Escape);
 

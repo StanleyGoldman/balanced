@@ -468,6 +468,7 @@ pub(crate) fn show(
                 form.go_to(previous);
             }
         }
+        DialogOutcome::Discarded => unreachable!("the wizard has no Discard button"),
     }
     if form.step != step && !form.step.has_field() {
         dialog.focus_default_button();

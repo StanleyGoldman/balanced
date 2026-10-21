@@ -15,6 +15,7 @@ use icu_calendar::{Date, Iso};
 use crate::data_file::DataFilePicker;
 use crate::i18n::fl;
 use crate::preferences::Preferences;
+use crate::register::LeftRow;
 use crate::register_columns::RegisterColumns;
 use crate::route::Route;
 
@@ -110,6 +111,9 @@ pub(crate) enum DialogKind {
     /// Go to date, starting on the Register's selected row's date, or today. Nothing
     /// opens while no Register is shown.
     GoToDate,
+    /// The leave-row prompt, asking whether to save the changed row being left, of the
+    /// kind given. It opens over any other Dialog, since closing the window can ask.
+    LeaveRow(LeftRow),
 }
 
 /// A Status bar message.
