@@ -148,10 +148,6 @@ _Avoid_: Child category, sub-item
 Whether a top-level category, and every subcategory under it, is Income or Expense.
 _Avoid_: Category kind, category class
 
-**Uncategorized**:
-The state of a transaction or split line with no category and no transfer account. It is not a category of its own.
-_Avoid_: No category, unassigned
-
 **Hidden category**:
 A category left out of the Category field's choices while it stays on its transactions and in reports. Hiding a parent hides its subcategories.
 _Avoid_: Archived category, inactive category
@@ -165,5 +161,5 @@ Moving every transaction and split line of the chosen categories into one other 
 _Avoid_: Combine, consolidate
 
 **Reassign**:
-Moving a deleted category's transactions and split lines to another category, or leaving them Uncategorized, as part of the delete.
+Moving a deleted category's transactions and split lines to another category as part of the delete.
 _Avoid_: Recategorize, remap
