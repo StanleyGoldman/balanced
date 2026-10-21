@@ -387,3 +387,28 @@ fn a_reconciled_amount_asks_on_save_not_on_leaving_its_cell() {
     assert!(moved);
     assert!(asks(&harness, RENT_CONFIRM));
 }
+
+#[test]
+fn opening_another_account_says_why_a_changed_reconciled_amount_was_not_saved() {
+    let mut harness = everyday_checking();
+    click_cell(&mut harness, "Payment", "Maple Property Management");
+    type_text(&mut harness, "1500");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    harness
+        .get_by_role_and_label(Role::Button, "Visa Rewards")
+        .click();
+    harness.run();
+
+    let shown: Vec<String> = harness
+        .get_by_role(Role::Status)
+        .query_all_by_role(Role::Label)
+        .filter_map(|label| label.accesskit_node().value())
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            "The changed row wasn't saved: a reconciled transaction's amount changes only once you confirm it."
+        ]
+    );
+}

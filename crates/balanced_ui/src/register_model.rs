@@ -216,6 +216,20 @@ impl RegisterRow {
         row
     }
 
+    /// Whether the row already holds the value `edit` gives its field.
+    pub(crate) fn holds(&self, edit: &TransactionEdit) -> bool {
+        match edit {
+            TransactionEdit::Date(date) => self.saved_date == Some(*date),
+            TransactionEdit::Number(number) => self.number == number.as_deref().unwrap_or_default(),
+            TransactionEdit::Payee(payee) => &self.payee == payee,
+            TransactionEdit::Memo(memo) => &self.memo == memo,
+            TransactionEdit::Category(category) => self.category_id() == Some(*category),
+            TransactionEdit::Transfer(account) => self.transfer_account() == Some(*account),
+            TransactionEdit::Amount(amount) => self.amount() == Some(*amount),
+            TransactionEdit::ClearedStatus(status) => self.cleared_status == *status,
+        }
+    }
+
     pub(crate) fn id(&self) -> RowId {
         self.id
     }

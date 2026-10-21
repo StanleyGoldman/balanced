@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
-use balanced_core::{CurrencyCode, Ledger, OpenError};
+use balanced_core::{CurrencyCode, DomainCommand, Ledger, OpenError};
 use balanced_i18n::Localizer;
 use eframe::egui;
 
@@ -225,28 +225,22 @@ impl App {
     /// file's, or the window closing. A refused save shows in the Status bar.
     // TODO(#423): ask Save, Continue editing or Discard first.
     fn save_editing_row(&mut self) {
-        let (commands, saves) = self.commands.beside();
+        let (commands, saves) = self.commands.with_own_channel();
         self.main_window
             .save_editing_row(&self.i18n, &self.preferences, &commands);
-        let Session::Open { ledger, .. } = &mut self.session else {
-            return;
-        };
         for command in saves.try_iter() {
             match command {
-                AppCommand::Domain(command) => {
-                    if let Err(error) = ledger.apply(command) {
-                        let message = StatusMessage::refusal(error, &ledger.snapshot());
-                        self.main_window.show_status(message);
-                    }
-                }
+                AppCommand::Domain(command) => self.apply_domain(command),
                 AppCommand::ShowStatus(message) => self.main_window.show_status(message),
                 // The confirm a Reconciled amount change asks for can't open over a
                 // Register that is going, so that row's changes are not saved.
                 AppCommand::OpenDialog(kind) => {
-                    tracing::debug!(
+                    tracing::error!(
                         ?kind,
-                        "the editing row's save needs a confirm, so it was dropped"
+                        "the editing row's save needs a confirm, so its changes were lost"
                     );
+                    self.main_window
+                        .show_status(StatusMessage::ReconciledAmountNotSaved);
                 }
                 // Saving the editing row sends none of these.
                 AppCommand::SubmitForm(_)
@@ -267,6 +261,17 @@ impl App {
                 | AppCommand::OpenDataFile(_)
                 | AppCommand::Quit => {}
             }
+        }
+    }
+
+    /// Applies `command` to the open ledger. A refused change shows in the Status bar.
+    fn apply_domain(&mut self, command: DomainCommand) {
+        let Session::Open { ledger, .. } = &mut self.session else {
+            return;
+        };
+        if let Err(error) = ledger.apply(command) {
+            let message = StatusMessage::refusal(error, &ledger.snapshot());
+            self.main_window.show_status(message);
         }
     }
 
@@ -353,14 +358,7 @@ impl App {
             Session::Welcome(_) => None,
         };
         match command {
-            AppCommand::Domain(command) => {
-                if let Some(ledger) = ledger
-                    && let Err(error) = ledger.apply(command)
-                {
-                    let message = StatusMessage::refusal(error, &ledger.snapshot());
-                    self.main_window.show_status(message);
-                }
-            }
+            AppCommand::Domain(command) => self.apply_domain(command),
             AppCommand::SubmitForm(command) => {
                 if let Some(ledger) = ledger {
                     let result = ledger.apply(command).map(drop);

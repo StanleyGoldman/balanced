@@ -57,7 +57,7 @@ impl RowChanges {
     pub(crate) fn record(&mut self, saved: &RegisterRow, edit: TransactionEdit) {
         let field = Field::of(&edit);
         self.edits.retain(|kept| Field::of(kept) != field);
-        if holds(saved, &edit) {
+        if saved.holds(&edit) {
             return;
         }
         let at = self.edits.partition_point(|kept| Field::of(kept) < field);
@@ -105,19 +105,5 @@ impl Field {
             TransactionEdit::Amount(_) => Self::Amount,
             TransactionEdit::ClearedStatus(_) => Self::ClearedStatus,
         }
-    }
-}
-
-/// Whether `row` already holds the value `edit` gives its field.
-fn holds(row: &RegisterRow, edit: &TransactionEdit) -> bool {
-    match edit {
-        TransactionEdit::Date(date) => row.saved_date() == Some(*date),
-        TransactionEdit::Number(number) => row.number() == number.as_deref().unwrap_or_default(),
-        TransactionEdit::Payee(payee) => row.payee() == payee,
-        TransactionEdit::Memo(memo) => row.memo() == memo,
-        TransactionEdit::Category(category) => row.category_id() == Some(*category),
-        TransactionEdit::Transfer(account) => row.transfer_account() == Some(*account),
-        TransactionEdit::Amount(amount) => row.amount() == Some(*amount),
-        TransactionEdit::ClearedStatus(status) => row.cleared_status() == *status,
     }
 }

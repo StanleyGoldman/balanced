@@ -926,6 +926,18 @@ fn ctrl_enter_saves_the_row_from_any_cell() {
 }
 
 #[test]
+fn ctrl_enter_on_a_highlighted_row_with_no_changes_does_nothing() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+
+    press(&mut harness, Modifiers::COMMAND, Key::Enter);
+
+    assert!(!editing(&harness));
+    assert_eq!(cursor(&harness), "Fresh Market");
+}
+
+#[test]
 fn after_enter_saves_the_next_row_opens_in_the_same_column() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
@@ -1059,6 +1071,23 @@ fn a_save_the_ledger_refuses_changes_nothing_and_keeps_the_row_open() {
         column(&harness, "Payee")
             .iter()
             .any(|cell| cell == "Corner Shop")
+    );
+    assert_eq!(undo_redo_disabled(&mut harness), (true, true));
+}
+
+#[test]
+fn leaving_a_row_whose_save_the_ledger_refuses_brings_the_cursor_back_to_it() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "86.42");
+    // Too large for the account's balance to hold.
+    type_text(&mut harness, "792281625142643375935439503.35");
+
+    click_cell(&mut harness, "Bean There");
+
+    assert_eq!(
+        editor(&harness, "Payment").as_deref(),
+        Some("792,281,625,142,643,375,935,439,503.35")
     );
     assert_eq!(undo_redo_disabled(&mut harness), (true, true));
 }
