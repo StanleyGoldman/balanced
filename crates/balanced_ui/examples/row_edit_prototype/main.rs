@@ -867,6 +867,8 @@ struct Proto {
     leave_prompt: Option<Leave>,
     prompt_always: bool,
     closing: bool,
+    /// XWayland ignores `with_maximized` at creation, so maximize again once the window is up.
+    maximize_sent: bool,
     scroll_to: Option<usize>,
     /// The ids of the edit's widgets drawn last frame and this frame.
     edit_ids: HashSet<Id>,
@@ -901,6 +903,7 @@ impl Proto {
             leave_prompt: None,
             prompt_always: false,
             closing: false,
+            maximize_sent: false,
             scroll_to: Some(usize::MAX),
             edit_ids: HashSet::new(),
             edit_ids_now: HashSet::new(),
@@ -1215,6 +1218,10 @@ impl Proto {
     }
 
     fn cancel(&mut self, via: &str) {
+        // The row the prompt asks about is gone, so the prompt goes with it.
+        if self.leave_prompt.take().is_some() {
+            self.h.event("leave_prompt", json!({ "choice": "dismissed", "via": via }));
+        }
         if let Some(e) = self.edit.take() {
             self.h.event(
                 "cancel",
@@ -1404,6 +1411,10 @@ impl eframe::App for Proto {
 
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if !self.maximize_sent {
+            self.maximize_sent = true;
+            ctx.send_viewport_cmd(ViewportCommand::Maximized(true));
+        }
         if let Some(cmd) = self.h.begin_frame(&ctx) {
             self.apply_control(&ctx, &cmd);
         }
@@ -1612,6 +1623,10 @@ impl Proto {
         let Some(leave) = self.leave_prompt else {
             return;
         };
+        if self.edit.is_none() {
+            self.leave_prompt = None;
+            return;
+        }
         enum Choice {
             Save,
             Continue,
@@ -1796,7 +1811,7 @@ impl Proto {
             .filter(|_| k > 0);
         let total = n + usize::from(has_draft) + k;
         let actions_w = if self.variant == Variant::B {
-            44.0
+            80.0
         } else {
             300.0
         };
@@ -2404,6 +2419,7 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: ViewportBuilder::default()
             .with_title("Balanced — PROTOTYPE row-level editing")
+            .with_inner_size([1600.0, 1000.0])
             .with_maximized(true),
         ..Default::default()
     };
