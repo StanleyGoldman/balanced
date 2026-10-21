@@ -839,6 +839,11 @@ impl Register {
         self.row(account, id)
     }
 
+    /// The selected transaction's date, while `account`'s Register shows it.
+    pub(crate) fn selected_date(&self, account: AccountId) -> Option<Date<Iso>> {
+        self.selected_row(account)?.saved_date()
+    }
+
     /// Transaction `id`'s row, while `account`'s Register shows it.
     pub(crate) fn row(&self, account: AccountId, id: TransactionId) -> Option<&RegisterRow> {
         let model = self

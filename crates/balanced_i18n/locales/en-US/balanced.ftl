@@ -230,12 +230,12 @@ dialog-new-category-name = Name
 dialog-new-category-hint = Use “:” to put it under another category, as in Home:Garden.
 # $parent is the text before the last colon of the typed name.
 dialog-new-category-no-parent = No category is named “{ $parent }”.
-dialog-preferences-title = Preferences
 dialog-go-to-date-title = Go to Date
 # The label of Go to date's date field.
 dialog-go-to-date-date = Date
 # The button that moves the Register to the date.
 dialog-go-to-date-go = Go
+dialog-preferences-title = Preferences
 # The groups listed down the left of the Preferences Dialog.
 dialog-preferences-group-display = Display
 dialog-preferences-scheme = Theme

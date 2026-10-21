@@ -455,8 +455,7 @@ impl MainWindow {
                 };
                 let seed = self
                     .register()
-                    .and_then(|register| register.selected_row(summary.account().id()))
-                    .and_then(RegisterRow::saved_date)
+                    .and_then(|register| register.selected_date(summary.account().id()))
                     .unwrap_or(today);
                 self.go_to_date = Some(OpenDialog::new(ctx, GoToDateForm::new(seed)));
             }

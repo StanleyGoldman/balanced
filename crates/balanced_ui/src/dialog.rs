@@ -226,6 +226,17 @@ enum HeavySize {
     Fitted(f32),
 }
 
+impl HeavySize {
+    /// How wide a fitted Dialog's body is: as asked, or `title_row` when the title is
+    /// wider, and never wider than `room`. `None` for a Dialog that isn't fitted.
+    fn fitted_width(self, title_row: f32, room: f32) -> Option<f32> {
+        match self {
+            Self::Fitted(width) => Some(width.max(title_row).min(room)),
+            Self::Default | Self::Opens(_) => None,
+        }
+    }
+}
+
 impl HeavyDialog {
     /// A heavy Dialog with `id`, titled `title`, whose default button reads `accept`,
     /// whose other button reads `cancel` and whose × a screen reader reads as `close`,
@@ -340,10 +351,7 @@ impl HeavyDialog {
         }
         let focused_before = ctx.memory(egui::Memory::focused);
         let shown = heavy.show(ctx, |ui| {
-            let fitted_width = match size {
-                HeavySize::Fitted(width) => Some(width.max(title_row).min(room.width())),
-                HeavySize::Default | HeavySize::Opens(_) => None,
-            };
+            let fitted_width = size.fitted_width(title_row, room.width());
             let (accept, cancel, _) = heavy_contents(ui, fitted_width, accept, cancel, |ui| {
                 body(ui, &mut dialog.form);
             });
