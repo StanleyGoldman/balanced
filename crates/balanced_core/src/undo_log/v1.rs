@@ -195,14 +195,18 @@ pub(crate) struct TransferSide {
     pub(crate) amount: i64,
 }
 
-/// A split line to post's transfer, to or from `account`.
+/// A split line to post's transfer, to or from `account`. Any other key is refused, so
+/// [`EditedLineTransfer`] can tell it apart.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct LineTo {
     pub(crate) account: u32,
 }
 
-/// A posted split line's transfer, whose other side is transaction `other_side`.
+/// A posted split line's transfer, whose other side is transaction `other_side`. Any
+/// other key is refused, so [`EditedLineTransfer`] can tell it apart.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct LineSide {
     pub(crate) other_side: u32,
 }
@@ -237,6 +241,21 @@ pub(crate) enum TransactionEdit {
     Transfer(u32),
     Amount(i64),
     ClearedStatus(ClearedStatus),
+    /// Every line of the transaction, which add up to `amount`.
+    Lines {
+        amount: i64,
+        lines: Vec<SplitLine<EditedLineTransfer>>,
+    },
+}
+
+/// An edited split line's transfer: a new one, to or from an account, or one that keeps
+/// its other side. Written as the struct alone, `{"account": 8}` or
+/// `{"other_side": 17}`, which its one key tells apart; an entry with both is refused.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum EditedLineTransfer {
+    New(LineTo),
+    Kept(LineSide),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -22,7 +22,7 @@ rust_decimal_macros.workspace = true
 tempfile.workspace = true
 
 [features]
-# `NewTransaction::split_for_tests`, `SplitLine::for_tests` and
+# `NewTransaction::split_for_tests`, `NewSplitLine::for_tests`, `EditedSplitLine::for_tests` and
 # `Ledger::open_with_migrations`, for tests outside the crate's own code.
 test-support = ["balanced_store/test-support"]
 
@@ -34,6 +34,11 @@ required-features = ["test-support"]
 # Posts split transactions, which need `test-support`.
 [[test]]
 name = "split_transfer"
+required-features = ["test-support"]
+
+# Edits split transactions, which need `test-support`.
+[[test]]
+name = "split_lines"
 required-features = ["test-support"]
 
 # Upgrades files through migrations of its own, which need `test-support`.

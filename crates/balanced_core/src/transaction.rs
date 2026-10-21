@@ -146,6 +146,70 @@ impl NewSplitLine {
     }
 }
 
+/// Where an [`EditedSplitLine`]'s part of the amount goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EditedSplitTarget {
+    /// Into this category.
+    Category(CategoryId),
+    /// To or from this account, where the edit records the line's new other side.
+    Transfer(AccountId),
+    /// To or from another account, where this transaction, already one of the
+    /// transaction's other sides, stays the line's other side.
+    Kept(TransactionId),
+}
+
+/// One line of a transaction's new list of lines, in [`TransactionEdit::Lines`]: a line
+/// to a category, a new line to an account, or a line to an account that keeps its
+/// other side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditedSplitLine {
+    target: EditedSplitTarget,
+    memo: String,
+    amount: Money,
+}
+
+impl EditedSplitLine {
+    pub(crate) fn new(target: EditedSplitTarget, memo: &str, amount: Money) -> Self {
+        Self {
+            target,
+            memo: memo.to_owned(),
+            amount,
+        }
+    }
+
+    /// A line in `category`, for tests outside the crate's own code.
+    #[cfg(feature = "test-support")]
+    pub fn for_tests(category: CategoryId, memo: &str, amount: Money) -> Self {
+        Self::new(EditedSplitTarget::Category(category), memo, amount)
+    }
+
+    /// A new line that moves `amount` from or to `account`, for tests outside the
+    /// crate's own code.
+    #[cfg(feature = "test-support")]
+    pub fn transfer_for_tests(account: AccountId, memo: &str, amount: Money) -> Self {
+        Self::new(EditedSplitTarget::Transfer(account), memo, amount)
+    }
+
+    /// A line whose other side stays `other_side`, for tests outside the crate's own
+    /// code.
+    #[cfg(feature = "test-support")]
+    pub fn kept_for_tests(other_side: TransactionId, memo: &str, amount: Money) -> Self {
+        Self::new(EditedSplitTarget::Kept(other_side), memo, amount)
+    }
+
+    pub(crate) fn target(&self) -> EditedSplitTarget {
+        self.target
+    }
+
+    pub(crate) fn memo(&self) -> &str {
+        &self.memo
+    }
+
+    pub(crate) fn amount(&self) -> Money {
+        self.amount
+    }
+}
+
 /// Where a transaction's amount went.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Allocation {
@@ -304,7 +368,7 @@ impl Transaction {
 
     /// An other side with `id` pointing back at this transaction, holding `memo` and
     /// `amount` with its sign flipped.
-    fn other_side_with(&self, id: TransactionId, memo: &str, amount: Money) -> Self {
+    pub(crate) fn other_side_with(&self, id: TransactionId, memo: &str, amount: Money) -> Self {
         Self {
             id,
             date: self.date,
@@ -339,8 +403,8 @@ impl Transaction {
     /// The transaction with `edit` made. Fails when the edit gives the opening balance
     /// a payee, or gives a split transaction or an amount in another currency.
     ///
-    /// Panics on [`TransactionEdit::Transfer`], whose other side only the ledger can
-    /// make.
+    /// Panics on [`TransactionEdit::Transfer`] and [`TransactionEdit::Lines`], whose
+    /// other sides only the ledger can make.
     pub(crate) fn edited(&self, edit: TransactionEdit) -> Result<Self, DomainError> {
         let mut edited = self.clone();
         match edit {
@@ -365,6 +429,9 @@ impl Transaction {
             }
             TransactionEdit::Transfer(_) => panic!(
                 "the ledger makes a transfer's other side, so it changes the target with `retargeted`"
+            ),
+            TransactionEdit::Lines { .. } => panic!(
+                "the ledger makes the lines' other sides, so it changes the lines with `resplit`"
             ),
             TransactionEdit::Amount(amount) => {
                 if matches!(self.allocation, Allocation::Split(_)) {
@@ -400,9 +467,39 @@ impl Transaction {
         }
     }
 
+    /// The transaction split into `lines`, which must add up to `amount`. Fails when it
+    /// is the opening balance, when `amount` is in another currency, or when the lines
+    /// add up to anything else.
+    pub(crate) fn resplit(
+        &self,
+        amount: Money,
+        lines: Vec<SplitLine>,
+    ) -> Result<Self, DomainError> {
+        if self.allocation == Allocation::OpeningBalance {
+            return Err(DomainError::NotInOneCategory {
+                transaction: self.id,
+            });
+        }
+        if amount.currency() != self.amount.currency() {
+            return Err(DomainError::CurrencyMismatch {
+                transaction: self.id,
+            });
+        }
+        if SplitLine::sum(&lines, amount.currency())? != amount {
+            return Err(DomainError::SplitAmount {
+                transaction: self.id,
+            });
+        }
+        Ok(Self {
+            allocation: Allocation::Split(lines),
+            amount,
+            ..self.clone()
+        })
+    }
+
     /// The edit that undoes `edit`: the same field, with this transaction's value.
     /// Only meaningful for an edit [`Transaction::edited`] accepts, so panics on
-    /// [`TransactionEdit::Transfer`].
+    /// [`TransactionEdit::Transfer`] and [`TransactionEdit::Lines`].
     pub(crate) fn undoing(&self, edit: &TransactionEdit) -> TransactionEdit {
         match edit {
             TransactionEdit::Number(_) => TransactionEdit::Number(self.number.clone()),
@@ -416,7 +513,7 @@ impl Transaction {
                     TransactionEdit::Category(*category)
                 }
             },
-            TransactionEdit::Transfer(_) => {
+            TransactionEdit::Transfer(_) | TransactionEdit::Lines { .. } => {
                 panic!("the ledger undoes a change of target by putting the transaction back whole")
             }
             TransactionEdit::Amount(_) => TransactionEdit::Amount(self.amount),
