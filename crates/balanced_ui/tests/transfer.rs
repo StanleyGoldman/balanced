@@ -421,6 +421,32 @@ fn picking_a_category_in_a_transfer_s_category_cell_deletes_its_other_side() {
 }
 
 #[test]
+fn a_transfer_s_date_and_amount_changed_in_its_row_change_its_other_side_on_save() {
+    let mut harness = app_on(with_transfer("Emergency Fund"));
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Saving up");
+    press(&mut harness, Modifiers::NONE, Key::ArrowLeft);
+    press(&mut harness, Modifiers::NONE, Key::ArrowLeft);
+    // A day later.
+    type_text(&mut harness, "+");
+    // Date, Num, Payee, Category, Memo, Payment.
+    for _ in 0..5 {
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+    }
+    press(&mut harness, Modifiers::COMMAND, Key::A);
+    type_text(&mut harness, "250");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    open(&mut harness, "Emergency Fund");
+
+    let other_side = row_of(&harness, "Saving up");
+    assert_eq!(
+        [other_side[0].as_str(), other_side[6].as_str()],
+        ["10/2/2026", "250.00"]
+    );
+}
+
+#[test]
 fn go_to_opens_the_other_account_on_the_other_side() {
     let mut harness = app_on(with_transfer("Emergency Fund"));
     open(&mut harness, "Everyday Checking");

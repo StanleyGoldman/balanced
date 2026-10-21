@@ -194,23 +194,59 @@ fn enter_on_the_amount_adds_the_draft_row_and_leaves_the_cursor_on_an_empty_one(
 }
 
 #[test]
-fn enter_on_an_empty_payment_moves_on_to_deposit() {
+fn enter_on_an_empty_payment_refuses_the_row_for_its_missing_amount() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     fill_draft(&mut harness, "10/15/2026", "Corner Cafe", "");
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
-    assert!(harness.query_by_label("Amount is missing").is_none());
-    let deposit = harness
-        .get_by_role_and_label(Role::ColumnHeader, "Deposit")
+    assert!(harness.query_by_label("Amount is missing").is_some());
+    let payment = harness
+        .get_by_role_and_label(Role::ColumnHeader, "Payment")
         .rect()
         .x_range();
     let cursor_cell = harness
         .query_all_by_role(Role::Cell)
         .find(|cell| cell.accesskit_node().is_selected() == Some(true))
         .expect("a cell holds the cell cursor");
-    assert!(deposit.contains(cursor_cell.rect().center().x));
+    assert!(payment.contains(cursor_cell.rect().center().x));
+}
+
+#[test]
+fn enter_in_any_cell_of_the_draft_row_adds_it() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    fill_draft(&mut harness, "10/15/2026", "Corner Cafe", "12");
+    // Payment, Memo, Category, Payee.
+    for _ in 0..3 {
+        press(&mut harness, Modifiers::SHIFT, Key::Tab);
+    }
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    let (label, top) = cursor(&harness);
+    assert_eq!(label, "");
+    assert!(top > row_top(&harness, "Corner Cafe"));
+}
+
+#[test]
+fn escape_empties_the_draft_row_and_leaves_it_highlighted() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    fill_draft(&mut harness, "10/15/2026", "Corner Cafe", "12");
+
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+
+    let draft_row = cells(&harness)[cells(&harness).len() - 9..].to_vec();
+    assert_eq!(draft_row, vec![String::new(); 9]);
+    assert!(
+        harness.query_all_by_role(Role::TextInput).all(|node| node
+            .accesskit_node()
+            .label()
+            .as_deref()
+            == Some("Search"))
+    );
 }
 
 #[test]

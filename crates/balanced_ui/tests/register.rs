@@ -583,7 +583,7 @@ fn typing_on_a_cell_starts_editing_it_with_the_typed_text() {
 }
 
 #[test]
-fn enter_commits_and_moves_right_without_opening_the_next_cell() {
+fn enter_saves_the_row_and_opens_the_next_rows_cell_below() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
@@ -593,26 +593,24 @@ fn enter_commits_and_moves_right_without_opening_the_next_cell() {
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
     harness.get_by_role_and_label(Role::Cell, "Fresh Market Downtown");
-    assert!(!editing(&harness));
-    assert_eq!(cursor(&harness), "Food & Dining:Groceries");
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Bean There"));
 }
 
 #[test]
-fn enter_on_the_last_cell_of_a_row_wraps_to_the_next_row() {
+fn enter_on_the_last_transaction_opens_the_draft_rows_cell_below() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    click_cell(&mut harness, "86.42");
-    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+    // The November rent's Payment, the last transaction's.
+    click_cell(&mut harness, "1,475.00");
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
-    // Bean There's date, the row after Fresh Market's.
-    assert_eq!(cursor(&harness), "9/6/2026");
+    assert_eq!(editor(&harness, "Payment").as_deref(), Some(""));
 }
 
 #[test]
-fn tab_commits_and_edits_the_next_editable_cell() {
+fn tab_keeps_the_cell_in_the_row_and_edits_the_next_editable_cell() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
@@ -629,7 +627,7 @@ fn tab_commits_and_edits_the_next_editable_cell() {
 }
 
 #[test]
-fn shift_tab_commits_and_edits_the_previous_editable_cell() {
+fn shift_tab_keeps_the_cell_in_the_row_and_edits_the_previous_editable_cell() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "September rent");
@@ -656,7 +654,7 @@ fn escape_cancels_the_edit_and_restores_the_saved_text() {
 }
 
 #[test]
-fn clicking_another_cell_commits_the_edit() {
+fn clicking_another_rows_cell_saves_the_edit() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
@@ -768,7 +766,7 @@ fn an_edit_starts_with_the_text_cursor_at_the_end() {
 }
 
 #[test]
-fn tab_on_the_last_transactions_last_cell_commits_and_edits_the_draft_rows_date() {
+fn tab_on_the_last_transactions_last_cell_saves_the_row_and_edits_the_draft_rows_date() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     // The November rent's Deposit, the last transaction's last cell.
@@ -785,7 +783,7 @@ fn tab_on_the_last_transactions_last_cell_commits_and_edits_the_draft_rows_date(
 }
 
 #[test]
-fn tab_on_the_draft_rows_last_cell_commits_and_closes_it() {
+fn tab_on_the_draft_rows_last_cell_keeps_it_and_closes_it() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     for _ in 0..6 {
@@ -829,11 +827,13 @@ fn the_register_leaves_ctrl_tab_to_the_rest_of_the_app() {
     assert_eq!(input.events, [ctrl_tab]);
 }
 
-/// Renames Fresh Market to Corner Shop through its Payee cell.
+/// Renames Fresh Market to Corner Shop through its Payee cell, then closes the cell
+/// the save opened on the next row.
 fn rename_fresh_market(harness: &mut Harness<'static, App>) {
     click_cell(harness, "Fresh Market");
     type_text(harness, "Corner Shop");
     press(harness, Modifiers::NONE, Key::Enter);
+    press(harness, Modifiers::NONE, Key::Escape);
 }
 
 #[test]
@@ -885,6 +885,196 @@ fn ctrl_z_during_a_cell_edit_undoes_typing_not_the_ledger() {
     assert_eq!(editor(&harness, "Payee").as_deref(), Some("Corner Shop"));
     press(&mut harness, Modifiers::NONE, Key::Escape);
     harness.get_by_role_and_label(Role::Cell, "Corner Shop");
+}
+
+#[test]
+fn enter_saves_every_changed_cell_of_the_row_as_one_undo_step() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    type_text(&mut harness, "Weekly shop");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    let saved = (
+        cell_of(&harness, "Memo", "Corner Shop"),
+        undo_redo_disabled(&mut harness),
+    );
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
+
+    let shown = |title, text| column(&harness, title).iter().any(|cell| cell == text);
+    let undone = (shown("Payee", "Corner Shop"), shown("Memo", "Weekly shop"));
+    assert_eq!(saved, ("Weekly shop".to_owned(), (false, true)));
+    assert_eq!(undone, (false, false));
+}
+
+#[test]
+fn ctrl_enter_saves_the_row_from_any_cell() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    press(&mut harness, Modifiers::COMMAND, Key::Enter);
+
+    assert_eq!(undo_redo_disabled(&mut harness), (false, true));
+    harness.get_by_role_and_label(Role::Cell, "Corner Shop");
+}
+
+#[test]
+fn after_enter_saves_the_next_row_opens_in_the_same_column() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+    type_text(&mut harness, "Weekly shop");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    // Bean There's Memo, the row after Fresh Market's.
+    assert_eq!(editor(&harness, "Memo").as_deref(), Some(""));
+    assert_eq!(
+        cell_of(&harness, "Memo", "Bean There"),
+        editor(&harness, "Memo").unwrap_or_default()
+    );
+    assert_eq!(cell_of(&harness, "Memo", "Fresh Market"), "Weekly shop");
+}
+
+#[test]
+fn enter_on_an_unchanged_row_saves_nothing_and_opens_the_next_row() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Bean There"));
+    assert_eq!(undo_redo_disabled(&mut harness), (true, true));
+}
+
+#[test]
+fn escape_throws_away_every_change_to_the_row_and_leaves_it_highlighted() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    type_text(&mut harness, "Weekly shop");
+
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+
+    let shown = |title, text| column(&harness, title).iter().any(|cell| cell == text);
+    let kept = (shown("Payee", "Corner Shop"), shown("Memo", "Weekly shop"));
+    assert_eq!(kept, (false, false));
+    assert!(!editing(&harness));
+    assert_eq!(cursor(&harness), "");
+    assert_eq!(undo_redo_disabled(&mut harness), (true, true));
+}
+
+#[test]
+fn escape_on_the_highlighted_row_throws_away_its_changes() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    let balance = cell_of(&harness, "Balance", "Fresh Market");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    // The Balance cell, in the same row, holds no cell cursor, so the edit closes.
+    click_cell(&mut harness, &balance);
+
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+
+    assert_eq!(cursor(&harness), "Fresh Market");
+    assert_eq!(undo_redo_disabled(&mut harness), (true, true));
+}
+
+#[test]
+fn leaving_a_changed_row_saves_it() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+
+    click_cell(&mut harness, "Bean There");
+    let saved = undo_redo_disabled(&mut harness);
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
+
+    assert_eq!(saved, (false, true));
+    harness.get_by_role_and_label(Role::Cell, "Fresh Market");
+}
+
+#[test]
+fn opening_another_account_saves_the_changed_row() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+
+    open(&mut harness, "Visa Rewards");
+    open(&mut harness, "Everyday Checking");
+
+    assert!(
+        column(&harness, "Payee")
+            .iter()
+            .any(|cell| cell == "Corner Shop")
+    );
+}
+
+#[test]
+fn closing_the_window_saves_the_changed_row() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+
+    eframe::App::on_exit(harness.state_mut(), None);
+    harness.run();
+
+    assert_eq!(undo_redo_disabled(&mut harness), (false, true));
+}
+
+#[test]
+fn a_save_the_ledger_refuses_changes_nothing_and_keeps_the_row_open() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    click_cell(&mut harness, "86.42");
+    // Too large for the account's balance to hold.
+    type_text(&mut harness, "792281625142643375935439503.35");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(
+        editor(&harness, "Payment").as_deref(),
+        Some("792,281,625,142,643,375,935,439,503.35")
+    );
+    assert!(
+        column(&harness, "Payee")
+            .iter()
+            .any(|cell| cell == "Corner Shop")
+    );
+    assert_eq!(undo_redo_disabled(&mut harness), (true, true));
+}
+
+#[test]
+fn moving_between_cells_of_the_editing_row_saves_nothing() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    press(&mut harness, Modifiers::SHIFT, Key::Tab);
+
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Corner Shop"));
+    assert_eq!(undo_redo_disabled(&mut harness), (true, true));
 }
 
 /// Whether the Edit menu's Undo and Redo items are disabled, opening the menu to
@@ -1423,6 +1613,7 @@ fn an_amount_typed_in_deposit_moves_a_payment_there_as_one_undoable_edit() {
         payment_of(&harness, "Fresh Market"),
         deposit_of(&harness, "Fresh Market"),
     );
+    press(&mut harness, Modifiers::NONE, Key::Escape);
     press(&mut harness, Modifiers::COMMAND, Key::Z);
     let undone = (
         payment_of(&harness, "Fresh Market"),

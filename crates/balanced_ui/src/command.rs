@@ -89,10 +89,11 @@ pub(crate) enum DialogKind {
     /// while no transaction is selected, or while its account is closed.
     DeleteTransaction,
     /// The confirm for changing a Reconciled transaction's amount to `amount`, from a
-    /// Payment or Deposit cell edit that is not sent until it is accepted.
+    /// save of its row, `save`, that is not sent until it is accepted.
     ChangeReconciledAmount {
         transaction: TransactionId,
         amount: Money,
+        save: DomainCommand,
     },
     /// The confirm for setting a Reconciled transaction back to Cleared. Nothing opens
     /// unless the open Register shows the transaction as Reconciled, or while its
@@ -229,6 +230,12 @@ impl CommandSender {
     pub(crate) fn new(ctx: egui::Context) -> (Self, Receiver<AppCommand>) {
         let (sender, receiver) = mpsc::channel();
         (Self { sender, ctx }, receiver)
+    }
+
+    /// A sender to a channel of its own, waking the same `ctx`, and its receiving end,
+    /// for Commands the App applies at once rather than on the next frame.
+    pub(crate) fn beside(&self) -> (Self, Receiver<AppCommand>) {
+        Self::new(self.ctx.clone())
     }
 
     pub(crate) fn send(&self, command: AppCommand) {

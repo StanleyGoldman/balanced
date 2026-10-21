@@ -9,7 +9,7 @@ The decision and the options that were rejected are in `docs/adr/0001-command-an
 | Accounts, transactions, balances | `Ledger` in `balanced_core` | Only through `Ledger::apply(DomainCommand)` |
 | What a window shows (route, selection, sort, filter) | That window's struct | In place, during `ui()` |
 | Dialog form fields | `Option<FormState>` on the host window | In place while open. OK sends a Command, Cancel sets it to `None` |
-| Edit buffer of the Register row being edited | The Register view | In place. Enter sends a Command |
+| The Register's editing row: the open cell's text, and the changes to the row not yet saved | The Register view | In place. Enter saves the row's changes as one Command; Esc throws them away |
 | Scroll, hover, focus | egui `Memory`, kept for the run only (`persist_egui_memory` is off) | egui handles them |
 | Preferences | `App`, loaded from `preferences.toml` (`PreferencesFile`) | Only through `AppCommand::SetPreferences`, or `AppCommand::SetRegisterColumns` from the column chooser, which `App::logic` applies and writes; the open Preferences Dialog's draft shows meanwhile |
 | Recent files, each with the view (top-level tab and open account) its data file closed on | `App`, loaded from `recent-files.toml` (`RecentFilesFile`) | When a data file opens or is created, `App` saves the closed file's view, moves the new file to the top, writes the file, and shows the new file's saved view. On exit, `App::on_exit` saves the open file's view and writes the file |

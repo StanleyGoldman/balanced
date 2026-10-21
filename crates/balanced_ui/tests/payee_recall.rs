@@ -453,7 +453,9 @@ fn a_second_remembered_payee_fills_only_the_cells_still_empty() {
     type_payee(&mut harness, "Daily Grind");
     press(&mut harness, Modifiers::NONE, Key::Tab);
     press(&mut harness, Modifiers::SHIFT, Key::Tab);
-    press(&mut harness, Modifiers::NONE, Key::Escape);
+    for _ in "Daily Grind".chars() {
+        press(&mut harness, Modifiers::NONE, Key::Backspace);
+    }
     type_text(&mut harness, "Trattoria Roma");
 
     press(&mut harness, Modifiers::NONE, Key::Tab);
@@ -511,8 +513,9 @@ fn a_recalled_category_clears_the_missing_category_bubble() {
     press(&mut harness, Modifiers::SHIFT, Key::Tab);
     type_text(&mut harness, "Trattoria Roma");
 
-    // Enter moves the cursor to Category without opening it, so its bubble would show.
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    // Category, then Memo: the Category cell is closed again, so its bubble would show.
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
 
     assert!(harness.query_by_label("Category is missing").is_none());
 }
@@ -534,8 +537,8 @@ fn a_recalled_amount_clears_the_missing_amount_bubble() {
     }
     type_text(&mut harness, "Trattoria Roma");
 
-    // Enter moves the cursor on without opening a cell, so a bubble would show.
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    // Tab opens Category, leaving Payment closed, so its bubble would show.
+    press(&mut harness, Modifiers::NONE, Key::Tab);
 
     assert!(harness.query_by_label("Amount is missing").is_none());
 }

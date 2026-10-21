@@ -135,17 +135,20 @@ fn dialog_open(harness: &Harness<'static, App>) -> bool {
 }
 
 #[test]
-fn ok_creates_the_category_fills_the_cell_and_enter_moves_on() {
+fn ok_creates_the_category_fills_the_cell_and_enter_saves_the_row() {
     let mut harness = new_category_for("Pets");
 
     harness.get_by_role_and_label(Role::Button, "OK").click();
     harness.run();
 
     assert!(!dialog_open(&harness));
-    assert_eq!(field(&harness, "Category"), None);
     assert!(cell_shows(&harness, "Pets"));
-    // Enter took the Create row, so the cell cursor moves right as Enter does.
-    assert_eq!(cursor(&harness), "");
+    // Enter took the Create row, so the row saves and the next row's Category cell
+    // opens, as Enter does.
+    assert_eq!(
+        field(&harness, "Category").as_deref(),
+        Some("Income:Salary")
+    );
 }
 
 #[test]
@@ -282,6 +285,8 @@ fn clicking_the_dimmed_window_cancels() {
 fn undo_takes_the_category_out_of_the_cell_then_deletes_it() {
     let mut harness = new_category_for("Pets");
     press(&mut harness, Modifiers::NONE, Key::Enter);
+    // Closes the next row's Category cell, which the save opened.
+    press(&mut harness, Modifiers::NONE, Key::Escape);
 
     press(&mut harness, Modifiers::COMMAND, Key::Z);
     let after_first = harness

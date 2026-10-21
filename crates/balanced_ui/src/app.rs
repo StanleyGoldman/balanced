@@ -21,6 +21,7 @@ use crate::layout::Layout;
 use crate::main_window::{MainWindow, WindowFrame};
 use crate::preferences::{Preferences, PreferencesFile};
 use crate::recent_files::{RecentFiles, RecentFilesFile};
+use crate::route::Route;
 use crate::theme::{Theme, ThemeSettings};
 use crate::welcome::Welcome;
 
@@ -206,6 +207,7 @@ impl App {
     /// the view it closed on, and the new file goes to the top of the Recent files and
     /// opens on the view it last closed on, or else from scratch on the tab shown.
     fn switch_data_file(&mut self, ledger: Ledger, path: PathBuf) {
+        self.save_editing_row();
         self.note_closed();
         let listed = listed(path);
         self.recent_files.note_opened(listed.clone());
@@ -216,6 +218,56 @@ impl App {
         };
         self.main_window.data_file_switched();
         self.reopen_last_view();
+    }
+
+    /// Saves the changes to the Register's editing row into the open ledger at once,
+    /// with no confirm, as the Register goes: for another account's, another data
+    /// file's, or the window closing. A refused save shows in the Status bar.
+    // TODO(#423): ask Save, Continue editing or Discard first.
+    fn save_editing_row(&mut self) {
+        let (commands, saves) = self.commands.beside();
+        self.main_window
+            .save_editing_row(&self.i18n, &self.preferences, &commands);
+        let Session::Open { ledger, .. } = &mut self.session else {
+            return;
+        };
+        for command in saves.try_iter() {
+            match command {
+                AppCommand::Domain(command) => {
+                    if let Err(error) = ledger.apply(command) {
+                        let message = StatusMessage::refusal(error, &ledger.snapshot());
+                        self.main_window.show_status(message);
+                    }
+                }
+                AppCommand::ShowStatus(message) => self.main_window.show_status(message),
+                // The confirm a Reconciled amount change asks for can't open over a
+                // Register that is going, so that row's changes are not saved.
+                AppCommand::OpenDialog(kind) => {
+                    tracing::debug!(
+                        ?kind,
+                        "the editing row's save needs a confirm, so it was dropped"
+                    );
+                }
+                // Saving the editing row sends none of these.
+                AppCommand::SubmitForm(_)
+                | AppCommand::Undo
+                | AppCommand::Redo
+                | AppCommand::Navigate(_)
+                | AppCommand::OpenSplitView(_)
+                | AppCommand::GoToTransaction { .. }
+                | AppCommand::GoToDraftRow
+                | AppCommand::GoToDate(_)
+                | AppCommand::SwitchPane
+                | AppCommand::OpenCalculator
+                | AppCommand::SubmitDialog(_)
+                | AppCommand::SetPreferences(_)
+                | AppCommand::SetRegisterColumns(_)
+                | AppCommand::ChooseDataFile(_)
+                | AppCommand::NewDataFile(_)
+                | AppCommand::OpenDataFile(_)
+                | AppCommand::Quit => {}
+            }
+        }
     }
 
     /// Saves the view the Main window shows as the one the open data file closed on.
@@ -331,11 +383,21 @@ impl App {
                     self.main_window.show_status(message);
                 }
             }
-            AppCommand::Navigate(route) => self.main_window.navigate(route),
+            AppCommand::Navigate(route) => {
+                if self.main_window.replaces_register(route) {
+                    self.save_editing_row();
+                }
+                self.main_window.navigate(route);
+            }
             AppCommand::GoToTransaction {
                 account,
                 transaction,
-            } => self.main_window.go_to_transaction(account, transaction),
+            } => {
+                if self.main_window.replaces_register(Route::Account(account)) {
+                    self.save_editing_row();
+                }
+                self.main_window.go_to_transaction(account, transaction);
+            }
             AppCommand::GoToDate(date) => self.main_window.go_to_date(date),
             AppCommand::GoToDraftRow => {
                 if let Some(ledger) = ledger {
@@ -464,8 +526,10 @@ impl eframe::App for App {
         self.main_window.layout().save(storage);
     }
 
-    /// Saves the view the Main window shows as the one the open data file closed on.
+    /// Saves the changes to the Register's editing row, with no confirm, and the view
+    /// the Main window shows as the one the open data file closed on.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.save_editing_row();
         self.note_closed();
         self.save_recent_files();
     }

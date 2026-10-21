@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use balanced_core::{
     Account, AccountId, AccountSummary, Allocation, CategoryId, ClearedStatus, CurrencyCode,
-    Generation, LedgerView, Money, SplitTarget, Transaction, TransactionId,
+    Generation, LedgerView, Money, SplitTarget, Transaction, TransactionEdit, TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
 use icu_calendar::{Date, Iso};
@@ -101,6 +101,9 @@ enum RowKind {
     Transfer(OtherSide),
     /// The draft row, with its category once one is typed.
     Draft(Option<CategoryTarget>),
+    /// A transaction's row whose category, or the account its transfer goes to, is
+    /// changed and not yet saved.
+    Changed(CategoryTarget),
 }
 
 /// A transfer's other side: the transaction, and the account holding it.
@@ -173,6 +176,46 @@ impl RegisterRow {
         }
     }
 
+    /// This transaction's row showing `edits`, changes not yet saved, with categories
+    /// and accounts named as in `view`. The balance stays the saved one.
+    pub(crate) fn changed(
+        &self,
+        edits: &[TransactionEdit],
+        view: &LedgerView,
+        i18n: &Localizer,
+    ) -> Self {
+        let mut row = self.clone();
+        for edit in edits {
+            match edit {
+                TransactionEdit::Date(date) => {
+                    row.saved_date = Some(*date);
+                    row.date = i18n.format_date(*date);
+                }
+                TransactionEdit::Number(number) => {
+                    row.number = number.clone().unwrap_or_default();
+                }
+                TransactionEdit::Payee(payee) => payee.clone_into(&mut row.payee),
+                TransactionEdit::Memo(memo) => memo.clone_into(&mut row.memo),
+                TransactionEdit::Category(category) => {
+                    row.kind = RowKind::Changed(CategoryTarget::Category(*category));
+                    row.category = category_text(view, *category).unwrap_or_default();
+                }
+                TransactionEdit::Transfer(account) => {
+                    row.kind = RowKind::Changed(CategoryTarget::Transfer(*account));
+                    row.category = view
+                        .account(*account)
+                        .map(|summary| transfer_text(summary.account().name()))
+                        .unwrap_or_default();
+                }
+                TransactionEdit::Amount(amount) => {
+                    row.amount = Some(RowAmount::new(i18n, *amount));
+                }
+                TransactionEdit::ClearedStatus(status) => row.cleared_status = *status,
+            }
+        }
+        row
+    }
+
     pub(crate) fn id(&self) -> RowId {
         self.id
     }
@@ -195,11 +238,14 @@ impl RegisterRow {
     /// or split, or the draft row before a category is typed.
     pub(crate) fn category_id(&self) -> Option<CategoryId> {
         match self.kind {
-            RowKind::Category(id) | RowKind::Draft(Some(CategoryTarget::Category(id))) => Some(id),
+            RowKind::Category(id)
+            | RowKind::Draft(Some(CategoryTarget::Category(id)))
+            | RowKind::Changed(CategoryTarget::Category(id)) => Some(id),
             RowKind::OpeningBalance
             | RowKind::Split
             | RowKind::Transfer(_)
-            | RowKind::Draft(None | Some(CategoryTarget::Transfer(_))) => None,
+            | RowKind::Draft(None | Some(CategoryTarget::Transfer(_)))
+            | RowKind::Changed(CategoryTarget::Transfer(_)) => None,
         }
     }
 
@@ -208,11 +254,13 @@ impl RegisterRow {
     pub(crate) fn transfer_account(&self) -> Option<AccountId> {
         match self.kind {
             RowKind::Transfer(OtherSide { account, .. })
-            | RowKind::Draft(Some(CategoryTarget::Transfer(account))) => Some(account),
+            | RowKind::Draft(Some(CategoryTarget::Transfer(account)))
+            | RowKind::Changed(CategoryTarget::Transfer(account)) => Some(account),
             RowKind::OpeningBalance
             | RowKind::Category(_)
             | RowKind::Split
-            | RowKind::Draft(None | Some(CategoryTarget::Category(_))) => None,
+            | RowKind::Draft(None | Some(CategoryTarget::Category(_)))
+            | RowKind::Changed(CategoryTarget::Category(_)) => None,
         }
     }
 
@@ -220,9 +268,11 @@ impl RegisterRow {
     pub(crate) fn other_side(&self) -> Option<OtherSide> {
         match self.kind {
             RowKind::Transfer(other_side) => Some(other_side),
-            RowKind::OpeningBalance | RowKind::Category(_) | RowKind::Split | RowKind::Draft(_) => {
-                None
-            }
+            RowKind::OpeningBalance
+            | RowKind::Category(_)
+            | RowKind::Split
+            | RowKind::Draft(_)
+            | RowKind::Changed(_) => None,
         }
     }
 
@@ -230,7 +280,10 @@ impl RegisterRow {
     /// the Category cell edits.
     pub(crate) fn takes_category(&self) -> bool {
         match self.kind {
-            RowKind::Category(_) | RowKind::Transfer(_) | RowKind::Draft(_) => true,
+            RowKind::Category(_)
+            | RowKind::Transfer(_)
+            | RowKind::Draft(_)
+            | RowKind::Changed(_) => true,
             RowKind::OpeningBalance | RowKind::Split => false,
         }
     }

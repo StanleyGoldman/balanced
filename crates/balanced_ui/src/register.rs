@@ -38,6 +38,7 @@ use crate::register_model::{
     AmountSide, OtherSide, RegisterModel, RegisterRow, RegisterSort, RowId, Showing, SortDirection,
     SortKey, TodayDivider,
 };
+use crate::row_changes::RowChanges;
 use crate::theme::Theme;
 
 /// The narrowest Payee and Category get before the Register scrolls sideways.
@@ -195,22 +196,6 @@ impl RegisterColumn {
             | Self::Clr
             | Self::Flag
             | Self::Actions => None,
-        }
-    }
-
-    /// Whether the column holds the amount, on one side.
-    fn holds_amount(self) -> bool {
-        match self {
-            Self::Payment | Self::Deposit => true,
-            Self::Date
-            | Self::Number
-            | Self::Payee
-            | Self::Category
-            | Self::Memo
-            | Self::Balance
-            | Self::Clr
-            | Self::Flag
-            | Self::Actions => false,
         }
     }
 
@@ -437,13 +422,17 @@ struct DraftRow {
 
 /// The Register's rows: the transactions' in the order of the sort, then the draft
 /// row, which an account that can't change has none of. The Today divider is drawn
-/// between two rows, on a line of its own, and is no row.
+/// between two rows, on a line of its own, and is no row. A transaction's row with
+/// changes not yet saved shows them.
 #[derive(Debug, Clone, Copy)]
 struct Rows<'a> {
     transactions: &'a [RegisterRow],
     /// The index of the row the Today divider sits above, while it is drawn.
     divider: Option<usize>,
     draft: Option<&'a RegisterRow>,
+    /// The row of the transaction with changes not yet saved, showing them, in place
+    /// of its saved row.
+    changed: Option<&'a RegisterRow>,
 }
 
 /// One line of the Register's body: a row, with its index among the rows, or the
@@ -455,13 +444,26 @@ enum Line<'a> {
 }
 
 impl<'a> Rows<'a> {
-    /// The rows of `model`, with its Today divider, then `draft`.
-    fn new(model: &'a RegisterModel, draft: Option<&'a RegisterRow>) -> Self {
+    /// The rows of `model`, with its Today divider and `changed` in place of its
+    /// transaction's saved row, then `draft`.
+    fn new(
+        model: &'a RegisterModel,
+        draft: Option<&'a RegisterRow>,
+        changed: Option<&'a RegisterRow>,
+    ) -> Self {
         Self {
             transactions: model.rows(),
             divider: model.divider(),
             draft,
+            changed,
         }
+    }
+
+    /// `row`, or the changed row in its place when it is the same transaction's.
+    fn shown(self, row: &'a RegisterRow) -> &'a RegisterRow {
+        self.changed
+            .filter(|changed| changed.id() == row.id())
+            .unwrap_or(row)
     }
 
     /// How many lines the rows take: one each, and one for the Today divider.
@@ -493,15 +495,22 @@ impl<'a> Rows<'a> {
     fn get(self, index: usize) -> Option<&'a RegisterRow> {
         self.transactions
             .get(index)
+            .map(|row| self.shown(row))
             .or_else(|| self.draft.filter(|_| index == self.transactions.len()))
     }
 
     /// The row with `id`, unless it is gone.
     fn find(self, id: RowId) -> Option<&'a RegisterRow> {
         match id {
-            RowId::Transaction(_) => self.transactions.iter().find(|row| row.id() == id),
+            RowId::Transaction(_) => self.saved(id).map(|row| self.shown(row)),
             RowId::Draft => self.draft,
         }
+    }
+
+    /// The transaction's row with `id` as the ledger has it, without changes not yet
+    /// saved, unless it is gone.
+    fn saved(self, id: RowId) -> Option<&'a RegisterRow> {
+        self.transactions.iter().find(|row| row.id() == id)
     }
 
     /// The index of the row with `id`, unless it is gone.
@@ -548,7 +557,7 @@ struct CellEdit {
     /// The keypad under an Amount cell, while it is open.
     keypad: Option<Box<Keypad>>,
     /// Whether the keypad just handed its result back into the text, which the edit
-    /// saves on the next frame before it leaves the cell.
+    /// keeps in the row on the next frame before it leaves the cell.
     handed_back: bool,
 }
 
@@ -826,9 +835,10 @@ impl LinesInView {
 }
 
 /// The open account's Register: its cached rows, its sort and filter, the cell cursor,
-/// the cell being edited, and the draft row. The cursor's row is the selected row.
-/// Opening another account sorts it by date, clears the filter, empties the draft row
-/// and puts the cursor on it. None of it outlives the run.
+/// the cell being edited, the draft row, and the changes to the editing row. The
+/// cursor's row is the selected row. Opening another account sorts it by date, clears
+/// the filter, empties the draft row and puts the cursor on it. None of it outlives the
+/// run.
 #[derive(Debug, Default)]
 pub(crate) struct Register {
     /// The rows of the last account shown, rebuilt when they are out of date.
@@ -849,8 +859,18 @@ pub(crate) struct Register {
     lines_in_view: Option<LinesInView>,
     /// Whether the edit refused to let the keyboard leave its cell this frame.
     refused_leave: bool,
-    /// What the draft row holds.
-    draft: Draft,
+    /// What the draft row holds, and the changes to a transaction's row, kept back
+    /// until the row is saved.
+    unsaved: Unsaved,
+    /// The row of the transaction with changes, showing them, as of the end of the
+    /// last frame.
+    changed_row: Option<RegisterRow>,
+    /// The save of a transaction's row sent to the ledger, until a later snapshot
+    /// shows whether it was applied.
+    saving: Option<Saving>,
+    /// The cell that opens for editing on the next frame, once a save has gone
+    /// through or been refused.
+    open_after_save: Option<CellAddress>,
     /// The draft row, formatted, with the draft it shows. It is rebuilt when the draft
     /// changes or the transactions' rows are rebuilt. `None` while the account can't
     /// change.
@@ -935,8 +955,11 @@ impl Register {
 
     /// Catches up with what changed since the last frame: another account, `summary`'s,
     /// starts the Register over with the cell cursor on its draft row, unless it is
-    /// closed; and a post that `view` shows applied empties the draft row, and stays in
-    /// view until the filter changes.
+    /// closed; a post
+    /// that `view` shows applied empties the draft row, and stays in view until the
+    /// filter changes; and a save of a transaction's row that `view` shows applied
+    /// drops its changes and opens the cell it moves on to, while a refused one opens
+    /// the cell it started from again.
     fn catch_up(&mut self, summary: &AccountSummary, view: &LedgerView) {
         let account = summary.account().id();
         if self.model.as_ref().map(RegisterModel::account) != Some(account) {
@@ -953,9 +976,22 @@ impl Register {
             {
                 self.filter.keep(model.added(summary));
             }
-            self.draft = Draft::default();
+            self.unsaved.draft = Draft::default();
             self.missing = None;
             self.go_to_draft_row();
+        }
+        if let Some(saving) = self.saving.take() {
+            if view.generation() != saving.at {
+                self.unsaved.changes = None;
+                self.open_after_save = saving.next;
+            } else if saving.confirm == Confirm::Asked {
+                // The confirm is still open.
+                self.saving = Some(saving);
+            } else {
+                // The ledger refused the save, or the confirm was cancelled: the row
+                // keeps its changes, and the cell opens again.
+                self.open_after_save = Some(saving.from);
+            }
         }
         if let Some(id) = self.go_to.take() {
             self.cursor = Some(CellAddress {
@@ -968,22 +1004,38 @@ impl Register {
     }
 
     /// Settles what this frame's keys and clicks changed: an edit that refused to let
-    /// the keyboard go keeps the cell cursor, a filled cell drops its outline, and
-    /// `draft_row`, taken for the frame, comes back up to date with the draft.
-    fn end_frame(&mut self, draft_row: Option<DraftRow>, draft_frame: DraftFrame<'_>) {
+    /// the keyboard go keeps the cell cursor, a transaction's row the cursor left saves
+    /// its changes, a filled cell drops its outline, and `draft_row`, taken for the
+    /// frame, comes back up to date with the draft, as the changed row does with the
+    /// changes.
+    fn end_frame(
+        &mut self,
+        model: &RegisterModel,
+        draft_row: Option<DraftRow>,
+        draft_frame: DraftFrame<'_>,
+        commands: &CommandSender,
+    ) {
         if std::mem::take(&mut self.refused_leave)
             && let Some(edit) = &self.edit
         {
             self.cursor = Some(edit.cell());
         }
-        let draft = &self.draft;
+        let left = self.unsaved.changes.as_ref().is_some_and(|changes| {
+            self.cursor.map(|cursor| cursor.row) != Some(RowId::Transaction(changes.transaction()))
+        });
+        if left && self.saving.is_none() {
+            let rows = Rows::new(model, None, None);
+            self.unsaved.save_silently(rows, commands);
+        }
+        let draft = &self.unsaved.draft;
         self.missing = self.missing.filter(|&missing| draft.lacks(missing));
         self.draft_row = draft_row;
         self.refresh_draft_row(draft_frame, false);
+        self.changed_row = draft_frame.changed_row(model, self.unsaved.changes.as_ref());
     }
 
     /// Starts the Register over for another account: sorted by date and unfiltered,
-    /// with no cell cursor and an empty draft row.
+    /// with no cell cursor, an empty draft row and no changes kept.
     fn start_over(&mut self) {
         self.sort = RegisterSort::default();
         self.filter = RegisterFilter::default();
@@ -992,7 +1044,10 @@ impl Register {
         self.edit = None;
         self.awaiting_category = None;
         self.lines_in_view = None;
-        self.draft = Draft::default();
+        self.unsaved = Unsaved::default();
+        self.changed_row = None;
+        self.saving = None;
+        self.open_after_save = None;
         self.missing = None;
         self.posted_at = None;
         self.paste_target = None;
@@ -1011,11 +1066,11 @@ impl Register {
             && self
                 .draft_row
                 .as_ref()
-                .is_some_and(|draft_row| draft_row.draft == self.draft);
+                .is_some_and(|draft_row| draft_row.draft == self.unsaved.draft);
         if !current {
             self.draft_row = Some(DraftRow {
-                draft: self.draft.clone(),
-                row: frame.row(&self.draft),
+                draft: self.unsaved.draft.clone(),
+                row: frame.row(&self.unsaved.draft),
             });
         }
     }
@@ -1128,8 +1183,9 @@ impl Register {
         }
     }
 
-    /// Saves the cell being edited, if any, and closes its editor, as a Shortcut does
-    /// before it acts.
+    /// Keeps the cell being edited, if any, in its row, closes its editor, and saves a
+    /// transaction's row's changes, as a Shortcut does before it acts. The draft row
+    /// is not added.
     pub(crate) fn commit_edit(
         &mut self,
         ctx: &egui::Context,
@@ -1137,23 +1193,58 @@ impl Register {
         preferences: &Preferences,
         commands: &CommandSender,
     ) {
+        if let Some(edit) = &self.edit {
+            ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+        }
+        self.save_on_leaving(i18n, preferences, commands);
+    }
+
+    /// Keeps the cell being edited, if any, in its row, and saves the changes to a
+    /// transaction's row, as the editing row is left: when the Register gives way to
+    /// another account's or another data file's, when the window closes, or when a
+    /// Shortcut acts.
+    pub(crate) fn save_on_leaving(
+        &mut self,
+        i18n: &Localizer,
+        preferences: &Preferences,
+        commands: &CommandSender,
+    ) {
+        self.keep_open_edit(i18n, PayeeRecall::of(preferences), commands);
+        if let Some(model) = &self.model {
+            let rows = Rows::new(model, None, self.changed_row.as_ref());
+            self.unsaved.save_silently(rows, commands);
+        }
+    }
+
+    /// Keeps the cell being edited, if any, in its row, against the rows shown last
+    /// frame, and closes its edit. A refused edit is dropped, leaving the row as it was.
+    fn keep_open_edit(
+        &mut self,
+        i18n: &Localizer,
+        payee_recall: PayeeRecall,
+        commands: &CommandSender,
+    ) {
         let Some(edit) = self.edit.take() else {
             return;
         };
-        if let (Some(model), Some(choices)) = (&self.model, &self.choices) {
-            let draft_row = self.draft_row.as_ref().map(|draft| &draft.row);
-            let rows = Rows::new(model, draft_row);
-            let draft = &mut self.draft;
-            // A refused edit is dropped: the Shortcut acts on the saved value.
-            let _refused = match edit.clone() {
-                Edit::Text(edit) => {
-                    let payee_recall = PayeeRecall::of(preferences);
-                    commit(&edit, rows, choices, payee_recall, commands, draft)
-                }
-                Edit::Date(mut edit) => commit_date(i18n, &mut edit, rows, commands, draft),
-            };
+        let (Some(model), Some(choices)) = (&self.model, &self.choices) else {
+            return;
+        };
+        let draft_row = self.draft_row.as_ref().map(|draft| &draft.row);
+        let rows = Rows::new(model, draft_row, self.changed_row.as_ref());
+        let unsaved = &mut self.unsaved;
+        let _refused = match edit {
+            Edit::Text(edit) => commit(&edit, rows, choices, payee_recall, commands, unsaved),
+            Edit::Date(mut edit) => commit_date(i18n, &mut edit, rows, commands, unsaved),
+        };
+    }
+
+    /// Tells the Register that the confirm a save of its editing row asked for was
+    /// cancelled, so nothing was saved: the row keeps its changes.
+    pub(crate) fn confirm_cancelled(&mut self) {
+        if let Some(saving) = &mut self.saving {
+            saving.confirm = Confirm::Cancelled;
         }
-        ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
     }
 
     /// Queues a Tab press, with `modifiers` held, for the next frame.
@@ -1162,8 +1253,9 @@ impl Register {
     }
 
     /// Puts `text`, the Calculator's result, into the Payment or Deposit cell last
-    /// clicked or edited, as if typed there: the cell's edit opens holding it, and saves
-    /// it when the cell is left. With no such cell shown, the Status bar says so.
+    /// clicked or edited, as if typed there: the cell's edit opens holding it, and keeps
+    /// it in the row when the cell is left. With no such cell shown, the Status bar
+    /// says so.
     pub(crate) fn paste(&mut self, ctx: &egui::Context, text: String) {
         self.pasting = Some(text);
         ctx.request_repaint();
@@ -1221,10 +1313,7 @@ impl Register {
         let today_divider = today_divider(preferences, today);
         let (model, rebuilt) = self.take_model(summary, view, today, today_divider, i18n);
         self.filter_bar(ui, i18n, &model);
-        let choices = match self.choices.take() {
-            Some(choices) if choices.is_current(view, summary.account().id(), i18n) => choices,
-            _ => FieldChoices::new(view, summary.account().id(), i18n),
-        };
+        let choices = self.take_choices(view, account, i18n);
         let draft_frame = DraftFrame {
             closed,
             currency: summary.account().currency(),
@@ -1233,7 +1322,9 @@ impl Register {
         };
         self.refresh_draft_row(draft_frame, rebuilt);
         let draft_row = self.draft_row.take();
-        let rows = Rows::new(&model, draft_row.as_ref().map(|draft| &draft.row));
+        let changed_row = draft_frame.changed_row(&model, self.unsaved.changes.as_ref());
+        let draft = draft_row.as_ref().map(|draft| &draft.row);
+        let rows = Rows::new(&model, draft, changed_row.as_ref());
         let keys = KeyContext {
             i18n,
             account,
@@ -1311,9 +1402,23 @@ impl Register {
                         self.body(body, frame, row_height, pitch);
                     });
             });
-        self.end_frame(draft_row, draft_frame);
+        self.end_frame(&model, draft_row, draft_frame, commands);
         self.model = Some(model);
         self.choices = Some(choices);
+    }
+
+    /// Takes what the Payee and Category comboboxes of `account`, in `view`, offer,
+    /// rebuilt if it is out of date.
+    fn take_choices(
+        &mut self,
+        view: &LedgerView,
+        account: AccountId,
+        i18n: &Localizer,
+    ) -> FieldChoices {
+        match self.choices.take() {
+            Some(choices) if choices.is_current(view, account, i18n) => choices,
+            _ => FieldChoices::new(view, account, i18n),
+        }
     }
 
     /// Takes the model of `summary`'s rows, an account in `view`, as of `today` and
@@ -1573,10 +1678,10 @@ impl Register {
                 frame.choices,
                 frame.payee_recall,
                 frame.commands,
-                &mut self.draft,
+                &mut self.unsaved,
             ) {
-                // A refused category leaves nothing to save; the Status bar says why.
-                Commit::Done | Commit::Confirming | Commit::Refused => {}
+                // A refused category leaves the row as it was; the Status bar says why.
+                Commit::Done | Commit::Refused => {}
                 Commit::Unreadable(error) => {
                     // Leaving the cell is refused too: the edit keeps the keyboard, and
                     // the cell cursor comes back to it once the rows are laid out.
@@ -1607,7 +1712,7 @@ impl Register {
                         frame.choices,
                         frame.payee_recall,
                         frame.commands,
-                        &mut self.draft,
+                        &mut self.unsaved,
                     );
                 }
                 Taken::Create => {
@@ -1623,8 +1728,8 @@ impl Register {
 
     /// Draws the keypad of the Amount cell being edited, at `cell` with its 🖩 button
     /// at `button`, while it is open. A result it hands back goes into the edit, which
-    /// saves it and moves on to the next cell on the next frame; closing it gives the
-    /// edit back the keyboard as it was.
+    /// keeps it in the row and moves on to the next cell on the next frame; closing it
+    /// gives the edit back the keyboard as it was.
     fn show_keypad(
         &mut self,
         ctx: &egui::Context,
@@ -1701,7 +1806,7 @@ impl Register {
                 &mut edit,
                 frame.rows,
                 frame.commands,
-                &mut self.draft,
+                &mut self.unsaved,
             ) == Commit::Refused
         {
             self.cursor = Some(edit.cell);
@@ -1734,17 +1839,18 @@ impl Register {
             self.tabs.clear();
             return None;
         }
+        if let Some(cell) = self.open_after_save.take() {
+            return self.open_saved_cell(ctx, keys, cell);
+        }
         let cursor = self.cursor?;
         if let Some(moved) = self.resume_category_edit(ctx, keys, cursor) {
             return moved.scroll_offset;
         }
         self.refuse_characters(ctx, keys, cursor);
-        if cursor.row == RowId::Draft
-            && ctx.input_mut(|input| input.consume_key(Modifiers::COMMAND, Key::Enter))
-        {
-            // Ctrl+Enter saves the cell being edited, then adds the row.
+        if ctx.input_mut(|input| input.consume_key(Modifiers::COMMAND, Key::Enter)) {
+            // Ctrl+Enter keeps the cell being edited in the row, then saves the row.
             if self.commit_open_edit(ctx, keys) {
-                self.post(keys);
+                return self.save_row(ctx, keys, cursor);
             }
             return None;
         }
@@ -1764,6 +1870,12 @@ impl Register {
             Some(Edit::Text(edit)) => return self.handle_edit_keys(ctx, keys, edit, cursor, tab),
             Some(Edit::Date(edit)) => return self.handle_date_keys(ctx, keys, edit, cursor, tab),
             None => {}
+        }
+        if self.unsaved.holds(cursor.row)
+            && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape))
+        {
+            self.discard_row(cursor.row);
+            return None;
         }
         let pressed = ctx.input_mut(|input| {
             [
@@ -1852,8 +1964,8 @@ impl Register {
             edit.highlight_previous();
         }
         if escape {
-            // The first Esc closes the list and drops the completion; the next cancels
-            // the edit.
+            // The first Esc closes the list and drops the completion; the next throws
+            // away every change to the row.
             if list_open {
                 edit.list = None;
                 if edit.completion.is_some() {
@@ -1863,6 +1975,7 @@ impl Register {
                 self.edit = Some(Edit::Text(edit));
             } else {
                 ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+                self.discard_row(cursor.row);
             }
             return None;
         }
@@ -1890,9 +2003,9 @@ impl Register {
         None
     }
 
-    /// Saves `edit`, the cell being edited under `cursor`, and leaves the cell as
-    /// `leave` says, returning the scroll offset that brings the cell cursor into view
-    /// when it has left it. A refused commit keeps the edit open.
+    /// Keeps `edit`, the cell being edited under `cursor`, in its row, and leaves the
+    /// cell as `leave` says, returning the scroll offset that brings the cell cursor
+    /// into view when it has left it. A refused commit keeps the edit open.
     fn leave_cell(
         &mut self,
         ctx: &egui::Context,
@@ -1907,20 +2020,9 @@ impl Register {
             keys.choices,
             keys.payee_recall,
             keys.commands,
-            &mut self.draft,
+            &mut self.unsaved,
         ) {
             Commit::Done => {}
-            Commit::Confirming => {
-                // The confirm takes the keyboard, so the cell cursor moves as `leave`
-                // says but opens no cell behind it.
-                ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
-                let step = match leave {
-                    Leave::Enter | Leave::Next => Move::Next,
-                    Leave::Tab(step) => step,
-                    Leave::Stay => return None,
-                };
-                return self.move_cursor(cursor, step, keys.rows)?.scroll_offset;
-            }
             Commit::Refused => {
                 edit.list = None;
                 ctx.memory_mut(|memory| memory.request_focus(edit.editor_id()));
@@ -1933,19 +2035,9 @@ impl Register {
             }
         }
         ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
-        if leave == Leave::Enter
-            && cursor.row == RowId::Draft
-            && ((cursor.column.holds_amount() && self.draft.amount().is_some())
-                || self.cursor_columns().last() == Some(&cursor.column))
-        {
-            // Enter on the draft row's last cell, or on an amount cell once the row
-            // has an amount, adds the row. Enter on an empty Payment moves on to
-            // Deposit.
-            self.post(keys);
-            return None;
-        }
         let step = match leave {
-            Leave::Enter | Leave::Next => Move::Next,
+            Leave::Enter => return self.save_row(ctx, keys, cursor),
+            Leave::Next => Move::Next,
             Leave::Tab(step) => step,
             Leave::Stay => return None,
         };
@@ -1959,8 +2051,8 @@ impl Register {
     }
 
     /// Tells the Category cell edit waiting on the New Category Dialog that the
-    /// category it asked for was created, with `path` its path. The edit saves it and
-    /// carries on as the key that took the Create row says.
+    /// category it asked for was created, with `path` its path. The edit keeps it in
+    /// the row and carries on as the key that took the Create row says.
     pub(crate) fn category_created(&mut self, path: String) {
         if let Some(awaiting) = &mut self.awaiting_category {
             awaiting.outcome = Some(CategoryOutcome::Created(path));
@@ -2012,8 +2104,8 @@ impl Register {
     /// Acts on this frame's keys for `edit`, the Date cell being edited under `cursor`,
     /// with `tab` the move a Tab press asks for, and returns the scroll offset that
     /// brings the cell cursor into view when it has left it. While the calendar is open
-    /// the field takes Enter and Esc itself; otherwise Esc cancels the edit and Enter
-    /// commits it. A refused date keeps the edit open.
+    /// the field takes Enter and Esc itself; otherwise Esc throws away every change to
+    /// the row and Enter saves the row. A refused date keeps the edit open.
     fn handle_date_keys(
         &mut self,
         ctx: &egui::Context,
@@ -2034,6 +2126,7 @@ impl Register {
         };
         if escape {
             ctx.memory_mut(|memory| memory.surrender_focus(editor_id(edit.cell)));
+            self.discard_row(cursor.row);
             return None;
         }
         if enter || tab.is_some() {
@@ -2042,19 +2135,19 @@ impl Register {
                 &mut edit,
                 keys.rows,
                 keys.commands,
-                &mut self.draft,
+                &mut self.unsaved,
             ) == Commit::Refused
             {
                 self.edit = Some(Edit::Date(edit));
                 return None;
             }
             ctx.memory_mut(|memory| memory.surrender_focus(editor_id(edit.cell)));
-            let step = if enter { Move::Next } else { tab? };
-            let moved = self.move_cursor(cursor, step, keys.rows)?;
-            // Tab opens the cell it moved to, as it does from a text cell.
-            if !enter {
-                self.start_edit(ctx, keys, EditStart::Saved);
+            if enter {
+                return self.save_row(ctx, keys, cursor);
             }
+            let moved = self.move_cursor(cursor, tab?, keys.rows)?;
+            // Tab opens the cell it moved to, as it does from a text cell.
+            self.start_edit(ctx, keys, EditStart::Saved);
             return moved.scroll_offset;
         }
         self.edit = Some(Edit::Date(edit));
@@ -2155,7 +2248,7 @@ impl Register {
         // as it is now.
         let current_draft;
         let row = if cursor.row == RowId::Draft {
-            current_draft = keys.draft_frame.row(&self.draft);
+            current_draft = keys.draft_frame.row(&self.unsaved.draft);
             &current_draft
         } else {
             row
@@ -2211,9 +2304,10 @@ impl Register {
         self.edit = Some(Edit::Text(edit));
     }
 
-    /// Saves the cell being edited, if any, and closes its editor, as Ctrl+Enter does
-    /// before it adds the draft row. A highlighted list entry is taken first. Returns
-    /// whether the edit, if any, was saved; a refused one stays open, saying why.
+    /// Keeps the cell being edited, if any, in its row, and closes its editor, as
+    /// Ctrl+Enter does before it saves the row. A highlighted list entry is taken
+    /// first. Returns whether the edit, if any, was kept; a refused one stays open,
+    /// saying why.
     fn commit_open_edit(&mut self, ctx: &egui::Context, keys: &KeyContext<'_>) -> bool {
         let Some(edit) = self.edit.take() else {
             return true;
@@ -2230,9 +2324,9 @@ impl Register {
                     keys.choices,
                     keys.payee_recall,
                     keys.commands,
-                    &mut self.draft,
+                    &mut self.unsaved,
                 ) {
-                    Commit::Done | Commit::Confirming => None,
+                    Commit::Done => None,
                     Commit::Refused => {
                         edit.list = None;
                         Some(Edit::Text(edit))
@@ -2246,7 +2340,7 @@ impl Register {
                     &mut edit,
                     keys.rows,
                     keys.commands,
-                    &mut self.draft,
+                    &mut self.unsaved,
                 );
                 (commit == Commit::Refused).then_some(Edit::Date(edit))
             }
@@ -2258,13 +2352,80 @@ impl Register {
         self.edit.is_none()
     }
 
+    /// Saves the row of `cursor`, the editing row, as Enter and Ctrl+Enter do, and
+    /// returns the scroll offset that brings the cell cursor into view when it has
+    /// left it. The draft row is added. A transaction's changes are sent as one
+    /// Command, and once the ledger applies it the next row's cell in the same column
+    /// opens; a refused save keeps the changes and opens the cell again. A row with no
+    /// changes moves on at once.
+    fn save_row(
+        &mut self,
+        ctx: &egui::Context,
+        keys: &KeyContext<'_>,
+        cursor: CellAddress,
+    ) -> Option<f32> {
+        if cursor.row == RowId::Draft {
+            self.post(keys);
+            return None;
+        }
+        let Some(changes) = self
+            .unsaved
+            .changes
+            .as_ref()
+            .filter(|_| self.unsaved.holds(cursor.row))
+        else {
+            let moved = self.move_cursor(cursor, Move::Down, keys.rows)?;
+            self.start_edit(ctx, keys, EditStart::Saved);
+            return moved.scroll_offset;
+        };
+        let next = keys
+            .rows
+            .position(cursor.row)
+            .and_then(|index| keys.rows.get(index + 1))
+            .map(|row| CellAddress {
+                row: row.id(),
+                column: cursor.column,
+            });
+        let confirm = send_save(changes, keys.rows, keys.commands);
+        self.saving = Some(Saving {
+            at: keys.generation,
+            from: cursor,
+            next,
+            confirm,
+        });
+        None
+    }
+
+    /// Opens `cell` for editing after a save of its row or the row above it, unless
+    /// its row is gone, and returns the scroll offset that brings it into view.
+    fn open_saved_cell(
+        &mut self,
+        ctx: &egui::Context,
+        keys: &KeyContext<'_>,
+        cell: CellAddress,
+    ) -> Option<f32> {
+        let index = keys.rows.position(cell.row)?;
+        self.cursor = Some(cell);
+        self.start_edit(ctx, keys, EditStart::Saved);
+        self.lines_in_view?.offset_showing(keys.rows.line_of(index))
+    }
+
+    /// Throws away every change to `row`, leaving the cell cursor on it with no cell
+    /// open: the draft row empties, and a transaction's row shows its saved values.
+    fn discard_row(&mut self, row: RowId) {
+        self.unsaved.discard(row);
+        if row == RowId::Draft {
+            self.missing = None;
+        }
+    }
+
     /// Adds the draft row to the account. Once the ledger applies it, the draft row
     /// empties and the cell cursor goes to its first cell; a rejected post keeps the
     /// draft, and the Status bar says why. A row missing a cell the transaction needs
     /// is refused: the cursor goes to the first such cell, outlined, with a bubble
     /// saying what is missing.
     fn post(&mut self, keys: &KeyContext<'_>) {
-        match self.draft.posting(keys.account) {
+        match self.unsaved.draft.posting(keys.account) {
             Ok(command) => {
                 keys.commands.send(AppCommand::Domain(command));
                 self.posted_at = Some(keys.generation);
@@ -2347,10 +2508,10 @@ fn complete_typing(ctx: &egui::Context, edit: &mut CellEdit, choices: &FieldChoi
     ctx.request_repaint();
 }
 
-/// How a cell edit leaves its cell once its text is saved.
+/// How a cell edit leaves its cell once its text is kept in the row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Leave {
-    /// As Enter does: the cell cursor moves to the next cell, which stays closed.
+    /// As Enter does: the row is saved.
     Enter,
     /// As Tab and Shift+Tab do: the cell cursor makes this move and opens the cell.
     Tab(Move),
@@ -2460,7 +2621,8 @@ fn fully_in(viewport: Rect, rect: Rect) -> bool {
     view.contains(rect.top()) && view.contains(rect.bottom())
 }
 
-/// What the draft row is formatted with in one frame.
+/// What the draft row, and the row of a transaction with changes, are formatted with
+/// in one frame.
 #[derive(Clone, Copy)]
 struct DraftFrame<'a> {
     /// Whether the account is closed, so has no draft row.
@@ -2480,6 +2642,19 @@ impl DraftFrame<'_> {
             ..
         } = self;
         RegisterRow::draft(draft, currency, view, i18n)
+    }
+
+    /// The row of the transaction `changes` are to, among `model`'s rows, showing
+    /// them, unless there are none or the row isn't shown.
+    fn changed_row(
+        self,
+        model: &RegisterModel,
+        changes: Option<&RowChanges>,
+    ) -> Option<RegisterRow> {
+        let changes = changes?;
+        let id = RowId::Transaction(changes.transaction());
+        let saved = model.rows().iter().find(|row| row.id() == id)?;
+        Some(saved.changed(changes.edits(), self.view, self.i18n))
     }
 }
 
@@ -2550,31 +2725,26 @@ fn open_split_view(row: &RegisterRow, column: RegisterColumn, commands: &Command
 /// Whether a commit went through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Commit {
-    /// The value was saved, or matched the saved one, or its row is gone.
+    /// The value is kept in the row, or matched the row's, or its row is gone.
     Done,
-    /// The value is a Reconciled transaction's new amount, so nothing was sent: the
-    /// confirm that sends it was asked for, and until it does the cell shows the
-    /// saved amount.
-    Confirming,
-    /// The value can't be saved, so nothing was sent: a category no category is named
-    /// (the Status bar says so), or a refused date (its bubble says so).
+    /// The value can't be kept, so the row is unchanged: a category no category is
+    /// named (the Status bar says so), or a refused date (its bubble says so).
     Refused,
-    /// The amount's text can't be read, for this reason, so nothing was sent.
+    /// The amount's text can't be read, for this reason, so the row is unchanged.
     Unreadable(AmountParseError),
 }
 
-/// Saves `edit`'s text, trimmed, unless it matches the saved text or saved amount: in
-/// `draft` on the draft row, else by sending one edit Command. A new amount for a
-/// transaction whose amount change asks first is not sent: the confirm is asked for
-/// instead, and sends it once accepted. A payee saved in the draft row recalls what
-/// `choices` remember of it, when `payee_recall` is on.
+/// Keeps `edit`'s text, trimmed, in its row, unless it matches what the row shows: in
+/// the draft on the draft row, else among the changes to the row's transaction. Nothing
+/// is sent to the ledger until the row is saved. A payee kept in the draft row recalls
+/// what `choices` remember of it, when `payee_recall` is on.
 fn commit(
     edit: &CellEdit,
     rows: Rows<'_>,
     choices: &FieldChoices,
     payee_recall: PayeeRecall,
     commands: &CommandSender,
-    draft: &mut Draft,
+    unsaved: &mut Unsaved,
 ) -> Commit {
     let Some(row) = rows.find(edit.cell.row) else {
         return Commit::Done;
@@ -2598,22 +2768,13 @@ fn commit(
         },
     };
     match (change, row.transaction()) {
-        (Some(TransactionEdit::Amount(amount)), Some(transaction))
-            if amount_change_asks_first(row.cleared_status()) =>
-        {
-            commands.send(AppCommand::OpenDialog(DialogKind::ChangeReconciledAmount {
-                transaction,
-                amount,
-            }));
-            return Commit::Confirming;
-        }
         (Some(TransactionEdit::Payee(payee)), None)
             if payee_recall == PayeeRecall::On
                 && let Some(recalled) = choices.recalled(&payee) =>
         {
-            draft.recall(recalled);
+            unsaved.draft.recall(recalled);
         }
-        (Some(edit), _) => save(row.id(), edit, commands, draft),
+        (Some(edit), _) => unsaved.keep(rows, row.id(), edit, commands),
         (None, _) => {}
     }
     Commit::Done
@@ -2628,18 +2789,129 @@ fn amount_change_asks_first(status: ClearedStatus) -> bool {
     }
 }
 
-/// Saves `edit` in a cell of `row`: in `draft` on the draft row, else by sending one
-/// edit Command.
-fn save(row: RowId, edit: TransactionEdit, commands: &CommandSender, draft: &mut Draft) {
-    match row {
-        RowId::Transaction(transaction) => {
-            commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
-                transaction,
-                edit,
-            }));
+/// What the Register holds and hasn't saved: what the draft row holds, and the
+/// changes to one transaction's row.
+#[derive(Debug, Default)]
+struct Unsaved {
+    draft: Draft,
+    changes: Option<RowChanges>,
+}
+
+impl Unsaved {
+    /// Keeps `edit`, made in a cell of `row`: in the draft on the draft row, else among
+    /// the changes to its transaction, measured against its saved row in `rows`.
+    /// Changes still kept for another transaction's row are saved first.
+    fn keep(
+        &mut self,
+        rows: Rows<'_>,
+        row: RowId,
+        edit: TransactionEdit,
+        commands: &CommandSender,
+    ) {
+        let RowId::Transaction(transaction) = row else {
+            self.draft.edit(edit);
+            return;
+        };
+        let Some(saved) = rows.saved(row) else {
+            return;
+        };
+        if self
+            .changes
+            .as_ref()
+            .is_some_and(|changes| changes.transaction() != transaction)
+        {
+            self.save_silently(rows, commands);
         }
-        RowId::Draft => draft.edit(edit),
+        let changes = self
+            .changes
+            .get_or_insert_with(|| RowChanges::new(transaction));
+        changes.record(saved, edit);
+        if changes.is_empty() {
+            self.changes = None;
+        }
     }
+
+    /// Whether `row` holds anything not yet saved: a filled draft row, or a
+    /// transaction's row with changes.
+    fn holds(&self, row: RowId) -> bool {
+        match row {
+            RowId::Draft => self.draft != Draft::default(),
+            RowId::Transaction(transaction) => self
+                .changes
+                .as_ref()
+                .is_some_and(|changes| changes.transaction() == transaction),
+        }
+    }
+
+    /// Throws away everything `row` holds that isn't saved.
+    fn discard(&mut self, row: RowId) {
+        match row {
+            RowId::Draft => self.draft = Draft::default(),
+            RowId::Transaction(_) => {
+                if self.holds(row) {
+                    self.changes = None;
+                }
+            }
+        }
+    }
+
+    /// Saves the changes to a transaction's row, if any, as the row is left: they are
+    /// sent at once, or through the confirm when they change a Reconciled amount, and
+    /// are no longer kept whatever the ledger makes of them.
+    // TODO(#423): leaving a changed row asks Save, Continue editing or Discard first.
+    fn save_silently(&mut self, rows: Rows<'_>, commands: &CommandSender) {
+        if let Some(changes) = self.changes.take() {
+            send_save(&changes, rows, commands);
+        }
+    }
+}
+
+/// Sends the Command that saves `changes`, made to a transaction's row in `rows`, or
+/// asks for the confirm that sends it when they change the amount of a transaction
+/// whose amount change asks first. Returns whether it asked.
+fn send_save(changes: &RowChanges, rows: Rows<'_>, commands: &CommandSender) -> Confirm {
+    let Some(save) = changes.saving() else {
+        return Confirm::None;
+    };
+    let transaction = changes.transaction();
+    let asks_first = rows
+        .saved(RowId::Transaction(transaction))
+        .is_some_and(|row| amount_change_asks_first(row.cleared_status()));
+    if let Some(amount) = changes.amount().filter(|_| asks_first) {
+        commands.send(AppCommand::OpenDialog(DialogKind::ChangeReconciledAmount {
+            transaction,
+            amount,
+            save,
+        }));
+        Confirm::Asked
+    } else {
+        commands.send(AppCommand::Domain(save));
+        Confirm::None
+    }
+}
+
+/// Whether a save waits on the confirm a Reconciled amount change asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Confirm {
+    /// The save was sent with no confirm.
+    None,
+    /// The confirm is open, and sends the save if it is accepted.
+    Asked,
+    /// The confirm was cancelled, so nothing was sent.
+    Cancelled,
+}
+
+/// The save of a transaction's row, sent to the ledger or waiting on the confirm,
+/// until a later snapshot shows whether it was applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Saving {
+    /// The generation of the snapshot the save was sent against.
+    at: Generation,
+    /// The cell the save started from, which opens again if the save is refused.
+    from: CellAddress,
+    /// The cell that opens once the save is applied, if any.
+    next: Option<CellAddress>,
+    confirm: Confirm,
 }
 
 /// The edit that saves `text`, already trimmed, as the amount of `row` on `side`,
@@ -2663,15 +2935,15 @@ fn amount_edit(
     Ok((row.amount() != Some(money)).then_some(TransactionEdit::Amount(money)))
 }
 
-/// Saves `edit`'s date, unless it matches the saved date: in `draft` on the draft
-/// row, else by sending one edit Command. A refused date shows the format message
-/// and saves nothing.
+/// Keeps `edit`'s date in its row, unless it matches the date the row shows, as
+/// [`commit`] keeps text. A refused date shows the format message and changes
+/// nothing.
 fn commit_date(
     i18n: &Localizer,
     edit: &mut DateCellEdit,
     rows: Rows<'_>,
     commands: &CommandSender,
-    draft: &mut Draft,
+    unsaved: &mut Unsaved,
 ) -> Commit {
     let Some(row) = rows.find(edit.cell.row) else {
         return Commit::Done;
@@ -2679,7 +2951,7 @@ fn commit_date(
     match edit.date.commit(i18n) {
         date_field::Commit::Unchanged => Commit::Done,
         date_field::Commit::Changed(date) => {
-            save(row.id(), TransactionEdit::Date(date), commands, draft);
+            unsaved.keep(rows, row.id(), TransactionEdit::Date(date), commands);
             Commit::Done
         }
         date_field::Commit::Rejected => Commit::Refused,
@@ -3678,7 +3950,7 @@ mod tests {
     }
 
     #[test]
-    fn a_commit_sends_one_edit_with_the_text_trimmed() {
+    fn a_save_sends_the_changed_cell_trimmed_in_one_compound() {
         let (mut harness, receiver) = register();
         click_cell(&mut harness, "Fresh Market");
         harness.event(Event::Text(" Corner Shop  ".to_owned()));
@@ -3689,10 +3961,12 @@ mod tests {
         let fresh_market = harness.state().transaction("Fresh Market");
         assert_eq!(
             receiver.try_iter().collect::<Vec<_>>(),
-            [AppCommand::Domain(DomainCommand::EditTransaction {
-                transaction: fresh_market,
-                edit: TransactionEdit::Payee("Corner Shop".to_owned()),
-            })]
+            [AppCommand::Domain(DomainCommand::Compound(vec![
+                DomainCommand::EditTransaction {
+                    transaction: fresh_market,
+                    edit: TransactionEdit::Payee("Corner Shop".to_owned()),
+                }
+            ]))]
         );
     }
 
@@ -3710,10 +3984,12 @@ mod tests {
         let rent = harness.state().transaction("Maple Property Management");
         assert_eq!(
             receiver.try_iter().collect::<Vec<_>>(),
-            [AppCommand::Domain(DomainCommand::EditTransaction {
-                transaction: rent,
-                edit: TransactionEdit::Number(None),
-            })]
+            [AppCommand::Domain(DomainCommand::Compound(vec![
+                DomainCommand::EditTransaction {
+                    transaction: rent,
+                    edit: TransactionEdit::Number(None),
+                }
+            ]))]
         );
     }
 
