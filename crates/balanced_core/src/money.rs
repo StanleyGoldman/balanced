@@ -241,11 +241,12 @@ mod tests {
     use super::*;
 
     fn currency(code: &str) -> CurrencyCode {
-        CurrencyCode::new(code).unwrap()
+        CurrencyCode::new(code).expect("the test names an ISO 4217 currency with minor units")
     }
 
     fn money(amount: Decimal, code: &str) -> Money {
-        Money::new(amount, currency(code)).unwrap()
+        Money::new(amount, currency(code))
+            .expect("the test's amount has no more significant decimal places than its currency")
     }
 
     /// Spot-checks `iso_currency`, which takes its data from Wikipedia, against the

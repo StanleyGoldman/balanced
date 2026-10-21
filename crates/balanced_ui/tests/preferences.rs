@@ -8,6 +8,7 @@ use std::path::Path;
 
 use balanced_core::Ledger;
 use balanced_i18n::Localizer;
+use balanced_ui::testing::check_saved_preferences;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::{FontFamily, Key};
@@ -58,12 +59,6 @@ fn is_dark(harness: &Harness<'static, App>) -> bool {
     harness.ctx.global_style().visuals.dark_mode
 }
 
-/// The text of the preferences file in `config_dir`.
-fn file_text(config_dir: &TempDir) -> String {
-    std::fs::read_to_string(config_dir.path().join("preferences.toml"))
-        .expect("the App wrote the preferences file")
-}
-
 #[test]
 fn dark_then_ok_applies_the_dark_theme_and_writes_the_file() {
     let dir = config_dir();
@@ -74,25 +69,10 @@ fn dark_then_ok_applies_the_dark_theme_and_writes_the_file() {
     click(&mut harness, Role::Button, "OK");
 
     assert!(is_dark(&harness));
-    assert_eq!(
-        file_text(&dir),
+    check_saved_preferences(
+        dir.path(),
         "version = 2\n\
-         scheme = \"dark\"\n\
-         font_face = \"egui\"\n\
-         dense_rows = false\n\
-         monospace_money = false\n\
-         coloured_negatives = true\n\
-         alternating_rows = true\n\
-         today_divider = true\n\
-         gridlines = \"off\"\n\
-         payee_recall = true\n\
-         inline_completion = true\n\
-         enter_moves_to_next_row = true\n\
-         save_without_asking = false\n\
-         group_totals = false\n\
-         net_worth_placement = \"account_bar\"\n\
-         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
-         hidden_register_columns = []\n"
+         scheme = \"dark\"\n",
     );
 }
 
@@ -171,25 +151,13 @@ fn the_other_display_preferences_apply_and_are_saved_on_ok() {
         .fonts(|fonts| fonts.definitions().families[&FontFamily::Proportional][0].clone());
     assert_eq!(row_height, 16.0);
     assert_eq!(first_face, "Noto Sans");
-    assert_eq!(
-        file_text(&dir),
+    check_saved_preferences(
+        dir.path(),
         "version = 2\n\
-         scheme = \"light\"\n\
          font_face = \"noto_sans\"\n\
          dense_rows = true\n\
          monospace_money = true\n\
-         coloured_negatives = false\n\
-         alternating_rows = true\n\
-         today_divider = true\n\
-         gridlines = \"off\"\n\
-         payee_recall = true\n\
-         inline_completion = true\n\
-         enter_moves_to_next_row = true\n\
-         save_without_asking = false\n\
-         group_totals = false\n\
-         net_worth_placement = \"account_bar\"\n\
-         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
-         hidden_register_columns = []\n"
+         coloured_negatives = false\n",
     );
 }
 
@@ -247,25 +215,14 @@ fn the_register_preferences_are_saved_on_ok() {
     );
     click(&mut harness, Role::Button, "OK");
 
-    assert_eq!(
-        file_text(&dir),
+    check_saved_preferences(
+        dir.path(),
         "version = 2\n\
-         scheme = \"light\"\n\
-         font_face = \"egui\"\n\
-         dense_rows = false\n\
-         monospace_money = false\n\
-         coloured_negatives = true\n\
          alternating_rows = false\n\
          today_divider = false\n\
          gridlines = \"both\"\n\
-         payee_recall = true\n\
-         inline_completion = true\n\
          enter_moves_to_next_row = false\n\
-         save_without_asking = true\n\
-         group_totals = false\n\
-         net_worth_placement = \"account_bar\"\n\
-         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
-         hidden_register_columns = []\n"
+         save_without_asking = true\n",
     );
 }
 
@@ -294,25 +251,11 @@ fn the_account_bar_preferences_are_saved_on_ok() {
 
     click(&mut harness, Role::Button, "OK");
 
-    assert_eq!(
-        file_text(&dir),
+    check_saved_preferences(
+        dir.path(),
         "version = 2\n\
-         scheme = \"light\"\n\
-         font_face = \"egui\"\n\
-         dense_rows = false\n\
-         monospace_money = false\n\
-         coloured_negatives = true\n\
-         alternating_rows = true\n\
-         today_divider = true\n\
-         gridlines = \"off\"\n\
-         payee_recall = true\n\
-         inline_completion = true\n\
-         enter_moves_to_next_row = true\n\
-         save_without_asking = false\n\
          group_totals = true\n\
-         net_worth_placement = \"status_bar\"\n\
-         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
-         hidden_register_columns = []\n"
+         net_worth_placement = \"status_bar\"\n",
     );
 }
 
