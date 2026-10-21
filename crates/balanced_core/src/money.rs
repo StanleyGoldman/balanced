@@ -246,7 +246,7 @@ mod tests {
 
     fn money(amount: Decimal, code: &str) -> Money {
         Money::new(amount, currency(code))
-            .expect("the test's amount has no more decimal places than its currency")
+            .expect("the test's amount has no more significant decimal places than its currency")
     }
 
     /// Spot-checks `iso_currency`, which takes its data from Wikipedia, against the

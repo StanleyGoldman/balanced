@@ -1627,7 +1627,8 @@ mod tests {
     }
 
     fn usd(amount: Decimal) -> Money {
-        Money::new(amount, usd_code()).expect("the test's amount has at most two decimal places")
+        Money::new(amount, usd_code())
+            .expect("the test's amount fits in Money with at most two significant decimal places")
     }
 
     fn date(day: u8) -> Date<Iso> {
