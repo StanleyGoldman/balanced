@@ -1217,6 +1217,30 @@ fn typed_arithmetic_commits_its_result_rounded_to_the_currency_decimal_places() 
 }
 
 #[test]
+fn typed_arithmetic_commits_its_result_on_tab() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "86.42");
+    type_text(&mut harness, "20+5");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(payment_of(&harness, "Fresh Market"), "25.00");
+}
+
+#[test]
+fn typed_arithmetic_commits_its_result_on_a_click_away() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "86.42");
+    type_text(&mut harness, "20+5");
+
+    click_cell(&mut harness, "Bean There");
+
+    assert_eq!(payment_of(&harness, "Fresh Market"), "25.00");
+}
+
+#[test]
 fn an_amount_with_excess_decimal_places_stays_in_edit_mode() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");

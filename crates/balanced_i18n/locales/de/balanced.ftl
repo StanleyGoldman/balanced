@@ -159,6 +159,22 @@ dialog-welcome-open = Vorhandene Datendatei öffnen …
 dialog-welcome-continue = Weiter
 dialog-welcome-quit = Beenden
 
+## Keypad
+
+field-amount-keypad = Rechner
+    .tooltip = Rechner (Alt+Herunter)
+keypad-add = Addieren
+keypad-subtract = Subtrahieren
+keypad-multiply = Multiplizieren
+keypad-divide = Dividieren
+keypad-decimal = Dezimaltrennzeichen
+keypad-clear = Löschen
+    .key = C
+keypad-backspace = Rücktaste
+keypad-ok = OK
+keypad-waiting = …
+keypad-not-an-amount = Kein Betrag
+
 ## Date field
 
 field-date-today = Heute

@@ -367,6 +367,30 @@ field-amount-preview = = { $amount }
 # The same, when the result was rounded to the currency's decimal places.
 field-amount-preview-rounded = ~ { $amount }
 
+## Keypad
+
+# The button beside an amount field that opens its keypad, a calculator under the
+# field. The keypad's sum is labelled with the same word.
+field-amount-keypad = Keypad
+    .tooltip = Keypad (Alt+Down)
+# The keypad's keys, as a screen reader reads them. Each shows its symbol.
+keypad-add = Add
+keypad-subtract = Subtract
+keypad-multiply = Multiply
+keypad-divide = Divide
+keypad-decimal = Decimal mark
+# .key is the letter on the key itself.
+keypad-clear = Clear
+    .key = C
+keypad-backspace = Backspace
+# Puts the keypad's result in the amount field.
+keypad-ok = OK
+# Shown under the keypad's sum while it ends in an operator, waiting for the next
+# amount.
+keypad-waiting = …
+# Shown under the keypad's sum when it can't be read as an amount.
+keypad-not-an-amount = Not an amount
+
 ## Date field
 
 # The letters standing for each part of a date in a date pattern, such as M/D/YYYY.

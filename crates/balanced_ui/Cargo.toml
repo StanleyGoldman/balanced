@@ -105,6 +105,10 @@ name = "keyboard"
 required-features = ["test-support"]
 
 [[test]]
+name = "keypad"
+required-features = ["test-support"]
+
+[[test]]
 name = "layout"
 required-features = ["test-support"]
 
