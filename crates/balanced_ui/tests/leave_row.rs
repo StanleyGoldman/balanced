@@ -440,7 +440,10 @@ fn a_draft_row_the_ledger_refuses_to_add_brings_the_cursor_back_to_it() {
     fill_draft(&mut harness, "792281625142643375935439503.35");
     click_cell(&mut harness, "Fresh Market");
 
-    click_button(&mut harness, "Add");
+    harness.get_by_role_and_label(Role::Button, "Add").click();
+    // The prompt's answer, the post, the ledger's refusal, then the Dialog saying so.
+    harness.run_steps(8);
+    click_button(&mut harness, "Continue editing");
 
     assert_eq!(
         editor(&harness, "Payment").as_deref(),

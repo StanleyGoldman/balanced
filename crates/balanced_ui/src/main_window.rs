@@ -36,6 +36,7 @@ use crate::recent_files::RecentFiles;
 use crate::register::{ColumnWidths, LeaveAnswer, LeftRow, Register};
 use crate::register_model::RegisterRow;
 use crate::route::{Route, TopLevelTab};
+use crate::save_refusal::{RefusalAnswer, SaveRefusal};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
 
@@ -72,6 +73,9 @@ pub(crate) struct MainWindow {
     go_to_date: Option<OpenDialog<GoToDateForm>>,
     /// The leave-row prompt, while it is open.
     leave_row: Option<OpenDialog<LeaveRowForm>>,
+    /// The "Can't save this transaction" Dialog, with why the save was refused, while
+    /// it is open.
+    cant_save: Option<OpenDialog<SaveRefusal>>,
     /// The Calculator, while it is open.
     calculator: Option<Calculator>,
     /// Where focus goes now that a Dialog has closed, until a frame restores it.
@@ -154,6 +158,7 @@ impl MainWindow {
             data_file_refusal: None,
             go_to_date: None,
             leave_row: None,
+            cant_save: None,
             calculator: None,
             focus_return: None,
             menu_nav: MenuNav::default(),
@@ -388,6 +393,7 @@ impl MainWindow {
             manage_accounts,
             go_to_date,
             leave_row,
+            cant_save,
             // The Preferences, and a refusal shown meanwhile, belong to no one file.
             preferences: _,
             data_file_refusal: _,
@@ -408,6 +414,7 @@ impl MainWindow {
         *manage_accounts = None;
         *go_to_date = None;
         *leave_row = None;
+        *cant_save = None;
     }
 
     /// Opens the Dialog saying why a data file was refused, over any Dialog already
@@ -457,6 +464,18 @@ impl MainWindow {
         self.status = Some(message);
     }
 
+    /// Hands the ledger's refusal of a save of the Register's editing row, `message`,
+    /// to the Register, or shows it in the Status bar when no save waits on it.
+    pub(crate) fn save_refused(&mut self, message: StatusMessage) {
+        let unclaimed = match self.register_mut() {
+            Some(register) => register.save_refused(message),
+            None => Some(message),
+        };
+        if let Some(message) = unclaimed {
+            self.show_status(message);
+        }
+    }
+
     /// Hands the open Dialog the outcome of the Command its form submitted: it closes
     /// once the Command is applied, and shows a rejection inline. With no Dialog open
     /// to take it, a rejection goes to the Status bar.
@@ -485,6 +504,10 @@ impl MainWindow {
         if let DialogKind::LeaveRow(row) = *kind {
             let form = LeaveRowForm { row, always: false };
             self.leave_row = Some(OpenDialog::new(ctx, form));
+            return;
+        }
+        if let DialogKind::CantSave(refusal) = kind {
+            self.cant_save = Some(OpenDialog::new(ctx, refusal.clone()));
             return;
         }
         if self.dialog_open() {
@@ -565,6 +588,7 @@ impl MainWindow {
                 self.go_to_date = Some(OpenDialog::new(ctx, GoToDateForm::new(seed)));
             }
             DialogKind::LeaveRow(_) => unreachable!("the leave-row prompt opened above"),
+            DialogKind::CantSave(_) => unreachable!("the refusal opened above"),
         }
     }
 
@@ -619,6 +643,7 @@ impl MainWindow {
             || self.data_file_refusal.is_some()
             || self.go_to_date.is_some()
             || self.leave_row.is_some()
+            || self.cant_save.is_some()
     }
 
     /// The account the Main view shows, if it shows one.
@@ -732,16 +757,61 @@ impl MainWindow {
         });
         self.accounts = Some(accounts);
         self.show_calculator(ui.ctx(), i18n, theme, main_view.response.rect);
-        self.delete_transaction_dialog(ui.ctx(), i18n, theme, commands, view);
-        self.reconciled_amount_dialog(ui.ctx(), i18n, theme, commands, view);
-        self.unreconcile_dialog(ui.ctx(), i18n, theme, commands, view);
-        self.new_account_dialog(ui.ctx(), i18n, theme, commands, today);
-        self.new_category_dialog(ui.ctx(), i18n, theme, commands, view);
-        self.preferences_dialog(ui.ctx(), i18n, theme, commands);
-        self.manage_accounts_dialog(ui.ctx(), i18n, theme, commands, view);
-        self.data_file_refusal_dialog(ui.ctx(), i18n, theme);
-        self.go_to_date_dialog(ui.ctx(), i18n, theme, commands, today);
-        self.leave_row_dialog(ui.ctx(), i18n, theme, commands, preferences);
+        self.dialogs(ui.ctx(), frame);
+    }
+
+    /// Draws whichever Dialogs are open, from `frame`. The leave-row prompt and the
+    /// refusal of a save come last, since they open over any other Dialog.
+    fn dialogs(&mut self, ctx: &egui::Context, frame: &WindowFrame<'_>) {
+        let WindowFrame {
+            i18n,
+            theme,
+            preferences,
+            commands,
+            view,
+            today,
+            recent_files: _,
+        } = *frame;
+        self.delete_transaction_dialog(ctx, i18n, theme, commands, view);
+        self.reconciled_amount_dialog(ctx, i18n, theme, commands, view);
+        self.unreconcile_dialog(ctx, i18n, theme, commands, view);
+        self.new_account_dialog(ctx, i18n, theme, commands, today);
+        self.new_category_dialog(ctx, i18n, theme, commands, view);
+        self.preferences_dialog(ctx, i18n, theme, commands);
+        self.manage_accounts_dialog(ctx, i18n, theme, commands, view);
+        self.data_file_refusal_dialog(ctx, i18n, theme);
+        self.go_to_date_dialog(ctx, i18n, theme, commands, today);
+        self.leave_row_dialog(ctx, i18n, theme, commands, preferences);
+        self.cant_save_dialog(ctx, i18n, theme);
+    }
+
+    /// The "Can't save this transaction" Dialog, while it is open, drawn over any other
+    /// Dialog. Continue editing has first focus, and Enter and Esc both press it; only a
+    /// click discards. The Register carries out the answer.
+    fn cant_save_dialog(&mut self, ctx: &egui::Context, i18n: &Localizer, theme: &Theme) {
+        let Some(dialog) = &mut self.cant_save else {
+            return;
+        };
+        let outcome = LightDialog::notice(
+            Id::new("cant_save_dialog"),
+            fl!(i18n, "dialog-cant-save-continue"),
+            theme,
+        )
+        .with_discard(fl!(i18n, "dialog-cant-save-discard"))
+        .show(ctx, dialog, |ui, refusal| {
+            ui.heading(fl!(i18n, "dialog-cant-save-title"));
+            ui.label(refusal.text(i18n));
+        });
+        let answer = match outcome {
+            DialogOutcome::Open => return,
+            DialogOutcome::Accepted | DialogOutcome::Cancelled => RefusalAnswer::ContinueEditing,
+            DialogOutcome::Discarded => RefusalAnswer::Discard,
+            DialogOutcome::Back => unreachable!("the refusal has no Back button"),
+        };
+        self.close_dialog(ctx, |window| &mut window.cant_save);
+        if let Some(register) = self.register_mut() {
+            register.answer_refusal(answer);
+        }
     }
 
     /// The leave-row prompt, while it is open, drawn over any other Dialog. Save, or Add
@@ -1089,7 +1159,7 @@ impl MainWindow {
         });
         match outcome {
             DialogOutcome::Open => return,
-            DialogOutcome::Accepted => commands.send(AppCommand::Domain(form.save)),
+            DialogOutcome::Accepted => commands.send(AppCommand::SaveRow(form.save)),
             DialogOutcome::Cancelled => {
                 if let Some(register) = self.register_mut() {
                     register.confirm_cancelled();

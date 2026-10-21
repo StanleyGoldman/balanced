@@ -236,7 +236,9 @@ impl App {
             .save_editing_row(&self.i18n, &self.preferences, &commands);
         for command in saves.try_iter() {
             match command {
-                AppCommand::Domain(command) => self.apply_domain(command),
+                AppCommand::Domain(command) | AppCommand::SaveRow(command) => {
+                    self.apply_domain(command);
+                }
                 AppCommand::ShowStatus(message) => self.main_window.show_status(message),
                 // The confirm a Reconciled amount change asks for can't open as the
                 // window closes, so that row's changes are not saved.
@@ -278,6 +280,18 @@ impl App {
         if let Err(error) = ledger.apply(command) {
             let message = StatusMessage::refusal(error, &ledger.snapshot());
             self.main_window.show_status(message);
+        }
+    }
+
+    /// Applies `command`, a save of the Register's editing row, to the open ledger. A
+    /// refused save goes back to the Register to say why.
+    fn save_row(&mut self, command: DomainCommand) {
+        let Session::Open { ledger, .. } = &mut self.session else {
+            return;
+        };
+        if let Err(error) = ledger.apply(command) {
+            let message = StatusMessage::refusal(error, &ledger.snapshot());
+            self.main_window.save_refused(message);
         }
     }
 
@@ -371,6 +385,7 @@ impl App {
         };
         match command {
             AppCommand::Domain(command) => self.apply_domain(command),
+            AppCommand::SaveRow(command) => self.save_row(command),
             AppCommand::SubmitForm(command) => {
                 if let Some(ledger) = ledger {
                     let result = ledger.apply(command).map(drop);

@@ -477,3 +477,23 @@ fn cancelling_the_confirm_as_another_row_is_clicked_stays_on_the_row_and_asks_no
             .is_none()
     );
 }
+
+#[test]
+fn an_accepted_amount_the_ledger_refuses_says_why() {
+    let mut harness = everyday_checking();
+    // Too large for the account's balance to hold.
+    commit(
+        &mut harness,
+        "Payment",
+        "Maple Property Management",
+        "792281625142643375935439503.35",
+    );
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert!(asks(&harness, "Can't save this transaction"));
+    assert!(asks(
+        &harness,
+        "That change would make a balance too large to hold."
+    ));
+}

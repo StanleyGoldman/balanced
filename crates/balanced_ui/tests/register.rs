@@ -106,6 +106,14 @@ fn editing(harness: &Harness<'static, App>) -> bool {
         .any(|node| node.accesskit_node().label().as_deref() != Some("Search"))
 }
 
+/// Answers the "Can't save this transaction" Dialog with Continue editing.
+fn continue_editing(harness: &mut Harness<'static, App>) {
+    harness
+        .get_by_role_and_label(Role::Button, "Continue editing")
+        .click();
+    harness.run();
+}
+
 /// The label of the cell under the cell cursor.
 fn cursor(harness: &Harness<'static, App>) -> String {
     let mut cursors = harness
@@ -1078,6 +1086,7 @@ fn with_enter_moves_to_the_next_row_off_a_refused_save_keeps_the_cell_open() {
     type_text(&mut harness, "792281625142643375935439503.35");
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
+    continue_editing(&mut harness);
 
     assert_eq!(
         editor(&harness, "Payment").as_deref(),
@@ -1177,6 +1186,7 @@ fn a_save_the_ledger_refuses_changes_nothing_and_keeps_the_row_open() {
     type_text(&mut harness, "792281625142643375935439503.35");
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
+    continue_editing(&mut harness);
 
     assert_eq!(
         editor(&harness, "Payment").as_deref(),
@@ -1200,7 +1210,9 @@ fn leaving_a_row_whose_save_the_ledger_refuses_brings_the_cursor_back_to_it() {
 
     click_cell(&mut harness, "Bean There");
     harness.get_by_role_and_label(Role::Button, "Save").click();
-    harness.run();
+    // The prompt's answer, the save, the ledger's refusal, then the Dialog saying so.
+    harness.run_steps(8);
+    continue_editing(&mut harness);
 
     assert_eq!(
         editor(&harness, "Payment").as_deref(),
@@ -1466,7 +1478,7 @@ fn enter_on_split_says_the_split_view_is_not_available_yet() {
 }
 
 #[test]
-fn enter_on_an_unknown_category_without_a_highlight_keeps_editing_and_says_why() {
+fn enter_on_an_unknown_category_without_a_highlight_says_why_and_keeps_editing() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Auto & Transport:Fuel");
@@ -1474,9 +1486,10 @@ fn enter_on_an_unknown_category_without_a_highlight_keeps_editing_and_says_why()
     press(&mut harness, Modifiers::NONE, Key::ArrowUp);
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
+    harness.get_by_label("No category has that name. Pick one from the list, or create it.");
+    continue_editing(&mut harness);
 
     assert_eq!(editor(&harness, "Category").as_deref(), Some("Pets"));
-    harness.get_by_label("No category has that name. Pick one from the list, or create it.");
 }
 
 #[test]
@@ -1583,7 +1596,7 @@ fn an_amount_with_excess_decimal_places_stays_in_edit_mode() {
     click_cell(&mut harness, "86.42");
     type_text(&mut harness, "12.345");
 
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
 
     assert_eq!(editor(&harness, "Payment").as_deref(), Some("12.345"));
     assert_eq!(payment_of(&harness, "Fresh Market"), "86.42");
@@ -1596,7 +1609,7 @@ fn an_amount_with_excess_decimal_places_shows_why_in_a_bubble() {
     click_cell(&mut harness, "86.42");
     type_text(&mut harness, "12.345");
 
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
 
     let bubble = harness.query_by_label("USD amounts have 2 decimal places");
     assert!(bubble.is_some(), "no error bubble");
@@ -1609,20 +1622,20 @@ fn an_amount_written_with_the_wrong_marks_names_the_locale_marks() {
     click_cell(&mut harness, "86.42");
     type_text(&mut harness, "1,5");
 
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
 
     let message = "Write amounts with “.” as the decimal mark and “,” between thousands.";
     assert!(harness.query_by_label(message).is_some(), "no error bubble");
 }
 
 #[test]
-fn leaving_a_refused_amount_keeps_the_cell_in_edit_mode() {
+fn leaving_a_refused_amount_for_another_cell_of_its_row_keeps_the_cell_in_edit_mode() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "86.42");
     type_text(&mut harness, "12.345");
 
-    click_cell(&mut harness, "Bean There");
+    click_cell(&mut harness, "Fresh Market");
     type_text(&mut harness, "6");
 
     assert_eq!(editor(&harness, "Payment").as_deref(), Some("12.3456"));
@@ -1707,7 +1720,7 @@ fn changing_a_refused_amount_clears_its_error() {
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "86.42");
     type_text(&mut harness, "12.345");
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
 
     press(&mut harness, Modifiers::NONE, Key::Backspace);
 

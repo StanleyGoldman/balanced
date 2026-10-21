@@ -18,6 +18,7 @@ use crate::preferences::Preferences;
 use crate::register::LeftRow;
 use crate::register_columns::RegisterColumns;
 use crate::route::Route;
+use crate::save_refusal::SaveRefusal;
 
 /// An app-level action. UI code sends one instead of changing app or domain state
 /// itself, and `App::logic` applies it.
@@ -25,6 +26,10 @@ use crate::route::Route;
 pub(crate) enum AppCommand {
     /// Apply a change to the ledger. A rejected change shows in the Status bar.
     Domain(DomainCommand),
+    /// Apply the save of the Register's editing row, or the post of its draft row. A
+    /// rejected save goes back to the Register, which says why in the "Can't save this
+    /// transaction" Dialog, or else shows in the Status bar.
+    SaveRow(DomainCommand),
     /// Apply the change the open Dialog's form asks for. The Dialog closes once it is
     /// applied, and shows a rejected change inline, staying open.
     SubmitForm(DomainCommand),
@@ -114,6 +119,10 @@ pub(crate) enum DialogKind {
     /// The leave-row prompt, asking whether to save the changed row being left, of the
     /// kind given. It opens over any other Dialog, since closing the window can ask.
     LeaveRow(LeftRow),
+    /// The "Can't save this transaction" Dialog, saying why a save of the Register's
+    /// editing row was refused. It opens over any other Dialog, since the leave-row
+    /// prompt's Save can be refused.
+    CantSave(SaveRefusal),
 }
 
 /// A Status bar message.

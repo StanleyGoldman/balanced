@@ -127,6 +127,11 @@ dialog-leave-row-continue = Weiter bearbeiten
 dialog-leave-row-discard = Verwerfen
 # Coined after LibreOffice's "Beim Schließen immer eine neue Version speichern".
 dialog-leave-row-always = Immer ohne Nachfrage speichern
+# Coined from GnuCash's "Scheckformular kann nicht gespeichert werden." and "Buchung".
+dialog-cant-save-title = Diese Buchung kann nicht gespeichert werden
+# Coined, as dialog-leave-row-continue.
+dialog-cant-save-continue = Weiter bearbeiten
+dialog-cant-save-discard = Änderungen verwerfen
 # Coined from GnuCash's "Geänderte Buchung speichern?".
 dialog-preferences-save-without-asking = Geänderte Buchung ohne Nachfrage speichern
 dialog-close-account-close = Schließen

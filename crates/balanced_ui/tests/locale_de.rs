@@ -365,6 +365,11 @@ fn the_leave_row_prompt_on_the_draft_row_reads_german() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     type_keys(&mut harness, "15.10.2026");
+    // Date, Num, Payee, Category.
+    for _ in 0..3 {
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+    }
+    type_text(&mut harness, "Food & Dining:Groceries");
     press(&mut harness, Modifiers::NONE, Key::Tab);
 
     harness
@@ -374,4 +379,19 @@ fn the_leave_row_prompt_on_the_draft_row_reads_german() {
 
     harness.get_by_label("Neue Buchung hinzufügen?");
     harness.get_by_role_and_label(Role::Button, "Hinzufügen");
+}
+
+#[test]
+fn the_cant_save_dialog_reads_german() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    harness.get_by_role_and_label(Role::Cell, "86,42").click();
+    harness.run();
+    type_text(&mut harness, "1,2,3");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    harness.get_by_label("Diese Buchung kann nicht gespeichert werden");
+    harness.get_by_role_and_label(Role::Button, "Weiter bearbeiten");
+    harness.get_by_role_and_label(Role::Button, "Änderungen verwerfen");
 }
