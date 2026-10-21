@@ -158,7 +158,7 @@ fn rename_fresh_market(harness: &mut Harness<'static, App>) {
 }
 
 /// How many buttons are labelled each of `labels`.
-fn buttons<const N: usize>(harness: &Harness<'static, App>, labels: [&str; N]) -> [usize; N] {
+fn button_counts<const N: usize>(harness: &Harness<'static, App>, labels: [&str; N]) -> [usize; N] {
     labels.map(|label| {
         harness
             .query_all_by_role_and_label(Role::Button, label)
@@ -174,7 +174,7 @@ fn the_editing_row_shows_save_cancel_split_and_more_in_place_of_its_actions_menu
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
-    let shown = buttons(
+    let shown = button_counts(
         &harness,
         ["Save", "Add", "Cancel", "Split", "More actions", "Actions"],
     );
@@ -189,7 +189,7 @@ fn the_draft_row_shows_add_in_place_of_save() {
     // The cell cursor starts on the draft row's Date cell, and typing opens it.
     type_text(&mut harness, "1");
 
-    let shown = buttons(&harness, ["Save", "Add", "Cancel", "Split", "More actions"]);
+    let shown = button_counts(&harness, ["Save", "Add", "Cancel", "Split", "More actions"]);
     assert_eq!(shown, [0, 1, 1, 1, 1]);
 }
 
@@ -200,7 +200,7 @@ fn a_highlighted_row_keeps_its_actions_menu() {
 
     click_cell(&mut harness, "Fresh Market");
 
-    let shown = buttons(
+    let shown = button_counts(
         &harness,
         ["Save", "Add", "Cancel", "More actions", "Actions"],
     );
@@ -330,7 +330,7 @@ fn clicking_add_adds_the_draft_row_and_opens_a_fresh_one() {
 
     assert!(shows(&harness, "Corner Cafe"));
     assert_eq!(cursor(&harness), "");
-    assert_eq!(buttons(&harness, ["Add"]), [0]);
+    assert_eq!(button_counts(&harness, ["Add"]), [0]);
 }
 
 #[test]
@@ -367,5 +367,82 @@ fn more_holds_the_rows_actions_menu() {
 
     click_button(&mut harness, "More actions");
 
-    assert_eq!(buttons(&harness, ["Flag", "Delete…"]), [1, 1]);
+    assert_eq!(button_counts(&harness, ["Flag", "Delete…"]), [1, 1]);
+}
+
+#[test]
+fn tab_on_the_draft_row_skips_its_disabled_more_and_goes_round_to_its_date() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    // From the draft row's Date: Num, Payee, Category, Memo, Payment, Deposit, then
+    // Add, Cancel and Split.
+    for _ in 0..9 {
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+    }
+    let on_split = focused_button(&harness);
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(on_split.as_deref(), Some("Split"));
+    assert!(editor(&harness, "Date").is_some());
+}
+
+#[test]
+fn escape_on_a_button_throws_away_the_rows_changes() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    rename_fresh_market(&mut harness);
+    // Payee, Category, Memo, Payment, Deposit, then Save.
+    for _ in 0..5 {
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+    }
+
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+
+    assert!(!shows(&harness, "Corner Shop"));
+    assert_eq!(button_counts(&harness, ["Save"]), [0]);
+}
+
+#[test]
+fn enter_on_an_item_of_mores_menu_closes_the_menu() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    rename_fresh_market(&mut harness);
+    click_button(&mut harness, "More actions");
+    harness.get_by_role_and_label(Role::Button, "Flag").focus();
+    harness.run();
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(button_counts(&harness, ["Flag", "Unflag"]), [0, 0]);
+}
+
+#[test]
+fn clicking_save_on_an_amount_that_cant_be_read_saves_nothing() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    rename_fresh_market(&mut harness);
+    click_cell(&mut harness, "86.42");
+    type_text(&mut harness, "12.345");
+
+    click_button(&mut harness, "Save");
+
+    assert_eq!(editor(&harness, "Payment").as_deref(), Some("12.345"));
+    assert!(!can_undo(&mut harness));
+}
+
+#[test]
+fn cancel_on_the_draft_row_empties_it() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    // From the draft row's Date: Num, then Payee.
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    type_text(&mut harness, "Corner Cafe");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    click_button(&mut harness, "Cancel");
+
+    assert!(!shows(&harness, "Corner Cafe"));
+    assert!(!editing(&harness));
 }

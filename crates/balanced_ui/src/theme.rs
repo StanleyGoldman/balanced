@@ -184,6 +184,14 @@ impl Theme {
     /// Space between the Register's edge and the text in its first and last columns.
     pub(crate) const EDGE_INSET: f32 = 6.0;
 
+    /// The space between the editing row's buttons, kept tight so the buttons cover as
+    /// little of the row as they can.
+    pub(crate) const ROW_BUTTON_GAP: f32 = 4.0;
+
+    /// The space between each of the editing row's buttons' sides and its text, tight
+    /// for the same reason.
+    pub(crate) const ROW_BUTTON_PADDING: f32 = 3.0;
+
     /// The least space between a Dialog and each edge of the window.
     pub(crate) const DIALOG_MARGIN: f32 = 24.0;
 
