@@ -108,6 +108,8 @@ pub(crate) enum DialogKind {
     NewAccount,
     /// Manage Accounts, holding every account as the ledger has it.
     ManageAccounts,
+    /// The Category List, showing every category and its usage as the ledger has them.
+    CategoryList,
     /// Create a category, starting from the name typed in a Category cell.
     NewCategory { name: String },
     /// The Preferences Dialog, starting from the Preferences in use.

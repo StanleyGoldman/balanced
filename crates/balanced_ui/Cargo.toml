@@ -133,6 +133,10 @@ name = "manage_accounts"
 required-features = ["test-support"]
 
 [[test]]
+name = "category_list"
+required-features = ["test-support"]
+
+[[test]]
 name = "new_account"
 required-features = ["test-support"]
 

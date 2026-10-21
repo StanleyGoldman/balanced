@@ -28,6 +28,7 @@ menu-view = View
 menu-view-switch-pane = Switch Pane
 menu-tools = Tools
 menu-tools-manage-accounts = Manage Accounts…
+menu-tools-category-list = Category List…
 menu-tools-preferences = Preferences…
 menu-tools-calculator = Calculator
 menu-help = Help
@@ -361,6 +362,10 @@ dialog-close-account-message-balance = Close { $name }? It still has a balance o
 dialog-close-account-close = Close
 dialog-delete-account-message = Delete { $name } and every transaction in it?
 dialog-delete-account-delete = Delete
+
+# The Category List: every category as a tree, with how much each is used.
+dialog-category-list-title = Category List
+dialog-category-list-close = Close
 
 # The New Account wizard. Each step's heading says how far through it is.
 dialog-new-account-step-type = Step 1 of 4: Type
