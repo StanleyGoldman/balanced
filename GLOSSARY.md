@@ -58,6 +58,14 @@ _Avoid_: Transaction list, ledger view
 The empty row at the bottom of a register where the user types a new transaction; it becomes a transaction when added.
 _Avoid_: New row, blank row, entry row
 
+**Payee recall**:
+Filling a draft row's empty cells from the latest transaction, in any account, with the payee just entered. A payee remembers only what its transactions say, so editing or deleting the latest one changes what it recalls.
+_Avoid_: QuickFill, memorized payee, autofill
+
+**Inline completion**:
+The rest of the closest matching payee or category, shown selected in the cell as the user types, so Tab or Enter takes it and typing on replaces it.
+_Avoid_: Autocomplete, type-ahead
+
 **Today divider**:
 The labelled line in a register sorted by date between the rows dated today or earlier and the first row dated later. It is not a row, so the cell cursor never rests on it.
 _Avoid_: Today line, future separator
