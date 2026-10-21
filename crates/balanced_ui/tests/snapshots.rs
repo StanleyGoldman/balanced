@@ -155,6 +155,39 @@ fn register_filtered_dark() {
     check_snapshot(&mut harness, "register_filtered_dark");
 }
 
+/// Opens Everyday Checking's first Payment cell with `100/3` typed in it, then its
+/// keypad, and adds `+1` to the keypad's sum: the cell's preview and the keypad's
+/// result both show.
+fn open_keypad(harness: &mut Harness<'static, App>) {
+    click(harness, Role::Button, "Everyday Checking");
+    click(harness, Role::Cell, "86.42");
+    harness.event(Event::Text("100/3".to_owned()));
+    harness.run();
+    click(harness, Role::Button, "Keypad");
+    harness.event(Event::Text("+1".to_owned()));
+    pointer_gone(harness);
+}
+
+#[test]
+#[ignore = "image snapshot: run with `cargo xtask snapshots`"]
+fn keypad_light() {
+    let mut harness = app(Theme::Light);
+
+    open_keypad(&mut harness);
+
+    check_snapshot(&mut harness, "keypad_light");
+}
+
+#[test]
+#[ignore = "image snapshot: run with `cargo xtask snapshots`"]
+fn keypad_dark() {
+    let mut harness = app(Theme::Dark);
+
+    open_keypad(&mut harness);
+
+    check_snapshot(&mut harness, "keypad_dark");
+}
+
 /// Opens Everyday Checking, edits the Date cell of 5 September 2026 and opens its
 /// calendar from the 📅 button.
 fn open_calendar(harness: &mut Harness<'static, App>) {

@@ -46,15 +46,32 @@ impl Preview {
             .read(text.trim())
             .ok()
             .filter(Calculation::is_arithmetic)?;
+        Some(Self::of_calculation(i18n, currency, &calculation))
+    }
+
+    /// The amount `text` reads as, by `reader` in `currency`, whether it is arithmetic
+    /// or a plain amount, or why it can't be read.
+    pub(crate) fn of_any(
+        i18n: &Localizer,
+        reader: &AmountReader,
+        currency: CurrencyCode,
+        text: &str,
+    ) -> Result<Self, AmountParseError> {
+        let calculation = reader.read(text.trim())?;
+        Ok(Self::of_calculation(i18n, currency, &calculation))
+    }
+
+    /// The preview of `calculation`, in `currency`.
+    fn of_calculation(i18n: &Localizer, currency: CurrencyCode, calculation: &Calculation) -> Self {
         let amount = i18n.format_amount(
             calculation.amount(),
             i18n_currency(currency),
             AmountStyle::Symbol,
         );
-        Some(Self {
+        Self {
             amount,
             rounded: calculation.rounded(),
-        })
+        }
     }
 
     /// The preview's text: `= $33.33`, or `~ $33.33` when rounded.

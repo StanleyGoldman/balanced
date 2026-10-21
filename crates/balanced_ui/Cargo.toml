@@ -97,7 +97,15 @@ name = "go_to_date"
 required-features = ["test-support"]
 
 [[test]]
+name = "inline_completion"
+required-features = ["test-support"]
+
+[[test]]
 name = "keyboard"
+required-features = ["test-support"]
+
+[[test]]
+name = "keypad"
 required-features = ["test-support"]
 
 [[test]]
