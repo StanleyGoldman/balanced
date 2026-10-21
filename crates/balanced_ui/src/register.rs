@@ -24,7 +24,7 @@ use egui_extras::{Column, TableBody, TableBuilder};
 use icu_calendar::{Date, Iso};
 
 use crate::amount_field::{self, Preview};
-use crate::combo_field::{self, ComboText, DROP_DOWN_GLYPH, ListScope};
+use crate::combo_field::{self, ComboText, DROP_DOWN_GLYPH, ListScope, text_typed};
 use crate::combobox::{CategoryTarget, FieldChoices, ListRow};
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::date_field::{self, DateEdit};
@@ -37,10 +37,11 @@ use crate::register_columns::{RegisterColumn, RegisterColumns};
 use crate::register_filter::RegisterFilter;
 use crate::register_model::{
     AmountSide, OtherSide, RegisterModel, RegisterRow, RegisterSort, RowId, Showing, SortDirection,
-    SortKey, TodayDivider,
+    SortKey, SplitLines, TodayDivider,
 };
 use crate::row_changes::RowChanges;
 use crate::save_refusal::{RefusalAnswer, SaveRefusal};
+use crate::split_dialog::SplitStart;
 use crate::theme::Theme;
 
 /// The narrowest Payee and Category get before the Register scrolls sideways.
@@ -811,6 +812,9 @@ pub(crate) struct Register {
     focus_button: Option<RowButton>,
     /// The editing row's button pressed in the last frame, which acts on this frame.
     pressed: Option<RowButtonAt>,
+    /// The lines the Split dialog's Done gave a row, which the row keeps from the next
+    /// frame.
+    split_done: Option<(RowId, SplitLines)>,
 }
 
 impl Register {
@@ -1566,6 +1570,10 @@ impl Register {
             view,
             i18n,
         };
+        if let Some((row, lines)) = self.split_done.take() {
+            let saved = Rows::new(&model, None, None);
+            self.unsaved.keep_split(saved, row, lines, commands);
+        }
         self.refresh_draft_row(draft_frame, rebuilt);
         let draft_row = self.draft_row.take();
         let changed_row = draft_frame.changed_row(&model, self.unsaved.changes.as_ref());
@@ -1841,8 +1849,18 @@ impl Register {
             if matches!(column.field(row), Some(CellField::Amount(_))) {
                 self.paste_target = Some(address);
             }
+            // A click that leaves another row, which may ask about its changes, only
+            // moves the cell cursor.
+            let leaves_row = self
+                .edit
+                .as_ref()
+                .map(Edit::cell)
+                .or_else(|| self.unsaved.reopened_cell())
+                .is_some_and(|cell| cell.row != row.id());
             self.place_cursor(row.id(), column);
-            open_split_view(row, column, commands);
+            if !leaves_row {
+                open_split_from_cell(row, column, commands);
+            }
         }
         if let (Some(action), Some(id)) = (action, row.transaction()) {
             self.act(id, action, commands);
@@ -2212,7 +2230,7 @@ impl Register {
                 return None;
             }
             if let Some(row) = keys.rows.find(cursor.row)
-                && open_split_view(row, cursor.column, keys.commands)
+                && open_split_from_cell(row, cursor.column, keys.commands)
             {
                 return None;
             }
@@ -2386,6 +2404,12 @@ impl Register {
             self.start_edit(ctx, keys, EditStart::Saved);
         }
         moved.scroll_offset
+    }
+
+    /// Gives `row` the `lines` the Split dialog's Done handed back, kept with the row's
+    /// other changes until it is saved.
+    pub(crate) fn split_done(&mut self, row: RowId, lines: SplitLines) {
+        self.split_done = Some((row, lines));
     }
 
     /// Tells the Category cell edit waiting on the New Category Dialog that the
@@ -2571,15 +2595,11 @@ impl Register {
                 }
                 self.discard_row(row);
             }
-            RowButton::Split => match keys.rows.find(row).and_then(RegisterRow::transaction) {
-                Some(transaction) => {
-                    keys.commands.send(AppCommand::OpenSplitView(transaction));
+            RowButton::Split => {
+                if let Some(shown) = keys.rows.find(row) {
+                    open_split_dialog(shown, keys.commands);
                 }
-                // TODO(#426): the draft row's Split opens the Split dialog too.
-                None => keys
-                    .commands
-                    .send(AppCommand::ShowStatus(StatusMessage::NotAvailableYet)),
-            },
+            }
             // More opens its menu as it is clicked.
             RowButton::More => {}
         }
@@ -3080,16 +3100,6 @@ fn text_changed(ctx: &egui::Context, frame: &BodyFrame<'_>, edit: &mut CellEdit)
     edit.preview = preview(frame.i18n, edit);
 }
 
-/// Whether text was typed or pasted this frame.
-fn text_typed(ctx: &egui::Context) -> bool {
-    ctx.input(|input| {
-        input
-            .events
-            .iter()
-            .any(|event| matches!(event, Event::Text(_) | Event::Paste(_)))
-    })
-}
-
 /// How a cell edit leaves its cell once its text is kept in the row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Leave {
@@ -3316,16 +3326,25 @@ impl InlineCompletion {
     }
 }
 
-/// Asks for the split view of `row` when `column` is the Category cell of a split
-/// transaction, whose `[Split]` acts as a button. Returns whether it asked.
-fn open_split_view(row: &RegisterRow, column: RegisterColumn, commands: &CommandSender) -> bool {
-    let split = row
-        .transaction()
-        .filter(|_| column == RegisterColumn::Category && row.is_split());
-    if let Some(transaction) = split {
-        commands.send(AppCommand::OpenSplitView(transaction));
+/// Opens the Split dialog on `row` when `column` is the Category cell of a split row,
+/// whose `[Split]` acts as a button. Returns whether it opened.
+fn open_split_from_cell(
+    row: &RegisterRow,
+    column: RegisterColumn,
+    commands: &CommandSender,
+) -> bool {
+    let split = column == RegisterColumn::Category && row.is_split();
+    if split {
+        open_split_dialog(row, commands);
     }
-    split.is_some()
+    split
+}
+
+/// Opens the Split dialog on `row`'s lines, as the row shows them.
+fn open_split_dialog(row: &RegisterRow, commands: &CommandSender) {
+    commands.send(AppCommand::OpenDialog(DialogKind::Split(SplitStart::of(
+        row,
+    ))));
 }
 
 /// Whether a commit went through.
@@ -3460,6 +3479,29 @@ impl Unsaved {
         }
     }
 
+    /// Keeps `lines`, from the Split dialog, in place of `row`'s category or lines: in
+    /// the draft on the draft row, else among the changes to its row's transaction, as
+    /// [`Unsaved::keep`] keeps an edit made in its Category cell.
+    fn keep_split(
+        &mut self,
+        rows: Rows<'_>,
+        row: RowId,
+        lines: SplitLines,
+        commands: &CommandSender,
+    ) {
+        let cell = CellAddress {
+            row,
+            column: RegisterColumn::Category,
+        };
+        match row {
+            RowId::Draft => {
+                self.draft.set_split(lines);
+                self.last_column = Some(cell.column);
+            }
+            RowId::Transaction(_) => self.keep(rows, cell, lines.edit(), commands),
+        }
+    }
+
     /// Throws away everything `row` holds that isn't saved.
     fn discard(&mut self, row: RowId) {
         match row {
@@ -3505,10 +3547,12 @@ fn send_save(changes: &RowChanges, rows: Rows<'_>, commands: &CommandSender) -> 
         return Confirm::NotAsked;
     };
     let transaction = changes.transaction();
-    let asks_first = rows
-        .saved(RowId::Transaction(transaction))
-        .is_some_and(|row| amount_change_asks_first(row.cleared_status()));
-    if let Some(amount) = changes.amount().filter(|_| asks_first) {
+    let saved = rows.saved(RowId::Transaction(transaction));
+    let asks_first = saved.is_some_and(|row| amount_change_asks_first(row.cleared_status()));
+    let new_amount = changes
+        .amount()
+        .filter(|&amount| saved.is_some_and(|row| row.amount() != Some(amount)));
+    if let Some(amount) = new_amount.filter(|_| asks_first) {
         commands.send(AppCommand::OpenDialog(DialogKind::ChangeReconciledAmount {
             transaction,
             amount,

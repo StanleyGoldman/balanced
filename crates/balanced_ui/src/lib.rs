@@ -37,6 +37,7 @@ mod register_model;
 mod route;
 mod row_changes;
 mod save_refusal;
+mod split_dialog;
 #[cfg(feature = "test-support")]
 pub mod testing;
 mod theme;

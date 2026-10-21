@@ -143,6 +143,33 @@ dialog-cant-save-title = Diese Buchung kann nicht gespeichert werden
 # Coined, as dialog-leave-row-continue.
 dialog-cant-save-continue = Weiter bearbeiten
 dialog-cant-save-discard = Änderungen verwerfen
+# GnuCash's "Split Transaction".
+dialog-split-title = Mehrteilige Buchung
+# Qt's "Done".
+dialog-split-done = Fertig
+# GnuCash's "Amount".
+dialog-split-amount = Betrag
+# Coined from GnuCash's "Line" (Zeile), with register-column-category,
+# register-column-memo and dialog-split-amount.
+dialog-split-line-category = Kategorie, Zeile { $line }
+dialog-split-line-memo = Notiz, Zeile { $line }
+dialog-split-line-amount = Betrag, Zeile { $line }
+# Coined from GnuCash's "_Add" and "Line".
+dialog-split-add-line = Zeile hinzufügen
+# GnuCash's "_Remove".
+dialog-split-remove-line = Entfernen
+# Coined from GnuCash's "_Remove" and "Line".
+dialog-split-remove-line-a11y = Zeile { $line } entfernen
+# GnuCash's "Total".
+dialog-split-total = Summe
+# Coined, with GnuCash's "Difference" and "Total".
+dialog-split-mismatch = Die Zeilen ergeben { $lines }, nicht die Summe von { $total }. Differenz: { $difference }
+# Coined.
+dialog-split-no-category = Zeile { $line } hat keine Kategorie.
+dialog-split-unknown-category = Zeile { $line }: Keine Kategorie und kein Konto heißt „{ $name }“.
+dialog-split-line-error = Zeile { $line }: { $error }
+dialog-split-total-error = Summe: { $error }
+dialog-split-no-lines = Geben Sie mindestens einer Zeile eine Kategorie.
 # Coined from GnuCash's "Geänderte Buchung speichern?".
 dialog-preferences-save-without-asking = Geänderte Buchung ohne Nachfrage speichern
 dialog-close-account-close = Schließen

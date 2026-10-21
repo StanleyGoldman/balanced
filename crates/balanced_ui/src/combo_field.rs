@@ -9,8 +9,8 @@ use eframe::egui::accesskit::Role;
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
 use eframe::egui::{
-    self, Area, Frame, Id, Order, Rect, Response, ScrollArea, Sense, TextStyle, TextWrapMode,
-    WidgetInfo, WidgetText, WidgetType, pos2, vec2,
+    self, Area, Event, Frame, Id, Order, Rect, Response, ScrollArea, Sense, TextStyle,
+    TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 
 use crate::combobox::{ListRow, rest_after};
@@ -381,4 +381,14 @@ fn list_row(
     ui.painter()
         .galley(pos2(rect.left(), top), galley, text_color);
     response.is_pointer_button_down_on()
+}
+
+/// Whether text was typed or pasted this frame.
+pub(crate) fn text_typed(ctx: &egui::Context) -> bool {
+    ctx.input(|input| {
+        input
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::Text(_) | Event::Paste(_)))
+    })
 }

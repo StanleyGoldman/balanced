@@ -11,6 +11,7 @@ use icu_calendar::{Date, Iso};
 
 use crate::combobox::{CategoryTarget, Recalled};
 use crate::i18n::fl;
+use crate::register_model::SplitLines;
 
 /// What the draft row holds so far. Every cell starts empty.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -19,6 +20,9 @@ pub(crate) struct Draft {
     number: String,
     payee: String,
     category: Option<CategoryTarget>,
+    /// The split lines from the Split dialog, in place of a category, and the amount
+    /// they add up to.
+    split: Option<SplitLines>,
     memo: String,
     amount: Option<Money>,
 }
@@ -40,6 +44,19 @@ impl Draft {
         self.category
     }
 
+    /// The split lines, when the draft is split.
+    pub(crate) fn split(&self) -> Option<&SplitLines> {
+        self.split.as_ref()
+    }
+
+    /// Splits the draft into `split`'s lines, in place of any category, with the
+    /// amount they add up to.
+    pub(crate) fn set_split(&mut self, split: SplitLines) {
+        self.category = None;
+        self.amount = Some(split.amount());
+        self.split = Some(split);
+    }
+
     pub(crate) fn memo(&self) -> &str {
         &self.memo
     }
@@ -57,13 +74,15 @@ impl Draft {
             TransactionEdit::Memo(memo) => self.memo = memo,
             TransactionEdit::Category(category) => {
                 self.category = Some(CategoryTarget::Category(category));
+                self.split = None;
             }
             TransactionEdit::Transfer(account) => {
                 self.category = Some(CategoryTarget::Transfer(account));
+                self.split = None;
             }
             TransactionEdit::Amount(amount) => self.amount = Some(amount),
             // The draft row's Clr cell is empty: a posted transaction starts uncleared.
-            // It holds no split lines yet. TODO(#426): keep the Split dialog's lines.
+            // Its split lines come from the Split dialog, through `set_split`.
             TransactionEdit::ClearedStatus(_) | TransactionEdit::Lines { .. } => {}
         }
     }
@@ -77,7 +96,9 @@ impl Draft {
     /// cells from it where they are empty.
     pub(crate) fn recall(&mut self, recalled: &Recalled) {
         recalled.payee().clone_into(&mut self.payee);
-        self.category = self.category.or(recalled.category());
+        if self.split.is_none() {
+            self.category = self.category.or(recalled.category());
+        }
         if self.memo.is_empty() {
             recalled.memo().clone_into(&mut self.memo);
         }
@@ -91,7 +112,7 @@ impl Draft {
     pub(crate) fn missing(&self) -> Option<Missing> {
         if self.date.is_none() {
             Some(Missing::Date)
-        } else if self.category.is_none() {
+        } else if self.category.is_none() && self.split.is_none() {
             Some(Missing::Category)
         } else {
             None
@@ -107,15 +128,16 @@ impl Draft {
         currency: CurrencyCode,
     ) -> Result<DomainCommand, Missing> {
         let date = self.date.ok_or(Missing::Date)?;
-        let category = self.category.ok_or(Missing::Category)?;
         let amount = self.amount.unwrap_or_else(|| Money::zero(currency));
-        let mut transaction = match category {
-            CategoryTarget::Category(category) => {
+        let mut transaction = match (&self.split, self.category) {
+            (Some(split), _) => NewTransaction::split(date, &self.payee, split.posted()),
+            (None, Some(CategoryTarget::Category(category))) => {
                 NewTransaction::new(date, &self.payee, category, amount)
             }
-            CategoryTarget::Transfer(other) => {
+            (None, Some(CategoryTarget::Transfer(other))) => {
                 NewTransaction::transfer(date, &self.payee, other, amount)
             }
+            (None, None) => return Err(Missing::Category),
         };
         if !self.number.is_empty() {
             transaction = transaction.number(&self.number);

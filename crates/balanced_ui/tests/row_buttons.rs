@@ -356,14 +356,14 @@ fn clicking_cancel_throws_away_the_rows_changes() {
 }
 
 #[test]
-fn clicking_split_says_the_split_view_is_not_available_yet() {
+fn clicking_split_opens_the_split_dialog() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     rename_fresh_market(&mut harness);
 
     click_button(&mut harness, "Split");
 
-    assert!(shows_text(&harness, "Not available yet"));
+    harness.get_by_role_and_label(Role::TextInput, "Line 1 category");
 }
 
 #[test]

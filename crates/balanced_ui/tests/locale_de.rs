@@ -228,6 +228,31 @@ fn a_heavy_dialogs_close_button_reads_german() {
     harness.get_by_role_and_label(Role::Button, "Dialog schließen");
 }
 
+#[test]
+fn the_split_dialog_reads_german_and_shows_german_amounts() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    harness.get_by_role_and_label(Role::Cell, "[Split]").click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::TextInput, "Betrag, Zeile 1")
+        .click();
+    harness.run();
+    press(&mut harness, Modifiers::COMMAND, Key::A);
+    type_text(&mut harness, "100");
+
+    open(&mut harness, "Fertig");
+
+    let mismatch = "Die Zeilen ergeben 163,90, nicht die Summe von 206,27. Differenz: 42,37";
+    assert!(
+        harness.query_all_by_role(Role::Label).any(|label| label
+            .accesskit_node()
+            .value()
+            .as_deref()
+            == Some(mismatch))
+    );
+}
+
 /// The text of the context header's Cleared figure, the one Label starting `Bestätigt `.
 fn cleared_figure(harness: &Harness<'static, App>) -> String {
     let figures: Vec<String> = harness
