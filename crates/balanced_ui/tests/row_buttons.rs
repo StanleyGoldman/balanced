@@ -378,6 +378,30 @@ fn more_holds_the_rows_actions_menu() {
 }
 
 #[test]
+fn mores_menu_leaves_out_split_which_has_its_own_button() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    rename_fresh_market(&mut harness);
+
+    click_button(&mut harness, "More actions");
+
+    assert_eq!(button_counts(&harness, ["Split"]), [1]);
+}
+
+#[test]
+fn mores_menu_stays_open_on_an_unchanged_row() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    // Opens the Payee cell, unchanged.
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    click_button(&mut harness, "More actions");
+
+    assert_eq!(button_counts(&harness, ["Flag", "Delete…"]), [1, 1]);
+}
+
+#[test]
 fn tab_on_the_draft_row_skips_its_disabled_more_and_goes_round_to_its_date() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");

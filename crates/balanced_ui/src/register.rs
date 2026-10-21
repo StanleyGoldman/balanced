@@ -812,6 +812,9 @@ pub(crate) struct Register {
     focus_button: Option<RowButton>,
     /// The editing row's button pressed in the last frame, which acts on this frame.
     pressed: Option<RowButtonAt>,
+    /// The command picked this frame from the More actions menu of a transaction's
+    /// editing row, which acts once the frame's rows are drawn.
+    picked: Option<Picked>,
     /// The lines the Split dialog's Done gave a row, which the row keeps from the next
     /// frame.
     split_done: Option<SplitDone>,
@@ -866,7 +869,10 @@ impl Register {
         let in_buttons = self.focus_button.is_some()
             || self
                 .focused_button(ctx)
-                .is_some_and(|focused| focused.row == row);
+                .is_some_and(|focused| focused.row == row)
+            || self
+                .buttons
+                .is_some_and(|drawn| drawn.row == row && drawn.more_open(ctx));
         (self.unsaved.is_changed(row) || in_buttons).then_some(row)
     }
 
@@ -1250,6 +1256,7 @@ impl Register {
         self.pasting = None;
         self.focus_button = None;
         self.pressed = None;
+        self.picked = None;
     }
 
     /// Formats the draft row again when the draft changed since it was formatted, or
@@ -1371,35 +1378,42 @@ impl Register {
 
     /// Carries out `action`, picked on transaction `id`'s row.
     fn act(&mut self, id: TransactionId, action: RowAction, commands: &CommandSender) {
+        if action == RowAction::Delete {
+            // The confirm asks about the selected row.
+            self.place_cursor(RowId::Transaction(id), RegisterColumn::Actions);
+        }
+        commands.send(action.command(id));
+    }
+
+    /// Carries out the command picked this frame from the editing row's More actions
+    /// menu, if any. Delete goes straight to its confirm, which throws the row's
+    /// changes away as it deletes. Any other command leaves the row first, so a changed
+    /// row asks about its changes and the command waits for the answer: Continue
+    /// editing drops it.
+    fn act_on_picked(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        preferences: &Preferences,
+        commands: &CommandSender,
+    ) {
+        let Some(Picked {
+            transaction,
+            action,
+        }) = self.picked.take()
+        else {
+            return;
+        };
         match action {
-            RowAction::Delete => {
-                // The confirm asks about the selected row.
-                self.place_cursor(RowId::Transaction(id), RegisterColumn::Actions);
-                commands.send(AppCommand::OpenDialog(DialogKind::DeleteTransaction));
-            }
-            RowAction::SetFlagged(flagged) => {
-                commands.send(AppCommand::Domain(DomainCommand::SetFlagged {
-                    transaction: id,
-                    flagged,
-                }));
-            }
-            RowAction::SetClearedStatus(status) => {
-                commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
-                    transaction: id,
-                    edit: TransactionEdit::ClearedStatus(status),
-                }));
-            }
-            RowAction::GoTo(OtherSide {
-                account,
-                transaction,
-            }) => commands.send(AppCommand::GoToTransaction {
-                account,
-                transaction,
-            }),
-            RowAction::Unreconcile => {
-                commands.send(AppCommand::OpenDialog(DialogKind::Unreconcile {
-                    transaction: id,
-                }));
+            RowAction::Delete => self.act(transaction, action, commands),
+            RowAction::SetFlagged(_)
+            | RowAction::SetClearedStatus(_)
+            | RowAction::GoTo(_)
+            | RowAction::Unreconcile => {
+                let then = action.command(transaction);
+                if self.leave(ctx, i18n, preferences, commands, then.clone()) {
+                    commands.send(then);
+                }
             }
         }
     }
@@ -1645,6 +1659,7 @@ impl Register {
                     });
             });
         self.end_frame(&model, draft_row, draft_frame);
+        self.act_on_picked(ui.ctx(), i18n, preferences, commands);
         // The cell cursor has left the row only once an edit that refused to let the
         // keyboard go has kept it.
         self.ask_if_left(ui.ctx(), preferences, commands);
@@ -1833,8 +1848,15 @@ impl Register {
             viewport,
         };
         let (response, mut action) = cell.show(ui, i18n, theme);
-        if editing && column == RegisterColumn::Actions {
-            action = action.or(self.row_buttons(ui, frame, row));
+        if editing
+            && column == RegisterColumn::Actions
+            && let Some(picked) = self.row_buttons(ui, frame, row)
+            && let Some(transaction) = row.transaction()
+        {
+            self.picked = Some(Picked {
+                transaction,
+                action: picked,
+            });
         }
         if column == RegisterColumn::Category && row.other_side().is_some() {
             response.context_menu(|ui| action = action.or(go_to_item(ui, i18n, row)));
@@ -3200,6 +3222,41 @@ enum RowAction {
     Unreconcile,
 }
 
+impl RowAction {
+    /// The command that carries out the action on transaction `id`'s row. Delete's
+    /// confirm asks about the selected row.
+    fn command(self, id: TransactionId) -> AppCommand {
+        match self {
+            Self::Delete => AppCommand::OpenDialog(DialogKind::DeleteTransaction),
+            Self::SetFlagged(flagged) => AppCommand::Domain(DomainCommand::SetFlagged {
+                transaction: id,
+                flagged,
+            }),
+            Self::SetClearedStatus(status) => AppCommand::Domain(DomainCommand::EditTransaction {
+                transaction: id,
+                edit: TransactionEdit::ClearedStatus(status),
+            }),
+            Self::GoTo(OtherSide {
+                account,
+                transaction,
+            }) => AppCommand::GoToTransaction {
+                account,
+                transaction,
+            },
+            Self::Unreconcile => {
+                AppCommand::OpenDialog(DialogKind::Unreconcile { transaction: id })
+            }
+        }
+    }
+}
+
+/// A command picked from the More actions menu of a transaction's editing row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Picked {
+    transaction: TransactionId,
+    action: RowAction,
+}
+
 /// Whether `rect` lies wholly within `viewport` from top to bottom, give or take half a
 /// point.
 fn fully_in(viewport: Rect, rect: Rect) -> bool {
@@ -4468,6 +4525,16 @@ impl DrawnButtons {
     fn id(self, button: RowButton) -> Id {
         self.ids[button.index()]
     }
+
+    /// Whether More's menu is open.
+    fn more_open(self, ctx: &egui::Context) -> bool {
+        Popup::is_id_open(ctx, more_menu_id(self.id(RowButton::More)))
+    }
+}
+
+/// The id of the menu of the More actions button with id `more`.
+fn more_menu_id(more: Id) -> Id {
+    more.with("register_more_menu")
 }
 
 /// What the editing row's buttons did in one frame.
@@ -4513,6 +4580,7 @@ fn edit_buttons(
         }
         if button == RowButton::More {
             action = Popup::menu(&response)
+                .id(more_menu_id(response.id))
                 .show(|ui| actions_items(ui, i18n, access, row))
                 .and_then(|menu| menu.inner);
         } else if response.clicked() {
