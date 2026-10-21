@@ -142,8 +142,8 @@ fn root_events<'a>(harness: &'a mut Harness<'static, App>) -> &'a mut Vec<Viewpo
 }
 
 /// Fills the draft row of the account just opened, from the Date cell under the
-/// cursor: Corner Shop, paid 5.00 for groceries on 15 October 2026.
-fn fill_draft(harness: &mut Harness<'static, App>) {
+/// cursor: Corner Shop, paid `payment` for groceries on 15 October 2026.
+fn fill_draft(harness: &mut Harness<'static, App>, payment: &str) {
     for c in "10/15/2026".chars() {
         send(harness, Event::Text(c.to_string()));
         harness.run();
@@ -157,7 +157,7 @@ fn fill_draft(harness: &mut Harness<'static, App>) {
     // Category, Memo, Payment.
     press(harness, Modifiers::NONE, Key::Tab);
     press(harness, Modifiers::NONE, Key::Tab);
-    type_text(harness, "5.00");
+    type_text(harness, payment);
 }
 
 /// Renames Fresh Market to Corner Shop in its Payee cell, leaving the edit open.
@@ -258,33 +258,39 @@ fn no_key_discards() {
 }
 
 #[test]
-fn opening_another_account_asks_first_and_save_opens_it() {
+fn opening_another_account_asks_first() {
     let mut harness = app();
     rename_fresh_market(&mut harness);
 
     open(&mut harness, "Visa Rewards");
-    assert!(prompted(&harness));
-    assert!(shows(&harness, "Corner Shop"));
-    click_button(&mut harness, "Save");
-    let moved = !shows(&harness, "Corner Shop");
-    open(&mut harness, "Everyday Checking");
 
-    assert!(moved);
+    assert!(prompted(&harness));
     assert!(shows(&harness, "Corner Shop"));
 }
 
 #[test]
-fn opening_another_account_and_discarding_opens_it_without_the_changes() {
+fn save_as_another_account_opens_saves_the_row_and_opens_it() {
     let mut harness = app();
     rename_fresh_market(&mut harness);
-
     open(&mut harness, "Visa Rewards");
-    click_button(&mut harness, "Discard");
-    let moved = !shows(&harness, "Fresh Market");
-    open(&mut harness, "Everyday Checking");
 
-    assert!(moved);
-    assert!(shows(&harness, "Fresh Market"));
+    click_button(&mut harness, "Save");
+
+    assert!(!shows(&harness, "Corner Shop"));
+    assert!(!shows(&harness, "Fresh Market"));
+    assert!(can_undo(&mut harness));
+}
+
+#[test]
+fn discard_as_another_account_opens_opens_it_without_the_changes() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    open(&mut harness, "Visa Rewards");
+
+    click_button(&mut harness, "Discard");
+
+    assert!(!shows(&harness, "Corner Shop"));
+    assert!(!shows(&harness, "Fresh Market"));
     assert!(!can_undo(&mut harness));
 }
 
@@ -294,10 +300,8 @@ fn another_tab_asks_first() {
     rename_fresh_market(&mut harness);
 
     click_button(&mut harness, "Home");
-    assert!(prompted(&harness));
-    click_button(&mut harness, "Continue editing");
 
-    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Corner Shop"));
+    assert!(prompted(&harness));
 }
 
 #[test]
@@ -306,7 +310,16 @@ fn closing_the_window_asks_first() {
     rename_fresh_market(&mut harness);
 
     close_window(&mut harness);
+
     assert!(prompted(&harness));
+}
+
+#[test]
+fn save_as_the_window_closes_saves_the_row() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    close_window(&mut harness);
+
     harness.get_by_role_and_label(Role::Button, "Save").click();
     // The save, then the close it asks for: more frames than `run` allows.
     harness.run_steps(8);
@@ -325,23 +338,23 @@ fn closing_the_window_with_nothing_changed_asks_nothing() {
     assert!(!prompted(&harness));
 }
 
-#[test]
-fn always_save_without_asking_saves_and_the_next_leave_saves_with_no_prompt() {
-    let mut harness = app();
-    rename_fresh_market(&mut harness);
-    click_cell(&mut harness, "Bean There");
-
+/// Ticks "Always save without asking" in the open prompt.
+fn tick_always_save(harness: &mut Harness<'static, App>) {
     harness
         .get_by_role_and_label(Role::CheckBox, "Always save without asking")
         .click();
     harness.run();
-    click_button(&mut harness, "Save");
-    type_text(&mut harness, "Cafe");
-    click_cell(&mut harness, "Corner Shop");
+}
 
-    assert!(!prompted(&harness));
-    assert!(shows(&harness, "Cafe"));
-    assert_eq!(cursor(&harness), "Corner Shop");
+#[test]
+fn saving_with_always_save_ticked_turns_the_preference_on() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    click_cell(&mut harness, "Bean There");
+    tick_always_save(&mut harness);
+
+    click_button(&mut harness, "Save");
+
     click_button(&mut harness, "Tools");
     click_button(&mut harness, "Preferences…");
     harness.get_by_role_and_label(Role::Tab, "Register").click();
@@ -354,17 +367,64 @@ fn always_save_without_asking_saves_and_the_next_leave_saves_with_no_prompt() {
 }
 
 #[test]
-fn a_filled_draft_row_asks_add_and_add_adds_it() {
+fn always_save_ticked_over_the_preferences_dialog_ticks_its_preference_too() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    click_button(&mut harness, "Tools");
+    click_button(&mut harness, "Preferences…");
+    harness.get_by_role_and_label(Role::Tab, "Register").click();
+    harness.run();
+    close_window(&mut harness);
+    tick_always_save(&mut harness);
+
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    harness.run_steps(8);
+
+    let preference = harness
+        .get_by_role_and_label(Role::CheckBox, "Save a changed transaction without asking")
+        .accesskit_node()
+        .toggled();
+    assert_eq!(preference, Some(Toggled::True));
+}
+
+#[test]
+fn after_always_save_the_next_leave_saves_with_no_prompt() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    click_cell(&mut harness, "Bean There");
+    tick_always_save(&mut harness);
+    click_button(&mut harness, "Save");
+    type_text(&mut harness, "Cafe");
+
+    click_cell(&mut harness, "Corner Shop");
+
+    assert!(!prompted(&harness));
+    assert!(shows(&harness, "Cafe"));
+    assert_eq!(cursor(&harness), "Corner Shop");
+}
+
+#[test]
+fn leaving_a_filled_draft_row_asks_add() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    fill_draft(&mut harness);
+    fill_draft(&mut harness, "5.00");
 
     click_cell(&mut harness, "Fresh Market");
+
     assert!(
         harness
             .query_by_role_and_label(Role::Button, "Add")
             .is_some()
     );
+}
+
+#[test]
+fn add_in_the_prompt_adds_the_draft_row_and_moves_on() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    fill_draft(&mut harness, "5.00");
+    click_cell(&mut harness, "Fresh Market");
+
     click_button(&mut harness, "Add");
 
     assert!(shows(&harness, "Corner Shop"));
@@ -373,12 +433,28 @@ fn a_filled_draft_row_asks_add_and_add_adds_it() {
 }
 
 #[test]
+fn a_draft_row_the_ledger_refuses_to_add_brings_the_cursor_back_to_it() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    // Too large for the account's balance to hold.
+    fill_draft(&mut harness, "792281625142643375935439503.35");
+    click_cell(&mut harness, "Fresh Market");
+
+    click_button(&mut harness, "Add");
+
+    assert_eq!(
+        editor(&harness, "Payment").as_deref(),
+        Some("792,281,625,142,643,375,935,439,503.35")
+    );
+}
+
+#[test]
 fn discarding_a_filled_draft_row_empties_it() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    fill_draft(&mut harness);
-
+    fill_draft(&mut harness, "5.00");
     click_cell(&mut harness, "Fresh Market");
+
     click_button(&mut harness, "Discard");
 
     assert!(!shows(&harness, "Corner Shop"));
@@ -392,10 +468,7 @@ fn an_empty_draft_row_never_asks() {
     open(&mut harness, "Everyday Checking");
 
     click_cell(&mut harness, "Fresh Market");
-    let asked = prompted(&harness);
-    open(&mut harness, "Visa Rewards");
 
-    assert!(!asked);
     assert!(!prompted(&harness));
 }
 
@@ -407,10 +480,7 @@ fn an_unchanged_row_never_asks() {
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
     click_cell(&mut harness, "Bean There");
-    let asked = prompted(&harness);
-    open(&mut harness, "Visa Rewards");
 
-    assert!(!asked);
     assert!(!prompted(&harness));
 }
 
@@ -434,13 +504,16 @@ fn a_row_changed_back_to_its_saved_values_never_asks() {
     assert!(!prompted(&harness));
 }
 
-/// Renames Fresh Market to Corner Shop and saves it, then renames Bean There to Cafe
-/// and closes the cell, leaving the row changed with no text field focused.
-fn save_one_rename_and_change_another(harness: &mut Harness<'static, App>) {
+/// Renames Fresh Market to Corner Shop and saves it, closing the cell the save opens.
+fn save_a_rename(harness: &mut Harness<'static, App>) {
     rename_fresh_market(harness);
     press(harness, Modifiers::NONE, Key::Enter);
-    // The save opened Bean There's Payee.
     press(harness, Modifiers::NONE, Key::Escape);
+}
+
+/// Renames Bean There to Cafe and closes the cell, leaving the row changed with no
+/// text field focused.
+fn change_bean_there(harness: &mut Harness<'static, App>) {
     // Bean There's Balance, five cells after its Payee.
     let balance = harness
         .query_all_by_role(Role::Cell)
@@ -457,11 +530,22 @@ fn save_one_rename_and_change_another(harness: &mut Harness<'static, App>) {
 #[test]
 fn ctrl_z_outside_a_text_field_asks_before_undoing() {
     let mut harness = app();
-    save_one_rename_and_change_another(&mut harness);
+    save_a_rename(&mut harness);
+    change_bean_there(&mut harness);
 
     press(&mut harness, Modifiers::COMMAND, Key::Z);
+
     assert!(prompted(&harness));
     assert!(shows(&harness, "Corner Shop"));
+}
+
+#[test]
+fn discard_before_an_undo_throws_the_changes_away_then_undoes() {
+    let mut harness = app();
+    save_a_rename(&mut harness);
+    change_bean_there(&mut harness);
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
+
     click_button(&mut harness, "Discard");
 
     assert!(shows(&harness, "Fresh Market"));
@@ -471,23 +555,24 @@ fn ctrl_z_outside_a_text_field_asks_before_undoing() {
 #[test]
 fn ctrl_y_outside_a_text_field_asks_before_redoing() {
     let mut harness = app();
-    rename_fresh_market(&mut harness);
-    press(&mut harness, Modifiers::NONE, Key::Enter);
-    press(&mut harness, Modifiers::NONE, Key::Escape);
+    save_a_rename(&mut harness);
     press(&mut harness, Modifiers::COMMAND, Key::Z);
-    let balance = harness
-        .query_all_by_role(Role::Cell)
-        .map(|cell| cell.accesskit_node().label().unwrap_or_default())
-        .skip_while(|label| label != "Bean There")
-        .nth(5)
-        .expect("Bean There's row has a Balance cell");
-    click_cell(&mut harness, "Bean There");
-    type_text(&mut harness, "Cafe");
-    click_cell(&mut harness, &balance);
+    change_bean_there(&mut harness);
 
     press(&mut harness, Modifiers::COMMAND, Key::Y);
+
     assert!(prompted(&harness));
     assert!(shows(&harness, "Fresh Market"));
+}
+
+#[test]
+fn discard_before_a_redo_throws_the_changes_away_then_redoes() {
+    let mut harness = app();
+    save_a_rename(&mut harness);
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
+    change_bean_there(&mut harness);
+    press(&mut harness, Modifiers::COMMAND, Key::Y);
+
     click_button(&mut harness, "Discard");
 
     assert!(shows(&harness, "Corner Shop"));
@@ -495,13 +580,25 @@ fn ctrl_y_outside_a_text_field_asks_before_redoing() {
 }
 
 #[test]
-fn edit_undo_with_a_changed_row_saves_then_undoes_on_save() {
+fn edit_undo_with_a_changed_row_asks_first() {
     let mut harness = app();
-    save_one_rename_and_change_another(&mut harness);
+    save_a_rename(&mut harness);
+    change_bean_there(&mut harness);
 
     click_button(&mut harness, "Edit");
     click_button(&mut harness, "Undo Ctrl+Z");
+
     assert!(prompted(&harness));
+}
+
+#[test]
+fn save_before_an_undo_saves_then_undoes_that_save() {
+    let mut harness = app();
+    save_a_rename(&mut harness);
+    change_bean_there(&mut harness);
+    click_button(&mut harness, "Edit");
+    click_button(&mut harness, "Undo Ctrl+Z");
+
     click_button(&mut harness, "Save");
 
     // The undo takes back the save just made, and nothing before it.

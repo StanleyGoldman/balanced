@@ -872,7 +872,7 @@ pub(crate) struct Register {
     /// carried out.
     leaving: Option<Leaving>,
     /// The cell that opens for editing on the next frame, once a save has gone
-    /// through or been refused.
+    /// through or been refused, or the leave-row prompt has been answered.
     open_after_save: Option<CellAddress>,
     /// The draft row, formatted, with the draft it shows. It is rebuilt when the draft
     /// changes or the transactions' rows are rebuilt. `None` while the account can't
@@ -991,7 +991,10 @@ impl Register {
                     None => self.go_to_draft_row(),
                 }
             } else if let Some(left) = left {
+                // The ledger refused the post: back to the draft row's cell, and what
+                // left the row doesn't go on.
                 self.cursor = Some(left.from);
+                self.open_after_save = Some(left.from);
             }
         }
         if let Some(saving) = self.saving.take() {
@@ -1007,7 +1010,10 @@ impl Register {
                 self.saving = Some(saving);
             } else {
                 // The ledger refused the save, or the confirm was cancelled: the row
-                // keeps its changes, and the cell opens again.
+                // keeps its changes, the cell cursor comes back to it at once, so it
+                // isn't left again, and its cell opens again. What left the row, if
+                // anything, doesn't go on.
+                self.cursor = Some(saving.from);
                 self.open_after_save = Some(saving.from);
                 self.take_saved_leaving();
             }
@@ -1067,10 +1073,13 @@ impl Register {
             ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
             edit.cell()
         });
-        self.ask_to_leave(ctx, from, None, preferences, commands);
-        if let Some(leaving) = &mut self.leaving {
-            leaving.resume = resume;
-        }
+        let leaving = Leaving {
+            from,
+            then: None,
+            resume,
+            step: LeaveStep::Asked,
+        };
+        self.ask_to_leave(ctx, leaving, preferences, commands);
     }
 
     /// Whether the Register may be left for `then` at once, as the Main view moves on:
@@ -1097,39 +1106,38 @@ impl Register {
         let Some(from) = self.unsaved.reopened_cell() else {
             return true;
         };
-        self.ask_to_leave(ctx, from, Some(then), preferences, commands);
+        let leaving = Leaving {
+            from,
+            then: Some(then),
+            resume: None,
+            step: LeaveStep::Asked,
+        };
+        self.ask_to_leave(ctx, leaving, preferences, commands);
         false
     }
 
-    /// Asks about leaving the changed row of `from`, the cell that opens again if the
-    /// user stays, for `then`, or answers Save at once when the Preferences say to
-    /// save without asking.
+    /// Asks about `leaving` the changed row, or answers Save at once when the
+    /// Preferences say to save without asking.
     fn ask_to_leave(
         &mut self,
         ctx: &egui::Context,
-        from: CellAddress,
-        then: Option<AppCommand>,
+        mut leaving: Leaving,
         preferences: &Preferences,
         commands: &CommandSender,
     ) {
-        let step = if preferences.save_without_asking {
+        leaving.step = if preferences.save_without_asking {
             // The next frame saves.
             ctx.request_repaint();
             LeaveStep::Answered(LeaveAnswer::Save)
         } else {
-            let row = match from.row {
+            let row = match leaving.from.row {
                 RowId::Draft => LeftRow::Draft,
                 RowId::Transaction(_) => LeftRow::Transaction,
             };
             commands.send(AppCommand::OpenDialog(DialogKind::LeaveRow(row)));
             LeaveStep::Asked
         };
-        self.leaving = Some(Leaving {
-            from,
-            then,
-            resume: None,
-            step,
-        });
+        self.leaving = Some(leaving);
     }
 
     /// Takes `answer`, the leave-row prompt's, which the next frame carries out.
@@ -1358,13 +1366,13 @@ impl Register {
     }
 
     /// Throws away the changes to transaction `id`'s row, which is being deleted.
-    pub(crate) fn deleting(&mut self, id: TransactionId) {
+    pub(crate) fn discard_deleted_row(&mut self, id: TransactionId) {
         self.unsaved.discard(RowId::Transaction(id));
     }
 
     /// Keeps the cell being edited, if any, in its row, and saves the changes to a
     /// transaction's row with no prompt, as the window closes without having asked.
-    pub(crate) fn save_on_leaving(
+    pub(crate) fn save_on_closing(
         &mut self,
         i18n: &Localizer,
         preferences: &Preferences,
@@ -1564,7 +1572,8 @@ impl Register {
                     });
             });
         self.end_frame(&model, draft_row, draft_frame);
-        // After an edit that refused to let the keyboard go has kept the cell cursor.
+        // The cell cursor has left the row only once an edit that refused to let the
+        // keyboard go has kept it.
         self.ask_if_left(ui.ctx(), preferences, commands);
         self.model = Some(model);
         self.choices = Some(choices);

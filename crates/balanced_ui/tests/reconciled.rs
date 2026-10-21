@@ -401,35 +401,79 @@ fn a_reconciled_amount_asks_on_save_not_on_leaving_its_cell() {
     assert!(asks(&harness, RENT_CONFIRM));
 }
 
-#[test]
-fn saving_a_changed_reconciled_amount_as_another_account_opens_asks_to_confirm_it_first() {
-    let mut harness = everyday_checking();
-    click_cell(&mut harness, "Payment", "Maple Property Management");
-    type_text(&mut harness, "1500");
-    press(&mut harness, Modifiers::NONE, Key::Tab);
+/// Changes the rent's Payment to 1500, keeps it in the row with Tab, then leaves the
+/// row as `leave` does, and answers the leave-row prompt with Save.
+fn change_the_rent_then_leave_and_save(
+    harness: &mut Harness<'static, App>,
+    leave: impl FnOnce(&mut Harness<'static, App>),
+) {
+    click_cell(harness, "Payment", "Maple Property Management");
+    type_text(harness, "1500");
+    press(harness, Modifiers::NONE, Key::Tab);
+    leave(harness);
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    harness.run();
+}
+
+/// Opens Visa Rewards from the Account bar.
+fn open_visa_rewards(harness: &mut Harness<'static, App>) {
     harness
         .get_by_role_and_label(Role::Button, "Visa Rewards")
         .click();
     harness.run();
+}
 
-    harness.get_by_role_and_label(Role::Button, "Save").click();
-    harness.run();
-    let confirming = harness.query_by_label_contains("Change its amount to -1,500.00?");
-    assert!(confirming.is_some());
+#[test]
+fn saving_a_changed_reconciled_amount_as_another_account_opens_asks_to_confirm_it() {
+    let mut harness = everyday_checking();
+
+    change_the_rent_then_leave_and_save(&mut harness, open_visa_rewards);
+
+    assert!(asks(&harness, RENT_CONFIRM));
+}
+
+#[test]
+fn confirming_the_amount_as_another_account_opens_saves_it_and_opens_the_account() {
+    let mut harness = everyday_checking();
+    change_the_rent_then_leave_and_save(&mut harness, open_visa_rewards);
+
     harness
         .get_by_role_and_label(Role::Button, "Change Amount")
         .click();
     harness.run();
 
-    // Visa Rewards opened once the amount was saved.
+    // Visa Rewards is open, and the save can be undone.
     assert!(
-        harness
-            .query_by_role_and_label(Role::Cell, "1,500.00")
-            .is_none()
+        !column(&harness, "Payee")
+            .iter()
+            .any(|payee| payee == "Maple Property Management")
     );
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    let undo = harness
+        .get_by_role_and_label(Role::Button, "Undo Ctrl+Z")
+        .accesskit_node()
+        .is_disabled();
+    assert!(!undo);
+}
+
+#[test]
+fn cancelling_the_confirm_as_another_row_is_clicked_stays_on_the_row_and_asks_no_more() {
+    let mut harness = everyday_checking();
+    change_the_rent_then_leave_and_save(&mut harness, |harness| {
+        click_cell(harness, "Payee", "Fresh Market");
+    });
+
     harness
-        .get_by_role_and_label(Role::Button, "Everyday Checking")
+        .get_by_role_and_label(Role::Button, "Cancel")
         .click();
     harness.run();
-    harness.get_by_role_and_label(Role::Cell, "1,500.00");
+
+    assert!(cursor_on(&harness, "Payment", "Maple Property Management"));
+    assert!(editing(&harness));
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Continue editing")
+            .is_none()
+    );
 }

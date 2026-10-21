@@ -51,6 +51,12 @@ impl PreferencesForm {
         &self.draft
     }
 
+    /// Turns "Save a changed transaction without asking" on in the draft, as the
+    /// leave-row prompt's "Always save without asking" does.
+    pub(crate) fn save_without_asking(&mut self) {
+        self.draft.save_without_asking = true;
+    }
+
     /// Draws the group list, which AccessKit reads as a tab list, and beside it the
     /// Preferences of the chosen group.
     pub(crate) fn show(&mut self, ui: &mut egui::Ui, i18n: &Localizer) {

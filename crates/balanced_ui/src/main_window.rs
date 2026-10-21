@@ -249,7 +249,8 @@ impl MainWindow {
     }
 
     /// Saves the changes to the open Register's editing row, cell being edited and
-    /// all, as the Register goes. The draft row is not added.
+    /// all, with no prompt, as the window closes without having asked. The draft row
+    /// is not added.
     pub(crate) fn save_editing_row(
         &mut self,
         i18n: &Localizer,
@@ -257,7 +258,7 @@ impl MainWindow {
         commands: &CommandSender,
     ) {
         if let Some(register) = self.register_mut() {
-            register.save_on_leaving(i18n, preferences, commands);
+            register.save_on_closing(i18n, preferences, commands);
         }
     }
 
@@ -787,6 +788,11 @@ impl MainWindow {
                         save_without_asking: true,
                         ..preferences.clone()
                     }));
+                    // The prompt can open over the Preferences Dialog, whose OK would
+                    // otherwise put the Preference back.
+                    if let Some(open) = &mut self.preferences {
+                        open.form.save_without_asking();
+                    }
                 }
                 LeaveAnswer::Save
             }
@@ -1028,7 +1034,7 @@ impl MainWindow {
             DialogOutcome::Open => return,
             DialogOutcome::Accepted => {
                 if let Some(register) = self.register_mut() {
-                    register.deleting(form.transaction);
+                    register.discard_deleted_row(form.transaction);
                 }
                 commands.send(AppCommand::Domain(DomainCommand::DeleteTransaction {
                     transaction: form.transaction,

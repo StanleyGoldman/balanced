@@ -275,7 +275,7 @@ fn alt_released_after_a_chord_opens_no_menu() {
 }
 
 #[test]
-fn a_shortcut_pressed_mid_edit_keeps_the_cell_and_asks_before_leaving_the_row() {
+fn a_shortcut_pressed_mid_edit_that_leaves_the_row_asks_first() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
@@ -283,8 +283,23 @@ fn a_shortcut_pressed_mid_edit_keeps_the_cell_and_asks_before_leaving_the_row() 
 
     // New Transaction, which goes to the draft row.
     press(&mut harness, Modifiers::COMMAND, Key::N);
-    let asked = harness.query_by_role_and_label(Role::Button, "Save");
-    assert!(asked.is_some());
+
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Continue editing")
+            .is_some()
+    );
+}
+
+#[test]
+fn a_shortcut_pressed_mid_edit_keeps_the_cell_for_the_save() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    // New Transaction, which goes to the draft row and asks first.
+    press(&mut harness, Modifiers::COMMAND, Key::N);
+
     harness.get_by_role_and_label(Role::Button, "Save").click();
     harness.run();
     // Throws away any change to the row that wasn't saved.

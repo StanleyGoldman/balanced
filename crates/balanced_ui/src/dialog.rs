@@ -211,13 +211,18 @@ impl LightDialog {
                 let width = Theme::LIGHT_DIALOG_WIDTH.min(inner.x);
                 ui.set_width(width);
                 body_area(ui, inner.y, |ui| body(ui, &mut dialog.form));
-                let (accept, cancel, back, discard) = buttons(ui, accept, cancel, back, discard);
+                let buttons = buttons(ui, accept, cancel, back, discard);
                 if first_frame {
-                    accept.request_focus();
+                    buttons.accept.request_focus();
                 }
-                (accept, cancel, back, discard)
+                buttons
             });
-        let (accept, cancel, back, discard) = &modal.inner;
+        let Buttons {
+            accept,
+            cancel,
+            back,
+            discard,
+        } = &modal.inner;
         let others = [cancel.as_ref(), back.as_ref(), discard.as_ref()];
         if accept.clicked() || (modal.is_top_modal && enter_pressed(ctx, others)) {
             DialogOutcome::Accepted
@@ -386,9 +391,10 @@ impl HeavyDialog {
         let focused_before = ctx.memory(egui::Memory::focused);
         let shown = heavy.show(ctx, |ui| {
             let fitted_width = size.fitted_width(title_row, room.width());
-            let (accept, cancel, _) = heavy_contents(ui, fitted_width, accept, cancel, |ui| {
-                body(ui, &mut dialog.form);
-            });
+            let Buttons { accept, cancel, .. } =
+                heavy_contents(ui, fitted_width, accept, cancel, |ui| {
+                    body(ui, &mut dialog.form);
+                });
             let cancel = cancel.expect("a heavy Dialog has Cancel");
             let body_took_focus = ctx.memory(egui::Memory::focused) != focused_before;
             if first_frame && !body_took_focus {
@@ -509,22 +515,19 @@ fn heavy_contents(
     accept: String,
     cancel: String,
     body: impl FnOnce(&mut egui::Ui),
-) -> (Response, Option<Response>, Option<Response>) {
+) -> Buttons {
     if let Some(width) = fitted_width {
         ui.set_width(width);
         body(ui);
         // An auto-sized window offers all the room it may grow to, which the buttons'
         // row would centre itself in.
         let row = Vec2::new(ui.available_width(), button_height(ui));
-        let (accept, cancel, back, _) = ui
-            .allocate_ui(row, |ui| buttons(ui, accept, Some(cancel), None, None))
-            .inner;
-        (accept, cancel, back)
+        ui.allocate_ui(row, |ui| buttons(ui, accept, Some(cancel), None, None))
+            .inner
     } else {
         let height = ui.available_height();
         body_area(ui, height, body);
-        let (accept, cancel, back, _) = buttons(ui, accept, Some(cancel), None, None);
-        (accept, cancel, back)
+        buttons(ui, accept, Some(cancel), None, None)
     }
 }
 
@@ -552,6 +555,15 @@ fn button_height(ui: &egui::Ui) -> f32 {
         .max(spacing.interact_size.y)
 }
 
+/// A Dialog's row of buttons, as drawn: its default button, and whichever of the others
+/// it has.
+struct Buttons {
+    accept: Response,
+    cancel: Option<Response>,
+    back: Option<Response>,
+    discard: Option<Response>,
+}
+
 /// A Dialog's default button reading `accept`, any Cancel button reading `cancel` and
 /// any Back button reading `back`, at the right edge of `ui`, and any Discard button
 /// reading `discard` at its left edge.
@@ -561,12 +573,7 @@ fn buttons(
     cancel: Option<String>,
     back: Option<String>,
     discard: Option<String>,
-) -> (
-    Response,
-    Option<Response>,
-    Option<Response>,
-    Option<Response>,
-) {
+) -> Buttons {
     // Right to left, so the default button sits left of Cancel at the right edge, and
     // Back left of the default button.
     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
@@ -580,7 +587,12 @@ fn buttons(
             })
             .inner
         });
-        (accept, cancel, back, discard)
+        Buttons {
+            accept,
+            cancel,
+            back,
+            discard,
+        }
     })
     .inner
 }
