@@ -766,7 +766,7 @@ fn an_edit_starts_with_the_text_cursor_at_the_end() {
 }
 
 #[test]
-fn tab_on_the_last_transactions_last_cell_saves_the_row_and_edits_the_draft_rows_date() {
+fn tab_on_the_last_transactions_last_cell_keeps_the_row_unsaved_and_moves_into_save() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     // The November rent's Deposit, the last transaction's last cell.
@@ -779,7 +779,12 @@ fn tab_on_the_last_transactions_last_cell_saves_the_row_and_edits_the_draft_rows
     let deposits = column(&harness, "Deposit");
     // The last transaction's, above the draft row's.
     assert_eq!(deposits[deposits.len() - 2], "70.00");
-    assert_eq!(editor(&harness, "Date").as_deref(), Some(""));
+    let save_focused = harness
+        .query_by_role_and_label(Role::Button, "Save")
+        .is_some_and(|save| save.accesskit_node().is_focused());
+    assert!(save_focused);
+    assert!(!editing(&harness));
+    assert_eq!(undo_redo_disabled(&mut harness), (true, true));
 }
 
 #[test]
@@ -991,18 +996,23 @@ fn escape_throws_away_every_change_to_the_row_and_leaves_it_highlighted() {
 }
 
 #[test]
-fn escape_on_the_highlighted_row_throws_away_its_changes() {
+fn escape_with_no_cell_open_throws_away_the_rows_changes() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    let balance = cell_of(&harness, "Balance", "Fresh Market");
     click_cell(&mut harness, "Fresh Market");
     type_text(&mut harness, "Corner Shop");
-    // The Balance cell, in the same row, holds no cell cursor, so the edit closes.
-    click_cell(&mut harness, &balance);
+    // A click on the row's Date cell closes the Payee cell and opens nothing.
+    click_cell(&mut harness, "9/5/2026");
 
     press(&mut harness, Modifiers::NONE, Key::Escape);
 
-    assert_eq!(cursor(&harness), "Fresh Market");
+    assert!(
+        !column(&harness, "Payee")
+            .iter()
+            .any(|cell| cell == "Corner Shop")
+    );
+    assert_eq!(cursor(&harness), "9/5/2026");
+    assert!(!editing(&harness));
     assert_eq!(undo_redo_disabled(&mut harness), (true, true));
 }
 

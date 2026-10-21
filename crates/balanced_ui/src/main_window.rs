@@ -270,12 +270,12 @@ impl MainWindow {
     }
 
     /// Whether the open Register takes Tab this frame: it is shown and owns the
-    /// keyboard.
+    /// keyboard, or its editing row's buttons hold it.
     pub(crate) fn register_takes_tab(&self, ctx: &egui::Context) -> bool {
         self.tab == TopLevelTab::Accounts
             && self
                 .register()
-                .is_some_and(|register| register.owns_keyboard(ctx))
+                .is_some_and(|register| register.takes_tab(ctx))
     }
 
     /// Takes the arrow keys out of `raw_input` while a menu is open, for the Menu bar's

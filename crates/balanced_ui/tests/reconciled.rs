@@ -165,6 +165,19 @@ fn editing(harness: &Harness<'static, App>) -> bool {
         .any(|node| node.accesskit_node().label().as_deref() != Some("Search"))
 }
 
+/// The Dialog's Cancel button, not the one in the editing row's toolbar behind it.
+fn dialog_cancel<'tree>(harness: &'tree Harness<'static, App>) -> egui_kittest::Node<'tree> {
+    harness
+        .query_all_by_role_and_label(Role::Button, "Cancel")
+        .find(|cancel| {
+            cancel
+                .accesskit_node()
+                .parent()
+                .is_none_or(|parent| parent.role() != Role::Toolbar)
+        })
+        .expect("the Dialog has a Cancel button")
+}
+
 #[test]
 fn committing_a_reconciled_rows_payment_asks_first() {
     let mut harness = everyday_checking();
@@ -235,9 +248,7 @@ fn cancel_saves_nothing_and_keeps_the_row_open() {
     let mut harness = everyday_checking();
     commit(&mut harness, "Payment", "Maple Property Management", "1500");
 
-    harness
-        .get_by_role_and_label(Role::Button, "Cancel")
-        .click();
+    dialog_cancel(&harness).click();
     harness.run();
     let open = editing(&harness);
     // Throws the row's changes away, showing what the ledger holds.

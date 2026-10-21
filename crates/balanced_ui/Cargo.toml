@@ -153,6 +153,10 @@ name = "register"
 required-features = ["test-support"]
 
 [[test]]
+name = "row_buttons"
+required-features = ["test-support"]
+
+[[test]]
 name = "transfer"
 required-features = ["test-support"]
 
