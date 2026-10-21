@@ -34,6 +34,7 @@ This doc applies to egui 0.36. Tutorials and examples written before 0.34 use AP
 - Lay out only the visible rows: `ScrollArea::show_rows`, or `TableBuilder` `body.rows`/`heterogeneous_rows`, or `egui_table`. (`TableBody::row` is banned in `clippy.toml`.)
 - Only the cell being edited gets a `TextEdit`. Every other cell is a label or painted text.
 - Strings shown in a row come pre-formatted from the window's cached view model (see [state](state.md)).
+- **Scroll bar over the last column:** egui's default scroll bar floats over the content, so in a `TableBuilder` with a `Column::remainder()` it covers the right-hand column (the Category List's Txns counts read "0|") and the overflow adds a sideways scroll. Set `ui.style_mut().spacing.scroll = ScrollStyle::solid()` before building the table, so the bar takes its own width beside the columns.
 
 ## Text entry and editable grids
 
