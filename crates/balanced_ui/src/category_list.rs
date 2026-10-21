@@ -4,7 +4,7 @@
 //! transactions and split lines use each and their total, and every account a
 //! transaction can transfer to.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 use balanced_core::{AccountId, Category, CategoryId, Generation, LedgerView, Usage};
 use balanced_i18n::{AmountStyle, Localizer};
@@ -132,7 +132,7 @@ impl Source {
 
 impl ListModel {
     fn new(view: &LedgerView, i18n: &Localizer) -> Self {
-        let mut children: HashMap<Option<CategoryId>, Vec<&Category>> = HashMap::new();
+        let mut children: BTreeMap<Option<CategoryId>, Vec<&Category>> = BTreeMap::new();
         for category in view.categories() {
             children
                 .entry(category.parent())
@@ -196,14 +196,15 @@ impl ListRow {
                 None
             }
         };
-        let description = match &total {
-            Some(total) => fl!(
+        let description = if let Some(total) = &total {
+            fl!(
                 i18n,
                 "dialog-category-list-usage",
                 count = count,
                 total = total.text().to_owned()
-            ),
-            None => fl!(i18n, "dialog-category-list-usage-count", count = count),
+            )
+        } else {
+            fl!(i18n, "dialog-category-list-usage-count", count = count)
         };
         Self {
             key,
@@ -486,10 +487,11 @@ fn name_cell(
     if response.has_focus() {
         action = row_keys(ui, row).or(action);
     }
-    if row.has_children && fold_triangle_button(ui, i18n, row, slot, state.fold).clicked() {
-        if let RowKey::Category(id) = row.key {
-            action = Some(TableAction::Toggle(id));
-        }
+    if row.has_children
+        && fold_triangle_button(ui, i18n, row, slot, state.fold).clicked()
+        && let RowKey::Category(id) = row.key
+    {
+        action = Some(TableAction::Toggle(id));
     }
     action
 }
@@ -529,7 +531,7 @@ fn row_keys(ui: &egui::Ui, row: &ListRow) -> Option<TableAction> {
 /// The fold triangle of `row` in `slot`, folded as `fold` says. Only a click folds it,
 /// so it is no Tab stop; ← and → fold the selected row.
 fn fold_triangle_button(
-    ui: &mut egui::Ui,
+    ui: &egui::Ui,
     i18n: &Localizer,
     row: &ListRow,
     slot: Rect,

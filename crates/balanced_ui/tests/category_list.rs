@@ -136,7 +136,7 @@ fn selected(harness: &Harness<'static, App>) -> Option<String> {
 fn focused(harness: &Harness<'static, App>) -> Option<String> {
     harness
         .query_all_by_role(Role::TreeItem)
-        .find(|row| row.is_focused())
+        .find(egui_kittest::Node::is_focused)
         .and_then(|row| row.accesskit_node().label())
 }
 
