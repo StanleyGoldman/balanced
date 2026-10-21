@@ -70,6 +70,30 @@ struct OpeningBalance {
     date: Date<Iso>,
 }
 
+/// The keypad under the opening balance, and what follows its closing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BalanceKeypad {
+    Closed,
+    Open(Keypad),
+    /// A pointer press outside closed it and is still held. Its click closes nothing
+    /// else, not even the Dialog when it lands on the dimmed window.
+    Closing,
+    /// It handed its result back, and the date field takes keyboard focus on the next
+    /// frame. A widget given focus in the frame of a click elsewhere loses it again,
+    /// so it waits a frame.
+    HandedBack,
+}
+
+impl BalanceKeypad {
+    /// Whether a click on the dimmed window goes to the keypad, not the Dialog.
+    fn holds_clicks(&self) -> bool {
+        match self {
+            Self::Open(_) | Self::Closing => true,
+            Self::Closed | Self::HandedBack => false,
+        }
+    }
+}
+
 /// Where the create Command is, once Finish has sent it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Submission {
@@ -93,12 +117,8 @@ pub(crate) struct NewAccountForm {
     balance: String,
     /// Why Next refused the typed opening balance, shown until it changes.
     balance_error: Option<AmountParseError>,
-    /// The keypad under the opening balance, while it is open.
-    keypad: Option<Keypad>,
-    /// Whether the date field takes keyboard focus on the next frame, after the
-    /// keypad handed its result back. A widget given focus in the frame of a click
-    /// elsewhere loses it again, so it waits a frame, as the Register's keypad does.
-    focus_date: bool,
+    /// The keypad under the opening balance.
+    keypad: BalanceKeypad,
     /// Reads the opening balance in the formatting locale the wizard opened in.
     reader: AmountReader,
     /// The ledger's currency, which the new account holds.
@@ -125,8 +145,7 @@ impl NewAccountForm {
             blank_name: false,
             balance: String::new(),
             balance_error: None,
-            keypad: None,
-            focus_date: false,
+            keypad: BalanceKeypad::Closed,
             reader: i18n.amount_reader(i18n_currency(currency)),
             currency,
             date: DateEdit::new(Some(today)),
@@ -206,7 +225,7 @@ impl NewAccountForm {
 
     fn go_to(&mut self, step: Step) {
         self.step = step;
-        self.keypad = None;
+        self.keypad = BalanceKeypad::Closed;
         self.focus_field = step.has_field();
         self.submission = Submission::NotSent;
     }
@@ -267,14 +286,15 @@ impl NewAccountForm {
     ) {
         let id = Id::new("new_account_balance");
         let date_id = Id::new("new_account_date");
-        if std::mem::take(&mut self.focus_date) {
+        if self.keypad == BalanceKeypad::HandedBack {
+            self.keypad = BalanceKeypad::Closed;
             ui.memory_mut(|memory| memory.request_focus(date_id));
         }
         let label = ui.label(fl!(i18n, "dialog-new-account-balance"));
         if ui.memory(|memory| memory.has_focus(id)) {
             amount_field::refuse_characters(ui.ctx(), &self.reader);
             if ui.input_mut(|input| input.consume_key(Modifiers::ALT, Key::ArrowDown)) {
-                self.keypad = Some(Keypad::new(&self.balance));
+                self.keypad = BalanceKeypad::Open(Keypad::new(&self.balance));
             }
         }
         let (row, _) = ui.allocate_exact_size(
@@ -298,12 +318,14 @@ impl NewAccountForm {
             self.balance_error = None;
         }
         if keypad::button(ui, i18n, id, button).clicked() {
-            self.keypad = match self.keypad.take() {
-                Some(_) => {
-                    field.request_focus();
-                    None
+            self.keypad = match self.keypad {
+                BalanceKeypad::Open(_) => {
+                    keypad::focus_at_end(ui.ctx(), id, &self.balance);
+                    BalanceKeypad::Closed
                 }
-                None => Some(Keypad::new(&self.balance)),
+                BalanceKeypad::Closed | BalanceKeypad::Closing | BalanceKeypad::HandedBack => {
+                    BalanceKeypad::Open(Keypad::new(&self.balance))
+                }
             };
         }
         self.show_keypad(ui.ctx(), i18n, theme, id, row, button);
@@ -339,7 +361,7 @@ impl NewAccountForm {
         row: Rect,
         button: Rect,
     ) {
-        let Some(keypad) = self.keypad.as_mut() else {
+        let BalanceKeypad::Open(keypad) = &mut self.keypad else {
             return;
         };
         match keypad.show(
@@ -354,14 +376,17 @@ impl NewAccountForm {
         ) {
             keypad::Outcome::Open => {}
             keypad::Outcome::Cancelled => {
-                self.keypad = None;
-                ctx.memory_mut(|memory| memory.request_focus(id));
+                self.keypad = if ctx.input(|input| input.pointer.any_pressed()) {
+                    BalanceKeypad::Closing
+                } else {
+                    BalanceKeypad::Closed
+                };
+                keypad::focus_at_end(ctx, id, &self.balance);
             }
             keypad::Outcome::Taken(text) => {
-                self.keypad = None;
+                self.keypad = BalanceKeypad::HandedBack;
                 self.balance = text;
                 self.balance_error = None;
-                self.focus_date = true;
                 ctx.request_repaint();
             }
         }
@@ -428,8 +453,12 @@ pub(crate) fn show(
     if step.previous().is_some() {
         wizard = wizard.with_back(fl!(i18n, "dialog-new-account-back"));
     }
+    wizard = wizard.with_body_popup(dialog.form.keypad.holds_clicks());
     let outcome = wizard.show(ctx, dialog, |ui, form| form.body(ui, i18n, theme, today));
     let form = &mut dialog.form;
+    if form.keypad == BalanceKeypad::Closing && !ctx.input(|input| input.pointer.any_down()) {
+        form.keypad = BalanceKeypad::Closed;
+    }
     match outcome {
         DialogOutcome::Open => return WizardOutcome::Open,
         DialogOutcome::Cancelled => return WizardOutcome::Cancelled,

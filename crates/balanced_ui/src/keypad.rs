@@ -386,9 +386,10 @@ fn key_button(ui: &egui::Ui, id: Id, rect: Rect, face: &str, label: &str) -> Res
     response
 }
 
-/// Gives the display with `id`, holding `text`, keyboard focus, with its text cursor
-/// at the end, where a key just added to the sum.
-fn focus_at_end(ctx: &egui::Context, id: Id, text: &str) {
+/// Gives the text field with `id`, holding `text`, keyboard focus, with its text
+/// cursor at the end: the display, where a key just added to the sum, or the field
+/// the keypad closed over.
+pub(crate) fn focus_at_end(ctx: &egui::Context, id: Id, text: &str) {
     let mut state = TextEditState::load(ctx, id).unwrap_or_default();
     state
         .cursor
