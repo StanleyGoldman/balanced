@@ -71,6 +71,7 @@ You drive the prototype as well as the conversation. Through the control file yo
 1. Before launch, write the agenda into the PR's Q&A, one entry per question.
 2. Before the first live session, run a **smoke pass**: a scripted launch that finds the bugs the user would otherwise hit in their first minutes. The calculator-popup prototype (#214) skipped it, and its first session hit five such bugs in ten minutes.
    - Pre-seed the control file with each agenda step's scenario: its variant switches and toggle flips, a `screenshot` after each, and every control-file verb the prototype offers. Ask for clearance as a smoke run (step 3), launch, then read every screenshot and the whole log.
+   - Keep the script in its own file in your scratchpad and copy it to a fresh run directory's `control.txt` for each launch. The harness empties the control file as it reads it, so a copy of the last run's `control.txt` is empty: in #483 a rerun launched on one and sat idle until the user closed it.
    - Check:
      - the window opened maximized, read off the prompt panel's last line in the first screenshot; if it didn't, stop the run and add the first-frame maximize from Shape before reading further;
      - no glyph draws as an empty box (the Gotchas in `docs/practices/egui.md`);
