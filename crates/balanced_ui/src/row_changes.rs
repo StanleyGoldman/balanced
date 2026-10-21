@@ -47,7 +47,10 @@ impl RowChanges {
             | TransactionEdit::Memo(_)
             | TransactionEdit::Category(_)
             | TransactionEdit::Transfer(_)
-            | TransactionEdit::ClearedStatus(_) => None,
+            // TODO(#426): a split's lines can change its amount, which the Reconciled
+            // confirm should ask about.
+            | TransactionEdit::ClearedStatus(_)
+            | TransactionEdit::Lines { .. } => None,
         })
     }
 
@@ -87,7 +90,8 @@ enum Field {
     Date,
     Number,
     Payee,
-    /// The category, or the account a transfer goes to.
+    /// Where the amount goes: one category, one account a transfer goes to, or split
+    /// lines.
     Category,
     Memo,
     Amount,
@@ -100,7 +104,9 @@ impl Field {
             TransactionEdit::Date(_) => Self::Date,
             TransactionEdit::Number(_) => Self::Number,
             TransactionEdit::Payee(_) => Self::Payee,
-            TransactionEdit::Category(_) | TransactionEdit::Transfer(_) => Self::Category,
+            TransactionEdit::Category(_)
+            | TransactionEdit::Transfer(_)
+            | TransactionEdit::Lines { .. } => Self::Category,
             TransactionEdit::Memo(_) => Self::Memo,
             TransactionEdit::Amount(_) => Self::Amount,
             TransactionEdit::ClearedStatus(_) => Self::ClearedStatus,

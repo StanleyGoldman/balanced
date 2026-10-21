@@ -67,6 +67,15 @@ impl AmountSide {
         };
         Money::new(amount, money.currency()).expect("a change of sign keeps the decimal places")
     }
+
+    /// The signed amount of `money` typed in this side's column. A negative typed in
+    /// one column is an amount on the other.
+    pub(crate) fn typed(self, money: Money) -> Money {
+        match self {
+            Self::Payment => -money,
+            Self::Deposit => money,
+        }
+    }
 }
 
 /// An amount as the Register shows it, signed and unsigned.
@@ -211,6 +220,11 @@ impl RegisterRow {
                     row.amount = Some(RowAmount::new(i18n, *amount));
                 }
                 TransactionEdit::ClearedStatus(status) => row.cleared_status = *status,
+                TransactionEdit::Lines { amount, .. } => {
+                    row.kind = RowKind::Split;
+                    row.category = fl!(i18n, "register-split");
+                    row.amount = Some(RowAmount::new(i18n, *amount));
+                }
             }
         }
         row
@@ -227,6 +241,8 @@ impl RegisterRow {
             TransactionEdit::Transfer(account) => self.transfer_account() == Some(*account),
             TransactionEdit::Amount(amount) => self.amount() == Some(*amount),
             TransactionEdit::ClearedStatus(status) => self.cleared_status == *status,
+            // The row shows no split's lines, so new lines are always kept.
+            TransactionEdit::Lines { .. } => false,
         }
     }
 
@@ -353,16 +369,20 @@ impl RegisterRow {
             .map_or("", |amount| amount.signed.text())
     }
 
-    /// The amount without its sign, as a bare number, when it is on `side`.
+    /// The amount without its sign, as a bare number, when it is on `side`. A zero
+    /// amount is on neither side.
     pub(crate) fn amount_on(&self, side: AmountSide) -> Option<&FormattedAmount> {
         self.amount
             .as_ref()
-            .filter(|amount| AmountSide::of(amount.signed.money()) == side)
+            .filter(|amount| {
+                let money = amount.signed.money();
+                !money.amount().is_zero() && AmountSide::of(money) == side
+            })
             .map(|amount| &amount.unsigned)
     }
 
-    /// The text of [`RegisterRow::amount_on`], or nothing when the amount is on the
-    /// other side or the row has none.
+    /// The text of [`RegisterRow::amount_on`], or nothing when the amount is zero or
+    /// on the other side, or the row has none.
     pub(crate) fn amount_text_on(&self, side: AmountSide) -> &str {
         self.amount_on(side).map_or("", FormattedAmount::text)
     }

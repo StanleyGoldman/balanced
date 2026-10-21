@@ -1653,6 +1653,93 @@ fn an_amount_typed_in_deposit_moves_a_payment_there_as_one_undoable_edit() {
     assert_eq!(undone, ("86.42".to_owned(), String::new()));
 }
 
+/// The Payment and Deposit cells of the first row whose Payee is `payee`.
+fn amount_of(harness: &Harness<'static, App>, payee: &str) -> (String, String) {
+    (payment_of(harness, payee), deposit_of(harness, payee))
+}
+
+#[test]
+fn a_negative_amount_typed_in_deposit_saves_as_a_payment() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "86.42");
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+    type_text(&mut harness, "-12.00");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(
+        amount_of(&harness, "Fresh Market"),
+        ("12.00".to_owned(), String::new())
+    );
+}
+
+#[test]
+fn a_negative_amount_typed_in_payment_saves_as_a_deposit() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "86.42");
+    type_text(&mut harness, "-12.00");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(
+        amount_of(&harness, "Fresh Market"),
+        (String::new(), "12.00".to_owned())
+    );
+}
+
+#[test]
+fn typed_arithmetic_that_comes_out_negative_saves_on_the_other_side() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "86.42");
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+    type_text(&mut harness, "10-22");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(
+        amount_of(&harness, "Fresh Market"),
+        ("12.00".to_owned(), String::new())
+    );
+}
+
+#[test]
+fn a_zero_amount_shows_in_neither_payment_nor_deposit() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "86.42");
+    type_text(&mut harness, "5-5");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(
+        amount_of(&harness, "Fresh Market"),
+        (String::new(), String::new())
+    );
+}
+
+#[test]
+fn an_emptied_amount_cell_saves_zero() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "86.42");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    for _ in "86.42".chars() {
+        press(&mut harness, Modifiers::NONE, Key::Backspace);
+    }
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    // The save opens Bean There's Payment, the row after Fresh Market's.
+    assert_eq!(editor(&harness, "Payment").as_deref(), Some("4.75"));
+    assert_eq!(
+        amount_of(&harness, "Fresh Market"),
+        (String::new(), String::new())
+    );
+}
+
 #[test]
 fn clicking_payment_or_deposit_sorts_by_the_signed_amount() {
     let mut harness = app();

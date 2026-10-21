@@ -9,7 +9,8 @@ use icu_calendar::{Date, Iso};
 
 use crate::data_file::{date_text, minor_units, money};
 use crate::transaction::{
-    NewAllocation, NewSplitLine, NewSplitTarget, NewTransactionParts, SplitLine, SplitTarget,
+    EditedSplitLine, EditedSplitTarget, NewAllocation, NewSplitLine, NewSplitTarget,
+    NewTransactionParts, SplitLine, SplitTarget,
 };
 use crate::{
     Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId,
@@ -219,6 +220,30 @@ fn edit_to_wire(edit: &TransactionEdit) -> Result<v1::TransactionEdit, WriteErro
         TransactionEdit::ClearedStatus(status) => {
             v1::TransactionEdit::ClearedStatus(cleared_status_to_wire(*status))
         }
+        TransactionEdit::Lines { amount, lines } => v1::TransactionEdit::Lines {
+            amount: minor_units(*amount)?,
+            lines: lines
+                .iter()
+                .map(|line| {
+                    let target = match line.target() {
+                        EditedSplitTarget::Category(category) => {
+                            v1::SplitTarget::Category(category.raw())
+                        }
+                        EditedSplitTarget::Transfer(account) => {
+                            v1::SplitTarget::Transfer(v1::EditedLineTransfer::New(v1::LineTo {
+                                account: account.raw(),
+                            }))
+                        }
+                        EditedSplitTarget::Kept(other_side) => {
+                            v1::SplitTarget::Transfer(v1::EditedLineTransfer::Kept(v1::LineSide {
+                                other_side: other_side.raw(),
+                            }))
+                        }
+                    };
+                    line_to_wire(target, line.memo(), line.amount())
+                })
+                .collect::<Result<_, _>>()?,
+        },
     })
 }
 
@@ -503,6 +528,26 @@ fn edit_from_wire(
         v1::TransactionEdit::ClearedStatus(status) => {
             TransactionEdit::ClearedStatus(cleared_status_from_wire(status))
         }
+        v1::TransactionEdit::Lines { amount, lines } => TransactionEdit::Lines {
+            amount: money(amount, currency),
+            lines: lines
+                .into_iter()
+                .map(|line| {
+                    let target = match line.target {
+                        v1::SplitTarget::Category(category) => {
+                            EditedSplitTarget::Category(CategoryId::new(category))
+                        }
+                        v1::SplitTarget::Transfer(v1::EditedLineTransfer::New(to)) => {
+                            EditedSplitTarget::Transfer(AccountId::new(to.account))
+                        }
+                        v1::SplitTarget::Transfer(v1::EditedLineTransfer::Kept(side)) => {
+                            EditedSplitTarget::Kept(TransactionId::new(side.other_side))
+                        }
+                    };
+                    EditedSplitLine::new(target, &line.memo, money(line.amount, currency))
+                })
+                .collect(),
+        },
     })
 }
 
@@ -619,7 +664,9 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use super::*;
-    use crate::transaction::{NewSplitLine, NewSplitTarget, SplitLine, SplitTarget};
+    use crate::transaction::{
+        EditedSplitLine, EditedSplitTarget, NewSplitLine, NewSplitTarget, SplitLine, SplitTarget,
+    };
     use crate::{
         Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId, Money,
         MoveDirection, NewTransaction, Transaction, TransactionEdit, TransactionId, Visibility,
@@ -709,7 +756,6 @@ mod tests {
     fn every_command() -> Vec<DomainCommand> {
         let account = AccountId::new(7);
         let transaction = TransactionId::new(12);
-        let edit = |edit| DomainCommand::EditTransaction { transaction, edit };
         let restore = |transaction| DomainCommand::RestoreTransaction {
             account,
             transaction,
@@ -778,17 +824,10 @@ mod tests {
             },
             post_transfer,
             post_split,
-            edit(TransactionEdit::Date(date(9))),
-            edit(TransactionEdit::Number(Some("1044".to_owned()))),
-            edit(TransactionEdit::Number(None)),
-            edit(TransactionEdit::Payee("Fresh Market".to_owned())),
-            edit(TransactionEdit::Memo("Weekly shop".to_owned())),
-            edit(TransactionEdit::Category(CategoryId::new(6))),
-            edit(TransactionEdit::Transfer(AccountId::new(8))),
-            edit(TransactionEdit::Amount(usd(dec!(-90.00)))),
-            edit(TransactionEdit::ClearedStatus(ClearedStatus::Uncleared)),
-            edit(TransactionEdit::ClearedStatus(ClearedStatus::Cleared)),
-            edit(TransactionEdit::ClearedStatus(ClearedStatus::Reconciled)),
+        ]
+        .into_iter()
+        .chain(edit_commands(transaction))
+        .chain([
             DomainCommand::SetFlagged {
                 transaction,
                 flagged: true,
@@ -803,8 +842,7 @@ mod tests {
             restore(restored.with_cleared_status(ClearedStatus::Reconciled)),
             restore_transfer,
             restore_split,
-        ]
-        .into_iter()
+        ])
         .chain(category_commands())
         .collect()
     }
@@ -886,6 +924,49 @@ mod tests {
         ]
     }
 
+    /// One edit of every field of `transaction`, every value set and unset. Its lines
+    /// go to a category, a new account and a kept other side, then to nothing.
+    fn edit_commands(transaction: TransactionId) -> Vec<DomainCommand> {
+        let edit = |edit| DomainCommand::EditTransaction { transaction, edit };
+        vec![
+            edit(TransactionEdit::Date(date(9))),
+            edit(TransactionEdit::Number(Some("1044".to_owned()))),
+            edit(TransactionEdit::Number(None)),
+            edit(TransactionEdit::Payee("Fresh Market".to_owned())),
+            edit(TransactionEdit::Memo("Weekly shop".to_owned())),
+            edit(TransactionEdit::Category(CategoryId::new(6))),
+            edit(TransactionEdit::Transfer(AccountId::new(8))),
+            edit(TransactionEdit::Amount(usd(dec!(-90.00)))),
+            edit(TransactionEdit::ClearedStatus(ClearedStatus::Uncleared)),
+            edit(TransactionEdit::ClearedStatus(ClearedStatus::Cleared)),
+            edit(TransactionEdit::ClearedStatus(ClearedStatus::Reconciled)),
+            edit(TransactionEdit::Lines {
+                amount: usd(dec!(-350.00)),
+                lines: vec![
+                    EditedSplitLine::new(
+                        EditedSplitTarget::Category(CategoryId::new(3)),
+                        "Food",
+                        usd(dec!(-50.00)),
+                    ),
+                    EditedSplitLine::new(
+                        EditedSplitTarget::Transfer(AccountId::new(8)),
+                        "Car",
+                        usd(dec!(-100.00)),
+                    ),
+                    EditedSplitLine::new(
+                        EditedSplitTarget::Kept(TransactionId::new(17)),
+                        "Rainy day",
+                        usd(dec!(-200.00)),
+                    ),
+                ],
+            }),
+            edit(TransactionEdit::Lines {
+                amount: usd(dec!(0.00)),
+                lines: Vec::new(),
+            }),
+        ]
+    }
+
     /// One of every category Command, every field set and unset.
     fn category_commands() -> [DomainCommand; 4] {
         [
@@ -962,6 +1043,15 @@ mod tests {
                 other_sides: Vec::new(),
             }
         );
+    }
+
+    #[test]
+    fn an_edited_lines_transfer_naming_both_an_account_and_an_other_side_is_refused() {
+        let entry = r#"{"edit_transaction":{"transaction":12,"edit":{"lines":{"amount":-100,"lines":[{"transfer":{"account":8,"other_side":17},"memo":"","amount":-100}]}}}}"#;
+
+        let error = decode(entry, usd_code()).unwrap_err();
+
+        assert!(matches!(error, UndoEntryError::Json(_)), "{error:?}");
     }
 
     #[test]

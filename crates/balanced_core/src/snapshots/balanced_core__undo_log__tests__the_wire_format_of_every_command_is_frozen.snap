@@ -27,6 +27,8 @@ expression: entries
 {"edit_transaction":{"transaction":12,"edit":{"cleared_status":"uncleared"}}}
 {"edit_transaction":{"transaction":12,"edit":{"cleared_status":"cleared"}}}
 {"edit_transaction":{"transaction":12,"edit":{"cleared_status":"reconciled"}}}
+{"edit_transaction":{"transaction":12,"edit":{"lines":{"amount":-35000,"lines":[{"category":3,"memo":"Food","amount":-5000},{"transfer":{"account":8},"memo":"Car","amount":-10000},{"transfer":{"other_side":17},"memo":"Rainy day","amount":-20000}]}}}}
+{"edit_transaction":{"transaction":12,"edit":{"lines":{"amount":0,"lines":[]}}}}
 {"set_flagged":{"transaction":12,"flagged":true}}
 {"set_flagged":{"transaction":12,"flagged":false}}
 {"delete_transaction":{"transaction":12}}

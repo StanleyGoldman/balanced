@@ -2457,7 +2457,11 @@ impl Register {
     /// is refused: the cursor goes to the first such cell, outlined, with a bubble
     /// saying what is missing.
     fn post(&mut self, keys: &KeyContext<'_>) {
-        match self.unsaved.draft.posting(keys.account) {
+        match self
+            .unsaved
+            .draft
+            .posting(keys.account, keys.draft_frame.currency)
+        {
             Ok(command) => {
                 keys.commands.send(AppCommand::Domain(command));
                 self.posted_at = Some(keys.generation);
@@ -2470,13 +2474,11 @@ impl Register {
     }
 }
 
-/// The draft row cell that `missing` names. A missing amount names Payment, the
-/// first of the two cells that take one.
+/// The draft row cell that `missing` names.
 fn missing_column(missing: Missing) -> RegisterColumn {
     match missing {
         Missing::Date => RegisterColumn::Date,
         Missing::Category => RegisterColumn::Category,
-        Missing::Amount => RegisterColumn::Payment,
     }
 }
 
@@ -2791,6 +2793,12 @@ fn commit(
             };
             change
         }
+        // An emptied draft row amount leaves the draft with no amount typed, as it
+        // started.
+        EditField::Amount { .. } if text.is_empty() && row.id() == RowId::Draft => {
+            unsaved.draft.clear_amount();
+            return Commit::Done;
+        }
         EditField::Amount {
             reader,
             currency,
@@ -2962,9 +2970,10 @@ struct Saving {
 }
 
 /// The edit that saves `text`, already trimmed, as the amount of `row` on `side`,
-/// read by `reader` in `currency`, or `None` when it matches the saved amount. The
-/// text's sign is ignored: the side gives the amount its sign, so the amount moves to
-/// `side` when it was on the other.
+/// read by `reader` in `currency`, or `None` when it matches the saved amount. A
+/// positive amount goes on `side`, moving there when it was on the other, and a
+/// negative one goes on the other side, without its sign. Text with no amount in it
+/// saves zero.
 fn amount_edit(
     row: &RegisterRow,
     side: AmountSide,
@@ -2975,10 +2984,13 @@ fn amount_edit(
     if text == row.amount_text_on(side) {
         return Ok(None);
     }
-    let amount = reader.read(text)?.amount();
-    let money = Money::new(amount, currency)
-        .expect("the reader gives amounts at the currency's decimal places");
-    let money = side.signed(money);
+    let money = match reader.read(text) {
+        Ok(calculation) => Money::new(calculation.amount(), currency)
+            .expect("the reader gives amounts at the currency's decimal places"),
+        Err(AmountParseError::Empty) => Money::zero(currency),
+        Err(error) => return Err(error),
+    };
+    let money = side.typed(money);
     Ok((row.amount() != Some(money)).then_some(TransactionEdit::Amount(money)))
 }
 
@@ -4089,20 +4101,17 @@ mod tests {
             harness.event(Event::Text(c.to_string()));
             harness.run();
         }
+        // Enter adds the row, which is refused for its missing category: the cursor
+        // goes to the Category cell.
         press(&mut harness, Key::Enter);
-        press(&mut harness, Key::ArrowRight);
+        press(&mut harness, Key::ArrowLeft);
         harness.event(Event::Text("Corner Cafe".to_owned()));
         harness.run();
         press(&mut harness, Key::Enter);
         harness.event(Event::Text("Food & Dining:Groceries".to_owned()));
         harness.run();
-        press(&mut harness, Key::Enter);
-        press(&mut harness, Key::ArrowRight);
-        harness.event(Event::Text("12".to_owned()));
-        harness.run();
 
-        harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
-        harness.run();
+        press(&mut harness, Key::Enter);
 
         let posted = receiver.try_iter().any(|command| {
             matches!(
@@ -4112,6 +4121,10 @@ mod tests {
         });
         assert!(posted);
         // The snapshot never changes, as when the ledger rejects the post.
-        harness.get_by_role_and_label(Role::Cell, "Corner Cafe");
+        assert!(
+            harness
+                .query_by_role_and_label(Role::Cell, "Corner Cafe")
+                .is_some()
+        );
     }
 }
