@@ -8,7 +8,8 @@ use std::collections::{HashMap, HashSet};
 
 use balanced_core::{
     Account, AccountId, AccountSummary, Allocation, CategoryId, ClearedStatus, CurrencyCode,
-    Generation, LedgerView, Money, SplitTarget, Transaction, TransactionEdit, TransactionId,
+    EditedSplitLine, EditedSplitTarget, Generation, LedgerView, Money, NewSplitLine, SplitLine,
+    SplitTarget, Transaction, TransactionEdit, TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
 use icu_calendar::{Date, Iso};
@@ -115,6 +116,116 @@ enum RowKind {
     Changed(CategoryTarget),
 }
 
+/// One line of a split, as a row holds it and the Split dialog edits it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SplitLineRow {
+    /// Where the line's part of the amount goes.
+    target: CategoryTarget,
+    /// The other side the line keeps, when it goes to another account and already has
+    /// one there.
+    other_side: Option<TransactionId>,
+    memo: String,
+    /// The line's signed amount, in the transaction's currency.
+    amount: Money,
+}
+
+impl SplitLineRow {
+    /// A line of `amount` to `target`, memoed `memo`, keeping `other_side` when it goes
+    /// to another account and already has one there.
+    pub(crate) fn new(
+        target: CategoryTarget,
+        other_side: Option<TransactionId>,
+        memo: &str,
+        amount: Money,
+    ) -> Self {
+        Self {
+            target,
+            other_side,
+            memo: memo.to_owned(),
+            amount,
+        }
+    }
+
+    pub(crate) fn target(&self) -> CategoryTarget {
+        self.target
+    }
+
+    pub(crate) fn other_side(&self) -> Option<TransactionId> {
+        self.other_side
+    }
+
+    pub(crate) fn memo(&self) -> &str {
+        &self.memo
+    }
+
+    pub(crate) fn amount(&self) -> Money {
+        self.amount
+    }
+
+    /// The line as a [`TransactionEdit::Lines`] edit gives it.
+    fn edited(&self) -> EditedSplitLine {
+        match (self.target, self.other_side) {
+            (CategoryTarget::Transfer(_), Some(other_side)) => {
+                EditedSplitLine::kept(other_side, &self.memo, self.amount)
+            }
+            (CategoryTarget::Transfer(account), None) => {
+                EditedSplitLine::transfer(account, &self.memo, self.amount)
+            }
+            (CategoryTarget::Category(category), _) => {
+                EditedSplitLine::category(category, &self.memo, self.amount)
+            }
+        }
+    }
+
+    /// The line of a new transaction to post. A new transaction has no other sides to
+    /// keep.
+    fn posted(&self) -> NewSplitLine {
+        match self.target {
+            CategoryTarget::Category(category) => {
+                NewSplitLine::category(category, &self.memo, self.amount)
+            }
+            CategoryTarget::Transfer(account) => {
+                NewSplitLine::transfer(account, &self.memo, self.amount)
+            }
+        }
+    }
+}
+
+/// A transaction's split lines, and its amount, which they add up to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SplitLines {
+    amount: Money,
+    lines: Vec<SplitLineRow>,
+}
+
+impl SplitLines {
+    /// `lines`, which add up to `amount`.
+    pub(crate) fn new(amount: Money, lines: Vec<SplitLineRow>) -> Self {
+        Self { amount, lines }
+    }
+
+    pub(crate) fn amount(&self) -> Money {
+        self.amount
+    }
+
+    pub(crate) fn lines(&self) -> &[SplitLineRow] {
+        &self.lines
+    }
+
+    /// The edit that gives a transaction these lines.
+    pub(crate) fn edit(&self) -> TransactionEdit {
+        TransactionEdit::Lines {
+            amount: self.amount,
+            lines: self.lines.iter().map(SplitLineRow::edited).collect(),
+        }
+    }
+
+    /// The lines of a new transaction to post.
+    pub(crate) fn posted(&self) -> Vec<NewSplitLine> {
+        self.lines.iter().map(SplitLineRow::posted).collect()
+    }
+}
+
 /// A transfer's other side: the transaction, and the account holding it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OtherSide {
@@ -145,6 +256,8 @@ pub(crate) struct RegisterRow {
     /// How far the transaction has been checked against the bank. The draft row is
     /// uncleared.
     cleared_status: ClearedStatus,
+    /// The split lines, when the amount is split.
+    lines: Vec<SplitLineRow>,
 }
 
 impl RegisterRow {
@@ -156,10 +269,25 @@ impl RegisterRow {
         view: &LedgerView,
         i18n: &Localizer,
     ) -> Self {
+        let (kind, category, lines) = match draft.split() {
+            Some(split) => (
+                RowKind::Split,
+                fl!(i18n, "register-split"),
+                split.lines().to_vec(),
+            ),
+            None => (
+                RowKind::Draft(draft.category()),
+                draft
+                    .category()
+                    .and_then(|target| target_text(view, target))
+                    .unwrap_or_default(),
+                Vec::new(),
+            ),
+        };
         Self {
             id: RowId::Draft,
             place: usize::MAX,
-            kind: RowKind::Draft(draft.category()),
+            kind,
             saved_date: draft.date(),
             date: draft
                 .date()
@@ -167,21 +295,14 @@ impl RegisterRow {
                 .unwrap_or_default(),
             number: draft.number().to_owned(),
             payee: draft.payee().to_owned(),
-            category: draft
-                .category()
-                .and_then(|target| match target {
-                    CategoryTarget::Category(id) => category_text(view, id),
-                    CategoryTarget::Transfer(account) => view
-                        .account(account)
-                        .map(|summary| transfer_text(summary.account().name())),
-                })
-                .unwrap_or_default(),
+            category,
             memo: draft.memo().to_owned(),
             currency,
             amount: draft.amount().map(|amount| RowAmount::new(i18n, amount)),
             balance: None,
             flagged: false,
             cleared_status: ClearedStatus::Uncleared,
+            lines,
         }
     }
 
@@ -208,22 +329,23 @@ impl RegisterRow {
                 TransactionEdit::Category(category) => {
                     row.kind = RowKind::Changed(CategoryTarget::Category(*category));
                     row.category = category_text(view, *category).unwrap_or_default();
+                    row.lines.clear();
                 }
                 TransactionEdit::Transfer(account) => {
                     row.kind = RowKind::Changed(CategoryTarget::Transfer(*account));
-                    row.category = view
-                        .account(*account)
-                        .map(|summary| transfer_text(summary.account().name()))
-                        .unwrap_or_default();
+                    row.category =
+                        target_text(view, CategoryTarget::Transfer(*account)).unwrap_or_default();
+                    row.lines.clear();
                 }
                 TransactionEdit::Amount(amount) => {
                     row.amount = Some(RowAmount::new(i18n, *amount));
                 }
                 TransactionEdit::ClearedStatus(status) => row.cleared_status = *status,
-                TransactionEdit::Lines { amount, .. } => {
+                TransactionEdit::Lines { amount, lines } => {
                     row.kind = RowKind::Split;
                     row.category = fl!(i18n, "register-split");
                     row.amount = Some(RowAmount::new(i18n, *amount));
+                    row.lines = lines.iter().map(|line| self.line_row(line)).collect();
                 }
             }
         }
@@ -241,9 +363,40 @@ impl RegisterRow {
             TransactionEdit::Transfer(account) => self.transfer_account() == Some(*account),
             TransactionEdit::Amount(amount) => self.amount() == Some(*amount),
             TransactionEdit::ClearedStatus(status) => self.cleared_status == *status,
-            // The row shows no split's lines, so new lines are always kept.
-            TransactionEdit::Lines { .. } => false,
+            TransactionEdit::Lines { amount, lines } => {
+                self.is_split()
+                    && self.amount() == Some(*amount)
+                    && self
+                        .lines
+                        .iter()
+                        .map(SplitLineRow::edited)
+                        .eq(lines.iter().cloned())
+            }
         }
+    }
+
+    /// `line`, an edited line of this transaction, as the row holds it. A kept line
+    /// goes to the account of the other side it keeps, one of this row's.
+    fn line_row(&self, line: &EditedSplitLine) -> SplitLineRow {
+        let (target, other_side) = match line.target() {
+            EditedSplitTarget::Category(category) => (CategoryTarget::Category(category), None),
+            EditedSplitTarget::Transfer(account) => (CategoryTarget::Transfer(account), None),
+            EditedSplitTarget::Kept(other_side) => {
+                let account = self
+                    .lines
+                    .iter()
+                    .find(|kept| kept.other_side == Some(other_side))
+                    .map(|kept| kept.target)
+                    .or_else(|| {
+                        self.other_side()
+                            .filter(|side| side.transaction == other_side)
+                            .map(|side| CategoryTarget::Transfer(side.account))
+                    })
+                    .expect("a kept line keeps one of the row's other sides");
+                (account, Some(other_side))
+            }
+        };
+        SplitLineRow::new(target, other_side, line.memo(), line.amount())
     }
 
     pub(crate) fn id(&self) -> RowId {
@@ -321,6 +474,11 @@ impl RegisterRow {
     /// Whether the amount is split between categories.
     pub(crate) fn is_split(&self) -> bool {
         self.kind == RowKind::Split
+    }
+
+    /// The split lines, when the amount is split.
+    pub(crate) fn split_lines(&self) -> &[SplitLineRow] {
+        &self.lines
     }
 
     /// The transaction's date, which the Date cell shows formatted. Only the draft row
@@ -594,6 +752,14 @@ impl RegisterModel {
                         )
                     }
                 };
+                let split_lines = match transaction.allocation() {
+                    Allocation::Split(lines) => lines.as_slice(),
+                    Allocation::OpeningBalance
+                    | Allocation::Category(_)
+                    | Allocation::Transfer(_) => &[],
+                };
+                let lines = other_accounts.line_rows(split_lines);
+                let split_targets = split_targets(split_lines, &mut paths, &mut other_accounts);
                 let row = RegisterRow {
                     id: RowId::Transaction(transaction.id()),
                     place,
@@ -610,22 +776,8 @@ impl RegisterModel {
                         .then(|| FormattedAmount::new(i18n, entry.balance(), AmountStyle::Bare)),
                     flagged: transaction.is_flagged(),
                     cleared_status: transaction.cleared_status(),
+                    lines,
                 };
-                let split_lines = match transaction.allocation() {
-                    Allocation::Split(lines) => lines.as_slice(),
-                    Allocation::OpeningBalance
-                    | Allocation::Category(_)
-                    | Allocation::Transfer(_) => &[],
-                };
-                let split_targets: Vec<String> = split_lines
-                    .iter()
-                    .map(|line| match line.target() {
-                        SplitTarget::Category(category) => paths.path(category).to_owned(),
-                        SplitTarget::Transfer(other_side) => {
-                            transfer_text(other_accounts.holding(other_side).name)
-                        }
-                    })
-                    .collect();
                 matcher
                     .shows(&row, split_targets.iter().map(String::as_str))
                     .then_some(row)
@@ -743,6 +895,24 @@ fn divider(rows: &[RegisterRow], direction: SortDirection, today: Date<Iso>) -> 
     }
 }
 
+/// What the Category field shows for each of `lines`, a split's: a category's path,
+/// or `[Name]` for the account holding a line's other side.
+fn split_targets(
+    lines: &[SplitLine],
+    paths: &mut CategoryPaths<'_>,
+    other_accounts: &mut OtherAccounts<'_>,
+) -> Vec<String> {
+    lines
+        .iter()
+        .map(|line| match line.target() {
+            SplitTarget::Category(category) => paths.path(category).to_owned(),
+            SplitTarget::Transfer(other_side) => {
+                transfer_text(other_accounts.holding(other_side).name)
+            }
+        })
+        .collect()
+}
+
 /// Category paths, each built once while a model is built.
 struct CategoryPaths<'a> {
     view: &'a LedgerView,
@@ -776,6 +946,23 @@ struct Holder<'a> {
 }
 
 impl<'a> OtherAccounts<'a> {
+    /// `lines`, a split's, as its row holds them.
+    fn line_rows(&mut self, lines: &[SplitLine]) -> Vec<SplitLineRow> {
+        lines
+            .iter()
+            .map(|line| {
+                let (target, other_side) = match line.target() {
+                    SplitTarget::Category(category) => (CategoryTarget::Category(category), None),
+                    SplitTarget::Transfer(other_side) => (
+                        CategoryTarget::Transfer(self.holding(other_side).id),
+                        Some(other_side),
+                    ),
+                };
+                SplitLineRow::new(target, other_side, line.memo(), line.amount())
+            })
+            .collect()
+    }
+
     /// The account holding transaction `other_side`.
     fn holding(&mut self, other_side: TransactionId) -> Holder<'a> {
         let view = self.view;
@@ -805,6 +992,17 @@ pub(crate) fn transactions_by_id(
             })
         })
         .collect()
+}
+
+/// What a Category field shows for `target` in `view`: a category's path, or `[Name]`
+/// for an account. `None` once it has been deleted.
+pub(crate) fn target_text(view: &LedgerView, target: CategoryTarget) -> Option<String> {
+    match target {
+        CategoryTarget::Category(id) => category_text(view, id),
+        CategoryTarget::Transfer(account) => view
+            .account(account)
+            .map(|summary| transfer_text(summary.account().name())),
+    }
 }
 
 /// The path from the top of the tree to category `id` of `view`, as the Register shows

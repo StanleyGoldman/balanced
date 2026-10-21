@@ -255,7 +255,6 @@ impl App {
                 | AppCommand::Undo
                 | AppCommand::Redo
                 | AppCommand::Navigate(_)
-                | AppCommand::OpenSplitView(_)
                 | AppCommand::GoToTransaction { .. }
                 | AppCommand::GoToDraftRow
                 | AppCommand::GoToDate(_)
@@ -432,9 +431,6 @@ impl App {
                 if let Some(ledger) = ledger {
                     self.main_window.go_to_draft_row(ctx, &ledger.snapshot());
                 }
-            }
-            AppCommand::OpenSplitView(_) => {
-                self.main_window.show_status(StatusMessage::NotAvailableYet);
             }
             AppCommand::SwitchPane => self.main_window.switch_pane(ctx),
             AppCommand::OpenCalculator => {

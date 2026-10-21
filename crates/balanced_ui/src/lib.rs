@@ -9,6 +9,7 @@ mod amount_field;
 mod app;
 mod calculator;
 mod clock;
+mod combo_field;
 mod combobox;
 mod command;
 mod data_file;
@@ -36,6 +37,7 @@ mod register_model;
 mod route;
 mod row_changes;
 mod save_refusal;
+mod split_dialog;
 #[cfg(feature = "test-support")]
 pub mod testing;
 mod theme;

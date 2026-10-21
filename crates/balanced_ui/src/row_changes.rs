@@ -37,29 +37,33 @@ impl RowChanges {
         &self.edits
     }
 
-    /// The new amount, if the amount is changed.
+    /// The amount the changes give the transaction: a changed amount, or the total of
+    /// changed split lines, which may be the amount it has.
     pub(crate) fn amount(&self) -> Option<Money> {
         self.edits.iter().find_map(|edit| match edit {
-            TransactionEdit::Amount(amount) => Some(*amount),
+            TransactionEdit::Amount(amount) | TransactionEdit::Lines { amount, .. } => {
+                Some(*amount)
+            }
             TransactionEdit::Date(_)
             | TransactionEdit::Number(_)
             | TransactionEdit::Payee(_)
             | TransactionEdit::Memo(_)
             | TransactionEdit::Category(_)
             | TransactionEdit::Transfer(_)
-            // TODO(#426): a split's lines can change its amount, which the Reconciled
-            // confirm should ask about.
-            | TransactionEdit::ClearedStatus(_)
-            | TransactionEdit::Lines { .. } => None,
+            | TransactionEdit::ClearedStatus(_) => None,
         })
     }
 
     /// Keeps `edit` in place of any earlier change to its field, or drops the field's
     /// change when `saved`, the transaction's row as the ledger has it, already holds
-    /// the value.
+    /// the value. Split lines carry the amount they add up to, so they replace a
+    /// changed amount too.
     pub(crate) fn record(&mut self, saved: &RegisterRow, edit: TransactionEdit) {
         let field = Field::of(&edit);
-        self.edits.retain(|kept| Field::of(kept) != field);
+        let edit_is_lines = matches!(edit, TransactionEdit::Lines { .. });
+        self.edits.retain(|kept| {
+            Field::of(kept) != field && !(edit_is_lines && Field::of(kept) == Field::Amount)
+        });
         if saved.holds(&edit) {
             return;
         }

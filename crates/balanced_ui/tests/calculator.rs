@@ -506,12 +506,12 @@ fn a_split_rows_amount_cell_is_no_paste_target() {
     ledger
         .apply(DomainCommand::PostTransaction {
             account: everyday,
-            transaction: NewTransaction::split_for_tests(
+            transaction: NewTransaction::split(
                 Date::try_new_iso(2026, 10, 1).expect("1 October 2026 is a date"),
                 "Payday",
                 vec![
-                    NewSplitLine::for_tests(food, "Lunch", usd("-50.00")),
-                    NewSplitLine::for_tests(food, "Dinner", usd("-70.00")),
+                    NewSplitLine::category(food, "Lunch", usd("-50.00")),
+                    NewSplitLine::category(food, "Dinner", usd("-70.00")),
                 ],
             ),
         })

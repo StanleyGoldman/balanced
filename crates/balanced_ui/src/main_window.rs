@@ -37,6 +37,7 @@ use crate::register::{ColumnWidths, LeaveAnswer, LeftRow, Register};
 use crate::register_model::RegisterRow;
 use crate::route::{Route, TopLevelTab};
 use crate::save_refusal::{RefusalAnswer, SaveRefusal};
+use crate::split_dialog::{DoneOutcome, SplitForm};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
 
@@ -76,6 +77,8 @@ pub(crate) struct MainWindow {
     /// The "Can't save this transaction" Dialog, with why the save was refused, while
     /// it is open.
     cant_save: Option<OpenDialog<SaveRefusal>>,
+    /// The Split dialog, while it is open.
+    split: Option<OpenDialog<SplitForm>>,
     /// The Calculator, while it is open.
     calculator: Option<Calculator>,
     /// Where focus goes now that a Dialog has closed, until a frame restores it.
@@ -159,6 +162,7 @@ impl MainWindow {
             go_to_date: None,
             leave_row: None,
             cant_save: None,
+            split: None,
             calculator: None,
             focus_return: None,
             menu_nav: MenuNav::default(),
@@ -394,6 +398,7 @@ impl MainWindow {
             go_to_date,
             leave_row,
             cant_save,
+            split,
             // The Preferences, and a refusal shown meanwhile, belong to no one file.
             preferences: _,
             data_file_refusal: _,
@@ -415,6 +420,7 @@ impl MainWindow {
         *go_to_date = None;
         *leave_row = None;
         *cant_save = None;
+        *split = None;
     }
 
     /// Opens the Dialog saying why a data file was refused, over any Dialog already
@@ -587,6 +593,13 @@ impl MainWindow {
                     .unwrap_or(today);
                 self.go_to_date = Some(OpenDialog::new(ctx, GoToDateForm::new(seed)));
             }
+            DialogKind::Split(start) => {
+                let Some(summary) = self.open_account(view) else {
+                    return;
+                };
+                let form = SplitForm::new(start, view, summary.account().id(), i18n);
+                self.split = Some(OpenDialog::new(ctx, form));
+            }
             DialogKind::LeaveRow(_) => unreachable!("the leave-row prompt opened above"),
             DialogKind::CantSave(_) => unreachable!("the refusal opened above"),
         }
@@ -644,6 +657,7 @@ impl MainWindow {
             || self.go_to_date.is_some()
             || self.leave_row.is_some()
             || self.cant_save.is_some()
+            || self.split.is_some()
     }
 
     /// The account the Main view shows, if it shows one.
@@ -781,8 +795,59 @@ impl MainWindow {
         self.manage_accounts_dialog(ctx, i18n, theme, commands, view);
         self.data_file_refusal_dialog(ctx, i18n, theme);
         self.go_to_date_dialog(ctx, i18n, theme, commands, today);
+        self.split_dialog(ctx, i18n, theme, preferences);
         self.leave_row_dialog(ctx, i18n, theme, commands, preferences);
         self.cant_save_dialog(ctx, i18n, theme);
+    }
+
+    /// The Split dialog, while it is open. Done hands its lines to the Register's row,
+    /// unless they don't add up, which the Dialog then shows; Cancel and Esc drop the
+    /// changes made in it.
+    fn split_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        theme: &Theme,
+        preferences: &Preferences,
+    ) {
+        let Some(dialog) = &mut self.split else {
+            return;
+        };
+        let outcome = HeavyDialog::new(
+            Id::new("split_dialog"),
+            fl!(i18n, "dialog-split-title"),
+            fl!(i18n, "dialog-split-done"),
+            fl!(i18n, "dialog-cancel"),
+            fl!(i18n, "dialog-close"),
+            theme,
+        )
+        .fitted(SplitForm::body_width(ctx))
+        .show(ctx, dialog, |ui, form| {
+            form.show(ui, i18n, theme, preferences.inline_completion);
+        });
+        match outcome {
+            DialogOutcome::Open => {}
+            DialogOutcome::Accepted => {
+                let done = match dialog.form.done() {
+                    DoneOutcome::Refused => return,
+                    DoneOutcome::Unchanged => None,
+                    DoneOutcome::Changed(done) => Some(done),
+                };
+                self.close_dialog(ctx, |window| &mut window.split);
+                if let Some(register) = self.register_mut() {
+                    register.split_closed(done);
+                }
+            }
+            DialogOutcome::Back | DialogOutcome::Discarded => {
+                unreachable!("a heavy Dialog has no Back or Discard button")
+            }
+            DialogOutcome::Cancelled => {
+                self.close_dialog(ctx, |window| &mut window.split);
+                if let Some(register) = self.register_mut() {
+                    register.split_closed(None);
+                }
+            }
+        }
     }
 
     /// The "Can't save this transaction" Dialog, while it is open, drawn over any other

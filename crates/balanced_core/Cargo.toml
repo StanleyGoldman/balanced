@@ -26,21 +26,6 @@ tempfile.workspace = true
 # `Ledger::open_with_migrations`, for tests outside the crate's own code.
 test-support = ["balanced_store/test-support"]
 
-# Posts split transactions, which need `test-support`.
-[[test]]
-name = "data_file"
-required-features = ["test-support"]
-
-# Posts split transactions, which need `test-support`.
-[[test]]
-name = "split_transfer"
-required-features = ["test-support"]
-
-# Edits split transactions, which need `test-support`.
-[[test]]
-name = "split_lines"
-required-features = ["test-support"]
-
 # Upgrades files through migrations of its own, which need `test-support`.
 [[test]]
 name = "upgrade"

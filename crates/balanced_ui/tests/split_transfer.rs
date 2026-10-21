@@ -54,12 +54,12 @@ fn payday() -> Harness<'static, App> {
     ledger
         .apply(DomainCommand::PostTransaction {
             account: everyday,
-            transaction: NewTransaction::split_for_tests(
+            transaction: NewTransaction::split(
                 Date::try_new_iso(2026, 10, 1).expect("1 October 2026 is a date"),
                 "Payday",
                 vec![
-                    NewSplitLine::for_tests(food, "Lunch", usd("-50.00")),
-                    NewSplitLine::transfer_for_tests(emergency, "Rainy day", usd("-200.00")),
+                    NewSplitLine::category(food, "Lunch", usd("-50.00")),
+                    NewSplitLine::transfer(emergency, "Rainy day", usd("-200.00")),
                 ],
             ),
         })

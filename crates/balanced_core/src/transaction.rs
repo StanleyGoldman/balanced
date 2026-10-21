@@ -111,16 +111,13 @@ impl NewSplitLine {
         }
     }
 
-    /// A line in `category`, for tests outside the crate's own code.
-    #[cfg(feature = "test-support")]
-    pub fn for_tests(category: CategoryId, memo: &str, amount: Money) -> Self {
+    /// A line in `category`.
+    pub fn category(category: CategoryId, memo: &str, amount: Money) -> Self {
         Self::new(NewSplitTarget::Category(category), memo, amount)
     }
 
-    /// A line that moves `amount` from or to `account`, for tests outside the crate's
-    /// own code.
-    #[cfg(feature = "test-support")]
-    pub fn transfer_for_tests(account: AccountId, memo: &str, amount: Money) -> Self {
+    /// A line that moves `amount` from or to `account`.
+    pub fn transfer(account: AccountId, memo: &str, amount: Money) -> Self {
         Self::new(NewSplitTarget::Transfer(account), memo, amount)
     }
 
@@ -148,7 +145,7 @@ impl NewSplitLine {
 
 /// Where an [`EditedSplitLine`]'s part of the amount goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EditedSplitTarget {
+pub enum EditedSplitTarget {
     /// Into this category.
     Category(CategoryId),
     /// To or from this account, where the edit records the line's new other side.
@@ -177,35 +174,31 @@ impl EditedSplitLine {
         }
     }
 
-    /// A line in `category`, for tests outside the crate's own code.
-    #[cfg(feature = "test-support")]
-    pub fn for_tests(category: CategoryId, memo: &str, amount: Money) -> Self {
+    /// A line in `category`.
+    pub fn category(category: CategoryId, memo: &str, amount: Money) -> Self {
         Self::new(EditedSplitTarget::Category(category), memo, amount)
     }
 
-    /// A new line that moves `amount` from or to `account`, for tests outside the
-    /// crate's own code.
-    #[cfg(feature = "test-support")]
-    pub fn transfer_for_tests(account: AccountId, memo: &str, amount: Money) -> Self {
+    /// A new line that moves `amount` from or to `account`.
+    pub fn transfer(account: AccountId, memo: &str, amount: Money) -> Self {
         Self::new(EditedSplitTarget::Transfer(account), memo, amount)
     }
 
-    /// A line whose other side stays `other_side`, for tests outside the crate's own
-    /// code.
-    #[cfg(feature = "test-support")]
-    pub fn kept_for_tests(other_side: TransactionId, memo: &str, amount: Money) -> Self {
+    /// A line to another account whose other side stays `other_side`, one of the
+    /// transaction's other sides.
+    pub fn kept(other_side: TransactionId, memo: &str, amount: Money) -> Self {
         Self::new(EditedSplitTarget::Kept(other_side), memo, amount)
     }
 
-    pub(crate) fn target(&self) -> EditedSplitTarget {
+    pub fn target(&self) -> EditedSplitTarget {
         self.target
     }
 
-    pub(crate) fn memo(&self) -> &str {
+    pub fn memo(&self) -> &str {
         &self.memo
     }
 
-    pub(crate) fn amount(&self) -> Money {
+    pub fn amount(&self) -> Money {
         self.amount
     }
 }
@@ -589,14 +582,8 @@ impl NewTransaction {
     }
 
     /// A transaction with `payee`, divided between `lines`.
-    pub(crate) fn split(date: Date<Iso>, payee: &str, lines: Vec<NewSplitLine>) -> Self {
+    pub fn split(date: Date<Iso>, payee: &str, lines: Vec<NewSplitLine>) -> Self {
         Self::with_allocation(date, payee, NewAllocation::Split(lines))
-    }
-
-    /// A split transaction, for tests outside the crate's own code.
-    #[cfg(feature = "test-support")]
-    pub fn split_for_tests(date: Date<Iso>, payee: &str, lines: Vec<NewSplitLine>) -> Self {
-        Self::split(date, payee, lines)
     }
 
     /// A transaction with every field given, as the undo log holds it.

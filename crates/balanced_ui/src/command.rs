@@ -19,6 +19,7 @@ use crate::register::LeftRow;
 use crate::register_columns::RegisterColumns;
 use crate::route::Route;
 use crate::save_refusal::SaveRefusal;
+use crate::split_dialog::SplitStart;
 
 /// An app-level action. UI code sends one instead of changing app or domain state
 /// itself, and `App::logic` applies it.
@@ -41,8 +42,6 @@ pub(crate) enum AppCommand {
     Redo,
     /// Show `Route` in the Main view.
     Navigate(Route),
-    /// Show the split lines of a split transaction.
-    OpenSplitView(TransactionId),
     /// Open `account`'s Register under the Accounts tab and put the cell cursor on
     /// `transaction`'s row.
     GoToTransaction {
@@ -123,6 +122,8 @@ pub(crate) enum DialogKind {
     /// editing row was refused. It opens over any other Dialog, since the leave-row
     /// prompt's Save can be refused.
     CantSave(SaveRefusal),
+    /// The Split dialog, on the lines of a row of the open Register.
+    Split(SplitStart),
 }
 
 /// A Status bar message.

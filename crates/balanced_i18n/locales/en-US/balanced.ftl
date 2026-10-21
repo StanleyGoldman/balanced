@@ -254,6 +254,32 @@ dialog-cant-save-title = Can't save this transaction
 dialog-cant-save-continue = Continue editing
 # Throws the row's changes away.
 dialog-cant-save-discard = Discard changes
+# Titles the Split dialog, where a Register row's split lines are edited.
+dialog-split-title = Split transaction
+# Closes the Split dialog, keeping its lines on the row until the row is saved.
+dialog-split-done = Done
+# Heads the column of each split line's amount.
+dialog-split-amount = Amount
+# What a screen reader reads for each field of split line $line, counting from 1.
+dialog-split-line-category = Line { $line } category
+dialog-split-line-memo = Line { $line } memo
+dialog-split-line-amount = Line { $line } amount
+dialog-split-add-line = Add line
+# .a11y is what a screen reader reads for the Remove button of split line $line.
+dialog-split-remove-line = Remove
+    .a11y = Remove line { $line }
+# Labels the amount the split lines must add up to.
+dialog-split-total = Total
+# Why Done didn't close the Split dialog: the lines add up to $lines, not $total,
+# and $difference is how far apart they are.
+dialog-split-mismatch = The lines add up to { $lines }, not to the total of { $total }. Difference: { $difference }
+dialog-split-no-category = Line { $line } has no category.
+dialog-split-unknown-category = Line { $line }: no category or account is named “{ $name }”.
+# Why split line $line's amount can't be read; $error says what is wrong with it.
+dialog-split-line-error = Line { $line }: { $error }
+# Why the total can't be read, or the lines' sum is too large; $error says which.
+dialog-split-total-error = Total: { $error }
+dialog-split-no-lines = Give at least one line a category.
 dialog-ok = OK
 dialog-new-category-title = New Category
 dialog-new-category-name = Name

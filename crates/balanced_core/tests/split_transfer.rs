@@ -90,13 +90,13 @@ impl Household {
         let (savings, groceries) = (self.savings, self.groceries);
         self.apply(DomainCommand::PostTransaction {
             account: self.checking,
-            transaction: NewTransaction::split_for_tests(
+            transaction: NewTransaction::split(
                 date(5),
                 "Payday",
                 vec![
-                    NewSplitLine::for_tests(groceries, "Food", usd("-50.00")),
-                    NewSplitLine::transfer_for_tests(savings, "Rainy day", usd("-200.00")),
-                    NewSplitLine::transfer_for_tests(savings, "Holiday", usd("-100.00")),
+                    NewSplitLine::category(groceries, "Food", usd("-50.00")),
+                    NewSplitLine::transfer(savings, "Rainy day", usd("-200.00")),
+                    NewSplitLine::transfer(savings, "Holiday", usd("-100.00")),
                 ],
             ),
         });
@@ -246,12 +246,12 @@ fn post_split_to(household: &mut Household, account: AccountId) -> Result<(), Do
         .ledger
         .apply(DomainCommand::PostTransaction {
             account: household.checking,
-            transaction: NewTransaction::split_for_tests(
+            transaction: NewTransaction::split(
                 date(5),
                 "Payday",
                 vec![
-                    NewSplitLine::for_tests(groceries, "Food", usd("-50.00")),
-                    NewSplitLine::transfer_for_tests(account, "Rainy day", usd("-200.00")),
+                    NewSplitLine::category(groceries, "Food", usd("-50.00")),
+                    NewSplitLine::transfer(account, "Rainy day", usd("-200.00")),
                 ],
             ),
         })

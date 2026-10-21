@@ -1481,17 +1481,17 @@ fn alt_down_lists_every_category() {
 }
 
 #[test]
-fn clicking_split_says_the_split_view_is_not_available_yet() {
+fn clicking_split_opens_the_split_dialog() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
 
     click_cell(&mut harness, "[Split]");
 
-    harness.get_by_label("Not available yet");
+    harness.get_by_role_and_label(Role::TextInput, "Line 1 category");
 }
 
 #[test]
-fn enter_on_split_says_the_split_view_is_not_available_yet() {
+fn enter_on_split_opens_the_split_dialog() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Costco");
@@ -1499,7 +1499,7 @@ fn enter_on_split_says_the_split_view_is_not_available_yet() {
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
-    harness.get_by_label("Not available yet");
+    harness.get_by_role_and_label(Role::TextInput, "Line 1 category");
 }
 
 #[test]

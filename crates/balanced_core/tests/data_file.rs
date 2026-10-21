@@ -560,12 +560,12 @@ fn an_undeleted_flagged_transaction_is_flagged_after_a_reopen() {
 /// Costco, on the 12th: groceries and household goods, split between `food` and
 /// `household`.
 fn costco(food: CategoryId, household: CategoryId) -> NewTransaction {
-    NewTransaction::split_for_tests(
+    NewTransaction::split(
         date(12),
         "Costco",
         vec![
-            NewSplitLine::for_tests(food, "Food", usd("-142.37")),
-            NewSplitLine::for_tests(household, "Paper towels, detergent", usd("-63.90")),
+            NewSplitLine::category(food, "Food", usd("-142.37")),
+            NewSplitLine::category(household, "Paper towels, detergent", usd("-63.90")),
         ],
     )
 }
@@ -899,10 +899,10 @@ fn an_amount_beyond_the_files_range_leaves_memory_undo_and_the_file_as_they_were
         },
         |h, amount| DomainCommand::PostTransaction {
             account: h.everyday,
-            transaction: NewTransaction::split_for_tests(
+            transaction: NewTransaction::split(
                 date(4),
                 "Lottery",
-                vec![NewSplitLine::for_tests(h.food, "Prize", amount)],
+                vec![NewSplitLine::category(h.food, "Prize", amount)],
             ),
         },
         |h, amount| DomainCommand::EditTransaction {

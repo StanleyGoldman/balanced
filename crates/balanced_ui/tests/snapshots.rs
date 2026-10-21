@@ -247,3 +247,30 @@ fn date_calendar_dark() {
 
     check_snapshot(&mut harness, "date_calendar_dark");
 }
+
+/// Opens the Split dialog on Everyday Checking's Costco split.
+fn split_costco(harness: &mut Harness<'static, App>) {
+    open_account(harness, "Everyday Checking");
+    click(harness, Role::Cell, "[Split]");
+    pointer_gone(harness);
+}
+
+#[test]
+#[ignore = "image snapshot: run with `cargo xtask snapshots`"]
+fn split_dialog_light() {
+    let mut harness = app(Theme::Light);
+
+    split_costco(&mut harness);
+
+    check_snapshot(&mut harness, "split_dialog_light");
+}
+
+#[test]
+#[ignore = "image snapshot: run with `cargo xtask snapshots`"]
+fn split_dialog_dark() {
+    let mut harness = app(Theme::Dark);
+
+    split_costco(&mut harness);
+
+    check_snapshot(&mut harness, "split_dialog_dark");
+}
