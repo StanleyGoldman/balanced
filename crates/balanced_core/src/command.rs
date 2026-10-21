@@ -6,8 +6,9 @@
 use icu_calendar::{Date, Iso};
 
 use crate::{
-    Account, AccountId, AccountKind, AccountStatus, Category, CategoryId, ClearedStatus, Money,
-    MoneyError, NewTransaction, Transaction, TransactionId, Visibility, WriteError,
+    Account, AccountId, AccountKind, AccountStatus, Category, CategoryId, ClearedStatus,
+    EditedSplitLine, Money, MoneyError, NewTransaction, Transaction, TransactionId, Visibility,
+    WriteError,
 };
 
 /// A change to the ledger. `Ledger::apply` applies it, or rejects it with a
@@ -175,6 +176,15 @@ pub enum TransactionEdit {
     /// How far the transaction has been checked against the bank. Any status may
     /// follow any other.
     ClearedStatus(ClearedStatus),
+    /// Every line of the transaction, which makes a transaction in one category or
+    /// account a split. The lines must add up to `amount`, which becomes the
+    /// transaction's amount. A new line to an account gets an other side there, with
+    /// the line's memo; a kept line's other side takes the line's new amount; and the
+    /// other side of every line the edit drops is deleted.
+    Lines {
+        amount: Money,
+        lines: Vec<EditedSplitLine>,
+    },
 }
 
 impl TransactionEdit {
@@ -189,15 +199,20 @@ impl TransactionEdit {
             | Self::Memo(_)
             | Self::Category(_)
             | Self::Transfer(_)
-            | Self::ClearedStatus(_) => None,
+            | Self::ClearedStatus(_)
+            | Self::Lines { .. } => None,
         }
     }
 
     /// Whether the edit reaches a transfer's other side: a date or amount it shares, or
-    /// a category or account that removes or replaces it.
+    /// a category, account or lines that remove or replace it.
     pub(crate) fn reaches_other_side(&self) -> bool {
         match self {
-            Self::Date(_) | Self::Amount(_) | Self::Category(_) | Self::Transfer(_) => true,
+            Self::Date(_)
+            | Self::Amount(_)
+            | Self::Category(_)
+            | Self::Transfer(_)
+            | Self::Lines { .. } => true,
             Self::Number(_) | Self::Payee(_) | Self::Memo(_) | Self::ClearedStatus(_) => false,
         }
     }

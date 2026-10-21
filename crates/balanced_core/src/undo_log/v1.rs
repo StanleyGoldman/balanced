@@ -237,6 +237,21 @@ pub(crate) enum TransactionEdit {
     Transfer(u32),
     Amount(i64),
     ClearedStatus(ClearedStatus),
+    /// Every line of the transaction, which add up to `amount`.
+    Lines {
+        amount: i64,
+        lines: Vec<SplitLine<EditedLineTransfer>>,
+    },
+}
+
+/// An edited split line's transfer: a new one, to or from an account, or one that keeps
+/// its other side. Written as the struct alone, `{"account": 8}` or
+/// `{"other_side": 17}`, which its one key tells apart.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum EditedLineTransfer {
+    New(LineTo),
+    Kept(LineSide),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

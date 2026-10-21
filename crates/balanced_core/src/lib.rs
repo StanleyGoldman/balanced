@@ -20,7 +20,7 @@ pub use data_file::{Damage, OpenError, WriteError};
 pub use ledger::{AccountSummary, Generation, Ledger, LedgerView, RegisterEntry};
 pub use money::{CurrencyCode, Money, MoneyError, RoundingPolicy};
 pub use transaction::{
-    Allocation, ClearedStatus, NewSplitLine, NewTransaction, SplitLine, SplitTarget, Transaction,
-    TransactionId,
+    Allocation, ClearedStatus, EditedSplitLine, NewSplitLine, NewTransaction, SplitLine,
+    SplitTarget, Transaction, TransactionId,
 };
 pub use undo_log::UndoEntryError;

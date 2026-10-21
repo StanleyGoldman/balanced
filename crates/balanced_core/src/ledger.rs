@@ -11,7 +11,9 @@ use icu_calendar::{Date, Iso};
 use crate::account::NewAccount;
 use crate::category::NewCategory;
 use crate::data_file::{account_row, category_row, transaction_row};
-use crate::transaction::{NewTransaction, TransactionId};
+use crate::transaction::{
+    EditedSplitLine, EditedSplitTarget, NewTransaction, SplitLine, SplitTarget, TransactionId,
+};
 use crate::undo_log;
 use crate::{
     Account, AccountGroup, AccountId, AccountKind, AccountStatus, Allocation, Applied, Category,
@@ -26,6 +28,21 @@ enum Target {
     Category(CategoryId),
     /// Another account, which makes the transaction a transfer.
     Account(AccountId),
+}
+
+/// The other side of a line that [`TransactionEdit::Lines`] gives a transaction.
+#[derive(Debug)]
+enum LineSide {
+    /// A new other side, with `id` and the line's `memo` and `amount`, in the account
+    /// at `index`.
+    New {
+        index: usize,
+        id: TransactionId,
+        memo: String,
+        amount: Money,
+    },
+    /// The other side the line keeps, which takes the line's `amount`.
+    Kept { id: TransactionId, amount: Money },
 }
 
 /// Counts the changes applied to a [`Ledger`]. A window's view model rebuilds when
@@ -980,6 +997,9 @@ impl Ledger {
             {
                 return self.change_target(position, Target::Category(category));
             }
+            TransactionEdit::Lines { amount, lines } => {
+                return self.change_lines(position, amount, lines);
+            }
             TransactionEdit::Date(_)
             | TransactionEdit::Number(_)
             | TransactionEdit::Payee(_)
@@ -1085,6 +1105,119 @@ impl Ledger {
             self.insert_transaction(other, new_side)?;
             self.next_transaction = id.next();
         }
+        Ok(DomainCommand::Compound(vec![
+            DomainCommand::DeleteTransaction {
+                transaction: old.id(),
+            },
+            DomainCommand::RestoreTransaction {
+                account,
+                transaction: old,
+                other_sides: old_sides,
+            },
+        ]))
+    }
+
+    /// Splits the transaction at `position` into `lines`, which must add up to
+    /// `amount`. A new line to an account gets an other side there, a kept line's other
+    /// side takes the line's amount, and every other side no line keeps is deleted. The
+    /// Command that undoes it deletes the transaction and puts it back as it was, with
+    /// its old other sides.
+    fn change_lines(
+        &mut self,
+        position: TransactionPosition,
+        amount: Money,
+        lines: Vec<EditedSplitLine>,
+    ) -> Result<DomainCommand, DomainError> {
+        // `position` was found in this same view.
+        let account = self.view.accounts[position.account].account.id();
+        let old = self.view.accounts[position.account].register[position.entry]
+            .transaction
+            .clone();
+        let mut unkept = old.other_side_ids();
+        let old_sides = unkept
+            .iter()
+            .map(|&id| {
+                let side = self
+                    .view
+                    .find_transaction(id)
+                    .ok_or(DomainError::UnknownTransaction { transaction: id })?;
+                // `find_transaction` found both indices in this same view.
+                let summary = &self.view.accounts[side.account];
+                Ok(OtherSide::new(
+                    summary.account.id(),
+                    summary.register[side.entry].transaction.clone(),
+                ))
+            })
+            .collect::<Result<Vec<_>, DomainError>>()?;
+        let mut next = self.next_transaction;
+        let mut sides = Vec::new();
+        let mut split_lines = Vec::with_capacity(lines.len());
+        for line in lines {
+            let target = match line.target() {
+                EditedSplitTarget::Category(category) => {
+                    if self.view.category(category).is_none() {
+                        return Err(DomainError::UnknownCategory { category });
+                    }
+                    SplitTarget::Category(category)
+                }
+                EditedSplitTarget::Transfer(other) => {
+                    let index = self.transfer_target(account, other)?;
+                    sides.push(LineSide::New {
+                        index,
+                        id: next,
+                        memo: line.memo().to_owned(),
+                        amount: line.amount(),
+                    });
+                    let id = next;
+                    next = id.next();
+                    SplitTarget::Transfer(id)
+                }
+                EditedSplitTarget::Kept(id) => {
+                    let kept = unkept
+                        .iter()
+                        .position(|&other_side| other_side == id)
+                        .ok_or(DomainError::UnknownTransaction { transaction: id })?;
+                    unkept.remove(kept);
+                    sides.push(LineSide::Kept {
+                        id,
+                        amount: line.amount(),
+                    });
+                    SplitTarget::Transfer(id)
+                }
+            };
+            split_lines.push(SplitLine::new(target, line.memo(), line.amount()));
+        }
+        let edited = old.resplit(amount, split_lines)?;
+        for dropped in unkept {
+            let side = self.changeable_other_side(dropped)?;
+            self.remove_transaction(side)?;
+        }
+        // The other sides are in other accounts, so the transaction is still at
+        // `position`.
+        self.rewrite_transaction(position, edited.clone())?;
+        for side in sides {
+            match side {
+                LineSide::New {
+                    index,
+                    id,
+                    memo,
+                    amount,
+                } => {
+                    self.insert_transaction(index, edited.other_side_with(id, &memo, amount))?;
+                }
+                LineSide::Kept { id, amount } => {
+                    let position = self.changeable_other_side(id)?;
+                    // `changeable_other_side` found both indices in this same view.
+                    let kept =
+                        &self.view.accounts[position.account].register[position.entry].transaction;
+                    if kept.amount() != -amount {
+                        let moved = kept.edited(TransactionEdit::Amount(-amount))?;
+                        self.rewrite_transaction(position, moved)?;
+                    }
+                }
+            }
+        }
+        self.next_transaction = next;
         Ok(DomainCommand::Compound(vec![
             DomainCommand::DeleteTransaction {
                 transaction: old.id(),
