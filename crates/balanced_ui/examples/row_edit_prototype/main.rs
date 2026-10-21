@@ -1141,6 +1141,7 @@ impl Proto {
         let Some(e) = &mut self.edit else {
             return true;
         };
+        let col = e.last_col;
         if !e.dirty() {
             let target = e.target;
             self.h.event(
@@ -1152,7 +1153,7 @@ impl Proto {
             if let Target::Txn(id) = target {
                 self.selected = Some(target);
                 if follow {
-                    self.follow_save(id);
+                    self.follow_save(id, col);
                 }
             }
             return true;
@@ -1211,14 +1212,15 @@ impl Proto {
                 self.start_edit(Target::Draft, 0, "after add");
                 self.scroll_to = Some(usize::MAX);
             } else {
-                self.follow_save(id);
+                self.follow_save(id, col);
             }
         }
         true
     }
 
-    /// With "After Save, edit the next row" on, opens the row below saved row `id`.
-    fn follow_save(&mut self, id: u32) {
+    /// With "After Save, edit the next row" on, opens the row below saved row `id` in
+    /// column `col`, the one the save came from.
+    fn follow_save(&mut self, id: u32, col: usize) {
         if !self.o[NEXT_ROW] {
             return;
         }
@@ -1229,7 +1231,7 @@ impl Proto {
         } else {
             Target::Draft
         };
-        self.start_edit(t, 0, "after save");
+        self.start_edit(t, col, "after save");
     }
 
     fn cancel(&mut self, via: &str) {
