@@ -242,17 +242,21 @@ impl LightDialog {
 
 /// A heavy Dialog: a title bar with ×, moved by its title bar and resized from its
 /// edges, over the dimmed Main window. Its body sits above a row with its default
-/// button and Cancel. It opens centred, and the default button has first focus
-/// unless the body gives it to a field.
+/// button and Cancel, or its Close button alone. It opens centred, and the default
+/// button has first focus unless the body gives it to a field.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct HeavyDialog {
     id: Id,
     title: String,
     accept: String,
-    cancel: String,
+    /// Cancel's text, or `None` for a Dialog whose one button closes it.
+    cancel: Option<String>,
     close: String,
     backdrop: Color32,
     size: HeavySize,
+    /// Whether the body fills the Dialog and scrolls itself, as a table does, rather
+    /// than scrolling in the Dialog when it is too tall.
+    body_fills: bool,
 }
 
 /// How big a heavy Dialog is.
@@ -268,12 +272,14 @@ enum HeavySize {
 }
 
 impl HeavySize {
-    /// How wide a fitted Dialog's body is: as asked, or `title_row` when the title is
-    /// wider, and never wider than `room`. `None` for a Dialog that isn't fitted.
-    fn fitted_width(self, title_row: f32, room: f32) -> Option<f32> {
+    /// How the body of a Dialog this size is laid out. A fitted Dialog's body is as
+    /// wide as asked, or `title_row` when the title is wider, and never wider than
+    /// `room`. Any other's body fills the Dialog when it `fills`, or else scrolls.
+    fn body_layout(self, title_row: f32, room: f32, fills: bool) -> BodyLayout {
         match self {
-            Self::Fitted(width) => Some(width.max(title_row).min(room)),
-            Self::Default | Self::Opens(_) => None,
+            Self::Fitted(width) => BodyLayout::Fitted(width.max(title_row).min(room)),
+            Self::Default | Self::Opens(_) if fills => BodyLayout::Fills,
+            Self::Default | Self::Opens(_) => BodyLayout::Scrolls,
         }
     }
 }
@@ -290,6 +296,33 @@ impl HeavyDialog {
         close: String,
         theme: &Theme,
     ) -> Self {
+        Self::with_buttons(id, title, accept, Some(cancel), close, theme)
+    }
+
+    /// A heavy Dialog with `id`, titled `title`, whose one button reads `close_button`
+    /// and whose × a screen reader reads as `close`, dimming the window in `theme`'s
+    /// backdrop. Its button closes it as [`DialogOutcome::Accepted`], and Esc, × and a
+    /// click on the dimmed window as [`DialogOutcome::Cancelled`].
+    pub(crate) fn closing(
+        id: Id,
+        title: String,
+        close_button: String,
+        close: String,
+        theme: &Theme,
+    ) -> Self {
+        Self::with_buttons(id, title, close_button, None, close, theme)
+    }
+
+    /// A heavy Dialog whose default button reads `accept`, with a Cancel button
+    /// reading `cancel` when it has one.
+    fn with_buttons(
+        id: Id,
+        title: String,
+        accept: String,
+        cancel: Option<String>,
+        close: String,
+        theme: &Theme,
+    ) -> Self {
         Self {
             id,
             title,
@@ -298,6 +331,15 @@ impl HeavyDialog {
             close,
             backdrop: theme.backdrop(),
             size: HeavySize::Default,
+            body_fills: false,
+        }
+    }
+
+    /// The same Dialog, whose body fills it and scrolls itself, as a table does.
+    pub(crate) fn body_fills(self) -> Self {
+        Self {
+            body_fills: true,
+            ..self
         }
     }
 
@@ -336,6 +378,7 @@ impl HeavyDialog {
             close,
             backdrop: tint,
             size,
+            body_fills,
         } = self;
         let window = ctx.content_rect();
         let room = window.shrink(Theme::DIALOG_MARGIN);
@@ -390,12 +433,10 @@ impl HeavyDialog {
         }
         let focused_before = ctx.memory(egui::Memory::focused);
         let shown = heavy.show(ctx, |ui| {
-            let fitted_width = size.fitted_width(title_row, room.width());
-            let Buttons { accept, cancel, .. } =
-                heavy_contents(ui, fitted_width, accept, cancel, |ui| {
-                    body(ui, &mut dialog.form);
-                });
-            let cancel = cancel.expect("a heavy Dialog has Cancel");
+            let layout = size.body_layout(title_row, room.width(), body_fills);
+            let Buttons { accept, cancel, .. } = heavy_contents(ui, layout, accept, cancel, |ui| {
+                body(ui, &mut dialog.form);
+            });
             let body_took_focus = ctx.memory(egui::Memory::focused) != focused_before;
             if first_frame && !body_took_focus {
                 accept.request_focus();
@@ -426,9 +467,13 @@ impl HeavyDialog {
                 && !popup_open
                 && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape))
         };
-        if accept.clicked() || (is_top && enter_pressed(ctx, [Some(&cancel)])) {
+        if accept.clicked() || (is_top && enter_pressed(ctx, [cancel.as_ref()])) {
             DialogOutcome::Accepted
-        } else if cancel.clicked() || closed || backdrop.clicked() || escape() {
+        } else if cancel.as_ref().is_some_and(Response::clicked)
+            || closed
+            || backdrop.clicked()
+            || escape()
+        {
             DialogOutcome::Cancelled
         } else {
             DialogOutcome::Open
@@ -506,28 +551,49 @@ pub(crate) fn close_button(
     response
 }
 
-/// Draws a heavy Dialog's `body` above its default button reading `accept` and its
-/// Cancel reading `cancel`. A fitted Dialog's body is `fitted_width` wide and doesn't
-/// scroll; any other's body scrolls when it is too tall for the Dialog.
+/// How a heavy Dialog lays out its body.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum BodyLayout {
+    /// This wide, and never scrolling.
+    Fitted(f32),
+    /// Taking the room above the buttons, and scrolling itself, as a table does.
+    Fills,
+    /// Scrolling when it is too tall for the Dialog.
+    Scrolls,
+}
+
+/// Draws a heavy Dialog's `body`, laid out as `layout` says, above its default button
+/// reading `accept` and any Cancel reading `cancel`.
 fn heavy_contents(
     ui: &mut egui::Ui,
-    fitted_width: Option<f32>,
+    layout: BodyLayout,
     accept: String,
-    cancel: String,
+    cancel: Option<String>,
     body: impl FnOnce(&mut egui::Ui),
 ) -> Buttons {
-    if let Some(width) = fitted_width {
-        ui.set_width(width);
-        body(ui);
-        // An auto-sized window offers all the room it may grow to, which the buttons'
-        // row would centre itself in.
-        let row = Vec2::new(ui.available_width(), button_height(ui));
-        ui.allocate_ui(row, |ui| buttons(ui, accept, Some(cancel), None, None))
-            .inner
-    } else {
-        let height = ui.available_height();
-        body_area(ui, height, body);
-        buttons(ui, accept, Some(cancel), None, None)
+    match layout {
+        BodyLayout::Fitted(width) => {
+            ui.set_width(width);
+            body(ui);
+            // An auto-sized window offers all the room it may grow to, which the
+            // buttons' row would centre itself in.
+            let row = Vec2::new(ui.available_width(), button_height(ui));
+            ui.allocate_ui(row, |ui| buttons(ui, accept, cancel, None, None))
+                .inner
+        }
+        BodyLayout::Fills => {
+            let room = Vec2::new(
+                ui.available_width(),
+                (ui.available_height() - button_height(ui) - ui.spacing().item_spacing.y).max(0.0),
+            );
+            ui.allocate_ui(room, body);
+            buttons(ui, accept, cancel, None, None)
+        }
+        BodyLayout::Scrolls => {
+            let height = ui.available_height();
+            body_area(ui, height, body);
+            buttons(ui, accept, cancel, None, None)
+        }
     }
 }
 

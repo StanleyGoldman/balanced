@@ -8,6 +8,7 @@ mod accounts_model;
 mod amount_field;
 mod app;
 mod calculator;
+mod category_list;
 mod clock;
 mod combo_field;
 mod combobox;

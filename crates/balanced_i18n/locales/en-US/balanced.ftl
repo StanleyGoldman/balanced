@@ -28,6 +28,7 @@ menu-view = View
 menu-view-switch-pane = Switch Pane
 menu-tools = Tools
 menu-tools-manage-accounts = Manage Accounts…
+menu-tools-category-list = Category List…
 menu-tools-preferences = Preferences…
 menu-tools-calculator = Calculator
 menu-help = Help
@@ -361,6 +362,29 @@ dialog-close-account-message-balance = Close { $name }? It still has a balance o
 dialog-close-account-close = Close
 dialog-delete-account-message = Delete { $name } and every transaction in it?
 dialog-delete-account-delete = Delete
+
+# The Category List: every category as a tree, with how much each is used.
+dialog-category-list-title = Category List
+dialog-category-list-close = Close
+dialog-category-list-category = Category
+# How many transactions and split lines are in a category or transfer to an account.
+dialog-category-list-txns = Txns
+dialog-category-list-total = Total
+# The triangle that hides or shows the categories under the category named $name, for
+# screen readers.
+dialog-category-list-collapse = Collapse { $name }
+dialog-category-list-expand = Expand { $name }
+# A row's usage, as a screen reader reads it after the row's name. $total is an amount.
+dialog-category-list-usage = { $count ->
+        [one] 1 transaction
+       *[other] { $count } transactions
+    }, totalling { $total }
+# The usage of a row nothing uses, or whose total is too large to add up.
+dialog-category-list-usage-count = { $count ->
+        [0] No transactions
+        [one] 1 transaction
+       *[other] { $count } transactions
+    }
 
 # The New Account wizard. Each step's heading says how far through it is.
 dialog-new-account-step-type = Step 1 of 4: Type

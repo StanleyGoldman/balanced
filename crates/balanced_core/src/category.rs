@@ -7,7 +7,7 @@
 pub struct CategoryId(u32);
 
 impl CategoryId {
-    pub(crate) fn new(id: u32) -> Self {
+    pub(crate) const fn new(id: u32) -> Self {
         Self(id)
     }
 

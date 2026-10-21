@@ -30,6 +30,8 @@ pub(crate) enum UserAction {
     NewAccount,
     /// Open Manage Accounts.
     ManageAccounts,
+    /// Open the Category List.
+    CategoryList,
     Quit,
     /// Open the Preferences Dialog.
     Preferences,
@@ -63,6 +65,7 @@ impl UserAction {
             Self::OpenDataFile => fl!(i18n, "menu-file-open-data-file"),
             Self::NewAccount => fl!(i18n, "menu-file-new-account"),
             Self::ManageAccounts => fl!(i18n, "menu-tools-manage-accounts"),
+            Self::CategoryList => fl!(i18n, "menu-tools-category-list"),
             Self::Quit => fl!(i18n, "menu-file-quit"),
             Self::Preferences => fl!(i18n, "menu-tools-preferences"),
             Self::Calculator => fl!(i18n, "menu-tools-calculator"),
@@ -88,6 +91,7 @@ impl UserAction {
             | Self::OpenDataFile
             | Self::NewAccount
             | Self::ManageAccounts
+            | Self::CategoryList
             | Self::Quit
             | Self::Preferences
             | Self::Calculator
@@ -115,6 +119,7 @@ impl UserAction {
             Self::ManageAccounts | Self::EditAccountDetails => {
                 AppCommand::OpenDialog(DialogKind::ManageAccounts)
             }
+            Self::CategoryList => AppCommand::OpenDialog(DialogKind::CategoryList),
             Self::Quit => AppCommand::Quit,
             Self::Preferences | Self::RegisterPreferences => {
                 AppCommand::OpenDialog(DialogKind::Preferences)

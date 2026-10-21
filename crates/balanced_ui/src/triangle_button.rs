@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
 
-//! A square button showing a painted triangle, for arrows egui's fonts lack.
+//! Painted triangles, for arrows egui's fonts lack: a square button showing one, and the
+//! fold triangle of a heading or a tree row.
 
-use eframe::egui::{self, Rect, Response, Sense, Shape, Stroke, WidgetInfo, WidgetType, vec2};
+use eframe::egui::{
+    self, Color32, Rect, Response, Sense, Shape, Stroke, WidgetInfo, WidgetType, vec2,
+};
 
 /// Which way a triangle button's triangle points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,6 +14,23 @@ pub(crate) enum Direction {
     Right,
     Up,
     Down,
+}
+
+/// Whether a heading or a tree row shows what is under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Fold {
+    Open,
+    Folded,
+}
+
+/// ▾ when what is under it shows and ▸ when it is folded, filling `icon`. The default
+/// fonts lack both glyphs, so the triangle is painted.
+pub(crate) fn fold_triangle(icon: Rect, fold: Fold, color: Color32) -> Shape {
+    let points = match fold {
+        Fold::Open => vec![icon.left_top(), icon.right_top(), icon.center_bottom()],
+        Fold::Folded => vec![icon.left_top(), icon.right_center(), icon.left_bottom()],
+    };
+    Shape::convex_polygon(points, color, Stroke::NONE)
 }
 
 /// A square button labelled `label` for AccessKit and in its tooltip, showing a

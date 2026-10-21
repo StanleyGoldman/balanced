@@ -18,6 +18,7 @@ use icu_calendar::{Date, Iso};
 use crate::account_bar::{AccountBar, BarFrame};
 use crate::accounts_model::AccountsModel;
 use crate::calculator::{self, Calculator};
+use crate::category_list::{self, CategoryListForm, CategoryListOutcome};
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::data_file::{self, DataFileRefusal};
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
@@ -66,6 +67,8 @@ pub(crate) struct MainWindow {
     new_category: Option<OpenDialog<NewCategoryForm>>,
     /// Manage Accounts, while it is open.
     manage_accounts: Option<OpenDialog<ManageAccountsForm>>,
+    /// The Category List, while it is open.
+    category_list: Option<OpenDialog<CategoryListForm>>,
     /// The Preferences Dialog, while it is open.
     preferences: Option<OpenDialog<PreferencesForm>>,
     /// The Dialog saying why a data file was refused, while it is open.
@@ -157,6 +160,7 @@ impl MainWindow {
             new_account: None,
             new_category: None,
             manage_accounts: None,
+            category_list: None,
             preferences: None,
             data_file_refusal: None,
             go_to_date: None,
@@ -293,6 +297,7 @@ impl MainWindow {
             | UserAction::OpenDataFile
             | UserAction::NewAccount
             | UserAction::ManageAccounts
+            | UserAction::CategoryList
             | UserAction::Quit
             | UserAction::Preferences
             | UserAction::Calculator
@@ -395,6 +400,7 @@ impl MainWindow {
             new_account,
             new_category,
             manage_accounts,
+            category_list,
             go_to_date,
             leave_row,
             cant_save,
@@ -417,6 +423,7 @@ impl MainWindow {
         *new_account = None;
         *new_category = None;
         *manage_accounts = None;
+        *category_list = None;
         *go_to_date = None;
         *leave_row = None;
         *cant_save = None;
@@ -575,6 +582,9 @@ impl MainWindow {
             DialogKind::ManageAccounts => {
                 self.manage_accounts = Some(OpenDialog::new(ctx, ManageAccountsForm::new(view)));
             }
+            DialogKind::CategoryList => {
+                self.category_list = Some(OpenDialog::new(ctx, CategoryListForm::default()));
+            }
             DialogKind::NewCategory { name } => {
                 let form = NewCategoryForm::new(name.clone());
                 self.new_category = Some(OpenDialog::new(ctx, form));
@@ -652,6 +662,7 @@ impl MainWindow {
             || self.new_account.is_some()
             || self.new_category.is_some()
             || self.manage_accounts.is_some()
+            || self.category_list.is_some()
             || self.preferences.is_some()
             || self.data_file_refusal.is_some()
             || self.go_to_date.is_some()
@@ -793,6 +804,7 @@ impl MainWindow {
         self.new_category_dialog(ctx, i18n, theme, commands, view);
         self.preferences_dialog(ctx, i18n, theme, commands);
         self.manage_accounts_dialog(ctx, i18n, theme, commands, view);
+        self.category_list_dialog(ctx, i18n, theme, view);
         self.data_file_refusal_dialog(ctx, i18n, theme);
         self.go_to_date_dialog(ctx, i18n, theme, commands, today);
         self.split_dialog(ctx, i18n, theme, preferences);
@@ -1011,6 +1023,22 @@ impl MainWindow {
             ManageAccountsOutcome::Closed => {
                 self.close_dialog(ctx, |window| &mut window.manage_accounts);
             }
+        }
+    }
+
+    /// The Category List, while it is open.
+    fn category_list_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        theme: &Theme,
+        view: &LedgerView,
+    ) {
+        let Some(dialog) = &mut self.category_list else {
+            return;
+        };
+        if category_list::show(ctx, i18n, theme, dialog, view) == CategoryListOutcome::Closed {
+            self.close_dialog(ctx, |window| &mut window.category_list);
         }
     }
 
@@ -1398,6 +1426,7 @@ impl MainWindow {
             drawn.note_menu(&view_menu.response);
             let tools = ui.menu_button(fl!(i18n, "menu-tools"), |ui| {
                 item(ui, &mut drawn, UserAction::ManageAccounts);
+                item(ui, &mut drawn, UserAction::CategoryList);
                 item(ui, &mut drawn, UserAction::Preferences);
                 ui.separator();
                 item(ui, &mut drawn, UserAction::Calculator);

@@ -15,10 +15,11 @@ use crate::transaction::{
     EditedSplitLine, EditedSplitTarget, NewTransaction, SplitLine, SplitTarget, TransactionId,
 };
 use crate::undo_log;
+use crate::usage::UsageCounts;
 use crate::{
     Account, AccountGroup, AccountId, AccountKind, AccountStatus, Allocation, Applied, Category,
     CategoryId, CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection,
-    OtherSide, Transaction, TransactionEdit, Visibility, WriteError,
+    OtherSide, Transaction, TransactionEdit, Usage, Visibility, WriteError,
 };
 
 /// Where [`TransactionEdit::Category`] or [`TransactionEdit::Transfer`] moves a
@@ -213,6 +214,7 @@ pub struct LedgerView {
     categories: Vec<Category>,
     net_worth: Money,
     totals: Totals,
+    usage: UsageCounts,
     can_undo: bool,
     can_redo: bool,
 }
@@ -244,6 +246,18 @@ impl LedgerView {
     /// The category with `id`, or `None` once it has been deleted.
     pub fn category(&self, id: CategoryId) -> Option<&Category> {
         self.categories.iter().find(|category| category.id() == id)
+    }
+
+    /// How many transactions and split lines are in category `id` or any category under
+    /// it, at every depth, and their total. A deleted category has none.
+    pub fn category_usage(&self, id: CategoryId) -> &Usage {
+        self.usage.category(id)
+    }
+
+    /// How many transactions and split lines in other accounts transfer to account
+    /// `id`, and their total. A deleted account has none.
+    pub fn transfer_usage(&self, id: AccountId) -> &Usage {
+        self.usage.transfer(id)
     }
 
     /// The names on the way from the top of the category tree down to category `id`,
@@ -365,6 +379,12 @@ impl LedgerView {
     fn accounts_changed(&mut self) {
         self.totals = Totals::count(&self.accounts, self.net_worth.currency());
         self.generation = self.generation.next();
+    }
+
+    /// Counts the usage of every category and account again, after a change.
+    fn count_usage(&mut self) {
+        self.usage =
+            UsageCounts::count(&self.categories, &self.accounts, self.net_worth.currency());
     }
 
     /// Whether there is a change Undo can reverse.
@@ -558,11 +578,13 @@ impl Ledger {
         totals: Totals,
         next: NextIds,
     ) -> Self {
+        let usage = UsageCounts::count(&categories, &accounts, net_worth.currency());
         Self {
             view: Arc::new(LedgerView {
                 generation: Generation::FIRST,
                 accounts,
                 categories,
+                usage,
                 net_worth,
                 totals,
                 can_undo: false,
@@ -673,7 +695,10 @@ impl Ledger {
         self.store.begin()?;
         let error = match change(self) {
             Ok(changed) => match self.store.commit() {
-                Ok(()) => return Ok(changed),
+                Ok(()) => {
+                    Arc::make_mut(&mut self.view).count_usage();
+                    return Ok(changed);
+                }
                 Err(error) => DomainError::from(error),
             },
             Err(error) => error,
