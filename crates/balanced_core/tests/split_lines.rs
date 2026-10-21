@@ -335,6 +335,7 @@ fn a_kept_line_whose_amount_changes_sign_flips_its_other_sides_sign() {
         ],
     );
 
+    assert_eq!(household.payday_sides(), [rainy_day, holiday]);
     assert_eq!(
         other_sides(&household),
         [
