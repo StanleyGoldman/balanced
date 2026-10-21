@@ -104,6 +104,18 @@ impl<T> Choices<T> {
     }
 }
 
+/// The rest of `text` after `typed`, when `text` starts with `typed`, ignoring case.
+pub(crate) fn rest_after<'a>(text: &'a str, typed: &str) -> Option<&'a str> {
+    let mut rest = text.chars();
+    for typed in typed.chars() {
+        let next = rest.next()?;
+        if !next.to_lowercase().eq(typed.to_lowercase()) {
+            return None;
+        }
+    }
+    Some(rest.as_str())
+}
+
 /// What a Category cell names: a category, or another account, for a transfer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CategoryTarget {

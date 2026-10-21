@@ -576,9 +576,10 @@ fn typing_on_a_cell_starts_editing_it_with_the_typed_text() {
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
 
-    type_text(&mut harness, "C");
+    // No payee starts with "X", so nothing completes it.
+    type_text(&mut harness, "X");
 
-    assert_eq!(editor(&harness, "Payee").as_deref(), Some("C"));
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("X"));
 }
 
 #[test]
@@ -946,13 +947,15 @@ fn up_past_the_top_match_then_enter_keeps_the_typed_payee() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Shell");
-    type_text(&mut harness, "Fresh");
+    // "Fresh Market" holds "Market", so tops the list, but doesn't start with it, so
+    // nothing completes it.
+    type_text(&mut harness, "Market");
     press(&mut harness, Modifiers::NONE, Key::ArrowUp);
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
     let payees = column(&harness, "Payee");
-    assert_eq!(payees.iter().filter(|payee| *payee == "Fresh").count(), 1);
+    assert_eq!(payees.iter().filter(|payee| *payee == "Market").count(), 1);
     assert_eq!(
         payees
             .iter()

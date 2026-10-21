@@ -24,7 +24,7 @@ use egui_extras::{Column, TableBody, TableBuilder};
 use icu_calendar::{Date, Iso};
 
 use crate::amount_field::{self, Preview};
-use crate::combobox::{CategoryTarget, FieldChoices, ListRow};
+use crate::combobox::{CategoryTarget, FieldChoices, ListRow, rest_after};
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::date_field::{self, DateEdit};
 use crate::draft_row::{Draft, Missing};
@@ -528,6 +528,9 @@ struct CellEdit {
     cell: CellAddress,
     field: EditField,
     text: String,
+    /// While the text ends in an Inline completion, the length in bytes of the typed
+    /// text before it.
+    completion: Option<usize>,
     list: Option<ListState>,
     /// Why the last commit was refused, shown in a bubble below the cell until the
     /// text changes.
@@ -646,7 +649,7 @@ impl CellEdit {
             return Vec::new();
         };
         let text = match list.scope {
-            ListScope::Matching => self.text.as_str(),
+            ListScope::Matching => self.typed(),
             ListScope::All => "",
         };
         match &self.field {
@@ -663,6 +666,35 @@ impl CellEdit {
         }
     }
 
+    /// The text typed so far, without the Inline completion after it.
+    fn typed(&self) -> &str {
+        &self.text[..self.completion.unwrap_or(self.text.len())]
+    }
+
+    /// Completes the typed text with the rest of the first entry of the open list that
+    /// starts with it, ignoring case, and highlights that entry. Returns the length in
+    /// characters of the typed text and of the whole, or `None` when no entry starts
+    /// with it.
+    fn complete(&mut self, choices: &FieldChoices) -> Option<(usize, usize)> {
+        let (index, rest) =
+            self.list_rows(choices)
+                .into_iter()
+                .enumerate()
+                .find_map(|(index, row)| match row {
+                    ListRow::Choice(text) => {
+                        Some((index, rest_after(text, &self.text)?.to_owned()))
+                    }
+                    ListRow::Create(_) => None,
+                })?;
+        let typed = self.text.chars().count();
+        self.completion = Some(self.text.len());
+        self.text.push_str(&rest);
+        if let Some(list) = &mut self.list {
+            list.highlight = Some(index);
+        }
+        Some((typed, self.text.chars().count()))
+    }
+
     /// The highlighted row of the list, if it is open with one highlighted.
     fn highlighted<'a>(&self, choices: &'a FieldChoices) -> Option<ListRow<'a>> {
         let highlight = self.list?.highlight?;
@@ -675,6 +707,13 @@ impl CellEdit {
             let last = rows.saturating_sub(1);
             list.highlight = Some(list.highlight.map_or(0, |row| (row + 1).min(last)));
             list.reveal = true;
+        }
+    }
+
+    /// Clears the list's highlight, so Tab and Enter keep the text.
+    fn highlight_none(&mut self) {
+        if let Some(list) = &mut self.list {
+            list.highlight = None;
         }
     }
 
@@ -1096,10 +1135,9 @@ impl Register {
             Some(choices) if choices.is_current(view, summary.account().id(), i18n) => choices,
             _ => FieldChoices::new(view, summary.account().id(), i18n),
         };
-        let currency = summary.account().currency();
         let draft_frame = DraftFrame {
             closed,
-            currency,
+            currency: summary.account().currency(),
             view,
             i18n,
         };
@@ -1175,6 +1213,7 @@ impl Register {
                             rows,
                             choices: &choices,
                             payee_recall: keys.payee_recall,
+                            inline_completion: InlineCompletion::of(preferences),
                             register_id,
                             access: Access::of(summary.account()),
                             viewport: Rect::NOTHING,
@@ -1410,7 +1449,14 @@ impl Register {
             heading_id(frame.register_id, column),
         );
         if edit.text != typed {
+            let completed = edit.completion.take().is_some();
             edit.open_list(ListScope::Matching, frame.choices);
+            if frame.inline_completion == InlineCompletion::On && text_typed(ui.ctx()) {
+                complete_typing(ui.ctx(), edit, frame.choices);
+            } else if completed {
+                // Deleting a completion keeps the typed text for Tab and Enter too.
+                edit.highlight_none();
+            }
             edit.error = None;
             edit.preview = preview(frame.i18n, edit);
         }
@@ -1988,6 +2034,7 @@ impl Register {
             cell: cursor,
             field,
             text,
+            completion: None,
             list: None,
             error: None,
             preview: None,
@@ -2086,6 +2133,40 @@ fn focus_at_end(ctx: &egui::Context, edit: &CellEdit) {
     ctx.memory_mut(|memory| memory.request_focus(id));
 }
 
+/// Whether text was typed or pasted this frame.
+fn text_typed(ctx: &egui::Context) -> bool {
+    ctx.input(|input| {
+        input
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::Text(_) | Event::Paste(_)))
+    })
+}
+
+/// Completes `edit`'s text, just typed into, when the caret ends at the end, selecting the completion so the next character typed replaces
+/// it.
+fn complete_typing(ctx: &egui::Context, edit: &mut CellEdit, choices: &FieldChoices) {
+    let id = edit.editor_id();
+    let Some(mut state) = TextEditState::load(ctx, id) else {
+        return;
+    };
+    let caret_at_end = state.cursor.char_range().is_some_and(|range| {
+        range.is_empty() && range.primary.index == CCursor::new(edit.text.chars().count()).index
+    });
+    if !caret_at_end {
+        return;
+    }
+    let Some((typed, end)) = edit.complete(choices) else {
+        return;
+    };
+    state.cursor.set_char_range(Some(CCursorRange::two(
+        CCursor::new(typed),
+        CCursor::new(end),
+    )));
+    state.store(ctx, id);
+    ctx.request_repaint();
+}
+
 /// How a cell edit leaves its cell once its text is saved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Leave {
@@ -2150,6 +2231,7 @@ struct BodyFrame<'a> {
     rows: Rows<'a>,
     choices: &'a FieldChoices,
     payee_recall: PayeeRecall,
+    inline_completion: InlineCompletion,
     register_id: Id,
     access: Access,
     /// The visible part of the Register's body.
@@ -2245,6 +2327,24 @@ enum PayeeRecall {
 impl PayeeRecall {
     fn of(preferences: &Preferences) -> Self {
         if preferences.payee_recall {
+            Self::On
+        } else {
+            Self::Off
+        }
+    }
+}
+
+/// Whether typing in a Payee or Category cell completes the text with the rest of the
+/// first entry that starts with it, as the Preferences say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InlineCompletion {
+    On,
+    Off,
+}
+
+impl InlineCompletion {
+    fn of(preferences: &Preferences) -> Self {
+        if preferences.inline_completion {
             Self::On
         } else {
             Self::Off

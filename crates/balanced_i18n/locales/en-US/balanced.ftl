@@ -257,6 +257,9 @@ dialog-preferences-gridlines-both = Both
 # Committing a new transaction's payee fills its other cells from the last
 # transaction with that payee.
 dialog-preferences-payee-recall = Fill in a new transaction from its payee's last one
+# Typing the start of a payee or category fills in the rest of the first one that
+# starts with it, selected, for Tab or Enter to take.
+dialog-preferences-inline-completion = Complete payees and categories as you type
 dialog-preferences-group-account-bar = { -account-bar }
 # Each group heading in the Account bar shows the sum of its accounts' balances.
 dialog-preferences-group-totals = Show group totals
