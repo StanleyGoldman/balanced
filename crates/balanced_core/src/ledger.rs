@@ -1648,15 +1648,16 @@ mod tests {
     };
 
     fn usd_code() -> CurrencyCode {
-        CurrencyCode::new("USD").unwrap()
+        CurrencyCode::new("USD").expect("USD is an ISO 4217 currency with minor units")
     }
 
     fn usd(amount: Decimal) -> Money {
-        Money::new(amount, usd_code()).unwrap()
+        Money::new(amount, usd_code())
+            .expect("the test's amount fits in Money with at most two significant decimal places")
     }
 
     fn date(day: u8) -> Date<Iso> {
-        Date::try_new_iso(2026, 9, day).unwrap()
+        Date::try_new_iso(2026, 9, day).expect("the test's day falls in September 2026")
     }
 
     /// An account opened on 1 September 2026 with `opening_balance`.
