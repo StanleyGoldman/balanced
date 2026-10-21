@@ -346,7 +346,13 @@ impl App {
                 self.main_window.show_status(StatusMessage::NotAvailableYet);
             }
             AppCommand::SwitchPane => self.main_window.switch_pane(ctx),
-            AppCommand::OpenCalculator => self.main_window.open_calculator(),
+            AppCommand::OpenCalculator => {
+                // The Calculator works in the ledger's currency, as New Account does.
+                if let Some(ledger) = ledger {
+                    let currency = ledger.snapshot().net_worth().currency();
+                    self.main_window.open_calculator(&self.i18n, currency);
+                }
+            }
             AppCommand::OpenDialog(kind) => {
                 if let Some(ledger) = ledger {
                     self.main_window.open_dialog(

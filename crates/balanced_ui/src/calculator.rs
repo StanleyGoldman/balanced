@@ -8,7 +8,7 @@
 //! the amount cell last edited. Esc in its display, or its ×, closes it.
 
 use balanced_core::CurrencyCode;
-use balanced_i18n::Localizer;
+use balanced_i18n::{AmountReader, Localizer};
 use eframe::egui::{self, Align2, Button, Id, Key, LayerId, Modifiers, Order, Pos2, Window};
 
 use crate::amount_field;
@@ -19,11 +19,16 @@ use crate::keypad::{self, Finish, Keypad};
 use crate::theme::Theme;
 
 /// The Calculator's state while it is open.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) struct Calculator {
     keypad: Keypad,
-    /// Whether it has been drawn yet. It opens at its default spot.
-    shown: bool,
+    /// The currency it reads and shows amounts in.
+    currency: CurrencyCode,
+    /// What reads its sum, with the marks of the locale it opened in, so a locale
+    /// change never rereads the sum under other marks.
+    reader: AmountReader,
+    /// Whether it has been placed yet. It opens at its default spot.
+    placed: bool,
 }
 
 /// What the Calculator did this frame.
@@ -40,28 +45,36 @@ pub(crate) enum Outcome {
 }
 
 impl Calculator {
-    /// The Calculator, empty, with its display taking the keyboard.
-    pub(crate) fn new() -> Self {
+    /// The Calculator, empty, with its display taking the keyboard, reading and
+    /// showing amounts in `currency` as `i18n` formats them.
+    pub(crate) fn new(i18n: &Localizer, currency: CurrencyCode) -> Self {
         Self {
             keypad: Keypad::new(""),
-            shown: false,
+            currency,
+            reader: i18n.amount_reader(i18n_currency(currency)),
+            placed: false,
         }
     }
 
     /// Draws the Calculator, opening with its top right corner at `spot`, and acts on
-    /// this frame's keys and presses. It reads and shows amounts in `currency`.
+    /// this frame's keys and presses.
     pub(crate) fn show(
         &mut self,
         ctx: &egui::Context,
         i18n: &Localizer,
         theme: &Theme,
-        currency: CurrencyCode,
         spot: Pos2,
     ) -> Outcome {
         let id = Id::new("calculator");
-        let reader = i18n.amount_reader(i18n_currency(currency));
+        let Self {
+            keypad,
+            currency,
+            reader,
+            placed,
+        } = self;
+        let currency = *currency;
         if ctx.memory(|memory| memory.has_focus(keypad::display_id(id))) {
-            amount_field::refuse_characters(ctx, &reader);
+            amount_field::refuse_characters(ctx, reader);
             let (enter, escape) = ctx.input_mut(|input| {
                 (
                     input.consume_key(Modifiers::NONE, Key::Enter),
@@ -72,7 +85,7 @@ impl Calculator {
                 return Outcome::Closed;
             }
             if enter {
-                self.keypad.equals(i18n, &reader, currency);
+                keypad.equals(i18n, reader, currency);
             }
         }
         let title = fl!(i18n, "calculator");
@@ -87,15 +100,15 @@ impl Calculator {
                 .resizable(false)
                 .pivot(Align2::RIGHT_TOP)
                 .constrain_to(room);
-        if !std::mem::replace(&mut self.shown, true) {
+        if !std::mem::replace(placed, true) {
             window = window.current_pos(spot);
         }
         let shown = window.show(ctx, |ui| {
-            let pressed = self.keypad.body(
+            let pressed = keypad.body(
                 ui,
                 i18n,
                 theme,
-                &reader,
+                reader,
                 currency,
                 id,
                 &title,
@@ -123,18 +136,18 @@ impl Calculator {
             return Outcome::Closed;
         }
         let (pressed, paste) = shown.inner.unwrap_or_default();
-        if self.keypad.press(pressed, &reader) {
-            self.keypad.equals(i18n, &reader, currency);
+        if keypad.press(pressed, reader) {
+            keypad.equals(i18n, reader, currency);
         }
         let outcome = if paste {
-            match self.keypad.result(i18n, &reader, currency) {
+            match keypad.result(i18n, reader, currency) {
                 Some(result) => Outcome::Paste(result),
                 None => Outcome::PasteRefused,
             }
         } else {
             Outcome::Open
         };
-        self.keypad.end_frame(ctx, id);
+        keypad.end_frame(ctx, id);
         outcome
     }
 }

@@ -1479,7 +1479,7 @@ impl Register {
         }
         // A refused date keeps the cell cursor until it is fixed or cancelled.
         if response.clicked() && !self.edit.as_ref().is_some_and(Edit::is_rejected) {
-            if column.holds_amount() {
+            if matches!(column.field(row), Some(CellField::Amount(_))) {
                 self.paste_target = Some(address);
             }
             self.place_cursor(row.id(), column);

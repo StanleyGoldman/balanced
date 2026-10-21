@@ -3,7 +3,7 @@
 //! The Main window: Menu bar, tab row, Account bar, Main view and Status bar.
 
 use balanced_core::{
-    AccountId, AccountSummary, ClearedStatus, DomainCommand, DomainError, LedgerView,
+    AccountId, AccountSummary, ClearedStatus, CurrencyCode, DomainCommand, DomainError, LedgerView,
     TransactionEdit, TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
@@ -363,27 +363,27 @@ impl MainWindow {
         self.data_file_refusal = Some(OpenDialog::new(ctx, refusal));
     }
 
-    /// Opens the Calculator, unless it is already open.
-    pub(crate) fn open_calculator(&mut self) {
-        self.calculator.get_or_insert_with(Calculator::new);
+    /// Opens the Calculator in `currency`, unless it is already open.
+    pub(crate) fn open_calculator(&mut self, i18n: &Localizer, currency: CurrencyCode) {
+        self.calculator
+            .get_or_insert_with(|| Calculator::new(i18n, currency));
     }
 
-    /// The Calculator, while it is open, opening at the top right of `main_view`, in
-    /// the ledger's currency. Its Paste goes to the shown Register's last amount cell,
+    /// The Calculator, while it is open, opening at the top right of `main_view`. Its
+    /// Paste goes to the shown Register's last amount cell,
     /// and the Status bar says why when there is none or the sum isn't an amount.
     fn show_calculator(
         &mut self,
         ctx: &egui::Context,
         i18n: &Localizer,
         theme: &Theme,
-        view: &LedgerView,
         main_view: Rect,
     ) {
         let Some(calculator) = &mut self.calculator else {
             return;
         };
         let spot = main_view.right_top() + vec2(-Theme::DIALOG_MARGIN, Theme::DIALOG_MARGIN);
-        match calculator.show(ctx, i18n, theme, view.net_worth().currency(), spot) {
+        match calculator.show(ctx, i18n, theme, spot) {
             calculator::Outcome::Open => {}
             calculator::Outcome::Closed => self.calculator = None,
             calculator::Outcome::Paste(text) => {
@@ -668,7 +668,7 @@ impl MainWindow {
             }
         });
         self.accounts = Some(accounts);
-        self.show_calculator(ui.ctx(), i18n, theme, view, main_view.response.rect);
+        self.show_calculator(ui.ctx(), i18n, theme, main_view.response.rect);
         self.delete_transaction_dialog(ui.ctx(), i18n, theme, commands, view);
         self.reconciled_amount_dialog(ui.ctx(), i18n, theme, commands, view);
         self.unreconcile_dialog(ui.ctx(), i18n, theme, commands, view);

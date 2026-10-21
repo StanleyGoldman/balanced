@@ -3,7 +3,10 @@
 //! The Calculator, a Tool window opened from Tools ▸ Calculator, and its Paste into the
 //! Register's amount cells, driven through the AccessKit tree the way a user drives it.
 
-use balanced_core::Ledger;
+use balanced_core::{
+    AccountId, AccountSummary, CategoryId, CurrencyCode, DomainCommand, Ledger, Money,
+    NewSplitLine, NewTransaction,
+};
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::App as _;
@@ -29,13 +32,18 @@ fn app_in_german() -> Harness<'static, App> {
 
 /// The App on stub data, shown by `i18n`, wide enough to show every Register column.
 fn app_in(i18n: Localizer) -> Harness<'static, App> {
+    app_on(i18n, Ledger::stub())
+}
+
+/// The App on `ledger`, shown by `i18n`, wide enough to show every Register column.
+fn app_on(i18n: Localizer, ledger: Ledger) -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
             App::on_ledger(
                 cc,
                 i18n,
-                Ledger::stub(),
+                ledger,
                 Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
                 PreferencesFile::for_tests(),
             )
@@ -403,4 +411,113 @@ fn the_calculator_pastes_german_amounts_with_a_decimal_comma() {
     click_button(&mut harness, "Einfügen");
 
     assert_eq!(editor(&harness, "Payment").as_deref(), Some("3,00"));
+}
+
+/// The heading of the column holding the cell cursor.
+fn cursor_column(harness: &Harness<'static, App>) -> String {
+    let cursor = harness
+        .query_all_by_role(Role::Cell)
+        .find(|cell| cell.accesskit_node().is_selected() == Some(true))
+        .expect("a cell holds the cell cursor");
+    let x = cursor.rect().center().x;
+    harness
+        .query_all_by_role(Role::ColumnHeader)
+        .find(|header| header.rect().x_range().contains(x))
+        .and_then(|header| header.accesskit_node().label())
+        .expect("a heading tops the cell cursor's column")
+}
+
+#[test]
+fn paste_goes_to_the_draft_row() {
+    let mut harness = app();
+    // Opening an account puts the cell cursor on its draft row.
+    open(&mut harness, "Everyday Checking");
+    while cursor_column(&harness) != "Payment" {
+        press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+    }
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    open_calculator(&mut harness);
+    calculate(&mut harness, "12");
+
+    click_button(&mut harness, "Paste");
+
+    assert_eq!(editor(&harness, "Payment").as_deref(), Some("12.00"));
+    assert_eq!(payment_of(&harness, "Fresh Market"), "86.42");
+}
+
+fn usd(amount: &str) -> Money {
+    let currency = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
+    Money::new(amount.parse().expect("a decimal"), currency).expect("an amount")
+}
+
+/// The id of the stub account named `name`.
+fn account(ledger: &Ledger, name: &str) -> AccountId {
+    ledger
+        .snapshot()
+        .accounts()
+        .iter()
+        .map(AccountSummary::account)
+        .find(|account| account.name() == name)
+        .expect("the stub has the account")
+        .id()
+}
+
+/// The id of the stub's top-level category named `name`.
+fn category(ledger: &Ledger, name: &str) -> CategoryId {
+    ledger
+        .snapshot()
+        .categories()
+        .iter()
+        .find(|category| category.name() == name)
+        .expect("the stub has the category")
+        .id()
+}
+
+#[test]
+fn a_split_rows_amount_cell_is_no_paste_target() {
+    let mut ledger = Ledger::stub();
+    let everyday = account(&ledger, "Everyday Checking");
+    let food = category(&ledger, "Food & Dining");
+    ledger
+        .apply(DomainCommand::PostTransaction {
+            account: everyday,
+            transaction: NewTransaction::split_for_tests(
+                Date::try_new_iso(2026, 10, 1).expect("1 October 2026 is a date"),
+                "Payday",
+                vec![
+                    NewSplitLine::for_tests(food, "Lunch", usd("-50.00")),
+                    NewSplitLine::for_tests(food, "Dinner", usd("-70.00")),
+                ],
+            ),
+        })
+        .expect("the stub takes the split");
+    let mut harness = app_on(Localizer::for_tests(), ledger);
+    open(&mut harness, "Everyday Checking");
+    open_calculator(&mut harness);
+    calculate(&mut harness, "12");
+    click_cell(&mut harness, "86.42");
+    click_cell(&mut harness, "120.00");
+
+    click_button(&mut harness, "Paste");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(payment_of(&harness, "Fresh Market"), "12.00");
+}
+
+#[test]
+fn another_account_has_no_paste_target() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    open_calculator(&mut harness);
+    calculate(&mut harness, "12");
+    click_cell(&mut harness, "86.42");
+    open(&mut harness, "Joint Checking");
+
+    click_button(&mut harness, "Paste");
+
+    assert_eq!(editor(&harness, "Payment"), None);
+    assert_eq!(
+        status(&harness),
+        "Click a Payment or Deposit cell first, then Paste puts the result there."
+    );
 }

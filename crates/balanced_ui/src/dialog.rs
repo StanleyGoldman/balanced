@@ -420,12 +420,13 @@ impl TitleRow {
     }
 }
 
-/// The × at the right of the title bar of the window with id `heavy`, a heavy Dialog
-/// or a Tool window, drawn on its `layer` where egui draws its own: centred in a `slot` at the top right corner
-/// inside the frame of the window at `window`. A screen reader reads it as `label`.
+/// The × at the right of the title bar of the window with id `window_id`, a heavy
+/// Dialog or a Tool window, drawn on its `layer` where egui draws its own: centred in
+/// a `slot` at the top right corner inside the frame of the window at `window`. A
+/// screen reader reads it as `label`.
 pub(crate) fn close_button(
     ctx: &egui::Context,
-    heavy: Id,
+    window_id: Id,
     layer: LayerId,
     window: Rect,
     slot: Vec2,
@@ -442,15 +443,15 @@ pub(crate) fn close_button(
     let rect = Rect::from_center_size(slot.center(), Vec2::splat(style.spacing.icon_width));
     let ui = egui::Ui::new(
         ctx.clone(),
-        heavy.with("close_ui"),
+        window_id.with("close_ui"),
         UiBuilder::new()
             .layer_id(layer)
             .max_rect(rect)
-            .accessibility_parent(heavy),
+            .accessibility_parent(window_id),
     );
     // It takes drags as well as clicks, so a drag that starts on it doesn't move the
     // Dialog by the title bar beneath it.
-    let response = ui.interact(rect, heavy.with("close"), Sense::click_and_drag());
+    let response = ui.interact(rect, window_id.with("close"), Sense::click_and_drag());
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), label));
     // Two strokes in the widget's foreground colour, as egui paints its ×.
     let visuals = ui.style().interact(&response);
