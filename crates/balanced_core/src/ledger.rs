@@ -507,11 +507,10 @@ impl Ledger {
         let mut categories: Vec<Category> = Vec::new();
         for (id, new) in (0..).zip(new_categories) {
             let id = CategoryId::new(id);
-            // Each category before this one has a lower id, so the parent must be one.
+            // A category's id is its index, and only those before this one are built yet.
             let parent_type = new.parent().map(|parent| {
                 categories
-                    .iter()
-                    .find(|category| category.id() == parent)
+                    .get(parent.raw() as usize)
                     .unwrap_or_else(|| panic!("{id:?} sits under a later category, {parent:?}"))
                     .category_type()
             });
@@ -1484,15 +1483,14 @@ impl Ledger {
         if name.is_empty() {
             return Err(DomainError::BlankCategoryName);
         }
-        let parent_type = match parent {
-            Some(parent) => Some(
+        let parent_type = parent
+            .map(|parent| {
                 self.view
                     .category(parent)
-                    .ok_or(DomainError::UnknownCategory { category: parent })?
-                    .category_type(),
-            ),
-            None => None,
-        };
+                    .map(Category::category_type)
+                    .ok_or(DomainError::UnknownCategory { category: parent })
+            })
+            .transpose()?;
         let folded = name.to_lowercase();
         if self
             .view

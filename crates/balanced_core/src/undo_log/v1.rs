@@ -2,8 +2,8 @@
 
 //! The undo log's wire format: a `DomainCommand` as JSON. The format is part of the data
 //! file's schema version. Adding a Command or an optional field keeps it; any other
-//! change needs a migration that clears the log (ADR 0007). Schema version 2 gave each
-//! category its type, so its migration clears the log.
+//! change needs a migration that clears the log (ADR 0007). The module keeps its first
+//! version's name; the format it holds is the current schema version's.
 //!
 //! Ids are integers, amounts integer minor units in the data file's currency, and dates
 //! ISO `YYYY-MM-DD` text. Enums are `snake_case`, and a Command is an object whose one key

@@ -20,8 +20,7 @@ use icu_locale::{LanguageIdentifier, Locale};
 use crate::dialog::{DialogOutcome, HeavyDialog, OpenDialog};
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
-use crate::new_category::type_label;
-use crate::register_model::transfer_text;
+use crate::register_model::{transfer_text, type_label};
 use crate::theme::Theme;
 use crate::triangle_button::{Fold, fold_triangle};
 

@@ -7,9 +7,9 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use balanced_core::{
-    Account, AccountId, AccountSummary, Allocation, CategoryId, ClearedStatus, CurrencyCode,
-    EditedSplitLine, EditedSplitTarget, Generation, LedgerView, Money, NewSplitLine, SplitLine,
-    SplitTarget, Transaction, TransactionEdit, TransactionId,
+    Account, AccountId, AccountSummary, Allocation, CategoryId, CategoryType, ClearedStatus,
+    CurrencyCode, EditedSplitLine, EditedSplitTarget, Generation, LedgerView, Money, NewSplitLine,
+    SplitLine, SplitTarget, Transaction, TransactionEdit, TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
 use icu_calendar::{Date, Iso};
@@ -1002,6 +1002,15 @@ pub(crate) fn target_text(view: &LedgerView, target: CategoryTarget) -> Option<S
         CategoryTarget::Transfer(account) => view
             .account(account)
             .map(|summary| transfer_text(summary.account().name())),
+    }
+}
+
+/// The name of `category_type`, as the New Category Dialog and the Category List show
+/// it.
+pub(crate) fn type_label(i18n: &Localizer, category_type: CategoryType) -> String {
+    match category_type {
+        CategoryType::Income => fl!(i18n, "category-type-income"),
+        CategoryType::Expense => fl!(i18n, "category-type-expense"),
     }
 }
 

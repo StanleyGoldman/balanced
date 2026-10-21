@@ -36,7 +36,8 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration {
         sql: include_str!("migration/0002_category_type.sql"),
         data: None,
-        // A deleted category in the log has no type to restore it with.
+        // An entry restoring a category written before this step has no type, so it
+        // no longer decodes.
         undo_format: UndoFormat::Changed,
     },
 ];

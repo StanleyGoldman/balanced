@@ -34,7 +34,7 @@ const GENERATED_PAYMENTS: [(&str, StubCategory, &str); 9] = [
 /// The stub's categories, in the order they are added, so each one's id is its
 /// position. The tree is three levels deep in places, and two categories share the
 /// name Insurance, so a search for a name's middle finds several.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 enum StubCategory {
     AutoTransport,
     Fuel,
@@ -95,7 +95,8 @@ impl StubCategory {
             Self::Household => ("Household", Some(Self::Shopping)),
         };
         let mut category = NewCategory::new(name);
-        if self == Self::Income {
+        // Income's subcategories take its type.
+        if matches!(self, Self::Income) {
             category = category.income();
         }
         match parent {

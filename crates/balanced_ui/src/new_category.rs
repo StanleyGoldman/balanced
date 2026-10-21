@@ -9,7 +9,11 @@ use eframe::egui::{self, Label, RichText, TextEdit};
 
 use crate::command::StatusMessage;
 use crate::i18n::fl;
-use crate::register_model::{CATEGORY_SEPARATOR, category_text};
+use crate::register_model::{CATEGORY_SEPARATOR, category_text, type_label};
+
+/// The types a top-level category can take, in the order the Dialog offers them: Expense,
+/// the one chosen at first, then Income.
+const TYPE_CHOICES: [CategoryType; 2] = [CategoryType::Expense, CategoryType::Income];
 
 /// What the New Category Dialog holds while it is open.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,7 +136,7 @@ impl NewCategoryForm {
         if !self.name.contains(CATEGORY_SEPARATOR) {
             ui.horizontal(|ui| {
                 ui.label(fl!(i18n, "dialog-new-category-type"));
-                for category_type in [CategoryType::Expense, CategoryType::Income] {
+                for category_type in TYPE_CHOICES {
                     ui.radio_value(
                         &mut self.category_type,
                         category_type,
@@ -141,15 +145,6 @@ impl NewCategoryForm {
                 }
             });
         }
-    }
-}
-
-/// The name of `category_type`, as the New Category Dialog and the Category List show
-/// it.
-pub(crate) fn type_label(i18n: &Localizer, category_type: CategoryType) -> String {
-    match category_type {
-        CategoryType::Income => fl!(i18n, "category-type-income"),
-        CategoryType::Expense => fl!(i18n, "category-type-expense"),
     }
 }
 
