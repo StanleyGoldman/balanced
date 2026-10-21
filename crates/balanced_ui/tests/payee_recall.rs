@@ -518,29 +518,6 @@ fn a_recalled_category_clears_the_missing_category_bubble() {
 }
 
 #[test]
-fn a_recalled_amount_clears_the_missing_amount_bubble() {
-    let mut harness = everyday_checking();
-    type_text(&mut harness, "10/15/2026");
-    // Date, Num, Payee, Category.
-    for _ in 0..3 {
-        press(&mut harness, Modifiers::NONE, Key::Tab);
-    }
-    type_text(&mut harness, "Food & Dining:Groceries");
-    press(&mut harness, Modifiers::COMMAND, Key::Enter);
-    harness.get_by_label("Amount is missing");
-    // The refused post put the cursor on Payment; back past Memo and Category to Payee.
-    for _ in 0..3 {
-        press(&mut harness, Modifiers::SHIFT, Key::Tab);
-    }
-    type_text(&mut harness, "Trattoria Roma");
-
-    // Enter moves the cursor on without opening a cell, so a bubble would show.
-    press(&mut harness, Modifiers::NONE, Key::Enter);
-
-    assert!(harness.query_by_label("Amount is missing").is_none());
-}
-
-#[test]
 fn a_payee_with_no_earlier_transaction_fills_nothing() {
     let mut harness = everyday_checking();
     type_payee(&mut harness, "Corner Cafe");

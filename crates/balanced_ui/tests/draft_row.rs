@@ -156,6 +156,29 @@ fn ctrl_enter_adds_the_draft_row_with_its_running_balance() {
 }
 
 #[test]
+fn a_draft_row_with_no_amount_adds_zero() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    fill_draft(&mut harness, "10/15/2026", "Corner Cafe", "");
+
+    press(&mut harness, Modifiers::COMMAND, Key::Enter);
+
+    assert_eq!(
+        row_of(&harness, "Corner Cafe"),
+        [
+            "10/15/2026",
+            "",
+            "Corner Cafe",
+            "Food & Dining:Groceries",
+            "",
+            "",
+            "",
+            "5,642.21",
+        ]
+    );
+}
+
+#[test]
 fn an_amount_in_the_draft_rows_deposit_adds_money_in() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
@@ -201,7 +224,6 @@ fn enter_on_an_empty_payment_moves_on_to_deposit() {
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
-    assert!(harness.query_by_label("Amount is missing").is_none());
     let deposit = harness
         .get_by_role_and_label(Role::ColumnHeader, "Deposit")
         .rect()
@@ -211,6 +233,32 @@ fn enter_on_an_empty_payment_moves_on_to_deposit() {
         .find(|cell| cell.accesskit_node().is_selected() == Some(true))
         .expect("a cell holds the cell cursor");
     assert!(deposit.contains(cursor_cell.rect().center().x));
+}
+
+#[test]
+fn enter_on_an_emptied_payment_moves_on_to_deposit() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    fill_draft(&mut harness, "10/15/2026", "Corner Cafe", "12");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    press(&mut harness, Modifiers::SHIFT, Key::Tab);
+    for _ in "12.00".chars() {
+        press(&mut harness, Modifiers::NONE, Key::Backspace);
+    }
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    let deposit = harness
+        .get_by_role_and_label(Role::ColumnHeader, "Deposit")
+        .rect()
+        .x_range();
+    let (_, top) = cursor(&harness);
+    let cursor_cell = harness
+        .query_all_by_role(Role::Cell)
+        .find(|cell| cell.accesskit_node().is_selected() == Some(true))
+        .expect("a cell holds the cell cursor");
+    assert!(deposit.contains(cursor_cell.rect().center().x));
+    assert_eq!(top, row_top(&harness, "Corner Cafe"));
 }
 
 #[test]

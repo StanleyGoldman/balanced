@@ -188,6 +188,19 @@ fn committing_a_reconciled_rows_deposit_asks_first() {
 }
 
 #[test]
+fn a_negative_in_a_reconciled_rows_deposit_asks_first_to_make_it_a_payment() {
+    let mut harness = everyday_checking();
+
+    commit(&mut harness, "Deposit", "Acme Corp", "-12");
+
+    assert!(asks(
+        &harness,
+        "This transaction is reconciled. Change its amount to -12.00? \
+         Acme Corp, 9/1/2026, 3,200.00"
+    ));
+}
+
+#[test]
 fn accepting_the_amount_confirm_saves_the_amount() {
     let mut harness = everyday_checking();
     commit(&mut harness, "Payment", "Maple Property Management", "1500");

@@ -3,7 +3,9 @@
 //! [`Draft`]: the transaction typed into the draft row at the bottom of a Register,
 //! before it is added.
 
-use balanced_core::{AccountId, DomainCommand, Money, NewTransaction, TransactionEdit};
+use balanced_core::{
+    AccountId, CurrencyCode, DomainCommand, Money, NewTransaction, TransactionEdit,
+};
 use balanced_i18n::Localizer;
 use icu_calendar::{Date, Iso};
 
@@ -65,6 +67,11 @@ impl Draft {
         }
     }
 
+    /// Empties the amount cells, as if no amount had been typed.
+    pub(crate) fn clear_amount(&mut self) {
+        self.amount = None;
+    }
+
     /// Takes `recalled`'s spelling of the payee, and fills the Category, Memo and amount
     /// cells from it where they are empty.
     pub(crate) fn recall(&mut self, recalled: &Recalled) {
@@ -83,16 +90,20 @@ impl Draft {
         match missing {
             Missing::Date => self.date.is_none(),
             Missing::Category => self.category.is_none(),
-            Missing::Amount => self.amount.is_none(),
         }
     }
 
-    /// The Command that adds the draft to `account`, or the first cell, left to right,
-    /// that the transaction can't do without.
-    pub(crate) fn posting(&self, account: AccountId) -> Result<DomainCommand, Missing> {
+    /// The Command that adds the draft to `account`, whose currency is `currency`, or
+    /// the first cell, left to right, that the transaction can't do without. With no
+    /// amount typed, the transaction's amount is zero.
+    pub(crate) fn posting(
+        &self,
+        account: AccountId,
+        currency: CurrencyCode,
+    ) -> Result<DomainCommand, Missing> {
         let date = self.date.ok_or(Missing::Date)?;
         let category = self.category.ok_or(Missing::Category)?;
-        let amount = self.amount.ok_or(Missing::Amount)?;
+        let amount = self.amount.unwrap_or_else(|| Money::zero(currency));
         let mut transaction = match category {
             CategoryTarget::Category(category) => {
                 NewTransaction::new(date, &self.payee, category, amount)
@@ -119,7 +130,6 @@ impl Draft {
 pub(crate) enum Missing {
     Date,
     Category,
-    Amount,
 }
 
 impl Missing {
@@ -128,7 +138,6 @@ impl Missing {
         match self {
             Self::Date => fl!(i18n, "register-draft-date-missing"),
             Self::Category => fl!(i18n, "register-draft-category-missing"),
-            Self::Amount => fl!(i18n, "register-draft-amount-missing"),
         }
     }
 }

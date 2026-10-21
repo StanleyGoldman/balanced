@@ -173,7 +173,6 @@ register-cleared-balance = Cleared { $amount }
 # the first empty cell the transaction needs.
 register-draft-date-missing = Date is missing
 register-draft-category-missing = Category is missing
-register-draft-amount-missing = Amount is missing
 # The line between the Register's rows dated today or earlier and its rows dated
 # later, labelled with today's date.
 register-today-divider = Today · { $date }
