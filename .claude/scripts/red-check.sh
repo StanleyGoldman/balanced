@@ -34,7 +34,12 @@
 #          its "panics" is empty. Read its failing record by rerunning the test on
 #          the broken code; a record that fails in setup proves nothing.
 #          Only a red result carries "panics".
-#   green: the tests pass against the broken code; they miss this break.
+#   green: the tests pass against the broken code; they miss this break. Or another
+#          guard covers the same behaviour, such as a stale cell address that a
+#          reset clears and a later row lookup also drops, each alone. This
+#          script breaks one place, so break every guard together by hand: `cp` each
+#          file aside, edit, run the test, then `cp` the copies back so mtimes move
+#          forward, and `cmp` to confirm the restore.
 #   error: bad arguments, or <old> not found exactly once, or the tests fail before
 #          the break, with their names in "failed" (the file is untouched in all three);
 #          or the test command failed with no `FAIL` line, usually a break
