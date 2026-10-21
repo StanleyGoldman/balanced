@@ -19,6 +19,7 @@ use crate::register_model::{
     AmountSide, RegisterRow, RowId, SplitLineRow, SplitLines, target_text,
 };
 use crate::theme::Theme;
+use crate::proto::{self, Setting};
 
 /// What the Split dialog opens on: the row whose lines it edits, as the Register shows
 /// it, pending changes and all.
@@ -169,6 +170,16 @@ pub(crate) struct SplitForm {
     error: Option<SplitError>,
     /// The field that takes keyboard focus on the next frame.
     focus: Option<Id>,
+    /// PROTOTYPE #472: the account the form's choices list, for rebuilding them.
+    proto_account: AccountId,
+    /// PROTOTYPE #472: a Create row picked this frame: the line's key and the name.
+    proto_create: Option<(usize, String)>,
+    /// PROTOTYPE #472: the line waiting on New Category.
+    proto_awaiting: Option<usize>,
+    /// PROTOTYPE #472: the category New Category created, for the waiting line.
+    pub(crate) proto_created: Option<String>,
+    /// PROTOTYPE #472: the field whose text is selected when it takes focus.
+    proto_select: Option<Id>,
 }
 
 impl SplitForm {
@@ -203,6 +214,11 @@ impl SplitForm {
             next_key: 0,
             error: None,
             focus: None,
+            proto_account: account,
+            proto_create: None,
+            proto_awaiting: None,
+            proto_created: None,
+            proto_select: None,
         };
         for line in &start.lines {
             let kept = match (line.target(), line.other_side()) {
@@ -226,6 +242,48 @@ impl SplitForm {
         }
         form.focus = form.lines.first().map(|line| category_id(line.key));
         form
+    }
+
+    /// PROTOTYPE #472: the name of the category a Create row asked for this frame, if
+    /// any; its line waits on New Category.
+    pub(crate) fn proto_take_create(&mut self) -> Option<String> {
+        let (key, name) = self.proto_create.take()?;
+        self.proto_awaiting = Some(key);
+        Some(name)
+    }
+
+    /// PROTOTYPE #472: whether a line waits on New Category.
+    pub(crate) fn proto_awaiting(&self) -> bool {
+        self.proto_awaiting.is_some()
+    }
+
+    /// PROTOTYPE #472: New Category created `path`: the waiting line takes it, and the
+    /// choices list it.
+    pub(crate) fn proto_category_created(&mut self, view: &LedgerView, i18n: &Localizer) {
+        let Some(path) = self.proto_created.take() else {
+            return;
+        };
+        self.choices = FieldChoices::new(view, self.proto_account, i18n);
+        if let Some(key) = self.proto_awaiting.take()
+            && let Some(line) = self.lines.iter_mut().find(|line| line.key == key)
+        {
+            line.category.set_text(&path);
+            line.category.close_list();
+            self.error = None;
+            self.focus = Some(category_id(key));
+        }
+    }
+
+    /// PROTOTYPE #472: New Category was cancelled: the waiting line's Category takes
+    /// focus again, with its text kept, or selected, as the setting says.
+    pub(crate) fn proto_category_cancelled(&mut self) {
+        if let Some(key) = self.proto_awaiting.take() {
+            let id = category_id(key);
+            self.focus = Some(id);
+            if proto::is(Setting::SplitCreateCancelFocus, 1) {
+                self.proto_select = Some(id);
+            }
+        }
     }
 
     /// The key the next line added takes.
@@ -493,11 +551,27 @@ impl SplitForm {
         let height = ui.spacing().interact_size.y;
         let gap = ui.spacing().item_spacing.x;
         let choices = &self.choices;
-        let list = |text: &str| choices.categories().list(text);
+        // PROTOTYPE #472: the list ends with a Create row, as the Register's does.
+        let create = proto::is(Setting::SplitCreate, 1);
+        let list = |text: &str| {
+            let mut rows = choices.categories().list(text);
+            if create {
+                rows.extend(choices.categories().create_row(text));
+            }
+            rows
+        };
         // `show` draws only indices below the number of lines.
         let line = &mut self.lines[index];
         let id = category_id(line.key);
+        let mut create_asked = None;
         if ui.memory(|memory| memory.has_focus(id)) {
+            if create
+                && let Some(ListRow::Create(name)) = line.category.highlighted(list)
+                && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter))
+            {
+                line.category.close_list();
+                create_asked = Some(name);
+            }
             list_keys(ui.ctx(), &mut line.category, list);
         }
         let response = ui.add_sized(
@@ -519,7 +593,19 @@ impl SplitForm {
         if self.focus == Some(id) {
             response.request_focus();
             self.focus = None;
+            // PROTOTYPE #472: where the cursor sits as the field takes focus back.
+            if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), id) {
+                let len = line.category.text().chars().count();
+                let start = if self.proto_select == Some(id) { 0 } else { len };
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(start),
+                    egui::text::CCursor::new(len),
+                )));
+                state.store(ui.ctx(), id);
+            }
+            self.proto_select = None;
         }
+        crate::proto::track(&response, format!("split line {} category", index + 1));
         if response.changed() {
             self.error = None;
             let completed = line.category.forget_completion();
@@ -553,6 +639,13 @@ impl SplitForm {
         if let Some(ListRow::Choice(text)) = pressed {
             line.category.set_text(text);
             line.category.close_list();
+        } else if let Some(ListRow::Create(name)) = pressed {
+            line.category.close_list();
+            create_asked = Some(name);
+        }
+        if let Some(name) = create_asked {
+            proto::decided(Setting::SplitCreate, &format!("Create \"{name}\" opens New Category"));
+            self.proto_create = Some((self.lines[index].key, name));
         }
     }
 
@@ -567,12 +660,23 @@ impl SplitForm {
             SplitError::NoCategory(line) => {
                 fl!(i18n, "dialog-split-no-category", line = line.0)
             }
-            SplitError::UnknownCategory { line, name } => fl!(
-                i18n,
-                "dialog-split-unknown-category",
-                line = line.0,
-                name = name.clone()
-            ),
+            SplitError::UnknownCategory { line, name } => {
+                let text = fl!(
+                    i18n,
+                    "dialog-split-unknown-category",
+                    line = line.0,
+                    name = name.clone()
+                );
+                // PROTOTYPE #472: Done's refusal says how to make the category.
+                if proto::is(Setting::SplitCreate, 2) {
+                    format!(
+                        "{text} To use a new category, create it first: type it in a \
+                         Register row's Category cell and pick Create."
+                    )
+                } else {
+                    text
+                }
+            }
             SplitError::Amount { field, error } => {
                 let error = amount_field::error_text(i18n, *error, &self.reader, self.currency);
                 match field {

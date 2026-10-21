@@ -826,6 +826,8 @@ pub(crate) struct Register {
     split_after_leave: Option<(RowId, SplitStart)>,
     /// PROTOTYPE: each drawn row's 1-based place, for naming cells in the log.
     proto_rows: HashMap<RowId, usize>,
+    /// PROTOTYPE #469: the right edge of the editable cells drawn so far in this row.
+    proto_editable_right: f32,
 }
 
 impl Register {
@@ -1896,6 +1898,7 @@ impl Register {
                 return;
             };
             self.proto_rows.insert(row.id(), row_index + 1);
+            self.proto_editable_right = f32::NEG_INFINITY;
             let selected = self.cursor.is_some_and(|cursor| cursor.row == row.id());
             table_row.set_selected(selected);
             let stripe = frame.theme.stripe(row_index).filter(|_| !selected);
@@ -1955,6 +1958,18 @@ impl Register {
             access,
             viewport,
         };
+        if matches!(
+            column,
+            RegisterColumn::Date
+                | RegisterColumn::Number
+                | RegisterColumn::Payee
+                | RegisterColumn::Category
+                | RegisterColumn::Memo
+                | RegisterColumn::Payment
+                | RegisterColumn::Deposit
+        ) {
+            self.proto_editable_right = self.proto_editable_right.max(ui.max_rect().right());
+        }
         let (response, mut action) = cell.show(ui, i18n, theme);
         proto::track(&response, self.cell_name(row.id(), column));
         if editing
@@ -2026,41 +2041,87 @@ impl Register {
         frame: &BodyFrame<'_>,
         row: &RegisterRow,
     ) -> Option<RowAction> {
+        // PROTOTYPE #469: variant A overlays the strip as built; B draws Split and More
+        // as icon buttons; C drops the strip below the row, and D moves buttons into
+        // More, when the strip would cover an editable cell.
+        let variant = proto::variant();
+        let compact = variant == 1;
         let cell = ui.max_rect();
         let right = cell.right() - Theme::EDGE_INSET;
-        let left = right - buttons_width(ui, frame.i18n) - Theme::ROW_BUTTON_GAP;
-        let strip = Rect::from_x_y_ranges(left..=cell.right(), cell.y_range());
-        let mut strip_ui = ui.new_child(
-            UiBuilder::new()
-                .max_rect(Rect::from_x_y_ranges(
-                    left + Theme::ROW_BUTTON_GAP..=right,
-                    cell.y_range(),
-                ))
-                .layout(Layout::left_to_right(Align::Center)),
-        );
-        strip_ui.set_clip_rect(strip.intersect(frame.viewport));
-        // Assistive technology reads the buttons as one group, the row's toolbar.
-        strip_ui
-            .ctx()
-            .accesskit_node_builder(strip_ui.unique_id(), |node| node.set_role(Role::Toolbar));
-        // The strip hides the cells under it, and takes the clicks between its buttons.
-        let fill = strip_ui.visuals().selection.bg_fill;
-        strip_ui.painter().rect_filled(strip, 0.0, fill);
-        let _blocked = strip_ui.interact(
-            strip,
-            frame.register_id.with("register_row_buttons"),
-            Sense::CLICK,
-        );
-        let spacing = strip_ui.spacing_mut();
-        spacing.item_spacing.x = Theme::ROW_BUTTON_GAP;
-        spacing.button_padding.x = Theme::ROW_BUTTON_PADDING;
-        let shown = edit_buttons(
-            &mut strip_ui,
-            frame.i18n,
-            frame.access,
-            row,
-            self.focus_button,
-        );
+        let widths = button_widths(ui, frame.i18n, compact);
+        let full: f32 = widths.iter().sum::<f32>() + 3.0 * Theme::ROW_BUTTON_GAP;
+        let covers = right - full - Theme::ROW_BUTTON_GAP < self.proto_editable_right;
+        let below = variant == 2 && covers;
+        let mut overflow = Vec::new();
+        let mut width = full;
+        if variant == 3 && covers {
+            let room = right - Theme::ROW_BUTTON_GAP - self.proto_editable_right;
+            // More stays; Save, then Cancel, then Split keep their place while they fit.
+            width = widths[RowButton::More.index()];
+            for button in [RowButton::Save, RowButton::Cancel, RowButton::Split] {
+                let wider = width + widths[button.index()] + Theme::ROW_BUTTON_GAP;
+                if wider <= room {
+                    width = wider;
+                } else {
+                    overflow.push(button);
+                }
+            }
+        }
+        let left = right - width - Theme::ROW_BUTTON_GAP;
+        let y_range = if below {
+            Rangef::new(cell.bottom(), cell.bottom() + cell.height())
+        } else {
+            cell.y_range()
+        };
+        let strip = Rect::from_x_y_ranges(left..=cell.right(), y_range);
+        let inner = Rect::from_x_y_ranges(left + Theme::ROW_BUTTON_GAP..=right, y_range);
+        let viewport = frame.viewport;
+        let register_id = frame.register_id;
+        let draw = |strip_ui: &mut egui::Ui| {
+            strip_ui.set_clip_rect(strip.intersect(viewport));
+            // Assistive technology reads the buttons as one group, the row's toolbar.
+            strip_ui
+                .ctx()
+                .accesskit_node_builder(strip_ui.unique_id(), |node| node.set_role(Role::Toolbar));
+            // The strip hides the cells under it, and takes the clicks between its buttons.
+            let fill = strip_ui.visuals().selection.bg_fill;
+            strip_ui.painter().rect_filled(strip, 0.0, fill);
+            let _blocked =
+                strip_ui.interact(strip, register_id.with("register_row_buttons"), Sense::CLICK);
+            let spacing = strip_ui.spacing_mut();
+            spacing.item_spacing.x = Theme::ROW_BUTTON_GAP;
+            spacing.button_padding.x = Theme::ROW_BUTTON_PADDING;
+            edit_buttons(
+                strip_ui,
+                frame.i18n,
+                frame.access,
+                row,
+                self.focus_button,
+                compact,
+                &overflow,
+            )
+        };
+        let shown = if below {
+            egui::Area::new(register_id.with("proto_strip_below"))
+                .order(Order::Foreground)
+                .fixed_pos(inner.min)
+                .show(ui.ctx(), |area_ui| {
+                    let mut strip_ui = area_ui.new_child(
+                        UiBuilder::new()
+                            .max_rect(inner)
+                            .layout(Layout::left_to_right(Align::Center)),
+                    );
+                    draw(&mut strip_ui)
+                })
+                .inner
+        } else {
+            let mut strip_ui = ui.new_child(
+                UiBuilder::new()
+                    .max_rect(inner)
+                    .layout(Layout::left_to_right(Align::Center)),
+            );
+            draw(&mut strip_ui)
+        };
         if let Some(button) = self.focus_button
             && ui.memory(|memory| memory.has_focus(shown.drawn.id(button)))
         {
@@ -4789,20 +4850,43 @@ fn edit_buttons(
     access: Access,
     row: &RegisterRow,
     focus: Option<RowButton>,
+    compact: bool,
+    overflow: &[RowButton],
 ) -> ButtonsShown {
     let draft = row.id() == RowId::Draft;
     let mut ids = [Id::NULL; 4];
     let mut pressed = None;
     let mut action = None;
     for (button, slot) in RowButton::ALL.into_iter().zip(&mut ids) {
+        if overflow.contains(&button) {
+            continue;
+        }
         let response = match button {
             RowButton::Save if draft => ui.button(fl!(i18n, "register-row-add")),
             RowButton::Save => ui.button(fl!(i18n, "register-row-save")),
             RowButton::Cancel => ui.button(fl!(i18n, "register-row-cancel")),
+            // PROTOTYPE #469 B: Split and More as labelled icon buttons.
+            RowButton::Split if compact => {
+                let label = fl!(i18n, "register-row-split");
+                icon_button(ui, SPLIT_GLYPH, &label, true).on_hover_text(label)
+            }
             RowButton::Split => ui.button(fl!(i18n, "register-row-split")),
             RowButton::More => {
-                let more = Button::new((fl!(i18n, "register-row-more"), DROP_DOWN_GLYPH));
-                let response = ui.add_enabled(!draft, more);
+                // PROTOTYPE #469 D: More holds the buttons that don't fit, even on the
+                // draft row.
+                let enabled = !draft || !overflow.is_empty();
+                let more = if compact {
+                    Button::new(DROP_DOWN_GLYPH)
+                } else {
+                    Button::new((fl!(i18n, "register-row-more"), DROP_DOWN_GLYPH))
+                };
+                let response = ui.add_enabled(enabled, more);
+                let response = if compact {
+                    response.on_hover_text(fl!(i18n, "register-row-more", "a11y"))
+                } else {
+                    response
+                };
+                let draft = !enabled;
                 let label = fl!(i18n, "register-row-more", "a11y");
                 response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, !draft, &label));
                 response
@@ -4813,10 +4897,37 @@ fn edit_buttons(
             response.request_focus();
         }
         if button == RowButton::More {
+            let mut from_menu = None;
             action = Popup::menu(&response)
                 .id(more_menu_id(response.id))
-                .show(|ui| actions_items(ui, i18n, access, row))
+                .show(|ui| {
+                    for &moved in overflow {
+                        let text = match moved {
+                            RowButton::Save if draft => fl!(i18n, "register-row-add"),
+                            RowButton::Save => fl!(i18n, "register-row-save"),
+                            RowButton::Cancel => fl!(i18n, "register-row-cancel"),
+                            RowButton::Split | RowButton::More => fl!(i18n, "register-row-split"),
+                        };
+                        let item = ui.button(text);
+                        proto::track(&item, format!("menu: {moved:?}"));
+                        if item.clicked() {
+                            from_menu = Some(moved);
+                            ui.close();
+                        }
+                    }
+                    if !overflow.is_empty() {
+                        ui.separator();
+                    }
+                    if draft {
+                        None
+                    } else {
+                        actions_items(ui, i18n, access, row)
+                    }
+                })
                 .and_then(|menu| menu.inner);
+            if from_menu.is_some() {
+                pressed = from_menu;
+            }
         } else if response.clicked() {
             pressed = Some(button);
         }
@@ -4827,6 +4938,42 @@ fn edit_buttons(
         pressed,
         action,
     }
+}
+
+/// PROTOTYPE #469 B: the Split icon.
+const SPLIT_GLYPH: &str = "÷";
+
+/// PROTOTYPE #469: each of the editing row's buttons' width in `ui`, in the order of
+/// [`RowButton::ALL`], with Save as wide as Add or Save, whichever is wider.
+fn button_widths(ui: &egui::Ui, i18n: &Localizer, compact: bool) -> [f32; 4] {
+    let text = |text: &str| {
+        WidgetText::from(text)
+            .into_galley(
+                ui,
+                Some(TextWrapMode::Extend),
+                f32::INFINITY,
+                TextStyle::Button,
+            )
+            .size()
+            .x
+    };
+    let spacing = ui.spacing();
+    let button = |content: f32| content + 2.0 * Theme::ROW_BUTTON_PADDING;
+    let save = text(&fl!(i18n, "register-row-save")).max(text(&fl!(i18n, "register-row-add")));
+    let (split, more) = if compact {
+        (text(SPLIT_GLYPH), text(DROP_DOWN_GLYPH))
+    } else {
+        (
+            text(&fl!(i18n, "register-row-split")),
+            text(&fl!(i18n, "register-row-more")) + spacing.icon_spacing + text(DROP_DOWN_GLYPH),
+        )
+    };
+    [
+        button(save),
+        button(text(&fl!(i18n, "register-row-cancel"))),
+        button(split),
+        button(more),
+    ]
 }
 
 /// The width of the editing row's buttons side by side in `ui`, with Save as wide as Add

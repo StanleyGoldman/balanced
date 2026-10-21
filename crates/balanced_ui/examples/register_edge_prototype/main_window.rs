@@ -521,7 +521,13 @@ impl MainWindow {
             self.cant_save = Some(OpenDialog::new(ctx, refusal.clone()));
             return;
         }
-        if self.dialog_open() {
+        // PROTOTYPE #472: New Category may open over the Split dialog.
+        let over_split = matches!(kind, DialogKind::NewCategory { .. })
+            && self
+                .split
+                .as_ref()
+                .is_some_and(|split| split.form.proto_awaiting());
+        if self.dialog_open() && !over_split {
             return;
         }
         match kind {
@@ -644,6 +650,13 @@ impl MainWindow {
         }
         let path = dialog.form.take_created_path();
         self.close_dialog(ctx, |window| &mut window.new_category);
+        // PROTOTYPE #472: the Split dialog's waiting line takes the new category.
+        if let Some(split) = &mut self.split
+            && split.form.proto_awaiting()
+        {
+            split.form.proto_created = path;
+            return;
+        }
         if let (Some(path), Some(register)) = (path, self.register_mut()) {
             register.category_created(path);
         }
@@ -822,12 +835,13 @@ impl MainWindow {
         self.reconciled_amount_dialog(ctx, i18n, theme, commands, view);
         self.unreconcile_dialog(ctx, i18n, theme, commands, view);
         self.new_account_dialog(ctx, i18n, theme, commands, today);
-        self.new_category_dialog(ctx, i18n, theme, commands, view);
         self.preferences_dialog(ctx, i18n, theme, commands);
         self.manage_accounts_dialog(ctx, i18n, theme, commands, view);
         self.data_file_refusal_dialog(ctx, i18n, theme);
         self.go_to_date_dialog(ctx, i18n, theme, commands, today);
-        self.split_dialog(ctx, i18n, theme, preferences);
+        self.split_dialog(ctx, i18n, theme, preferences, commands, view);
+        // PROTOTYPE #472: after the Split dialog, so New Category draws over it.
+        self.new_category_dialog(ctx, i18n, theme, commands, view);
         self.leave_row_dialog(ctx, i18n, theme, commands, preferences);
         self.cant_save_dialog(ctx, i18n, theme);
     }
@@ -841,10 +855,14 @@ impl MainWindow {
         i18n: &Localizer,
         theme: &Theme,
         preferences: &Preferences,
+        commands: &CommandSender,
+        view: &LedgerView,
     ) {
         let Some(dialog) = &mut self.split else {
             return;
         };
+        // PROTOTYPE #472: a Create row opens New Category over the Split dialog.
+        dialog.form.proto_category_created(view, i18n);
         let outcome = HeavyDialog::new(
             Id::new("split_dialog"),
             fl!(i18n, "dialog-split-title"),
@@ -857,6 +875,13 @@ impl MainWindow {
         .show(ctx, dialog, |ui, form| {
             form.show(ui, i18n, theme, preferences.inline_completion);
         });
+        if let Some(name) = dialog.form.proto_take_create() {
+            commands.send(AppCommand::OpenDialog(DialogKind::NewCategory { name }));
+            return;
+        }
+        if dialog.form.proto_awaiting() {
+            return;
+        }
         match outcome {
             DialogOutcome::Open => {}
             DialogOutcome::Accepted => {
@@ -1158,6 +1183,13 @@ impl MainWindow {
             }
             DialogOutcome::Cancelled => {
                 self.close_dialog(ctx, |window| &mut window.new_category);
+                // PROTOTYPE #472: back to the Split dialog's waiting line.
+                if let Some(split) = &mut self.split
+                    && split.form.proto_awaiting()
+                {
+                    split.form.proto_category_cancelled();
+                    return;
+                }
                 if let Some(register) = self.register_mut() {
                     register.category_cancelled();
                 }
