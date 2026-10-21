@@ -336,7 +336,7 @@ impl App {
                 account,
                 transaction,
             } => self.main_window.go_to_transaction(account, transaction),
-            AppCommand::GoToOtherSide => self.main_window.go_to_other_side(),
+            AppCommand::GoToDate(date) => self.main_window.go_to_date(date),
             AppCommand::GoToDraftRow => {
                 if let Some(ledger) = ledger {
                     self.main_window.go_to_draft_row(ctx, &ledger.snapshot());
