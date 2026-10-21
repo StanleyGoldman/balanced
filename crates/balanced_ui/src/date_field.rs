@@ -345,19 +345,9 @@ impl DateEdit {
         self.rejected
     }
 
-    /// Closes the calendar. Returns whether it was open.
-    pub(crate) fn close_calendar(&mut self) -> bool {
-        self.calendar.take().is_some()
-    }
-
-    /// Picks the open calendar's marked day, as Enter does. Returns whether the
-    /// calendar was open.
-    pub(crate) fn pick_marked(&mut self) -> bool {
-        let Some(calendar) = self.calendar else {
-            return false;
-        };
-        self.pick(calendar.marked);
-        true
+    /// Whether the calendar is open. While it is, the field takes Enter and Esc.
+    pub(crate) fn is_calendar_open(&self) -> bool {
+        self.calendar.is_some()
     }
 
     /// The date the field holds, or `None` while an empty field is untouched.
@@ -404,6 +394,7 @@ impl DateEdit {
                 } => self.press(*key, today),
                 Event::Text(text) | Event::Paste(text) => {
                     self.type_text(i18n, order, today, text);
+                    self.mark_value(i18n);
                     true
                 }
                 _ => false,
@@ -415,13 +406,25 @@ impl DateEdit {
         ctx.input_mut(|input| input.events = kept);
     }
 
-    /// Acts on `key`, pressed with no modifiers. Keys the open calendar takes act on
-    /// it. Returns whether the field took the key.
+    /// Acts on `key`, pressed with no modifiers. While the calendar is open, Enter
+    /// picks its marked day, Esc closes it, and the keys that move the marked day act
+    /// on it. Returns whether the field took the key.
     fn press(&mut self, key: Key, today: Date<Iso>) -> bool {
-        if let Some(calendar) = &mut self.calendar
-            && calendar.press(key)
-        {
-            return true;
+        if let Some(calendar) = &mut self.calendar {
+            #[expect(clippy::wildcard_enum_match_arm, reason = "foreign enum")]
+            match key {
+                Key::Enter => {
+                    let marked = calendar.marked;
+                    self.pick(marked);
+                    return true;
+                }
+                Key::Escape => {
+                    self.calendar = None;
+                    return true;
+                }
+                _ if calendar.press(key) => return true,
+                _ => {}
+            }
         }
         if let Some(shortcut) = Shortcut::key(key) {
             if self.typed.is_none() {
@@ -504,6 +507,16 @@ impl DateEdit {
         if self.calendar.take().is_none() {
             let shown = self.value(i18n).ok().flatten().unwrap_or(today);
             self.calendar = Some(OpenCalendar::on(shown));
+        }
+    }
+
+    /// Marks the field's date in the open calendar, turning to its month, once typing
+    /// has made one.
+    fn mark_value(&mut self, i18n: &Localizer) {
+        if let Ok(Some(date)) = self.value(i18n)
+            && let Some(calendar) = &mut self.calendar
+        {
+            *calendar = OpenCalendar::on(date);
         }
     }
 
@@ -745,7 +758,8 @@ impl Calendar {
                     let size = vec2(self.day_size, self.day_size);
                     ui.horizontal(|ui| {
                         let previous = month.checked_sub(1.month()).ok();
-                        if nav_button(ui, size, "◀", &fl!(i18n, "field-date-previous-month"))
+                        if flat_button(ui, size, "◀", &fl!(i18n, "field-date-previous-month"))
+                            .clicked()
                             && let Some(previous) = previous
                         {
                             action = CalendarAction::Month(to_iso(previous));
@@ -757,7 +771,7 @@ impl Calendar {
                             Label::new(i18n.format_month_year(self.month)),
                         );
                         let next = month.checked_add(1.month()).ok();
-                        if nav_button(ui, size, "▶", &fl!(i18n, "field-date-next-month"))
+                        if flat_button(ui, size, "▶", &fl!(i18n, "field-date-next-month")).clicked()
                             && let Some(next) = next
                         {
                             action = CalendarAction::Month(to_iso(next));
@@ -770,11 +784,11 @@ impl Calendar {
                     // Today spans the seven day columns.
                     let gaps = (TODAY_DAYS - 1.0) * ui.spacing().item_spacing.x;
                     let width = self.day_size * TODAY_DAYS + gaps;
-                    if flat_button(
-                        ui,
-                        vec2(width, self.day_size),
-                        &fl!(i18n, "field-date-today"),
-                    ) {
+                    let today = fl!(i18n, "field-date-today");
+                    // Today picks on pointer press, as a day does.
+                    if flat_button(ui, vec2(width, self.day_size), &today, &today)
+                        .is_pointer_button_down_on()
+                    {
                         action = CalendarAction::Pick(self.today);
                     }
                 });
@@ -890,8 +904,9 @@ impl Calendar {
     }
 }
 
-/// A ◀ or ▶ button that moves the calendar a month. It never takes focus.
-fn nav_button(ui: &mut egui::Ui, size: egui::Vec2, glyph: &str, label: &str) -> bool {
+/// A ◀ or ▶ button, or Today: `text` in a flat button spanning `size`, read by a screen
+/// reader as `label`. It never takes focus.
+fn flat_button(ui: &mut egui::Ui, size: egui::Vec2, text: &str, label: &str) -> Response {
     let (rect, response) = ui.allocate_exact_size(size, Sense::CLICK);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, label));
     let visuals = ui.style().interact(&response);
@@ -901,28 +916,9 @@ fn nav_button(ui: &mut egui::Ui, size: egui::Vec2, glyph: &str, label: &str) -> 
     ui.painter().text(
         rect.center(),
         Align2::CENTER_CENTER,
-        glyph,
+        text,
         TextStyle::Body.resolve(ui.style()),
         visuals.text_color(),
     );
-    response.clicked()
-}
-
-/// A flat button spanning `size`, drawn as a day is. Returns whether the pointer was
-/// pressed on it. It never takes focus.
-fn flat_button(ui: &mut egui::Ui, size: egui::Vec2, label: &str) -> bool {
-    let (rect, response) = ui.allocate_exact_size(size, Sense::CLICK);
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, label));
-    let visuals = ui.style().interact(&response);
-    if response.hovered() {
-        ui.painter().rect_filled(rect, 0.0, visuals.weak_bg_fill);
-    }
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        label,
-        TextStyle::Body.resolve(ui.style()),
-        visuals.text_color(),
-    );
-    response.is_pointer_button_down_on()
+    response
 }

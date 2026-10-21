@@ -1797,9 +1797,9 @@ impl Register {
 
     /// Acts on this frame's keys for `edit`, the Date cell being edited under `cursor`,
     /// with `tab` the move a Tab press asks for, and returns the scroll offset that
-    /// brings the cell cursor into view when it has left it. The first Esc closes the
-    /// calendar and the next cancels the edit. Enter picks the calendar's marked day
-    /// while it is open, and otherwise commits; a refused date keeps the edit open.
+    /// brings the cell cursor into view when it has left it. While the calendar is open
+    /// the field takes Enter and Esc itself; otherwise Esc cancels the edit and Enter
+    /// commits it. A refused date keeps the edit open.
     fn handle_date_keys(
         &mut self,
         ctx: &egui::Context,
@@ -1808,22 +1808,18 @@ impl Register {
         cursor: CellAddress,
         tab: Option<Move>,
     ) -> Option<f32> {
-        let (escape, enter) = ctx.input_mut(|input| {
-            (
-                input.consume_key(Modifiers::NONE, Key::Escape),
-                input.consume_key(Modifiers::NONE, Key::Enter),
-            )
-        });
+        let (escape, enter) = if edit.date.is_calendar_open() {
+            (false, false)
+        } else {
+            ctx.input_mut(|input| {
+                (
+                    input.consume_key(Modifiers::NONE, Key::Escape),
+                    input.consume_key(Modifiers::NONE, Key::Enter),
+                )
+            })
+        };
         if escape {
-            if edit.date.close_calendar() {
-                self.edit = Some(Edit::Date(edit));
-            } else {
-                ctx.memory_mut(|memory| memory.surrender_focus(editor_id(edit.cell)));
-            }
-            return None;
-        }
-        if enter && edit.date.pick_marked() {
-            self.edit = Some(Edit::Date(edit));
+            ctx.memory_mut(|memory| memory.surrender_focus(editor_id(edit.cell)));
             return None;
         }
         if enter || tab.is_some() {

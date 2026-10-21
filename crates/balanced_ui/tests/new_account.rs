@@ -224,3 +224,40 @@ fn a_day_picked_from_the_calendar_dates_the_opening_balance() {
 
     assert!(shows(&harness, "Opening balance: $10.00 as of 10/24/2026"));
 }
+
+/// Walks the wizard to its Opening Balance step, types `10.00` and opens the calendar.
+fn open_the_calendar(harness: &mut Harness<'static, App>) {
+    press(harness, Key::Enter);
+    type_into(harness, "Name", "Rainy Day");
+    press(harness, Key::Enter);
+    type_into(harness, "Opening balance", "10.00");
+    harness
+        .get_by_role_and_label(Role::Button, "Calendar")
+        .click();
+    harness.run();
+}
+
+#[test]
+fn enter_in_the_calendar_picks_the_marked_day_and_keeps_the_step() {
+    let mut harness = wizard();
+    open_the_calendar(&mut harness);
+    press(&mut harness, Key::ArrowRight);
+
+    press(&mut harness, Key::Enter);
+    let kept_step = shows(&harness, "Step 3 of 4: Opening balance");
+    press(&mut harness, Key::Enter);
+
+    assert!(kept_step);
+    assert!(shows(&harness, "Opening balance: $10.00 as of 10/15/2026"));
+}
+
+#[test]
+fn esc_in_the_calendar_closes_it_and_keeps_the_wizard_open() {
+    let mut harness = wizard();
+    open_the_calendar(&mut harness);
+
+    press(&mut harness, Key::Escape);
+
+    assert!(!shows(&harness, "October 2026"));
+    assert!(shows(&harness, "Step 3 of 4: Opening balance"));
+}

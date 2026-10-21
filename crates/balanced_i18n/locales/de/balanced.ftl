@@ -99,7 +99,6 @@ register-transaction-count =
        *[other] { $count } Buchungen
     }
 
-
 ## Dialogs
 
 dialog-cancel = Abbrechen

@@ -600,3 +600,15 @@ fn shortcut_keys_move_the_field_again_once_the_calendar_closes() {
 
     assert_eq!(field(&harness), "10/6/2026");
 }
+
+#[test]
+fn a_date_typed_while_the_calendar_is_open_becomes_the_marked_day() {
+    let mut harness = app();
+    edit_date(&mut harness, "9/5/2026");
+    press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+
+    type_at_once(&mut harness, "11/20/2026");
+
+    assert_eq!(marked(&harness).as_deref(), Some("11/20/2026"));
+    assert!(shows(&harness, "November 2026"));
+}
