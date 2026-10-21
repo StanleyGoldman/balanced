@@ -322,6 +322,21 @@ fn a_pasted_result_saves_when_the_cell_is_left() {
 }
 
 #[test]
+fn a_pasted_negative_result_in_payment_saves_as_a_deposit() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    open_calculator(&mut harness);
+    calculate(&mut harness, "10-22");
+    click_cell(&mut harness, "86.42");
+    click_button(&mut harness, "Paste");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(payment_of(&harness, "Fresh Market"), "");
+    harness.get_by_role_and_label(Role::Cell, "12.00");
+}
+
+#[test]
 fn paste_goes_to_the_amount_cell_last_clicked_after_other_cells() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");

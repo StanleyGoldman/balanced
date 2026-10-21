@@ -2264,7 +2264,7 @@ impl Register {
     /// is refused: the cursor goes to the first such cell, outlined, with a bubble
     /// saying what is missing.
     fn post(&mut self, keys: &KeyContext<'_>) {
-        match self.draft.posting(keys.account) {
+        match self.draft.posting(keys.account, keys.draft_frame.currency) {
             Ok(command) => {
                 keys.commands.send(AppCommand::Domain(command));
                 self.posted_at = Some(keys.generation);
@@ -2277,13 +2277,11 @@ impl Register {
     }
 }
 
-/// The draft row cell that `missing` names. A missing amount names Payment, the
-/// first of the two cells that take one.
+/// The draft row cell that `missing` names.
 fn missing_column(missing: Missing) -> RegisterColumn {
     match missing {
         Missing::Date => RegisterColumn::Date,
         Missing::Category => RegisterColumn::Category,
-        Missing::Amount => RegisterColumn::Payment,
     }
 }
 
@@ -2643,9 +2641,10 @@ fn save(row: RowId, edit: TransactionEdit, commands: &CommandSender, draft: &mut
 }
 
 /// The edit that saves `text`, already trimmed, as the amount of `row` on `side`,
-/// read by `reader` in `currency`, or `None` when it matches the saved amount. The
-/// text's sign is ignored: the side gives the amount its sign, so the amount moves to
-/// `side` when it was on the other.
+/// read by `reader` in `currency`, or `None` when it matches the saved amount. A
+/// positive amount goes on `side`, moving there when it was on the other, and a
+/// negative one goes on the other side, without its sign. Text with no amount in it
+/// saves zero.
 fn amount_edit(
     row: &RegisterRow,
     side: AmountSide,
@@ -2656,10 +2655,13 @@ fn amount_edit(
     if text == row.amount_text_on(side) {
         return Ok(None);
     }
-    let amount = reader.read(text)?.amount();
-    let money = Money::new(amount, currency)
-        .expect("the reader gives amounts at the currency's decimal places");
-    let money = side.signed(money);
+    let money = match reader.read(text) {
+        Ok(calculation) => Money::new(calculation.amount(), currency)
+            .expect("the reader gives amounts at the currency's decimal places"),
+        Err(AmountParseError::Empty) => Money::zero(currency),
+        Err(error) => return Err(error),
+    };
+    let money = side.typed(money);
     Ok((row.amount() != Some(money)).then_some(TransactionEdit::Amount(money)))
 }
 
