@@ -601,3 +601,72 @@ fn go_to_in_a_transfer_s_category_cell_menu_goes_to_its_other_side() {
     assert_eq!(row_of(&harness, "Saving up")[3], "[Everyday Checking]");
     assert!(saving_up_is_selected(&harness));
 }
+
+/// Renames "Saving up" to "Rainy day" in its Payee cell, leaving the edit open, and
+/// picks `item` from the editing row's More actions menu.
+fn rename_saving_up_then_pick_more(harness: &mut Harness<'static, App>, item: &str) {
+    select_saving_up(harness);
+    type_text(harness, "Rainy day");
+    for label in ["More actions", item] {
+        harness.get_by_role_and_label(Role::Button, label).click();
+        harness.run();
+    }
+}
+
+/// Whether the leave-row prompt is open.
+fn prompted(harness: &Harness<'static, App>) -> bool {
+    harness
+        .query_by_role_and_label(Role::Button, "Continue editing")
+        .is_some()
+}
+
+#[test]
+fn go_to_from_more_on_a_changed_row_asks_first() {
+    let mut harness = app_on(with_transfer("Emergency Fund"));
+    open(&mut harness, "Everyday Checking");
+
+    rename_saving_up_then_pick_more(&mut harness, "Go to [Emergency Fund]");
+
+    assert!(prompted(&harness));
+    assert!(column(&harness, "Payee").contains(&"Rainy day".to_owned()));
+}
+
+#[test]
+fn continue_editing_after_go_to_from_more_stays_on_the_row() {
+    let mut harness = app_on(with_transfer("Emergency Fund"));
+    open(&mut harness, "Everyday Checking");
+    rename_saving_up_then_pick_more(&mut harness, "Go to [Emergency Fund]");
+
+    harness
+        .get_by_role_and_label(Role::Button, "Continue editing")
+        .click();
+    harness.run();
+
+    assert!(!prompted(&harness));
+    assert!(column(&harness, "Payee").contains(&"Rainy day".to_owned()));
+    assert_eq!(
+        harness
+            .get_by_role_and_label(Role::TextInput, "Payee")
+            .accesskit_node()
+            .value()
+            .as_deref(),
+        Some("Rainy day")
+    );
+}
+
+#[test]
+fn go_to_from_more_on_an_unchanged_row_goes_at_once() {
+    let mut harness = app_on(with_transfer("Emergency Fund"));
+    open(&mut harness, "Everyday Checking");
+    select_saving_up(&mut harness);
+    // Opens the Payee cell, unchanged.
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    for label in ["More actions", "Go to [Emergency Fund]"] {
+        harness.get_by_role_and_label(Role::Button, label).click();
+        harness.run();
+    }
+
+    assert!(!prompted(&harness));
+    assert_eq!(row_of(&harness, "Saving up")[3], "[Everyday Checking]");
+}

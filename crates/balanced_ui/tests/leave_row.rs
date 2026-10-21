@@ -667,3 +667,122 @@ fn deleting_a_changed_row_throws_its_changes_away_with_no_prompt() {
     assert!(!shows(&harness, "Corner Shop"));
     assert!(!shows(&harness, "Fresh Market"));
 }
+
+/// Picks `item` from the editing row's More actions menu.
+fn pick_more(harness: &mut Harness<'static, App>, item: &str) {
+    for label in ["More actions", item] {
+        harness.get_by_role_and_label(Role::Button, label).click();
+        harness.run();
+    }
+}
+
+/// Whether Fresh Market's transaction, of 9/5/2026 for 86.42, shows flagged in its
+/// Flag cell, under whatever payee its row shows.
+fn fresh_market_flagged(harness: &Harness<'static, App>) -> bool {
+    harness
+        .query_all_by_role(Role::CheckBox)
+        .find(|cell| {
+            cell.accesskit_node()
+                .label()
+                .is_some_and(|label| label.ends_with(", 9/5/2026, -86.42"))
+        })
+        .expect("Fresh Market's row has a Flag cell")
+        .accesskit_node()
+        .toggled()
+        == Some(Toggled::True)
+}
+
+#[test]
+fn flag_from_more_on_a_changed_row_asks_first() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+
+    pick_more(&mut harness, "Flag");
+
+    assert!(prompted(&harness));
+    assert!(!fresh_market_flagged(&harness));
+}
+
+#[test]
+fn continue_editing_after_flag_from_more_keeps_the_changes_and_flags_nothing() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    pick_more(&mut harness, "Flag");
+
+    click_button(&mut harness, "Continue editing");
+
+    assert!(!prompted(&harness));
+    assert!(!fresh_market_flagged(&harness));
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Corner Shop"));
+    assert!(!can_undo(&mut harness));
+}
+
+#[test]
+fn save_after_flag_from_more_saves_the_row_then_flags_it() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    pick_more(&mut harness, "Flag");
+
+    click_button(&mut harness, "Save");
+
+    assert!(!prompted(&harness));
+    assert!(shows(&harness, "Corner Shop"));
+    assert!(fresh_market_flagged(&harness));
+}
+
+#[test]
+fn discard_after_flag_from_more_throws_the_changes_away_then_flags_the_row() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    pick_more(&mut harness, "Flag");
+
+    click_button(&mut harness, "Discard");
+
+    assert!(!prompted(&harness));
+    assert!(shows(&harness, "Fresh Market"));
+    assert!(!shows(&harness, "Corner Shop"));
+    assert!(fresh_market_flagged(&harness));
+}
+
+#[test]
+fn flag_from_more_on_an_unchanged_row_flags_it_at_once() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    // Opens the Payee cell, unchanged.
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    pick_more(&mut harness, "Flag");
+
+    assert!(!prompted(&harness));
+    assert!(fresh_market_flagged(&harness));
+}
+
+#[test]
+fn delete_from_more_on_a_changed_row_asks_the_delete_confirm_not_the_prompt() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+
+    pick_more(&mut harness, "Delete…");
+
+    assert!(!prompted(&harness));
+    assert!(harness.query_all_by_role(Role::Label).any(|label| {
+        label
+            .accesskit_node()
+            .value()
+            .is_some_and(|text| text.starts_with("Delete this transaction?"))
+    }));
+}
+
+#[test]
+fn delete_from_more_on_a_changed_row_deletes_without_saving() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    pick_more(&mut harness, "Delete…");
+
+    click_button(&mut harness, "Delete");
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
+
+    assert!(shows(&harness, "Fresh Market"));
+    assert!(!shows(&harness, "Corner Shop"));
+}
