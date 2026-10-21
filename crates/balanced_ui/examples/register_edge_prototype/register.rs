@@ -4689,6 +4689,7 @@ fn actions_menu(
         vec2(size, size),
     );
     let response = ui.interact(button, menu.with("button"), Sense::click());
+    proto::track(&response, format!("actions menu: {}", row.payee()));
     let label = fl!(i18n, "register-actions");
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
     if ui.is_rect_visible(button) {

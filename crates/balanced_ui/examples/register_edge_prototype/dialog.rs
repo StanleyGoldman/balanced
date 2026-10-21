@@ -420,6 +420,8 @@ impl HeavyDialog {
         let Some((accept, cancel)) = shown.inner else {
             return DialogOutcome::Open;
         };
+        crate::proto::track(&accept, format!("heavy button: accept ({})", id.short_debug_format()));
+        crate::proto::track(&cancel, format!("heavy button: cancel ({})", id.short_debug_format()));
         // Esc and Enter belong to the top Dialog, such as a confirm opened over this one.
         let escape = || {
             is_top

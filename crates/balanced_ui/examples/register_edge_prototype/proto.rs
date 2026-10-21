@@ -250,6 +250,7 @@ thread_local! {
     static NOTICE: RefCell<Option<(String, std::time::Instant)>> = const { RefCell::new(None) };
     static HARNESS: RefCell<Option<Harness>> = const { RefCell::new(None) };
     static RECTS: RefCell<HashMap<String, Rect>> = RefCell::new(HashMap::new());
+    static PREV_RECTS: RefCell<HashMap<String, Rect>> = RefCell::new(HashMap::new());
 }
 
 pub fn install(harness: Harness) {
@@ -272,16 +273,20 @@ pub fn track(response: &Response, name: impl Into<String>) {
 /// preferring an exact match.
 pub fn find(name: &str) -> Option<(String, Rect)> {
     let lower = name.to_lowercase();
-    RECTS.with(|r| {
-        let r = r.borrow();
+    let look = |r: &HashMap<String, Rect>| {
         r.iter()
             .find(|(n, _)| n.to_lowercase() == lower)
             .or_else(|| r.iter().find(|(n, _)| n.to_lowercase().contains(&lower)))
             .map(|(n, rect)| (n.clone(), *rect))
-    })
+    };
+    RECTS
+        .with(|r| look(&r.borrow()))
+        .or_else(|| PREV_RECTS.with(|r| look(&r.borrow())))
 }
 
+/// Starts a frame's names: last frame's stay findable until this frame draws.
 pub fn clear_rects() {
+    RECTS.with(|r| PREV_RECTS.with(|p| std::mem::swap(&mut *r.borrow_mut(), &mut *p.borrow_mut())));
     RECTS.with(|r| r.borrow_mut().clear());
 }
 

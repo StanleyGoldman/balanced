@@ -533,6 +533,23 @@ impl App {
         self.main_window.data_file_switched();
     }
 
+    /// PROTOTYPE #469: shows or hides the Register column with id `column`.
+    pub fn proto_show_column(&mut self, column: &str, shown: bool) -> bool {
+        let Some(column) = crate::register_columns::RegisterColumn::ALL
+            .into_iter()
+            .find(|c| c.id().eq_ignore_ascii_case(column))
+        else {
+            return false;
+        };
+        let mut register_columns = self.preferences.register_columns.clone();
+        register_columns.set_shown(column, shown);
+        self.set_preferences(Preferences {
+            register_columns,
+            ..self.preferences.clone()
+        });
+        true
+    }
+
     /// PROTOTYPE: the open ledger as it stands.
     pub fn view(&self) -> Option<Arc<balanced_core::LedgerView>> {
         match &self.session {

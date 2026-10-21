@@ -19,7 +19,8 @@
 //! `step <n>`, `screenshot [label]`, `dock on|off`, `reload` (fresh stub data, every
 //! change thrown away), `quit`, `account <name>`, `key <Ctrl+Shift+Name>` (a key press,
 //! e.g. `key Tab`, `key Ctrl+Enter`, `key Esc`), `text <chars>` (typed text),
-//! `click <tracked widget name>` (a left click on its centre), `resetsettings`.
+//! `click <tracked widget name>` (a left click on its centre), `resetsettings`,
+//! `hide <column id>` / `show <column id>` (the column chooser's checkbox), `wait <ms>`.
 
 #![allow(
     dead_code,
@@ -155,6 +156,11 @@ struct Proto {
     inject: VecDeque<Vec<Event>>,
     /// Where the pointer is, as the injected clicks last left it.
     pointer: Option<egui::Pos2>,
+    /// Control commands waiting for the injected input before them to land.
+    pending: VecDeque<String>,
+    /// `wait <ms>` holds the commands after it until then.
+    hold_until: Option<std::time::Instant>,
+    injected_last_frame: bool,
 }
 
 impl Proto {
@@ -276,6 +282,13 @@ impl Proto {
                 None => bad(),
             },
             "text" => self.inject.push_back(vec![Event::Text(rest.to_owned())]),
+            "hide" | "show" => {
+                if self.app.proto_show_column(rest, verb == "show") {
+                    proto::log("column", json!({ "column": rest, "shown": verb == "show" }));
+                } else {
+                    bad();
+                }
+            }
             "click" => match proto::find(rest) {
                 Some((name, rect)) => {
                     let pos = rect.center();
@@ -468,8 +481,10 @@ impl eframe::App for Proto {
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.injected_last_frame = false;
         if let Some(batch) = self.inject.pop_front() {
             raw_input.events.extend(batch);
+            self.injected_last_frame = true;
             ctx.request_repaint();
         }
         let tabs = |input: &egui::RawInput| {
@@ -508,7 +523,33 @@ impl eframe::App for Proto {
         }
         proto::clear_rects();
         if let Some(cmd) = proto::with(|h| h.begin_frame(&ctx)) {
-            self.apply_control(&ctx, &cmd);
+            self.pending.push_back(cmd);
+        }
+        // A command waits until the keys and clicks queued before it have landed, and
+        // a frame has drawn their effect.
+        let held = self
+            .hold_until
+            .is_some_and(|until| std::time::Instant::now() < until);
+        if !held && self.inject.is_empty() && !self.injected_last_frame {
+            self.hold_until = None;
+            if let Some(cmd) = self.pending.pop_front() {
+                if let Some(ms) = cmd.strip_prefix("wait ").and_then(|ms| ms.trim().parse().ok()) {
+                    self.hold_until =
+                        Some(std::time::Instant::now() + std::time::Duration::from_millis(ms));
+                } else {
+                    self.apply_control(&ctx, &cmd);
+                    // A screenshot (and a toggle's or variant's own) waits 350 ms to settle
+                    // and then takes a frame; nothing else runs until it is taken.
+                    if matches!(cmd.split(' ').next(), Some("screenshot" | "toggle" | "variant")) {
+                        self.hold_until = Some(
+                            std::time::Instant::now() + std::time::Duration::from_millis(800),
+                        );
+                    }
+                }
+            }
+        }
+        if !self.pending.is_empty() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(30));
         }
         self.keys(&ctx);
         self.dock(ui);
@@ -596,6 +637,9 @@ fn main() -> eframe::Result {
                 maximize_sent: false,
                 inject: VecDeque::new(),
                 pointer: None,
+                pending: VecDeque::new(),
+                hold_until: None,
+                injected_last_frame: false,
             }))
         }),
     )
