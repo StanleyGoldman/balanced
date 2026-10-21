@@ -23,6 +23,12 @@
 # script then adds the step's hit rate as a row to $RUNNER_TEMP/sccache-rows.md,
 # which .github/sccache-summary.sh turns into a table in the job summary.
 #
+# sccache won't start when its cache storage is unreachable (the Actions cache
+# answering 503, say), and then every rustc call through it fails. So the
+# script starts the server first; if that fails, it logs a warning annotation,
+# runs the command with RUSTC_WRAPPER unset so it builds without the cache, and
+# in a workflow step adds an "unreachable" row to the summary table.
+#
 # Exit status: the command's.
 set -euo pipefail
 
@@ -50,14 +56,24 @@ fi
 
 # Removed and written inside the container, whose root owns `target/`.
 stats=target/sccache-stats.json
+unreachable=target/sccache-unreachable
 status=0
 docker run "${args[@]}" balanced-ci:latest sh -c '
-  rm -f '"$stats"'
-  trap "sccache --show-stats || true
-    mkdir -p target && sccache --show-stats --stats-format=json > '"$stats"' || true" EXIT
+  rm -f '"$stats"' '"$unreachable"'
+  if sccache --start-server; then
+    trap "sccache --show-stats || true
+      mkdir -p target && sccache --show-stats --stats-format=json > '"$stats"' || true" EXIT
+  else
+    echo "::warning title=sccache unreachable::sccache could not reach its cache storage (error above), so this step builds without the cache."
+    mkdir -p target && touch '"$unreachable"'
+    export RUSTC_WRAPPER=
+  fi
   "$@"' sh "$@" || status=$?
 
-if [ -n "${RUNNER_TEMP:-}" ] && [ -s "$stats" ]; then
+if [ -n "${RUNNER_TEMP:-}" ] && [ -e "$unreachable" ]; then
+  echo "| \`$*\` | – | – | unreachable, built without the cache | – |" \
+    >> "$RUNNER_TEMP/sccache-rows.md"
+elif [ -n "${RUNNER_TEMP:-}" ] && [ -s "$stats" ]; then
   jq -r --arg command "$*" '
     .stats as $s
     | ([$s.cache_hits.counts[]] | add // 0) as $hits
