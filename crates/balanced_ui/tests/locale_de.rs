@@ -309,3 +309,18 @@ fn the_unreconcile_confirm_reads_german() {
     );
     harness.get_by_role_and_label(Role::Button, "Auf „Bestätigt“ setzen");
 }
+
+#[test]
+fn the_calendars_today_button_reads_german() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    harness
+        .get_by_role_and_label(Role::Cell, "05.09.2026")
+        .click();
+    harness.run();
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+
+    harness.get_by_role_and_label(Role::Button, "Heute");
+}
