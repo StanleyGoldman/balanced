@@ -108,13 +108,13 @@ impl Household {
         let (savings, groceries) = (self.savings, self.groceries);
         self.apply(DomainCommand::PostTransaction {
             account: self.checking,
-            transaction: NewTransaction::split_for_tests(
+            transaction: NewTransaction::split(
                 date(5),
                 "Payday",
                 vec![
-                    NewSplitLine::for_tests(groceries, "Food", usd("-50.00")),
-                    NewSplitLine::transfer_for_tests(savings, "Rainy day", usd("-200.00")),
-                    NewSplitLine::transfer_for_tests(savings, "Holiday", usd("-100.00")),
+                    NewSplitLine::category(groceries, "Food", usd("-50.00")),
+                    NewSplitLine::transfer(savings, "Rainy day", usd("-200.00")),
+                    NewSplitLine::transfer(savings, "Holiday", usd("-100.00")),
                 ],
             ),
         });
@@ -241,8 +241,8 @@ fn lines_split_a_transaction_in_one_category_whose_amount_is_their_sum() {
         costco,
         "-100.00",
         vec![
-            EditedSplitLine::for_tests(groceries, "Food", usd("-80.00")),
-            EditedSplitLine::for_tests(cleaning, "Soap", usd("-20.00")),
+            EditedSplitLine::category(groceries, "Food", usd("-80.00")),
+            EditedSplitLine::category(cleaning, "Soap", usd("-20.00")),
         ],
     );
 
@@ -293,9 +293,9 @@ fn a_kept_lines_other_side_keeps_its_id_and_own_memo_and_takes_the_lines_new_amo
         payday,
         "-350.00",
         vec![
-            EditedSplitLine::for_tests(groceries, "Food", usd("-100.00")),
-            EditedSplitLine::kept_for_tests(rainy_day, "Emergencies", usd("-150.00")),
-            EditedSplitLine::kept_for_tests(holiday, "Holiday", usd("-100.00")),
+            EditedSplitLine::category(groceries, "Food", usd("-100.00")),
+            EditedSplitLine::kept(rainy_day, "Emergencies", usd("-150.00")),
+            EditedSplitLine::kept(holiday, "Holiday", usd("-100.00")),
         ],
     );
 
@@ -329,9 +329,9 @@ fn a_kept_line_whose_amount_changes_sign_flips_its_other_sides_sign() {
         payday,
         "50.00",
         vec![
-            EditedSplitLine::for_tests(groceries, "Food", usd("-50.00")),
-            EditedSplitLine::kept_for_tests(rainy_day, "Rainy day", usd("200.00")),
-            EditedSplitLine::kept_for_tests(holiday, "Holiday", usd("-100.00")),
+            EditedSplitLine::category(groceries, "Food", usd("-50.00")),
+            EditedSplitLine::kept(rainy_day, "Rainy day", usd("200.00")),
+            EditedSplitLine::kept(holiday, "Holiday", usd("-100.00")),
         ],
     );
 
@@ -365,8 +365,8 @@ fn a_line_to_an_account_the_edit_drops_loses_its_other_side() {
         payday,
         "-350.00",
         vec![
-            EditedSplitLine::for_tests(groceries, "Food", usd("-150.00")),
-            EditedSplitLine::kept_for_tests(rainy_day, "Rainy day", usd("-200.00")),
+            EditedSplitLine::category(groceries, "Food", usd("-150.00")),
+            EditedSplitLine::kept(rainy_day, "Rainy day", usd("-200.00")),
         ],
     );
 
@@ -389,8 +389,8 @@ fn a_new_line_to_an_account_gains_an_other_side_there_taking_the_lines_memo() {
         costco,
         "-100.00",
         vec![
-            EditedSplitLine::for_tests(groceries, "Food", usd("-60.00")),
-            EditedSplitLine::transfer_for_tests(savings, "Change jar", usd("-40.00")),
+            EditedSplitLine::category(groceries, "Food", usd("-60.00")),
+            EditedSplitLine::transfer(savings, "Change jar", usd("-40.00")),
         ],
     );
 
@@ -429,8 +429,8 @@ fn a_replaced_split_has_exactly_one_other_side_for_each_line_to_an_account() {
         payday,
         "-350.00",
         vec![
-            EditedSplitLine::transfer_for_tests(savings, "Car", usd("-250.00")),
-            EditedSplitLine::kept_for_tests(holiday, "Holiday", usd("-100.00")),
+            EditedSplitLine::transfer(savings, "Car", usd("-250.00")),
+            EditedSplitLine::kept(holiday, "Holiday", usd("-100.00")),
         ],
     );
 
@@ -469,9 +469,9 @@ fn lines_that_dont_add_up_to_the_amount_are_refused_and_change_nothing() {
         payday,
         "-350.00",
         vec![
-            EditedSplitLine::for_tests(groceries, "Food", usd("-50.00")),
-            EditedSplitLine::kept_for_tests(rainy_day, "Rainy day", usd("-200.00")),
-            EditedSplitLine::transfer_for_tests(savings, "Car", usd("-90.00")),
+            EditedSplitLine::category(groceries, "Food", usd("-50.00")),
+            EditedSplitLine::kept(rainy_day, "Rainy day", usd("-200.00")),
+            EditedSplitLine::transfer(savings, "Car", usd("-90.00")),
         ],
     ));
 
@@ -501,8 +501,8 @@ fn a_line_keeping_an_other_side_the_transaction_doesnt_have_is_refused() {
         costco,
         "-100.00",
         vec![
-            EditedSplitLine::for_tests(groceries, "Food", usd("-90.00")),
-            EditedSplitLine::kept_for_tests(saving_up, "Saving up", usd("-10.00")),
+            EditedSplitLine::category(groceries, "Food", usd("-90.00")),
+            EditedSplitLine::kept(saving_up, "Saving up", usd("-10.00")),
         ],
     ));
 
@@ -527,9 +527,9 @@ fn a_line_keeping_one_other_side_twice_is_refused() {
         payday,
         "-350.00",
         vec![
-            EditedSplitLine::for_tests(groceries, "Food", usd("-150.00")),
-            EditedSplitLine::kept_for_tests(rainy_day, "Rainy day", usd("-100.00")),
-            EditedSplitLine::kept_for_tests(rainy_day, "Rainy day", usd("-100.00")),
+            EditedSplitLine::category(groceries, "Food", usd("-150.00")),
+            EditedSplitLine::kept(rainy_day, "Rainy day", usd("-100.00")),
+            EditedSplitLine::kept(rainy_day, "Rainy day", usd("-100.00")),
         ],
     ));
 
@@ -557,8 +557,8 @@ fn a_new_line_to_a_closed_account_is_refused_naming_it() {
         costco,
         "-100.00",
         vec![
-            EditedSplitLine::for_tests(groceries, "Food", usd("-60.00")),
-            EditedSplitLine::transfer_for_tests(savings, "Change jar", usd("-40.00")),
+            EditedSplitLine::category(groceries, "Food", usd("-60.00")),
+            EditedSplitLine::transfer(savings, "Change jar", usd("-40.00")),
         ],
     ));
 
@@ -580,7 +580,7 @@ fn a_line_in_an_unknown_category_is_refused() {
     let result = household.ledger.apply(lines_edit(
         costco,
         "-100.00",
-        vec![EditedSplitLine::for_tests(cleaning, "Soap", usd("-100.00"))],
+        vec![EditedSplitLine::category(cleaning, "Soap", usd("-100.00"))],
     ));
 
     assert_eq!(
@@ -602,7 +602,7 @@ fn lines_on_the_opening_balance_are_refused() {
     let result = household.ledger.apply(lines_edit(
         opening,
         "1000.00",
-        vec![EditedSplitLine::for_tests(groceries, "", usd("1000.00"))],
+        vec![EditedSplitLine::category(groceries, "", usd("1000.00"))],
     ));
 
     assert_eq!(
@@ -625,7 +625,7 @@ fn lines_on_a_split_lines_other_side_are_refused_naming_the_splits_account() {
     let result = household.ledger.apply(lines_edit(
         rainy_day,
         "200.00",
-        vec![EditedSplitLine::for_tests(groceries, "", usd("200.00"))],
+        vec![EditedSplitLine::category(groceries, "", usd("200.00"))],
     ));
 
     assert_eq!(
@@ -646,9 +646,9 @@ fn resplit_payday(household: &mut Household, payday: TransactionId) {
         payday,
         "-400.00",
         vec![
-            EditedSplitLine::for_tests(groceries, "Food", usd("-50.00")),
-            EditedSplitLine::kept_for_tests(rainy_day, "Rainy day", usd("-250.00")),
-            EditedSplitLine::transfer_for_tests(savings, "Car", usd("-100.00")),
+            EditedSplitLine::category(groceries, "Food", usd("-50.00")),
+            EditedSplitLine::kept(rainy_day, "Rainy day", usd("-250.00")),
+            EditedSplitLine::transfer(savings, "Car", usd("-100.00")),
         ],
     );
 }
@@ -675,8 +675,8 @@ fn one_undo_puts_back_a_transaction_in_one_category() {
         costco,
         "-100.00",
         vec![
-            EditedSplitLine::for_tests(groceries, "Food", usd("-60.00")),
-            EditedSplitLine::transfer_for_tests(savings, "Change jar", usd("-40.00")),
+            EditedSplitLine::category(groceries, "Food", usd("-60.00")),
+            EditedSplitLine::transfer(savings, "Change jar", usd("-40.00")),
         ],
     );
 
@@ -714,8 +714,8 @@ fn lines_in_a_compound_with_other_edits_undo_in_one_step() {
             payday,
             "-300.00",
             vec![
-                EditedSplitLine::for_tests(groceries, "Food", usd("-100.00")),
-                EditedSplitLine::kept_for_tests(rainy_day, "Rainy day", usd("-200.00")),
+                EditedSplitLine::category(groceries, "Food", usd("-100.00")),
+                EditedSplitLine::kept(rainy_day, "Rainy day", usd("-200.00")),
             ],
         ),
         DomainCommand::EditTransaction {
@@ -749,7 +749,7 @@ fn a_refused_lines_edit_in_a_compound_leaves_the_other_edits_unmade() {
         lines_edit(
             costco,
             "-100.00",
-            vec![EditedSplitLine::for_tests(groceries, "Food", usd("-90.00"))],
+            vec![EditedSplitLine::category(groceries, "Food", usd("-90.00"))],
         ),
     ]));
 
@@ -803,8 +803,8 @@ fn a_new_line_to_the_transactions_own_account_is_refused() {
         costco,
         "-100.00",
         vec![
-            EditedSplitLine::for_tests(groceries, "Food", usd("-60.00")),
-            EditedSplitLine::transfer_for_tests(checking, "Change jar", usd("-40.00")),
+            EditedSplitLine::category(groceries, "Food", usd("-60.00")),
+            EditedSplitLine::transfer(checking, "Change jar", usd("-40.00")),
         ],
     ));
 
@@ -847,11 +847,7 @@ fn assert_lines_refused_while_savings_is_closed(
 #[test]
 fn dropping_a_line_whose_other_side_is_in_a_closed_account_is_refused_naming_it() {
     assert_lines_refused_while_savings_is_closed(|_, groceries| {
-        vec![EditedSplitLine::for_tests(
-            groceries,
-            "Food",
-            usd("-350.00"),
-        )]
+        vec![EditedSplitLine::category(groceries, "Food", usd("-350.00"))]
     });
 }
 
@@ -859,9 +855,9 @@ fn dropping_a_line_whose_other_side_is_in_a_closed_account_is_refused_naming_it(
 fn keeping_a_line_whose_other_side_is_in_a_closed_account_is_refused_naming_it() {
     assert_lines_refused_while_savings_is_closed(|[rainy_day, holiday], groceries| {
         vec![
-            EditedSplitLine::for_tests(groceries, "Snacks", usd("-50.00")),
-            EditedSplitLine::kept_for_tests(rainy_day, "Rainy day", usd("-200.00")),
-            EditedSplitLine::kept_for_tests(holiday, "Holiday", usd("-100.00")),
+            EditedSplitLine::category(groceries, "Snacks", usd("-50.00")),
+            EditedSplitLine::kept(rainy_day, "Rainy day", usd("-200.00")),
+            EditedSplitLine::kept(holiday, "Holiday", usd("-100.00")),
         ]
     });
 }
@@ -881,8 +877,8 @@ fn lines_split_a_transfer_keeping_its_other_side() {
         sent,
         "-300.00",
         vec![
-            EditedSplitLine::kept_for_tests(received, "Saving up", usd("-250.00")),
-            EditedSplitLine::for_tests(groceries, "Lunch", usd("-50.00")),
+            EditedSplitLine::kept(received, "Saving up", usd("-250.00")),
+            EditedSplitLine::category(groceries, "Lunch", usd("-50.00")),
         ],
     );
 

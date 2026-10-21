@@ -738,12 +738,12 @@ fn a_transfer_into_this_account_from_one_now_closed_fills_memo_and_amount_but_no
 fn a_split_fills_memo_and_its_total_but_no_category() {
     let mut ledger = Ledger::stub();
     // Its line to Emergency Fund puts a transfer with the same payee there too.
-    let transaction = NewTransaction::split_for_tests(
+    let transaction = NewTransaction::split(
         Date::try_new_iso(2026, 10, 1).expect("1 October 2026 is a date"),
         "Warehouse Club",
         vec![
-            NewSplitLine::for_tests(category(&ledger, "Groceries"), "", usd("-60.00")),
-            NewSplitLine::transfer_for_tests(account(&ledger, "Emergency Fund"), "", usd("-40.00")),
+            NewSplitLine::category(category(&ledger, "Groceries"), "", usd("-60.00")),
+            NewSplitLine::transfer(account(&ledger, "Emergency Fund"), "", usd("-40.00")),
         ],
     )
     .memo("Monthly stock-up");
