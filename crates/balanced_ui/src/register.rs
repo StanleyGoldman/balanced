@@ -537,7 +537,7 @@ struct CellEdit {
     /// `None` while the text is no arithmetic that can be read.
     preview: Option<Preview>,
     /// The keypad under an Amount cell, while it is open.
-    keypad: Option<Keypad>,
+    keypad: Option<Box<Keypad>>,
     /// Whether the keypad just handed its result back into the text, which the edit
     /// saves on the next frame before it leaves the cell.
     handed_back: bool,
@@ -1435,7 +1435,7 @@ impl Register {
             if edit.keypad.take().is_some() {
                 focus_at_end(ui.ctx(), edit);
             } else {
-                edit.keypad = Some(Keypad::new(&edit.text));
+                edit.keypad = Some(Box::new(Keypad::new(&edit.text)));
             }
         } else if response.lost_focus() && edit.keypad.is_none() {
             let edit = self.edit.take().expect("the edit was just shown");
@@ -1697,7 +1697,7 @@ impl Register {
         let offers_list = edit.field.offers_list();
         let amount = matches!(edit.field, EditField::Amount { .. });
         if amount && ctx.input_mut(|input| input.consume_key(Modifiers::ALT, Key::ArrowDown)) {
-            edit.keypad = Some(Keypad::new(&edit.text));
+            edit.keypad = Some(Box::new(Keypad::new(&edit.text)));
             self.edit = Some(Edit::Text(edit));
             return None;
         }

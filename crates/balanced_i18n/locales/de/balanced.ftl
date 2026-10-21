@@ -157,6 +157,7 @@ dialog-welcome-quit = Beenden
 ## Keypad
 
 field-amount-keypad = Rechner
+    .tooltip = Rechner (Alt+Herunter)
 keypad-add = Addieren
 keypad-subtract = Subtrahieren
 keypad-multiply = Multiplizieren

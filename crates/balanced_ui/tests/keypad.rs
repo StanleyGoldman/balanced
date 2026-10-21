@@ -261,14 +261,43 @@ fn escape_closes_the_keypad_and_leaves_the_cell_as_it_was() {
 #[test]
 fn a_click_outside_closes_the_keypad_and_leaves_the_cell_as_it_was() {
     let mut harness = app();
-    edit_fresh_market_payment(&mut harness);
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "86.42");
+    type_text(&mut harness, "20+5");
     click_button(&mut harness, "Keypad");
     type_text(&mut harness, "*2");
 
     click_cell(&mut harness, "Bean There");
 
+    // The click away saves the cell's own sum, 20+5, as it does with no keypad.
     assert_eq!(display(&harness), None);
-    assert_eq!(payment_of(&harness, "Fresh Market"), "86.42");
+    assert_eq!(payment_of(&harness, "Fresh Market"), "25.00");
+}
+
+#[test]
+fn alt_down_in_the_keypad_closes_it_and_leaves_the_cell_as_it_was() {
+    let mut harness = app();
+    edit_fresh_market_payment(&mut harness);
+    click_button(&mut harness, "Keypad");
+    type_text(&mut harness, "*2");
+
+    press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+
+    assert_eq!(display(&harness), None);
+    assert_eq!(editor(&harness, "Payment").as_deref(), Some("86.42"));
+}
+
+#[test]
+fn the_keypad_button_closes_an_open_keypad() {
+    let mut harness = app();
+    edit_fresh_market_payment(&mut harness);
+    click_button(&mut harness, "Keypad");
+    type_text(&mut harness, "*2");
+
+    click_button(&mut harness, "Keypad");
+
+    assert_eq!(display(&harness), None);
+    assert_eq!(editor(&harness, "Payment").as_deref(), Some("86.42"));
 }
 
 /// Whether a label in the window reads `text`.
@@ -371,5 +400,10 @@ fn the_keypad_writes_german_amounts_with_a_decimal_comma() {
 
     click_button(&mut harness, "OK");
 
-    harness.get_by_role_and_label(Role::Cell, "3,00");
+    // The Payment heading has no German translation yet, so it reads in English.
+    let row = column(&harness, "Zahlungsempfänger")
+        .iter()
+        .position(|cell| cell == "Fresh Market")
+        .expect("the Register lists Fresh Market");
+    assert_eq!(column(&harness, "Payment")[row], "3,00");
 }
