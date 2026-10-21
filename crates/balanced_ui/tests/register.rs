@@ -36,7 +36,7 @@ fn app_with(file: PreferencesFile) -> Harness<'static, App> {
 
 /// The App as [`app`] makes it, with "Enter moves to the next row" turned off in
 /// `preferences.toml`, which lives in the returned directory.
-fn app_with_enter_staying() -> (tempfile::TempDir, Harness<'static, App>) {
+fn app_with_enter_moving_off() -> (tempfile::TempDir, Harness<'static, App>) {
     let dir = tempfile::tempdir().expect("the test machine can make a temporary directory");
     std::fs::write(
         dir.path().join("preferences.toml"),
@@ -990,7 +990,7 @@ fn enter_on_an_unchanged_row_saves_nothing_and_opens_the_next_row() {
 
 #[test]
 fn with_enter_moves_to_the_next_row_off_enter_saves_and_leaves_the_row_highlighted() {
-    let (_dir, mut harness) = app_with_enter_staying();
+    let (_dir, mut harness) = app_with_enter_moving_off();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
     type_text(&mut harness, "Corner Shop");
@@ -1004,7 +1004,7 @@ fn with_enter_moves_to_the_next_row_off_enter_saves_and_leaves_the_row_highlight
 
 #[test]
 fn with_enter_moves_to_the_next_row_off_ctrl_enter_saves_and_leaves_the_row_highlighted() {
-    let (_dir, mut harness) = app_with_enter_staying();
+    let (_dir, mut harness) = app_with_enter_moving_off();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
     type_text(&mut harness, "Corner Shop");
@@ -1022,7 +1022,7 @@ fn with_enter_moves_to_the_next_row_off_ctrl_enter_saves_and_leaves_the_row_high
 
 #[test]
 fn with_enter_moves_to_the_next_row_off_enter_on_an_unchanged_row_leaves_it_highlighted() {
-    let (_dir, mut harness) = app_with_enter_staying();
+    let (_dir, mut harness) = app_with_enter_moving_off();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
     press(&mut harness, Modifiers::NONE, Key::Enter);
@@ -1031,6 +1031,54 @@ fn with_enter_moves_to_the_next_row_off_enter_on_an_unchanged_row_leaves_it_high
 
     assert!(!editing(&harness));
     assert_eq!(cursor(&harness), "Fresh Market");
+}
+
+#[test]
+fn with_enter_moves_to_the_next_row_off_enter_on_the_draft_row_still_opens_a_fresh_one() {
+    let (_dir, mut harness) = app_with_enter_moving_off();
+    open(&mut harness, "Everyday Checking");
+    // The Date cell's field takes a date one key at a time.
+    for key in "10/15/2026".chars() {
+        type_text(&mut harness, &key.to_string());
+    }
+    // Date, Num, Payee.
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    type_text(&mut harness, "Corner Cafe");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    type_text(&mut harness, "Food & Dining:Groceries");
+    // Category, Memo, Payment.
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    type_text(&mut harness, "12");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    let top = |cell: &egui_kittest::Node<'_>| cell.rect().top();
+    let added = top(&harness.get_by_role_and_label(Role::Cell, "Corner Cafe"));
+    let cursor_cell = harness
+        .query_all_by_role(Role::Cell)
+        .find(|cell| cell.accesskit_node().is_selected() == Some(true))
+        .expect("a cell holds the cell cursor");
+    assert_eq!(cursor_cell.accesskit_node().label().unwrap_or_default(), "");
+    assert!(top(&cursor_cell) > added);
+}
+
+#[test]
+fn with_enter_moves_to_the_next_row_off_a_refused_save_keeps_the_cell_open() {
+    let (_dir, mut harness) = app_with_enter_moving_off();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "86.42");
+    // Too large for the account's balance to hold.
+    type_text(&mut harness, "792281625142643375935439503.35");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(
+        editor(&harness, "Payment").as_deref(),
+        Some("792,281,625,142,643,375,935,439,503.35")
+    );
+    assert_eq!(undo_redo_disabled(&mut harness), (true, true));
 }
 
 #[test]

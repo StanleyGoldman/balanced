@@ -335,7 +335,5 @@ fn the_enter_moves_to_the_next_row_preference_reads_german() {
     harness.get_by_role_and_label(Role::Tab, "Register").click();
     harness.run();
 
-    let checkbox =
-        harness.query_by_role_and_label(Role::CheckBox, "Mit »Eingabe« zur nächsten Zeile gehen");
-    assert!(checkbox.is_some());
+    harness.get_by_role_and_label(Role::CheckBox, "Mit »Eingabe« zur nächsten Zeile gehen");
 }

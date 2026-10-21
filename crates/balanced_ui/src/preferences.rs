@@ -112,8 +112,8 @@ pub(crate) struct Preferences {
     /// Typing in a Payee or Category cell completes the text with the rest of the
     /// first entry that starts with it (Inline completion).
     pub(crate) inline_completion: bool,
-    /// Enter, saving a Register row, opens the next row's cell in the same column,
-    /// rather than leaving the saved row highlighted.
+    /// Enter or Ctrl+Enter, saving a Register row, opens the next row's cell in the
+    /// same column, rather than leaving the saved row highlighted.
     pub(crate) enter_moves_to_next_row: bool,
     /// Each Account bar heading shows its section's total.
     pub(crate) group_totals: bool,

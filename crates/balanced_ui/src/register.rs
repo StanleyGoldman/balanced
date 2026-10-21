@@ -2408,22 +2408,25 @@ impl Register {
             .as_ref()
             .filter(|_| self.unsaved.is_changed(cursor.row))
         else {
-            if keys.after_enter == AfterEnter::SameRow {
-                return None;
+            match keys.after_enter {
+                AfterEnter::NextRow => {}
+                AfterEnter::SameRow => return None,
             }
             let moved = self.move_cursor(cursor, Move::Down, keys.rows)?;
             self.start_edit(ctx, keys, EditStart::Saved);
             return moved.scroll_offset;
         };
-        let next = keys
-            .rows
-            .position(cursor.row)
-            .filter(|_| keys.after_enter == AfterEnter::NextRow)
-            .and_then(|index| keys.rows.get(index + 1))
-            .map(|row| CellAddress {
-                row: row.id(),
-                column: cursor.column,
-            });
+        let next = match keys.after_enter {
+            AfterEnter::NextRow => keys
+                .rows
+                .position(cursor.row)
+                .and_then(|index| keys.rows.get(index + 1))
+                .map(|row| CellAddress {
+                    row: row.id(),
+                    column: cursor.column,
+                }),
+            AfterEnter::SameRow => None,
+        };
         let confirm = send_save(changes, keys.rows, keys.commands);
         self.saving = Some(Saving {
             at: keys.generation,
@@ -2733,8 +2736,8 @@ impl PayeeRecall {
     }
 }
 
-/// Where the cell cursor goes once Enter saves a transaction's row, as the Preferences
-/// say.
+/// Where the cell cursor goes once Enter or Ctrl+Enter saves a transaction's row, as
+/// the Preferences say.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AfterEnter {
     /// The next row's cell in the same column opens for editing.
