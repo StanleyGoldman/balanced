@@ -572,6 +572,11 @@ struct Proto {
     cal_button_rect: Rect,
 
     goto: Option<String>,
+    /// While Go to date is open, the date field machinery drives its box, and the entry
+    /// row's date waits here: date, text, dirty, field rect, 📅 rect.
+    parked: Option<(i64, String, bool, Rect, Rect)>,
+    /// The register row last clicked or gone to; Go to date starts from its date.
+    selected_row: Option<usize>,
     focus_request: Option<(Id, bool)>,
 }
 
@@ -627,6 +632,8 @@ impl Proto {
             date_rect: Rect::NOTHING,
             cal_button_rect: Rect::NOTHING,
             goto: None,
+            parked: None,
+            selected_row: None,
             focus_request: None,
         }
     }
@@ -790,7 +797,7 @@ impl Proto {
             }
             "goto" => {
                 if rest == "open" {
-                    self.goto = Some(String::new());
+                    self.open_goto("control");
                 } else if let Some(d) = parse_day(rest) {
                     self.go_to_date(d, "control");
                 } else {
@@ -825,6 +832,104 @@ impl Proto {
     // -----------------------------------------------------------------------------------------
     // The date field and its calendar
 
+    /// The focused date field: the entry row's, or the Go to date box's while it is open.
+    fn date_id(&self) -> Id {
+        if self.parked.is_some() {
+            Id::new("goto_date")
+        } else {
+            Id::new(DATE_ID)
+        }
+    }
+
+    /// The date text box and its 📅 button, for whichever field is active (`date_id`).
+    fn date_widget(&mut self, ui: &mut Ui, ctx: &Context, name: &str) {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let id = self.date_id();
+        let focused = ctx.memory(|m| m.has_focus(id));
+        if focused {
+            self.date_input(ctx);
+        }
+        if !self.date_dirty {
+            self.date_text = fmt_day(self.date);
+        }
+        let r = ui.add(
+            TextEdit::singleline(&mut self.date_text)
+                .id(id)
+                .desired_width(92.0)
+                .event_filter(egui::EventFilter {
+                    escape: true,
+                    ..Default::default()
+                }),
+        );
+        self.h.track(&r, format!("{name} field"));
+        self.date_rect = r.rect;
+        if r.changed() {
+            self.date_dirty = true;
+        }
+        if r.lost_focus() && self.date_dirty && !self.cal_open {
+            self.commit_date_text("blur");
+        }
+        if r.lost_focus()
+            && self.date_dirty
+            && self.cal_open
+            && !ctx.input(|i| i.pointer.any_down())
+        {
+            self.commit_date_text("blur");
+        }
+        let b = ui.add(Button::new("📅").min_size(vec2(26.0, 0.0)));
+        self.h.track(&b, format!("{name} calendar button"));
+        self.cal_button_rect = b.rect;
+        if b.clicked() {
+            if self.cal_open {
+                self.close_calendar("button");
+            } else {
+                self.open_calendar("button");
+            }
+        }
+    }
+
+    /// Opens Go to date on the selected row's date (today when none is selected), in a box
+    /// that is the date field itself: date keys, 📅, the calendar.
+    fn open_goto(&mut self, via: &str) {
+        if self.parked.is_some() {
+            return;
+        }
+        self.close_calendar("Go to date");
+        let seed = self
+            .selected_row
+            .and_then(|i| self.rows.get(i))
+            .map_or(TODAY, |r| r.date);
+        self.parked = Some((
+            self.date,
+            std::mem::take(&mut self.date_text),
+            self.date_dirty,
+            self.date_rect,
+            self.cal_button_rect,
+        ));
+        self.date = seed;
+        self.date_text = fmt_day(seed);
+        self.date_dirty = false;
+        self.goto = Some(String::new());
+        self.focus_request = Some((self.date_id(), true));
+        self.h.event(
+            "goto",
+            json!({ "open": true, "via": via, "seed": fmt_day(seed) }),
+        );
+    }
+
+    /// Closes Go to date and gives the date field back to the entry row.
+    fn close_goto(&mut self) {
+        self.close_calendar("Go to date closed");
+        self.goto = None;
+        if let Some((date, text, dirty, rect, button)) = self.parked.take() {
+            self.date = date;
+            self.date_text = text;
+            self.date_dirty = dirty;
+            self.date_rect = rect;
+            self.cal_button_rect = button;
+        }
+    }
+
     fn set_date(&mut self, date: i64, via: &str) {
         if self.date != date {
             self.h.event(
@@ -858,7 +963,7 @@ impl Proto {
         self.cal_view = (y, m);
         self.h
             .event("calendar", json!({ "open": true, "via": via }));
-        self.focus_request = Some((Id::new(DATE_ID), false));
+        self.focus_request = Some((self.date_id(), false));
     }
 
     fn close_calendar(&mut self, via: &str) {
@@ -899,7 +1004,7 @@ impl Proto {
             }
             if let Some(d) = moved {
                 self.set_date(d, "calendar key");
-                self.focus_request = Some((Id::new(DATE_ID), true));
+                self.focus_request = Some((self.date_id(), true));
                 return;
             }
             if step(ctx, Key::Enter) {
@@ -956,7 +1061,7 @@ impl Proto {
         }
         if let Some(d) = moved {
             self.set_date(d, "date key");
-            self.focus_request = Some((Id::new(DATE_ID), true));
+            self.focus_request = Some((self.date_id(), true));
         }
     }
 
@@ -1073,7 +1178,7 @@ impl Proto {
             if close.is_none() {
                 close = Some("day pressed");
             }
-            self.focus_request = Some((Id::new(DATE_ID), true));
+            self.focus_request = Some((self.date_id(), true));
         }
         // A press anywhere else closes it. A press on the popup keeps the date field focused.
         let (pressed, down, pos) = ctx.input(|i| {
@@ -1093,7 +1198,7 @@ impl Proto {
                 close = Some("click outside");
             }
             if down && inside {
-                self.focus_request = Some((Id::new(DATE_ID), false));
+                self.focus_request = Some((self.date_id(), false));
             }
         }
         if let Some(via) = close {
@@ -1108,6 +1213,7 @@ impl Proto {
             .position(|r| r.date >= date)
             .unwrap_or(self.rows.len().saturating_sub(1));
         self.scroll_to = Some(at);
+        self.selected_row = Some(at);
         self.emit(&format!("GoToDate({})", fmt_day(date)), via);
         self.status = format!(
             "Went to {}: row {} of {}",
@@ -1118,36 +1224,25 @@ impl Proto {
     }
 
     fn goto_window(&mut self, ctx: &Context) {
-        let Some(mut text) = self.goto.take() else {
+        if self.goto.is_none() {
             return;
-        };
+        }
         let mut done = false;
         let mut go = false;
-        let id = Id::new("goto_text");
         Window::new("Go to date")
             .id(Id::new("goto_window"))
             .collapsible(false)
             .resizable(false)
             .anchor(Align2::CENTER_CENTER, vec2(0.0, -80.0))
             .show(ctx, |ui| {
-                ui.label("Date (m/d/yyyy, or t for today):");
-                let r = ui.add(
-                    TextEdit::singleline(&mut text)
-                        .id(id)
-                        .desired_width(160.0)
-                        .event_filter(egui::EventFilter {
-                            escape: true,
-                            ..Default::default()
-                        }),
-                );
-                self.h.track(&r, "go to date: text");
-                if !ctx.memory(|m| m.has_focus(id)) && !r.lost_focus() {
-                    r.request_focus();
-                }
-                if r.has_focus() && ctx.input(|i| i.key_pressed(Key::Enter)) {
+                ui.label("Date keys t m h y r + −, arrows; Alt+Down opens the calendar");
+                ui.horizontal(|ui| self.date_widget(ui, ctx, "go to date"));
+                // The calendar takes Enter and Esc while open; otherwise they act on the box.
+                let focused = ctx.memory(|m| m.has_focus(self.date_id()));
+                if focused && ctx.input(|i| i.key_pressed(Key::Enter)) {
                     go = true;
                 }
-                if ctx.input(|i| i.key_pressed(Key::Escape)) {
+                if !self.cal_open && ctx.input(|i| i.key_pressed(Key::Escape)) {
                     done = true;
                 }
                 ui.horizontal(|ui| {
@@ -1164,16 +1259,19 @@ impl Proto {
                 });
             });
         if go {
-            match parse_day(&text) {
-                Some(d) => {
-                    self.go_to_date(d, "Go to date box");
-                    done = true;
-                }
-                None => self.entry_error = Some(format!("“{text}” is not a date")),
+            if self.date_dirty {
+                self.commit_date_text("Go");
+            }
+            if !self.date_dirty {
+                let d = self.date;
+                self.close_goto();
+                self.go_to_date(d, "Go to date box");
+                return;
             }
         }
-        if !done {
-            self.goto = Some(text);
+        if done {
+            self.h.event("goto", json!({ "open": false, "via": "cancel" }));
+            self.close_goto();
         }
     }
 
@@ -1839,48 +1937,16 @@ impl Proto {
                     ui.vertical(|ui| {
                         ui.label(RichText::new("Date").small());
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            let id = Id::new(DATE_ID);
-                            let focused = ctx.memory(|m| m.has_focus(id));
-                            if focused {
-                                self.date_input(ctx);
-                            }
-                            if !self.date_dirty {
-                                self.date_text = fmt_day(self.date);
-                            }
-                            let r = ui.add(
-                                TextEdit::singleline(&mut self.date_text)
-                                    .id(id)
-                                    .desired_width(92.0)
-                                    .event_filter(egui::EventFilter {
-                                        escape: true,
-                                        ..Default::default()
-                                    }),
-                            );
-                            self.h.track(&r, "date field");
-                            self.date_rect = r.rect;
-                            if r.changed() {
-                                self.date_dirty = true;
-                            }
-                            if r.lost_focus() && self.date_dirty && !self.cal_open {
-                                self.commit_date_text("blur");
-                            }
-                            if r.lost_focus()
-                                && self.date_dirty
-                                && self.cal_open
-                                && !ctx.input(|i| i.pointer.any_down())
-                            {
-                                self.commit_date_text("blur");
-                            }
-                            let b = ui.add(Button::new("📅").min_size(vec2(26.0, 0.0)));
-                            self.h.track(&b, "calendar button");
-                            self.cal_button_rect = b.rect;
-                            if b.clicked() {
-                                if self.cal_open {
-                                    self.close_calendar("button");
-                                } else {
-                                    self.open_calendar("button");
-                                }
+                            if let Some((_, text, ..)) = &self.parked {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                let mut shown = text.clone();
+                                ui.add_enabled(
+                                    false,
+                                    TextEdit::singleline(&mut shown).desired_width(92.0),
+                                );
+                                ui.add_enabled(false, Button::new("📅").min_size(vec2(26.0, 0.0)));
+                            } else {
+                                self.date_widget(ui, ctx, "date");
                             }
                         });
                         ui.label(RichText::new(" ").small());
@@ -1950,6 +2016,8 @@ impl Proto {
         }
         let rows = &self.rows;
         let bal = &self.balances;
+        let selected = self.selected_row;
+        let mut clicked = None;
         table
             .header(22.0, |mut h| {
                 for t in ["Date", "Payee", "Memo", "Payment", "Deposit", "Balance"] {
@@ -1962,6 +2030,7 @@ impl Proto {
                 body.rows(row_h, rows.len(), |mut row| {
                     let i = row.index();
                     let r = &rows[i];
+                    row.set_selected(selected == Some(i));
                     row.col(|ui| {
                         ui.label(fmt_day(r.date));
                     });
@@ -1990,8 +2059,15 @@ impl Proto {
                             ui.label(fmt_cents(bal[i]));
                         });
                     });
+                    if row.response().clicked() {
+                        clicked = Some(i);
+                    }
                 });
             });
+        if let Some(i) = clicked {
+            self.selected_row = Some(i);
+            self.h.event("click", json!({ "widget": format!("register row {}", i + 1) }));
+        }
     }
 
     fn menu_bar(&mut self, ui: &mut Ui) {
@@ -2165,7 +2241,7 @@ impl eframe::App for Proto {
         if let Some((id, end)) = self.focus_request.take() {
             ctx.memory_mut(|m| m.request_focus(id));
             if end {
-                let len = if id == Id::new(DATE_ID) {
+                let len = if id == self.date_id() {
                     self.date_text.chars().count()
                 } else if id == Field::Payment.id() {
                     self.payment.chars().count()
@@ -2199,9 +2275,7 @@ impl eframe::App for Proto {
             self.set_dock(!self.dock_open, "key");
         }
         if self.o[GO_TO_DATE] && ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::G)) {
-            self.goto = Some(String::new());
-            self.h
-                .event("goto", json!({ "open": true, "via": "Ctrl+G" }));
+            self.open_goto("Ctrl+G");
         }
 
         self.dock(ui);
