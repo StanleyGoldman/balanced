@@ -2,25 +2,30 @@
 
 //! The Category List: a heavy Dialog showing every category as a tree, with how many
 //! transactions and split lines use each and their total, and every account a
-//! transaction can transfer to.
+//! transaction can transfer to. Buttons beside the tree create and delete categories;
+//! each change applies as soon as its confirm is accepted, as one undo step.
 
 use std::collections::{BTreeMap, HashSet};
 
-use balanced_core::{AccountId, Category, CategoryId, Generation, LedgerView, Usage};
+use balanced_core::{
+    AccountId, Category, CategoryId, DomainCommand, DomainError, Generation, LedgerView, Usage,
+};
 use balanced_i18n::{AmountStyle, Localizer};
 use eframe::egui::accesskit::{self, Role};
 use eframe::egui::style::ScrollStyle;
 use eframe::egui::{
-    self, Align, EventFilter, Id, Key, Layout, Modifiers, Rect, Response, RichText, Sense,
+    self, Align, Button, EventFilter, Id, Key, Layout, Modifiers, Rect, Response, RichText, Sense,
     TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
-use egui_extras::{Column, TableBuilder};
+use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 use icu_locale::{LanguageIdentifier, Locale};
 
-use crate::dialog::{DialogOutcome, HeavyDialog, OpenDialog};
+use crate::command::{AppCommand, CommandSender, StatusMessage};
+use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
-use crate::register_model::transfer_text;
+use crate::new_category::{self, NewCategoryForm, NewCategoryOutcome};
+use crate::register_model::{category_text, transfer_text};
 use crate::theme::Theme;
 use crate::triangle_button::{Fold, fold_triangle};
 
@@ -44,6 +49,28 @@ pub(crate) struct CategoryListForm {
     /// How far the table was scrolled on the last frame, and how tall its rows' view
     /// was.
     scrolled: Option<Scrolled>,
+    /// The New Category Dialog, while it is open over the list.
+    new_category: Option<OpenDialog<NewCategoryForm>>,
+    /// The delete confirm, while it is open over the list.
+    delete: Option<OpenDialog<DeleteConfirm>>,
+    /// Where focus goes now that a Dialog over the list has closed, until a frame
+    /// restores it.
+    focus_return: Option<FocusReturn>,
+    /// Why the ledger refused the last change, shown in place of the status line.
+    error: Option<DomainError>,
+}
+
+/// The delete confirm's form: which unused category, with none under it, it deletes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DeleteConfirm {
+    category: CategoryId,
+}
+
+/// What a click in the button column asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ButtonAction {
+    New,
+    Delete(CategoryId),
 }
 
 /// How far the table is scrolled, and how tall its rows' view is.
@@ -97,6 +124,8 @@ struct ListRow {
     name: String,
     /// Whether any category sits under it.
     has_children: bool,
+    /// Whether any transaction or split line uses it, or a category under it.
+    used: bool,
     /// The Txns cell's text.
     count: String,
     /// The Total cell's amount, or `None` when nothing uses the row or the total
@@ -236,6 +265,7 @@ impl ListRow {
             depth,
             name,
             has_children,
+            used: count > 0,
             count: i18n.format_number(
                 i64::try_from(count).expect("a ledger holds fewer than 2^63 transactions"),
             ),
@@ -246,8 +276,28 @@ impl ListRow {
 }
 
 impl CategoryListForm {
-    /// Draws the tree and its usage, filling `ui`.
+    /// Hands the list the ledger's answer to the change it asked for: the New Category
+    /// Dialog closes once its category is created, and shows a refusal itself; any
+    /// other refusal shows in place of the status line.
+    pub(crate) fn applied(&mut self, ctx: &egui::Context, applied: Result<(), DomainError>) {
+        match (applied, &mut self.new_category) {
+            (Ok(()), Some(_)) => {
+                if let Some(dialog) = self.new_category.take() {
+                    self.focus_return = Some(dialog.close(ctx));
+                }
+            }
+            (Err(error), Some(dialog)) => dialog.form.rejected(error),
+            (Ok(()), None) => self.error = None,
+            (Err(error), None) => self.error = Some(error),
+        }
+    }
+
+    /// Draws the tree and its usage beside the button column, above the status line,
+    /// filling `ui`.
     fn show(&mut self, ui: &mut egui::Ui, i18n: &Localizer, theme: &Theme, view: &LedgerView) {
+        if let Some(focus) = self.focus_return.take() {
+            self.focus_return = focus.restore_in(ui.ctx(), dialog_id());
+        }
         let model = match self.model.take() {
             Some(model) if model.source == Source::of(view, i18n) => model,
             _ => {
@@ -262,6 +312,46 @@ impl CategoryListForm {
             self.selected = self.selected.filter(|&key| still_shown(key));
             shown
         });
+        let mut asked = None;
+        let status_height = ui.text_style_height(&TextStyle::Body);
+        StripBuilder::new(ui)
+            .size(Size::remainder())
+            .size(Size::exact(status_height))
+            .vertical(|mut strip| {
+                strip.strip(|builder| {
+                    builder
+                        .size(Size::remainder())
+                        .size(Size::exact(Theme::CATEGORY_LIST_BUTTONS_WIDTH))
+                        .horizontal(|mut strip| {
+                            strip.cell(|ui| self.table(ui, i18n, theme, &model, shown));
+                            strip.cell(|ui| asked = self.buttons(ui, i18n, &model));
+                        });
+                });
+                strip.cell(|ui| self.status_line(ui, i18n));
+            });
+        match asked {
+            None => {}
+            Some(ButtonAction::New) => {
+                let form = NewCategoryForm::new(String::new());
+                self.new_category = Some(OpenDialog::new(ui.ctx(), form));
+            }
+            Some(ButtonAction::Delete(category)) => {
+                self.delete = Some(OpenDialog::new(ui.ctx(), DeleteConfirm { category }));
+            }
+        }
+        self.model = Some(model);
+    }
+
+    /// Draws the rows of `model` at the indices `shown`, and does what a click or a key
+    /// in them asks for.
+    fn table(
+        &mut self,
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        theme: &Theme,
+        model: &ListModel,
+        shown: Vec<usize>,
+    ) {
         let tab_stop = self
             .selected
             .or_else(|| shown.first().map(|&index| model.rows[index].key));
@@ -347,9 +437,62 @@ impl CategoryListForm {
         });
         self.shown = Some(shown);
         if let Some(action) = action {
-            self.act(&model, action, pitch);
+            self.act(model, action, pitch);
         }
-        self.model = Some(model);
+    }
+
+    /// The button column: New… always, and Delete… for a selected category nothing
+    /// uses, with none under it. Edit…, Merge… and Hide wait on their own Dialogs.
+    /// Returns what a click asked for.
+    fn buttons(
+        &self,
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        model: &ListModel,
+    ) -> Option<ButtonAction> {
+        // TODO(#488): Delete… a used category or a parent, with Reassign.
+        let deletable = self
+            .selected
+            .and_then(|key| model.rows.iter().find(|row| row.key == key))
+            .and_then(|row| match row.key {
+                RowKey::Category(id) if !row.used && !row.has_children => Some(id),
+                RowKey::Category(_) | RowKey::Transfer(_) => None,
+            });
+        let mut asked = None;
+        ui.vertical(|ui| {
+            let width = ui.available_width() - ui.spacing().item_spacing.x;
+            let mut button = |text: String, enabled: bool| {
+                ui.add_enabled(enabled, Button::new(text).min_size(vec2(width, 0.0)))
+                    .clicked()
+            };
+            if button(fl!(i18n, "dialog-category-list-new"), true) {
+                asked = Some(ButtonAction::New);
+            }
+            // TODO(#490): Edit… a category.
+            button(fl!(i18n, "dialog-category-list-edit"), false);
+            // TODO(#489): Merge… the selected categories.
+            button(fl!(i18n, "dialog-category-list-merge"), false);
+            // TODO(#491): Hide and Unhide a category.
+            button(fl!(i18n, "dialog-category-list-hide"), false);
+            if button(
+                fl!(i18n, "dialog-category-list-delete"),
+                deletable.is_some(),
+            ) {
+                asked = deletable.map(ButtonAction::Delete);
+            }
+        });
+        asked
+    }
+
+    /// The status line below the tree: that changes apply at once, or why the ledger
+    /// refused the last one.
+    fn status_line(&self, ui: &mut egui::Ui, i18n: &Localizer) {
+        let text = match &self.error {
+            Some(error) => RichText::new(StatusMessage::Rejected(error.clone()).text(i18n))
+                .color(ui.visuals().error_fg_color),
+            None => RichText::new(fl!(i18n, "dialog-category-list-status")).weak(),
+        };
+        ui.label(text);
     }
 
     /// Does what a click or a key in the table asked for, in `model`, whose rows are
@@ -582,11 +725,13 @@ fn dialog_id() -> Id {
     Id::new("category_list_dialog")
 }
 
-/// Draws the Category List from `view`.
+/// Draws the Category List from `view`, and any Dialog open over it. Each change it
+/// asks for goes to the ledger as soon as its Dialog is accepted.
 pub(crate) fn show(
     ctx: &egui::Context,
     i18n: &Localizer,
     theme: &Theme,
+    commands: &CommandSender,
     dialog: &mut OpenDialog<CategoryListForm>,
     view: &LedgerView,
 ) -> CategoryListOutcome {
@@ -600,11 +745,77 @@ pub(crate) fn show(
     .with_size(Theme::CATEGORY_LIST_SIZE)
     .body_fills()
     .show(ctx, dialog, |ui, form| form.show(ui, i18n, theme, view));
+    // Drawn after the list, so they are raised above it.
+    show_delete(ctx, i18n, theme, commands, &mut dialog.form, view);
+    show_new_category(ctx, i18n, theme, commands, &mut dialog.form, view);
     match outcome {
         DialogOutcome::Open => CategoryListOutcome::Open,
         DialogOutcome::Accepted | DialogOutcome::Cancelled => CategoryListOutcome::Closed,
         DialogOutcome::Back | DialogOutcome::Discarded => {
             unreachable!("a heavy Dialog has no Back or Discard button")
+        }
+    }
+}
+
+/// The delete confirm, while it is open over the list. Delete has first focus, so
+/// Enter confirms.
+fn show_delete(
+    ctx: &egui::Context,
+    i18n: &Localizer,
+    theme: &Theme,
+    commands: &CommandSender,
+    form: &mut CategoryListForm,
+    view: &LedgerView,
+) {
+    let Some(dialog) = &mut form.delete else {
+        return;
+    };
+    let category = dialog.form.category;
+    // The ledger can't change while the confirm blocks the list.
+    let name = category_text(view, category).expect("the confirm asks about a category");
+    let outcome = LightDialog::new(
+        Id::new("category_list_delete"),
+        fl!(i18n, "dialog-delete-category-delete"),
+        fl!(i18n, "dialog-cancel"),
+        theme,
+    )
+    .show(ctx, dialog, |ui, _confirm| {
+        ui.label(fl!(i18n, "dialog-delete-category-message", name = name));
+    });
+    match outcome {
+        DialogOutcome::Open => return,
+        DialogOutcome::Accepted => {
+            let command = DomainCommand::DeleteCategory { category };
+            commands.send(AppCommand::SubmitDialog(command));
+        }
+        DialogOutcome::Cancelled => {}
+        DialogOutcome::Back | DialogOutcome::Discarded => {
+            unreachable!("a confirm has no Back or Discard button")
+        }
+    }
+    if let Some(dialog) = form.delete.take() {
+        form.focus_return = Some(dialog.close(ctx));
+    }
+}
+
+/// The New Category Dialog, while it is open over the list.
+fn show_new_category(
+    ctx: &egui::Context,
+    i18n: &Localizer,
+    theme: &Theme,
+    commands: &CommandSender,
+    form: &mut CategoryListForm,
+    view: &LedgerView,
+) {
+    let Some(dialog) = &mut form.new_category else {
+        return;
+    };
+    match new_category::show(ctx, i18n, theme, commands, dialog, view) {
+        NewCategoryOutcome::Open => {}
+        NewCategoryOutcome::Cancelled => {
+            if let Some(dialog) = form.new_category.take() {
+                form.focus_return = Some(dialog.close(ctx));
+            }
         }
     }
 }

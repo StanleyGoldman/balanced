@@ -439,3 +439,35 @@ fn the_cant_save_dialog_reads_german() {
     harness.get_by_role_and_label(Role::Button, "Weiter bearbeiten");
     harness.get_by_role_and_label(Role::Button, "Änderungen verwerfen");
 }
+
+#[test]
+fn the_category_lists_buttons_and_delete_confirm_read_german() {
+    let mut harness = app();
+    harness
+        .get_by_role_and_label(Role::Button, "Extras")
+        .click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Category List…")
+        .click();
+    harness.run();
+    // Home:Insurance is the stub's one category nothing uses.
+    harness
+        .query_all_by_role_and_label(Role::TreeItem, "Insurance")
+        .last()
+        .expect("the stub has Home:Insurance")
+        .click();
+    harness.run();
+
+    for label in ["Neu …", "Bearbeiten …", "Zusammenführen …", "Ausblenden"] {
+        harness.get_by_role_and_label(Role::Button, label);
+    }
+    harness.get_by_label("Änderungen gelten sofort nach der Bestätigung.");
+    harness
+        .get_by_role_and_label(Role::Button, "Löschen …")
+        .click();
+    harness.run();
+
+    harness.get_by_label("Home:Insurance löschen? Keine Buchung verwendet diese Kategorie.");
+    harness.get_by_role_and_label(Role::Button, "Löschen");
+}

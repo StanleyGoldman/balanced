@@ -30,7 +30,7 @@ use crate::layout::Layout;
 use crate::manage_accounts::{self, ManageAccountsForm, ManageAccountsOutcome};
 use crate::menu_nav::{DrawnMenus, MenuNav};
 use crate::new_account::{self, NewAccountForm, WizardOutcome};
-use crate::new_category::NewCategoryForm;
+use crate::new_category::{self, NewCategoryForm, NewCategoryOutcome};
 use crate::preferences::{NetWorthPlacement, Preferences};
 use crate::preferences_dialog::PreferencesForm;
 use crate::recent_files::RecentFiles;
@@ -637,6 +637,10 @@ impl MainWindow {
             }
             return;
         }
+        if let Some(dialog) = &mut self.category_list {
+            dialog.form.applied(ctx, applied);
+            return;
+        }
         let Some(dialog) = &mut self.new_category else {
             if let Err(error) = applied {
                 self.show_status(StatusMessage::Rejected(error));
@@ -804,7 +808,7 @@ impl MainWindow {
         self.new_category_dialog(ctx, i18n, theme, commands, view);
         self.preferences_dialog(ctx, i18n, theme, commands);
         self.manage_accounts_dialog(ctx, i18n, theme, commands, view);
-        self.category_list_dialog(ctx, i18n, theme, view);
+        self.category_list_dialog(ctx, i18n, theme, commands, view);
         self.data_file_refusal_dialog(ctx, i18n, theme);
         self.go_to_date_dialog(ctx, i18n, theme, commands, today);
         self.split_dialog(ctx, i18n, theme, preferences);
@@ -1032,12 +1036,14 @@ impl MainWindow {
         ctx: &egui::Context,
         i18n: &Localizer,
         theme: &Theme,
+        commands: &CommandSender,
         view: &LedgerView,
     ) {
         let Some(dialog) = &mut self.category_list else {
             return;
         };
-        if category_list::show(ctx, i18n, theme, dialog, view) == CategoryListOutcome::Closed {
+        let outcome = category_list::show(ctx, i18n, theme, commands, dialog, view);
+        if outcome == CategoryListOutcome::Closed {
             self.close_dialog(ctx, |window| &mut window.category_list);
         }
     }
@@ -1100,8 +1106,7 @@ impl MainWindow {
         self.close_dialog(ctx, |window| &mut window.preferences);
     }
 
-    /// The New Category Dialog, while it is open. OK sends the Command creating the
-    /// category, and the Dialog stays open until the ledger answers.
+    /// The New Category Dialog, while it is open.
     fn new_category_dialog(
         &mut self,
         ctx: &egui::Context,
@@ -1113,26 +1118,9 @@ impl MainWindow {
         let Some(dialog) = &mut self.new_category else {
             return;
         };
-        let outcome = HeavyDialog::new(
-            Id::new("new_category_dialog"),
-            fl!(i18n, "dialog-new-category-title"),
-            fl!(i18n, "dialog-ok"),
-            fl!(i18n, "dialog-cancel"),
-            fl!(i18n, "dialog-close"),
-            theme,
-        )
-        .show(ctx, dialog, |ui, form| form.show(ui, i18n));
-        match outcome {
-            DialogOutcome::Open => {}
-            DialogOutcome::Accepted => {
-                if let Some(command) = dialog.form.submit(view) {
-                    commands.send(AppCommand::SubmitDialog(command));
-                }
-            }
-            DialogOutcome::Back | DialogOutcome::Discarded => {
-                unreachable!("a heavy Dialog has no Back or Discard button")
-            }
-            DialogOutcome::Cancelled => {
+        match new_category::show(ctx, i18n, theme, commands, dialog, view) {
+            NewCategoryOutcome::Open => {}
+            NewCategoryOutcome::Cancelled => {
                 self.close_dialog(ctx, |window| &mut window.new_category);
                 if let Some(register) = self.register_mut() {
                     register.category_cancelled();
