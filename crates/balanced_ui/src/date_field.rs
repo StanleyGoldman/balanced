@@ -11,7 +11,9 @@
 //!
 //! While nothing has been typed, shortcut keys move the date: `t` today, `+`/`-` and
 //! ↑/↓ a day, `m`/`h` the month's first and last day, `y`/`r` the year's, PgUp/PgDn a
-//! month. A 📅 button, or Alt+↓, opens a calendar whose days pick on pointer press.
+//! month. A 📅 button, or Alt+↓, opens a calendar whose days, and its Today button,
+//! pick on pointer press. While it is open, the keys act on its marked day instead: ←/→
+//! a day, ↑/↓ a week, PgUp/PgDn a month, Enter picks it and Esc closes the calendar.
 
 use balanced_i18n::{DateParseError, DateSegment, DateSegments, Localizer};
 use eframe::egui::accesskit::Role;
@@ -47,6 +49,9 @@ const LAST_SLOT: usize = 2;
 /// How many day columns the calendar's month and year title spans, between ◀ and ▶.
 const TITLE_DAYS: f32 = 5.0;
 
+/// How many day columns the calendar's Today button spans: the whole week.
+const TODAY_DAYS: f32 = 7.0;
+
 /// The date field's state while its cell is edited.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DateEdit {
@@ -59,8 +64,8 @@ pub(crate) struct DateEdit {
     /// The segments typed, once anything has been. Shortcuts act only while this is
     /// `None`.
     typed: Option<Typed>,
-    /// The first day of the month the calendar shows, while it is open.
-    calendar: Option<Date<Iso>>,
+    /// The calendar, while it is open.
+    calendar: Option<OpenCalendar>,
     /// Whether the last commit was refused, so the format message shows.
     rejected: bool,
     /// Whether the pointer went down on the 📅 button or the calendar and hasn't come
@@ -259,6 +264,43 @@ impl Shortcut {
     }
 }
 
+/// The open calendar's page and the day marked on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OpenCalendar {
+    /// The first day of the month the calendar shows.
+    month: Date<Iso>,
+    /// The day the keys move and Enter picks.
+    marked: Date<Iso>,
+}
+
+impl OpenCalendar {
+    /// The calendar showing `marked`'s month, with `marked` marked.
+    fn on(marked: Date<Iso>) -> Self {
+        Self {
+            month: first_of_month(marked),
+            marked,
+        }
+    }
+
+    /// Acts on `key`, pressed with no modifiers: ←/→ move the marked day by a day, ↑/↓
+    /// by a week and PgUp/PgDn by a month, and the calendar turns to its month. Returns
+    /// whether the calendar took the key.
+    fn press(&mut self, key: Key) -> bool {
+        #[expect(clippy::wildcard_enum_match_arm, reason = "foreign enum")]
+        let step = match key {
+            Key::ArrowLeft => Shortcut::Days(-1),
+            Key::ArrowRight => Shortcut::Days(1),
+            Key::ArrowUp => Shortcut::Days(-7),
+            Key::ArrowDown => Shortcut::Days(7),
+            Key::PageUp => Shortcut::Months(-1),
+            Key::PageDown => Shortcut::Months(1),
+            _ => return false,
+        };
+        *self = Self::on(step.apply(self.marked, self.marked));
+        true
+    }
+}
+
 /// How a commit of the field ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Commit {
@@ -303,9 +345,9 @@ impl DateEdit {
         self.rejected
     }
 
-    /// Closes the calendar. Returns whether it was open.
-    pub(crate) fn close_calendar(&mut self) -> bool {
-        self.calendar.take().is_some()
+    /// Whether the calendar is open. While it is, the field takes Enter and Esc.
+    pub(crate) fn is_calendar_open(&self) -> bool {
+        self.calendar.is_some()
     }
 
     /// The date the field holds, or `None` while an empty field is untouched.
@@ -352,6 +394,7 @@ impl DateEdit {
                 } => self.press(*key, today),
                 Event::Text(text) | Event::Paste(text) => {
                     self.type_text(i18n, order, today, text);
+                    self.mark_value(i18n);
                     true
                 }
                 _ => false,
@@ -363,8 +406,26 @@ impl DateEdit {
         ctx.input_mut(|input| input.events = kept);
     }
 
-    /// Acts on `key`, pressed with no modifiers. Returns whether the field took it.
+    /// Acts on `key`, pressed with no modifiers. While the calendar is open, Enter
+    /// picks its marked day, Esc closes it, and the keys that move the marked day act
+    /// on it. Returns whether the field took the key.
     fn press(&mut self, key: Key, today: Date<Iso>) -> bool {
+        if let Some(calendar) = &mut self.calendar {
+            #[expect(clippy::wildcard_enum_match_arm, reason = "foreign enum")]
+            match key {
+                Key::Enter => {
+                    let marked = calendar.marked;
+                    self.pick(marked);
+                    return true;
+                }
+                Key::Escape => {
+                    self.calendar = None;
+                    return true;
+                }
+                _ if calendar.press(key) => return true,
+                _ => {}
+            }
+        }
         if let Some(shortcut) = Shortcut::key(key) {
             if self.typed.is_none() {
                 self.shortcut(shortcut, today);
@@ -445,7 +506,17 @@ impl DateEdit {
     fn toggle_calendar(&mut self, i18n: &Localizer, today: Date<Iso>) {
         if self.calendar.take().is_none() {
             let shown = self.value(i18n).ok().flatten().unwrap_or(today);
-            self.calendar = Some(first_of_month(shown));
+            self.calendar = Some(OpenCalendar::on(shown));
+        }
+    }
+
+    /// Marks the field's date in the open calendar, turning to its month, once typing
+    /// has made one.
+    fn mark_value(&mut self, i18n: &Localizer) {
+        if let Ok(Some(date)) = self.value(i18n)
+            && let Some(calendar) = &mut self.calendar
+        {
+            *calendar = OpenCalendar::on(date);
         }
     }
 
@@ -498,18 +569,18 @@ impl DateEdit {
         if calendar_button.clicked() {
             self.toggle_calendar(i18n, today);
         }
-        if let Some(month) = self.calendar {
+        if let Some(open) = &mut self.calendar {
             let shown = Calendar {
                 id: id.with("date_calendar"),
-                month,
-                selected: self.value(i18n).ok().flatten(),
+                month: open.month,
+                marked: open.marked,
                 today,
                 below: rect,
                 day_size: theme.row_height(),
             };
             match shown.show(ui.ctx(), i18n) {
                 CalendarAction::None => {}
-                CalendarAction::Month(month) => self.calendar = Some(month),
+                CalendarAction::Month(month) => open.month = month,
                 CalendarAction::Pick(date) => self.pick(date),
             }
             self.holding_focus |= shown.pressed(ui.ctx());
@@ -660,8 +731,9 @@ struct Calendar {
     id: Id,
     /// The month's first day.
     month: Date<Iso>,
-    /// The field's date, which the calendar marks.
-    selected: Option<Date<Iso>>,
+    /// The day the calendar marks: the field's date when it opens, then where the keys
+    /// moved it.
+    marked: Date<Iso>,
     today: Date<Iso>,
     /// The cell the calendar opens under.
     below: Rect,
@@ -671,7 +743,8 @@ struct Calendar {
 
 impl Calendar {
     /// Draws the calendar: the month and year between ◀ and ▶, the weekdays from the
-    /// locale's first, and the month's days, which pick on pointer press.
+    /// locale's first, the month's days, and Today under them. A day or Today picks on
+    /// pointer press.
     fn show(&self, ctx: &egui::Context, i18n: &Localizer) -> CalendarAction {
         let mut action = CalendarAction::None;
         let Some(month) = to_civil(self.month) else {
@@ -685,7 +758,8 @@ impl Calendar {
                     let size = vec2(self.day_size, self.day_size);
                     ui.horizontal(|ui| {
                         let previous = month.checked_sub(1.month()).ok();
-                        if nav_button(ui, size, "◀", &fl!(i18n, "field-date-previous-month"))
+                        if flat_button(ui, size, "◀", &fl!(i18n, "field-date-previous-month"))
+                            .clicked()
                             && let Some(previous) = previous
                         {
                             action = CalendarAction::Month(to_iso(previous));
@@ -697,7 +771,7 @@ impl Calendar {
                             Label::new(i18n.format_month_year(self.month)),
                         );
                         let next = month.checked_add(1.month()).ok();
-                        if nav_button(ui, size, "▶", &fl!(i18n, "field-date-next-month"))
+                        if flat_button(ui, size, "▶", &fl!(i18n, "field-date-next-month")).clicked()
                             && let Some(next) = next
                         {
                             action = CalendarAction::Month(to_iso(next));
@@ -705,6 +779,17 @@ impl Calendar {
                     });
                     if let Some(picked) = self.grid(ui, i18n, month, size) {
                         action = CalendarAction::Pick(picked);
+                    }
+                    ui.separator();
+                    // Today spans the seven day columns.
+                    let gaps = (TODAY_DAYS - 1.0) * ui.spacing().item_spacing.x;
+                    let width = self.day_size * TODAY_DAYS + gaps;
+                    let today = fl!(i18n, "field-date-today");
+                    // Today picks on pointer press, as a day does.
+                    if flat_button(ui, vec2(width, self.day_size), &today, &today)
+                        .is_pointer_button_down_on()
+                    {
+                        action = CalendarAction::Pick(self.today);
                     }
                 });
             });
@@ -793,9 +878,12 @@ impl Calendar {
     fn day(&self, ui: &mut egui::Ui, i18n: &Localizer, date: Date<Iso>, size: egui::Vec2) -> bool {
         let (rect, response) = ui.allocate_exact_size(size, Sense::CLICK);
         let label = i18n.format_date(date);
+        let marked = self.marked == date;
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label));
+        ui.ctx()
+            .accesskit_node_builder(response.id, |node| node.set_selected(marked));
         let visuals = ui.style().interact(&response);
-        if self.selected == Some(date) {
+        if marked {
             ui.painter()
                 .rect_filled(rect, 0.0, ui.visuals().selection.bg_fill);
         } else if response.hovered() {
@@ -816,8 +904,9 @@ impl Calendar {
     }
 }
 
-/// A ◀ or ▶ button that moves the calendar a month. It never takes focus.
-fn nav_button(ui: &mut egui::Ui, size: egui::Vec2, glyph: &str, label: &str) -> bool {
+/// A ◀ or ▶ button, or Today: `text` in a flat button spanning `size`, read by a screen
+/// reader as `label`. It never takes focus.
+fn flat_button(ui: &mut egui::Ui, size: egui::Vec2, text: &str, label: &str) -> Response {
     let (rect, response) = ui.allocate_exact_size(size, Sense::CLICK);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, label));
     let visuals = ui.style().interact(&response);
@@ -827,9 +916,9 @@ fn nav_button(ui: &mut egui::Ui, size: egui::Vec2, glyph: &str, label: &str) -> 
     ui.painter().text(
         rect.center(),
         Align2::CENTER_CENTER,
-        glyph,
+        text,
         TextStyle::Body.resolve(ui.style()),
         visuals.text_color(),
     );
-    response.clicked()
+    response
 }

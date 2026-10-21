@@ -14,6 +14,7 @@ mod date_field;
 mod dialog;
 mod draft_row;
 mod formatted_amount;
+mod go_to_date;
 mod i18n;
 mod keymap;
 mod keypad;

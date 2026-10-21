@@ -93,6 +93,10 @@ name = "draft_row"
 required-features = ["test-support"]
 
 [[test]]
+name = "go_to_date"
+required-features = ["test-support"]
+
+[[test]]
 name = "keyboard"
 required-features = ["test-support"]
 
@@ -126,6 +130,10 @@ required-features = ["test-support"]
 
 [[test]]
 name = "new_category"
+required-features = ["test-support"]
+
+[[test]]
+name = "payee_recall"
 required-features = ["test-support"]
 
 [[test]]

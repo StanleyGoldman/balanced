@@ -23,7 +23,7 @@ menu-file-recent = { $number } { $file }
 menu-edit = Edit
 menu-edit-undo = Undo
 menu-edit-redo = Redo
-menu-edit-go-to-transfer = Go to Transfer
+menu-edit-go-to-date = Go to Date…
 menu-view = View
 menu-view-switch-pane = Switch Pane
 menu-tools = Tools
@@ -230,6 +230,11 @@ dialog-new-category-name = Name
 dialog-new-category-hint = Use “:” to put it under another category, as in Home:Garden.
 # $parent is the text before the last colon of the typed name.
 dialog-new-category-no-parent = No category is named “{ $parent }”.
+dialog-go-to-date-title = Go to Date
+# The label of Go to date's date field.
+dialog-go-to-date-date = Date
+# The button that moves the Register to the date.
+dialog-go-to-date-go = Go
 dialog-preferences-title = Preferences
 # The groups listed down the left of the Preferences Dialog.
 dialog-preferences-group-display = Display
@@ -254,6 +259,9 @@ dialog-preferences-gridlines-off = Off
 dialog-preferences-gridlines-horizontal = Horizontal
 dialog-preferences-gridlines-vertical = Vertical
 dialog-preferences-gridlines-both = Both
+# Committing a new transaction's payee fills its other cells from the last
+# transaction with that payee.
+dialog-preferences-payee-recall = Fill in a new transaction from its payee's last one
 dialog-preferences-group-account-bar = { -account-bar }
 # Each group heading in the Account bar shows the sum of its accounts' balances.
 dialog-preferences-group-totals = Show group totals
@@ -394,6 +402,8 @@ field-date-calendar = Calendar
     .tooltip = Calendar (Alt+Down)
 field-date-previous-month = Previous month
 field-date-next-month = Next month
+# The button under the calendar that picks today's date.
+field-date-today = Today
 
 ## Status bar
 

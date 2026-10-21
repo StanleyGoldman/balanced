@@ -243,6 +243,12 @@ impl Default for ColumnWidths {
 }
 
 impl ColumnWidths {
+    /// The width of the Date column.
+    pub(crate) fn date(&self) -> f32 {
+        self.width(RegisterColumn::Date)
+            .expect("the Date column resizes, so it has a width")
+    }
+
     /// The widths `saved` holds under column ids, raised to [`MIN_COLUMN_WIDTH`]. A
     /// column `saved` leaves out takes its default width, and an unknown id is ignored.
     pub(crate) fn from_saved(saved: &BTreeMap<String, f32>) -> Self {
@@ -839,6 +845,11 @@ impl Register {
         self.row(account, id)
     }
 
+    /// The selected transaction's date, while `account`'s Register shows it.
+    pub(crate) fn selected_date(&self, account: AccountId) -> Option<Date<Iso>> {
+        self.selected_row(account)?.saved_date()
+    }
+
     /// Transaction `id`'s row, while `account`'s Register shows it.
     pub(crate) fn row(&self, account: AccountId, id: TransactionId) -> Option<&RegisterRow> {
         let model = self
@@ -932,13 +943,7 @@ impl Register {
     /// when `rebuilt` says the transactions' rows were just formatted again. A closed
     /// account has none.
     fn refresh_draft_row(&mut self, frame: DraftFrame<'_>, rebuilt: bool) {
-        let DraftFrame {
-            closed,
-            currency,
-            view,
-            i18n,
-        } = frame;
-        if closed {
+        if frame.closed {
             self.draft_row = None;
             return;
         }
@@ -950,7 +955,7 @@ impl Register {
         if !current {
             self.draft_row = Some(DraftRow {
                 draft: self.draft.clone(),
-                row: RegisterRow::draft(&self.draft, currency, view, i18n),
+                row: frame.row(&self.draft),
             });
         }
     }
@@ -959,6 +964,25 @@ impl Register {
     /// scrolling its row to the middle of the Register.
     pub(crate) fn go_to(&mut self, id: TransactionId) {
         self.go_to = Some(id);
+    }
+
+    /// Puts the cell cursor on the Date cell of the row Go to date lands on for `date`
+    /// (see [`RegisterModel::row_on_or_after`]), scrolling the row to the middle of the
+    /// Register. With no rows shown it does nothing.
+    pub(crate) fn go_to_date(&mut self, date: Date<Iso>) {
+        let Some(row) = self
+            .model
+            .as_ref()
+            .and_then(|model| model.row_on_or_after(date))
+        else {
+            return;
+        };
+        self.cursor = Some(CellAddress {
+            row: row.id(),
+            column: RegisterColumn::Date,
+        });
+        self.reveal_draft = false;
+        self.centre_pending = true;
     }
 
     /// Puts the cell cursor on the draft row's first cell, scrolling it into view on
@@ -1050,6 +1074,7 @@ impl Register {
         &mut self,
         ctx: &egui::Context,
         i18n: &Localizer,
+        preferences: &Preferences,
         commands: &CommandSender,
     ) {
         let Some(edit) = self.edit.take() else {
@@ -1061,7 +1086,10 @@ impl Register {
             let draft = &mut self.draft;
             // A refused edit is dropped: the Shortcut acts on the saved value.
             let _refused = match edit.clone() {
-                Edit::Text(edit) => commit(&edit, rows, choices, commands, draft),
+                Edit::Text(edit) => {
+                    let payee_recall = PayeeRecall::of(preferences);
+                    commit(&edit, rows, choices, payee_recall, commands, draft)
+                }
                 Edit::Date(mut edit) => commit_date(i18n, &mut edit, rows, commands, draft),
             };
         }
@@ -1120,7 +1148,9 @@ impl Register {
             generation: view.generation(),
             closed,
             rows,
+            draft_frame,
             choices: &choices,
+            payee_recall: PayeeRecall::of(preferences),
             commands,
         };
         let key_scroll_offset = self.handle_keys(ui.ctx(), &keys);
@@ -1180,6 +1210,7 @@ impl Register {
                             commands,
                             rows,
                             choices: &choices,
+                            payee_recall: keys.payee_recall,
                             register_id,
                             access: Access::of(summary.account()),
                             viewport: Rect::NOTHING,
@@ -1446,6 +1477,7 @@ impl Register {
                 &edit,
                 frame.rows,
                 frame.choices,
+                frame.payee_recall,
                 frame.commands,
                 &mut self.draft,
             ) {
@@ -1479,6 +1511,7 @@ impl Register {
                         &edit,
                         frame.rows,
                         frame.choices,
+                        frame.payee_recall,
                         frame.commands,
                         &mut self.draft,
                     );
@@ -1770,6 +1803,7 @@ impl Register {
             &edit,
             keys.rows,
             keys.choices,
+            keys.payee_recall,
             keys.commands,
             &mut self.draft,
         ) {
@@ -1875,8 +1909,9 @@ impl Register {
 
     /// Acts on this frame's keys for `edit`, the Date cell being edited under `cursor`,
     /// with `tab` the move a Tab press asks for, and returns the scroll offset that
-    /// brings the cell cursor into view when it has left it. The first Esc closes the
-    /// calendar and the next cancels the edit; a refused date keeps the edit open.
+    /// brings the cell cursor into view when it has left it. While the calendar is open
+    /// the field takes Enter and Esc itself; otherwise Esc cancels the edit and Enter
+    /// commits it. A refused date keeps the edit open.
     fn handle_date_keys(
         &mut self,
         ctx: &egui::Context,
@@ -1885,18 +1920,18 @@ impl Register {
         cursor: CellAddress,
         tab: Option<Move>,
     ) -> Option<f32> {
-        let (escape, enter) = ctx.input_mut(|input| {
-            (
-                input.consume_key(Modifiers::NONE, Key::Escape),
-                input.consume_key(Modifiers::NONE, Key::Enter),
-            )
-        });
+        let (escape, enter) = if edit.date.is_calendar_open() {
+            (false, false)
+        } else {
+            ctx.input_mut(|input| {
+                (
+                    input.consume_key(Modifiers::NONE, Key::Escape),
+                    input.consume_key(Modifiers::NONE, Key::Enter),
+                )
+            })
+        };
         if escape {
-            if edit.date.close_calendar() {
-                self.edit = Some(Edit::Date(edit));
-            } else {
-                ctx.memory_mut(|memory| memory.surrender_focus(editor_id(edit.cell)));
-            }
+            ctx.memory_mut(|memory| memory.surrender_focus(editor_id(edit.cell)));
             return None;
         }
         if enter || tab.is_some() {
@@ -2013,6 +2048,16 @@ impl Register {
         let Some((row, field)) = field_at(keys.rows, cursor) else {
             return;
         };
+        // The frame's rows show the draft as it was before this frame's commits, and a
+        // commit on the draft row can fill other cells, so the cell opens on the draft
+        // as it is now.
+        let current_draft;
+        let row = if cursor.row == RowId::Draft {
+            current_draft = keys.draft_frame.row(&self.draft);
+            &current_draft
+        } else {
+            row
+        };
         if keys.closed {
             let error = DomainError::AccountClosed {
                 account: keys.account,
@@ -2079,6 +2124,7 @@ impl Register {
                     &edit,
                     keys.rows,
                     keys.choices,
+                    keys.payee_recall,
                     keys.commands,
                     &mut self.draft,
                 ) {
@@ -2217,6 +2263,7 @@ struct BodyFrame<'a> {
     commands: &'a CommandSender,
     rows: Rows<'a>,
     choices: &'a FieldChoices,
+    payee_recall: PayeeRecall,
     register_id: Id,
     access: Access,
     /// The visible part of the Register's body.
@@ -2272,6 +2319,19 @@ struct DraftFrame<'a> {
     i18n: &'a Localizer,
 }
 
+impl DraftFrame<'_> {
+    /// The draft row holding `draft`.
+    fn row(self, draft: &Draft) -> RegisterRow {
+        let Self {
+            currency,
+            view,
+            i18n,
+            ..
+        } = self;
+        RegisterRow::draft(draft, currency, view, i18n)
+    }
+}
+
 /// What the Register's keys act on.
 struct KeyContext<'a> {
     i18n: &'a Localizer,
@@ -2280,8 +2340,30 @@ struct KeyContext<'a> {
     generation: Generation,
     closed: bool,
     rows: Rows<'a>,
+    /// What the draft row is formatted with, for a cell opened after a commit changed
+    /// the draft this frame.
+    draft_frame: DraftFrame<'a>,
     choices: &'a FieldChoices,
+    payee_recall: PayeeRecall,
     commands: &'a CommandSender,
+}
+
+/// Whether committing the draft row's Payee cell fills its empty cells from the payee's
+/// latest transaction, as the Preferences say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PayeeRecall {
+    On,
+    Off,
+}
+
+impl PayeeRecall {
+    fn of(preferences: &Preferences) -> Self {
+        if preferences.payee_recall {
+            Self::On
+        } else {
+            Self::Off
+        }
+    }
 }
 
 /// Asks for the split view of `row` when `column` is the Category cell of a split
@@ -2315,11 +2397,13 @@ enum Commit {
 /// Saves `edit`'s text, trimmed, unless it matches the saved text or saved amount: in
 /// `draft` on the draft row, else by sending one edit Command. A new amount for a
 /// transaction whose amount change asks first is not sent: the confirm is asked for
-/// instead, and sends it once accepted.
+/// instead, and sends it once accepted. A payee saved in the draft row recalls what
+/// `choices` remember of it, when `payee_recall` is on.
 fn commit(
     edit: &CellEdit,
     rows: Rows<'_>,
     choices: &FieldChoices,
+    payee_recall: PayeeRecall,
     commands: &CommandSender,
     draft: &mut Draft,
 ) -> Commit {
@@ -2353,6 +2437,12 @@ fn commit(
                 amount,
             }));
             return Commit::Confirming;
+        }
+        (Some(TransactionEdit::Payee(payee)), None)
+            if payee_recall == PayeeRecall::On
+                && let Some(recalled) = choices.recalled(&payee) =>
+        {
+            draft.recall(recalled);
         }
         (Some(edit), _) => save(row.id(), edit, commands, draft),
         (None, _) => {}

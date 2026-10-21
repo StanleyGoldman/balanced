@@ -22,6 +22,7 @@ menu-file-recent = { $number } { $file }
 menu-edit = Bearbeiten
 menu-edit-undo = Rückgängig
 menu-edit-redo = Wiederherstellen
+menu-edit-go-to-date = Zu Datum gehen …
 menu-view = Ansicht
 # Coined from "Wechseln".
 menu-view-switch-pane = Bereich wechseln
@@ -104,6 +105,10 @@ register-transaction-count =
 dialog-cancel = Abbrechen
 dialog-close = Dialog schließen
 dialog-ok = OK
+dialog-go-to-date-title = Zu Datum gehen
+dialog-go-to-date-date = Datum
+# Coined from GnuCash's "Springen" for its register's Jump.
+dialog-go-to-date-go = Springen
 dialog-delete-reconciled-transaction-message = Diese Buchung wurde abgeglichen. Trotzdem löschen? { $payee }, { $date }, { $amount }
 dialog-delete-transaction-delete = Löschen
 dialog-reconciled-amount-message = Diese Buchung wurde abgeglichen. Betrag auf { $new } ändern? { $payee }, { $date }, { $amount }
@@ -169,3 +174,7 @@ keypad-backspace = Rücktaste
 keypad-ok = OK
 keypad-waiting = …
 keypad-not-an-amount = Kein Betrag
+
+## Date field
+
+field-date-today = Heute
