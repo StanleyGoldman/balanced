@@ -236,6 +236,13 @@ dialog-leave-row-continue = Continue editing
 dialog-leave-row-discard = Discard
 # Sets the Preference dialog-preferences-save-without-asking names.
 dialog-leave-row-always = Always save without asking
+# Heads the Dialog that says why a Register row's save was refused. The reason
+# follows below it.
+dialog-cant-save-title = Can't save this transaction
+# Stays on the row with the field at fault open, keeping the row's changes.
+dialog-cant-save-continue = Continue editing
+# Throws the row's changes away.
+dialog-cant-save-discard = Discard changes
 dialog-ok = OK
 dialog-new-category-title = New Category
 dialog-new-category-name = Name

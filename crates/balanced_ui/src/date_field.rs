@@ -669,7 +669,7 @@ fn placeholders(i18n: &Localizer) -> [String; 3] {
 
 /// The message a refused date shows: the locale's date pattern, with 5 October 2026
 /// as an example.
-fn format_message(i18n: &Localizer) -> String {
+pub(crate) fn format_message(i18n: &Localizer) -> String {
     let pattern = placeholders(i18n).join(i18n.date_segments().separator());
     let example = Date::try_new_iso(2026, 10, 5).expect("5 October 2026 is a date");
     fl!(

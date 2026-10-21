@@ -86,11 +86,15 @@ impl Draft {
         }
     }
 
-    /// Whether the cell `missing` names is still empty.
-    pub(crate) fn lacks(&self, missing: Missing) -> bool {
-        match missing {
-            Missing::Date => self.date.is_none(),
-            Missing::Category => self.category.is_none(),
+    /// The first cell, left to right, that the transaction can't do without and the
+    /// draft leaves empty, if any.
+    pub(crate) fn missing(&self) -> Option<Missing> {
+        if self.date.is_none() {
+            Some(Missing::Date)
+        } else if self.category.is_none() {
+            Some(Missing::Category)
+        } else {
+            None
         }
     }
 
@@ -134,7 +138,7 @@ pub(crate) enum Missing {
 }
 
 impl Missing {
-    /// Why the draft row was refused, as its bubble says it.
+    /// Why the draft row can't be added.
     pub(crate) fn message(self, i18n: &Localizer) -> String {
         match self {
             Self::Date => fl!(i18n, "register-draft-date-missing"),

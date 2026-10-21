@@ -291,7 +291,7 @@ fn a_partial_or_impossible_date_is_refused_with_the_format_message() {
         edit_date(&mut harness, "9/5/2026");
         type_keys(&mut harness, typed);
 
-        press(&mut harness, Modifiers::NONE, Key::Enter);
+        press(&mut harness, Modifiers::NONE, Key::Tab);
 
         assert!(
             shows(&harness, FORMAT_MESSAGE),
@@ -308,7 +308,7 @@ fn german_partial_dates_are_refused_with_the_german_pattern() {
     edit_date(&mut harness, "05.09.2026");
     type_keys(&mut harness, "5.3.");
 
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
 
     assert!(shows(
         &harness,
@@ -321,7 +321,7 @@ fn typing_again_clears_the_format_message() {
     let mut harness = app();
     edit_date(&mut harness, "9/5/2026");
     type_keys(&mut harness, "5");
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
 
     type_keys(&mut harness, "/");
 

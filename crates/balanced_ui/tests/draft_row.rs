@@ -304,14 +304,18 @@ fn enter_on_an_emptied_payment_adds_the_draft_row_at_zero() {
 }
 
 #[test]
-fn a_row_with_no_date_is_refused_with_the_cursor_on_its_date() {
+fn a_row_with_no_date_is_refused_and_continues_on_its_date() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     fill_draft(&mut harness, "", "Corner Cafe", "12");
 
     press(&mut harness, Modifiers::COMMAND, Key::Enter);
-
     harness.get_by_label("Date is missing");
+    harness
+        .get_by_role_and_label(Role::Button, "Continue editing")
+        .click();
+    harness.run();
+
     let date = harness
         .get_by_role_and_label(Role::ColumnHeader, "Date")
         .rect()
