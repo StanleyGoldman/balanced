@@ -122,6 +122,8 @@ dialog-delete-account-delete = Löschen
 dialog-new-account-back = Zurück
 dialog-new-account-next = Weiter
 dialog-new-account-finish = Fertigstellen
+# Coined from GnuCash's "Mit »_Eingabe« gehen Sie zur leeren Buchung" and "Zeile".
+dialog-preferences-enter-moves-to-next-row = Mit »Eingabe« zur nächsten Zeile gehen
 
 # Why a data file wasn't opened or created.
 # The first sentence follows GnuCash's "Die Datei %s konnte nicht gefunden werden"; the

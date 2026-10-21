@@ -14,19 +14,37 @@ use icu_calendar::Date;
 
 /// The App on stub data, in the test locale, wide enough to show every Register column.
 fn app() -> Harness<'static, App> {
+    app_with(PreferencesFile::for_tests())
+}
+
+/// The App as [`app`] makes it, keeping its Preferences in `file`.
+fn app_with(file: PreferencesFile) -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
-        .build_eframe(|cc| {
+        .build_eframe(move |cc| {
             App::on_ledger(
                 cc,
                 Localizer::for_tests(),
                 Ledger::stub(),
                 Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
-                PreferencesFile::for_tests(),
+                file,
             )
         });
     harness.run();
     harness
+}
+
+/// The App as [`app`] makes it, with "Enter moves to the next row" turned off in
+/// `preferences.toml`, which lives in the returned directory.
+fn app_with_enter_staying() -> (tempfile::TempDir, Harness<'static, App>) {
+    let dir = tempfile::tempdir().expect("the test machine can make a temporary directory");
+    std::fs::write(
+        dir.path().join("preferences.toml"),
+        "version = 2\nenter_moves_to_next_row = false\n",
+    )
+    .expect("the test can write the preferences file");
+    let harness = app_with(PreferencesFile::in_dir(dir.path()));
+    (dir, harness)
 }
 
 /// Opens the account named `name` from the Account bar.
@@ -968,6 +986,51 @@ fn enter_on_an_unchanged_row_saves_nothing_and_opens_the_next_row() {
 
     assert_eq!(editor(&harness, "Payee").as_deref(), Some("Bean There"));
     assert_eq!(undo_redo_disabled(&mut harness), (true, true));
+}
+
+#[test]
+fn with_enter_moves_to_the_next_row_off_enter_saves_and_leaves_the_row_highlighted() {
+    let (_dir, mut harness) = app_with_enter_staying();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert!(!editing(&harness));
+    assert_eq!(cursor(&harness), "Corner Shop");
+    assert_eq!(undo_redo_disabled(&mut harness), (false, true));
+}
+
+#[test]
+fn with_enter_moves_to_the_next_row_off_ctrl_enter_saves_and_leaves_the_row_highlighted() {
+    let (_dir, mut harness) = app_with_enter_staying();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    press(&mut harness, Modifiers::COMMAND, Key::Enter);
+
+    assert!(!editing(&harness));
+    assert_eq!(
+        cursor(&harness),
+        cell_of(&harness, "Category", "Corner Shop")
+    );
+    assert_eq!(undo_redo_disabled(&mut harness), (false, true));
+}
+
+#[test]
+fn with_enter_moves_to_the_next_row_off_enter_on_an_unchanged_row_leaves_it_highlighted() {
+    let (_dir, mut harness) = app_with_enter_staying();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert!(!editing(&harness));
+    assert_eq!(cursor(&harness), "Fresh Market");
 }
 
 #[test]

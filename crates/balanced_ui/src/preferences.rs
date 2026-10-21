@@ -112,6 +112,9 @@ pub(crate) struct Preferences {
     /// Typing in a Payee or Category cell completes the text with the rest of the
     /// first entry that starts with it (Inline completion).
     pub(crate) inline_completion: bool,
+    /// Enter, saving a Register row, opens the next row's cell in the same column,
+    /// rather than leaving the saved row highlighted.
+    pub(crate) enter_moves_to_next_row: bool,
     /// Each Account bar heading shows its section's total.
     pub(crate) group_totals: bool,
     pub(crate) net_worth_placement: NetWorthPlacement,
@@ -133,6 +136,7 @@ impl Default for Preferences {
             gridlines: Gridlines::default(),
             payee_recall: true,
             inline_completion: true,
+            enter_moves_to_next_row: true,
             group_totals: false,
             net_worth_placement: NetWorthPlacement::default(),
             register_columns: RegisterColumns::default(),
@@ -316,6 +320,7 @@ mod tests {
             gridlines: Gridlines::Both,
             payee_recall: false,
             inline_completion: false,
+            enter_moves_to_next_row: false,
             group_totals: true,
             net_worth_placement: NetWorthPlacement::StatusBar,
             register_columns,
@@ -402,6 +407,7 @@ mod tests {
             gridlines: Gridlines::Both,
             payee_recall: true,
             inline_completion: true,
+            enter_moves_to_next_row: true,
             group_totals: true,
             net_worth_placement: NetWorthPlacement::StatusBar,
             register_columns,
@@ -596,6 +602,20 @@ mod tests {
     }
 
     #[test]
+    fn enter_moves_to_the_next_row_in_a_file_from_before_it() {
+        let (dir, file) = file();
+        std::fs::write(
+            dir.path().join("preferences.toml"),
+            "version = 2\ndense_rows = true\n",
+        )
+        .unwrap();
+
+        let loaded = file.load().unwrap();
+
+        assert!(loaded.enter_moves_to_next_row);
+    }
+
+    #[test]
     fn no_file_loads_the_defaults() {
         let (_dir, file) = file();
 
@@ -652,6 +672,7 @@ mod tests {
              gridlines = \"off\"\n\
              payee_recall = true\n\
              inline_completion = true\n\
+             enter_moves_to_next_row = true\n\
              group_totals = false\n\
              net_worth_placement = \"account_bar\"\n\
              register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\", \"clr\", \"flag\"]\n\
