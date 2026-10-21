@@ -30,6 +30,7 @@ use crate::date_field::{self, DateEdit};
 use crate::draft_row::{Draft, Missing};
 use crate::formatted_amount::i18n_currency;
 use crate::i18n::fl;
+use crate::keypad::{self, Keypad};
 use crate::preferences::Preferences;
 use crate::register_columns::{RegisterColumn, RegisterColumns};
 use crate::register_filter::RegisterFilter;
@@ -535,6 +536,11 @@ struct CellEdit {
     /// The result of the arithmetic typed so far, for the bubble below the cell, or
     /// `None` while the text is no arithmetic that can be read.
     preview: Option<Preview>,
+    /// The keypad under an Amount cell, while it is open.
+    keypad: Option<Keypad>,
+    /// Whether the keypad just handed its result back into the text, which the edit
+    /// saves on the next frame before it leaves the cell.
+    handed_back: bool,
 }
 
 /// The field a cell edit saves its text in.
@@ -1394,11 +1400,15 @@ impl Register {
         };
         let cell = ui.max_rect();
         let mut field = cell;
+        let button =
+            Rect::from_x_y_ranges(cell.right() - cell.height()..=cell.right(), cell.y_range());
         let list_button = matches!(edit.field, EditField::Text(TextField::Category)).then(|| {
-            let button =
-                Rect::from_x_y_ranges(cell.right() - cell.height()..=cell.right(), cell.y_range());
             field.max.x = button.left();
             list_button(ui, frame.i18n, button, edit.editor_id())
+        });
+        let keypad_button = matches!(edit.field, EditField::Amount { .. }).then(|| {
+            field.max.x = button.left();
+            keypad::button(ui, frame.i18n, edit.editor_id(), button)
         });
         let typed = edit.text.clone();
         let response = editor(
@@ -1421,7 +1431,13 @@ impl Register {
                 edit.open_list(ListScope::All, frame.choices);
             }
             ui.memory_mut(|memory| memory.request_focus(edit.editor_id()));
-        } else if response.lost_focus() {
+        } else if keypad_button.as_ref().is_some_and(Response::clicked) {
+            if edit.keypad.take().is_some() {
+                focus_at_end(ui.ctx(), edit);
+            } else {
+                edit.keypad = Some(Keypad::new(&edit.text));
+            }
+        } else if response.lost_focus() && edit.keypad.is_none() {
             let edit = self.edit.take().expect("the edit was just shown");
             let Edit::Text(edit) = edit else {
                 return;
@@ -1448,6 +1464,10 @@ impl Register {
             return;
         }
         bubble(ui, frame.i18n, edit, cell);
+        self.show_keypad(ui.ctx(), frame, cell, button);
+        let Some(Edit::Text(edit)) = self.edit.as_mut() else {
+            return;
+        };
         let pressed = list(ui, frame, edit, cell);
         if let Some(row) = pressed
             && let Some(Edit::Text(mut edit)) = self.edit.take()
@@ -1470,6 +1490,57 @@ impl Register {
                         outcome: None,
                     });
                 }
+            }
+        }
+    }
+
+    /// Draws the keypad of the Amount cell being edited, at `cell` with its 🖩 button
+    /// at `button`, while it is open. A result it hands back goes into the edit, which
+    /// saves it and moves on to the next cell on the next frame; closing it gives the
+    /// edit back the keyboard as it was.
+    fn show_keypad(
+        &mut self,
+        ctx: &egui::Context,
+        frame: &BodyFrame<'_>,
+        cell: Rect,
+        button: Rect,
+    ) {
+        let Some(Edit::Text(edit)) = self.edit.as_mut() else {
+            return;
+        };
+        let id = edit.editor_id();
+        let (
+            Some(keypad),
+            EditField::Amount {
+                reader, currency, ..
+            },
+        ) = (edit.keypad.as_mut(), &edit.field)
+        else {
+            return;
+        };
+        match keypad.show(
+            ctx,
+            frame.i18n,
+            frame.theme,
+            reader,
+            *currency,
+            id,
+            cell,
+            button,
+        ) {
+            keypad::Outcome::Open => {}
+            keypad::Outcome::Cancelled => {
+                edit.keypad = None;
+                focus_at_end(ctx, edit);
+            }
+            keypad::Outcome::Taken(text) => {
+                edit.keypad = None;
+                edit.text = text;
+                edit.error = None;
+                edit.preview = preview(frame.i18n, edit);
+                edit.handed_back = true;
+                focus_at_end(ctx, edit);
+                ctx.request_repaint();
             }
         }
     }
@@ -1624,6 +1695,12 @@ impl Register {
         let rows = edit.list_rows(keys.choices).len();
         let list_open = rows > 0;
         let offers_list = edit.field.offers_list();
+        let amount = matches!(edit.field, EditField::Amount { .. });
+        if amount && ctx.input_mut(|input| input.consume_key(Modifiers::ALT, Key::ArrowDown)) {
+            edit.keypad = Some(Keypad::new(&edit.text));
+            self.edit = Some(Edit::Text(edit));
+            return None;
+        }
         let (alt_down, down, up, escape, enter) = ctx.input_mut(|input| {
             // Alt+↓ first, since a bare ↓ also matches it.
             let alt_down = offers_list && input.consume_key(Modifiers::ALT, Key::ArrowDown);
@@ -1655,6 +1732,7 @@ impl Register {
             return None;
         }
         let leave = match tab {
+            _ if std::mem::take(&mut edit.handed_back) => Some(Leave::Next),
             _ if enter => Some(Leave::Enter),
             Some(step) => Some(Leave::Tab(step)),
             None => None,
@@ -1701,7 +1779,7 @@ impl Register {
                 // says but opens no cell behind it.
                 ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
                 let step = match leave {
-                    Leave::Enter => Move::Next,
+                    Leave::Enter | Leave::Next => Move::Next,
                     Leave::Tab(step) => step,
                     Leave::Stay => return None,
                 };
@@ -1731,7 +1809,7 @@ impl Register {
             return None;
         }
         let step = match leave {
-            Leave::Enter => Move::Next,
+            Leave::Enter | Leave::Next => Move::Next,
             Leave::Tab(step) => step,
             Leave::Stay => return None,
         };
@@ -1977,6 +2055,8 @@ impl Register {
             list: None,
             error: None,
             preview: None,
+            keypad: None,
+            handed_back: false,
         };
         focus_at_end(ctx, &edit);
         self.edit = Some(Edit::Text(edit));
@@ -2078,6 +2158,9 @@ enum Leave {
     Enter,
     /// As Tab and Shift+Tab do: the cell cursor makes this move and opens the cell.
     Tab(Move),
+    /// As the keypad's Enter and OK do: the cell cursor moves to the next cell, which
+    /// stays closed, and the draft row is never added.
+    Next,
     /// As a click on a list row does: the cell cursor stays.
     Stay,
 }

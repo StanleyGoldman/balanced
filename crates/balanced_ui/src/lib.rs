@@ -16,6 +16,7 @@ mod draft_row;
 mod formatted_amount;
 mod i18n;
 mod keymap;
+mod keypad;
 mod layout;
 mod main_window;
 mod manage_accounts;
