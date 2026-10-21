@@ -781,8 +781,21 @@ fn delete_from_more_on_a_changed_row_deletes_without_saving() {
     pick_more(&mut harness, "Delete…");
 
     click_button(&mut harness, "Delete");
+    // Undo brings back the transaction as it was saved.
     press(&mut harness, Modifiers::COMMAND, Key::Z);
 
     assert!(shows(&harness, "Fresh Market"));
     assert!(!shows(&harness, "Corner Shop"));
+}
+
+#[test]
+fn cancel_on_the_delete_confirm_from_more_keeps_the_changes() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    pick_more(&mut harness, "Delete…");
+
+    click_button(&mut harness, "Cancel");
+
+    assert!(shows(&harness, "Corner Shop"));
+    assert!(!can_undo(&mut harness));
 }

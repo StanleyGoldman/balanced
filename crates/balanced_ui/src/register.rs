@@ -812,8 +812,8 @@ pub(crate) struct Register {
     focus_button: Option<RowButton>,
     /// The editing row's button pressed in the last frame, which acts on this frame.
     pressed: Option<RowButtonAt>,
-    /// The command picked this frame from the More actions menu of the editing row,
-    /// a transaction's, which acts once the frame's rows are drawn.
+    /// The command picked this frame from the More actions menu of a transaction's
+    /// editing row, which acts once the frame's rows are drawn.
     picked: Option<Picked>,
     /// The lines the Split dialog's Done gave a row, which the row keeps from the next
     /// frame.
