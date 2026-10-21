@@ -8,25 +8,29 @@ use balanced_core::{
 };
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
+use eframe::egui::accesskit::Action;
 use eframe::egui::accesskit::Role;
-use eframe::egui::{Event, Key, Modifiers};
+use eframe::egui::{Event, Key, Modifiers, Vec2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use icu_calendar::Date;
 
 /// The App on `ledger`, in the test locale.
 fn app_on(ledger: Ledger) -> Harness<'static, App> {
-    let mut harness = Harness::builder()
-        .with_size(eframe::egui::vec2(1280.0, 800.0))
-        .build_eframe(|cc| {
-            App::on_ledger(
-                cc,
-                Localizer::for_tests(),
-                ledger,
-                Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
-                PreferencesFile::for_tests(),
-            )
-        });
+    app_in(ledger, vec2(1280.0, 800.0))
+}
+
+/// The App on `ledger`, in the test locale, in a window of `size`.
+fn app_in(ledger: Ledger, size: Vec2) -> Harness<'static, App> {
+    let mut harness = Harness::builder().with_size(size).build_eframe(|cc| {
+        App::on_ledger(
+            cc,
+            Localizer::for_tests(),
+            ledger,
+            Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
+            PreferencesFile::for_tests(),
+        )
+    });
     harness.run();
     harness
 }
@@ -117,6 +121,28 @@ fn categories(harness: &Harness<'static, App>) -> Vec<String> {
         .map(|(_, name)| name)
         .take_while(|name| !name.starts_with('['))
         .collect()
+}
+
+/// The name of the selected row, if any.
+fn selected(harness: &Harness<'static, App>) -> Option<String> {
+    harness
+        .query_all_by_role(Role::TreeItem)
+        .find(|row| row.accesskit_node().is_selected() == Some(true))
+        .and_then(|row| row.accesskit_node().label())
+}
+
+/// The name of the row with keyboard focus, if any.
+fn focused(harness: &Harness<'static, App>) -> Option<String> {
+    harness
+        .query_all_by_role(Role::TreeItem)
+        .find(|row| row.is_focused())
+        .and_then(|row| row.accesskit_node().label())
+}
+
+/// Clicks the row named `name`, then runs the App until it settles.
+fn click_row(harness: &mut Harness<'static, App>, name: &str) {
+    harness.get_by_role_and_label(Role::TreeItem, name).click();
+    harness.run();
 }
 
 /// Clicks the button labelled `label`, then runs the App until it settles.
@@ -314,4 +340,75 @@ fn a_category_with_none_under_it_has_no_fold() {
             .query_by_role_and_label(Role::Button, "Collapse Groceries")
             .is_none()
     );
+}
+
+#[test]
+fn clicking_a_row_selects_it_and_gives_it_focus() {
+    let mut harness = category_list();
+
+    click_row(&mut harness, "Groceries");
+
+    assert_eq!(selected(&harness).as_deref(), Some("Groceries"));
+    assert_eq!(focused(&harness).as_deref(), Some("Groceries"));
+}
+
+#[test]
+fn down_and_up_move_the_selection_through_the_rows_shown() {
+    let mut harness = category_list();
+    click_row(&mut harness, "Food & Dining");
+    click(&mut harness, "Collapse Food & Dining");
+
+    press(&mut harness, Key::ArrowDown);
+    let after_down = selected(&harness);
+    press(&mut harness, Key::ArrowUp);
+    press(&mut harness, Key::ArrowUp);
+
+    assert_eq!(after_down.as_deref(), Some("Home"));
+    // Auto & Transport's Insurance, the row above Food & Dining.
+    assert_eq!(selected(&harness).as_deref(), Some("Insurance"));
+    assert_eq!(focused(&harness).as_deref(), Some("Insurance"));
+}
+
+#[test]
+fn left_collapses_the_selected_row_and_right_expands_it() {
+    let mut harness = category_list();
+    click_row(&mut harness, "Restaurants");
+
+    press(&mut harness, Key::ArrowLeft);
+    let collapsed = (expanded(&harness, "Restaurants"), categories(&harness));
+    press(&mut harness, Key::ArrowRight);
+
+    assert_eq!(collapsed.0, Some(false));
+    assert!(!collapsed.1.contains(&"Coffee Shops".to_owned()));
+    assert_eq!(expanded(&harness, "Restaurants"), Some(true));
+    assert!(categories(&harness).contains(&"Coffee Shops".to_owned()));
+}
+
+#[test]
+fn down_scrolls_the_selection_into_view() {
+    let mut harness = app_in(Ledger::stub(), vec2(1280.0, 480.0));
+    open_category_list(&mut harness);
+    click_row(&mut harness, "Auto & Transport");
+
+    // Fifteen categories, then the stub's thirteen accounts, Mortgage last.
+    for _ in 0..27 {
+        press(&mut harness, Key::ArrowDown);
+    }
+
+    assert_eq!(selected(&harness).as_deref(), Some("[Mortgage]"));
+    assert_eq!(focused(&harness).as_deref(), Some("[Mortgage]"));
+}
+
+#[test]
+fn the_tree_is_one_tab_stop() {
+    let mut harness = category_list();
+    click_row(&mut harness, "Groceries");
+
+    let focusable: Vec<String> = harness
+        .query_all_by_role(Role::TreeItem)
+        .filter(|row| row.accesskit_node().data().supports_action(Action::Focus))
+        .filter_map(|row| row.accesskit_node().label())
+        .collect();
+
+    assert_eq!(focusable, ["Groceries"]);
 }

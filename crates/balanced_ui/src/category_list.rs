@@ -8,11 +8,11 @@ use std::collections::{HashMap, HashSet};
 
 use balanced_core::{AccountId, Category, CategoryId, Generation, LedgerView, Usage};
 use balanced_i18n::{AmountStyle, Localizer};
-use eframe::egui::accesskit::Role;
+use eframe::egui::accesskit::{self, Role};
 use eframe::egui::style::ScrollStyle;
 use eframe::egui::{
-    self, Align, Id, Layout, Rect, Response, RichText, Sense, TextStyle, TextWrapMode, WidgetInfo,
-    WidgetText, WidgetType, pos2, vec2,
+    self, Align, EventFilter, Id, Key, Layout, Modifiers, Rect, Response, RichText, Sense,
+    TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, TableBuilder};
 use icu_locale::Locale;
@@ -34,6 +34,49 @@ pub(crate) struct CategoryListForm {
     /// The index in the model of each row shown, top to bottom: every row but those
     /// under a folded category. `None` once the model or the folds change.
     shown: Option<Vec<usize>>,
+    /// The selected row, which is the tree's one Tab stop.
+    selected: Option<RowKey>,
+    /// Whether the selected row takes keyboard focus once it is drawn.
+    focus_selected: bool,
+    /// The offset the table scrolls to on the next frame, to show the selected row.
+    scroll_to: Option<f32>,
+    /// How far the table was scrolled on the last frame, and how tall its rows' view
+    /// was.
+    scrolled: Option<Scrolled>,
+}
+
+/// How far the table is scrolled, and how tall its rows' view is.
+#[derive(Debug, Clone, Copy)]
+struct Scrolled {
+    offset: f32,
+    height: f32,
+}
+
+/// What a click or a key in the table asks for, done once the table is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TableAction {
+    /// Select the row, and give it focus.
+    Select(RowKey),
+    /// Fold the category, or unfold it, and select it.
+    Toggle(CategoryId),
+    /// Fold or unfold the category, as ← and → do.
+    SetFold(CategoryId, Fold),
+    /// Select the row shown below the selected one, as ↓ does.
+    Down,
+    /// Select the row shown above the selected one, as ↑ does.
+    Up,
+}
+
+/// How a row is drawn this frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RowState {
+    fold: Fold,
+    selected: bool,
+    /// Whether it is the tree's Tab stop: the selected row, or the first row while none
+    /// shown is selected.
+    tab_stop: bool,
+    /// Whether it takes keyboard focus this frame.
+    take_focus: bool,
 }
 
 /// Which row of the Category List a row is.
@@ -206,25 +249,37 @@ impl CategoryListForm {
                 ListModel::new(view, i18n)
             }
         };
-        let shown = self
-            .shown
-            .take()
-            .unwrap_or_else(|| model.shown(&self.folded));
-        let mut toggled = None;
+        let shown = self.shown.take().unwrap_or_else(|| {
+            let shown = model.shown(&self.folded);
+            // A row a fold hides is no longer selected.
+            let still_shown = |key| shown.iter().any(|&index| model.rows[index].key == key);
+            self.selected = self.selected.filter(|&key| still_shown(key));
+            shown
+        });
+        let tab_stop = self
+            .selected
+            .or_else(|| shown.first().map(|&index| model.rows[index].key));
+        let mut action = None;
         // A solid scroll bar takes its own width beside the columns, so it never covers
         // Total.
         ui.style_mut().spacing.scroll = ScrollStyle::solid();
         let row_height = theme.row_height();
-        TableBuilder::new(ui)
+        let pitch = row_height + ui.spacing().item_spacing.y;
+        let mut table = TableBuilder::new(ui)
             .id_salt("category_list_table")
             .striped(true)
             .resizable(false)
             .auto_shrink(false)
             .max_scroll_height(f32::INFINITY)
+            .sense(Sense::CLICK)
             .cell_layout(Layout::left_to_right(Align::Center))
             .column(Column::remainder().clip(true))
             .column(Column::exact(Theme::CATEGORY_LIST_COUNT_WIDTH))
-            .column(Column::exact(Theme::CATEGORY_LIST_TOTAL_WIDTH))
+            .column(Column::exact(Theme::CATEGORY_LIST_TOTAL_WIDTH));
+        if let Some(offset) = self.scroll_to.take() {
+            table = table.vertical_scroll_offset(offset);
+        }
+        let scrolled = table
             .header(row_height, |mut header| {
                 header.col(|ui| {
                     ui.strong(fl!(i18n, "dialog-category-list-category"));
@@ -243,15 +298,20 @@ impl CategoryListForm {
             .body(|body| {
                 body.rows(row_height, shown.len(), |mut table_row| {
                     let row = &model.rows[shown[table_row.index()]];
-                    table_row.col(|ui| {
-                        let fold = match row.key {
+                    let selected = self.selected == Some(row.key);
+                    let state = RowState {
+                        fold: match row.key {
                             RowKey::Category(id) if self.folded.contains(&id) => Fold::Folded,
                             RowKey::Category(_) | RowKey::Transfer(_) => Fold::Open,
-                        };
-                        if name_cell(ui, i18n, row, fold).is_some_and(|fold| fold.clicked())
-                            && let RowKey::Category(id) = row.key
-                        {
-                            toggled = Some(id);
+                        },
+                        selected,
+                        tab_stop: tab_stop == Some(row.key),
+                        take_focus: selected && self.focus_selected,
+                    };
+                    table_row.set_selected(selected);
+                    table_row.col(|ui| {
+                        if let Some(asked) = name_cell(ui, i18n, row, state) {
+                            action = Some(asked);
                         }
                     });
                     table_row.col(|ui| {
@@ -266,25 +326,101 @@ impl CategoryListForm {
                             }
                         });
                     });
+                    if state.take_focus {
+                        self.focus_selected = false;
+                    }
+                    if action.is_none() && table_row.response().clicked() {
+                        action = Some(TableAction::Select(row.key));
+                    }
                 });
             });
-        match toggled {
-            Some(id) => {
-                if !self.folded.remove(&id) {
-                    self.folded.insert(id);
-                }
-            }
-            None => self.shown = Some(shown),
+        self.scrolled = Some(Scrolled {
+            offset: scrolled.state.offset.y,
+            height: scrolled.inner_rect.height(),
+        });
+        self.shown = Some(shown);
+        if let Some(action) = action {
+            self.act(&model, action, pitch);
         }
         self.model = Some(model);
     }
+
+    /// Does what a click or a key in the table asked for, in `model`, whose rows are
+    /// `pitch` apart.
+    fn act(&mut self, model: &ListModel, action: TableAction, pitch: f32) {
+        let shown = self.shown.as_deref().unwrap_or_default();
+        let place = |key| shown.iter().position(|&index| model.rows[index].key == key);
+        match action {
+            TableAction::Select(key) => self.select(key),
+            TableAction::Toggle(id) => {
+                if !self.folded.remove(&id) {
+                    self.folded.insert(id);
+                }
+                self.shown = None;
+                self.select(RowKey::Category(id));
+            }
+            TableAction::SetFold(id, fold) => {
+                let changed = match fold {
+                    Fold::Open => self.folded.remove(&id),
+                    Fold::Folded => self.folded.insert(id),
+                };
+                if changed {
+                    self.shown = None;
+                }
+            }
+            TableAction::Down | TableAction::Up => {
+                let Some(at) = self.selected.and_then(place) else {
+                    return;
+                };
+                let to = match action {
+                    TableAction::Down => (at + 1).min(shown.len() - 1),
+                    TableAction::Up | TableAction::Select(_) | TableAction::Toggle(_) => {
+                        at.saturating_sub(1)
+                    }
+                    TableAction::SetFold(..) => at,
+                };
+                self.select(model.rows[shown[to]].key);
+                self.scroll_to = self.scrolled.and_then(|view| row_in_view(view, to, pitch));
+            }
+        }
+    }
+
+    /// Selects the row `key`, which takes keyboard focus once it is drawn.
+    fn select(&mut self, key: RowKey) {
+        self.selected = Some(key);
+        self.focus_selected = true;
+    }
 }
 
-/// The Category cell of `row`, folded as `fold` says: its fold triangle, when a
+/// The offset that brings the row at `index`, of rows `pitch` apart, into a `view`
+/// scrolled as it is, or `None` when the row is already in it.
+fn row_in_view(view: Scrolled, index: usize, pitch: f32) -> Option<f32> {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a list never holds enough rows to lose precision"
+    )]
+    let top = index as f32 * pitch;
+    let bottom = top + pitch;
+    if top < view.offset {
+        Some(top)
+    } else if bottom > view.offset + view.height {
+        Some(bottom - view.height)
+    } else {
+        None
+    }
+}
+
+/// The Category cell of `row`, drawn as `state` says: its fold triangle, when a
 /// category sits under it, and its name, indented to its depth. A screen reader reads
-/// the name as one tree item, with its level, its usage and whether it is expanded.
-/// Returns the fold triangle's response, when it has one.
-fn name_cell(ui: &mut egui::Ui, i18n: &Localizer, row: &ListRow, fold: Fold) -> Option<Response> {
+/// the name as one tree item, with its level, its usage, whether it is selected and
+/// whether it is expanded. While the name has focus, ↑ and ↓ move the selection, and ←
+/// and → fold and unfold the row. Returns what a click or a key asked for.
+fn name_cell(
+    ui: &mut egui::Ui,
+    i18n: &Localizer,
+    row: &ListRow,
+    state: RowState,
+) -> Option<TableAction> {
     let cell = ui.max_rect();
     #[expect(
         clippy::cast_precision_loss,
@@ -300,18 +436,32 @@ fn name_cell(ui: &mut egui::Ui, i18n: &Localizer, row: &ListRow, fold: Fold) -> 
         (slot.right() + ui.spacing().item_spacing.x)..=cell.right(),
         cell.y_range(),
     );
-    let response = ui.interact(
-        name_rect,
-        Id::new(("category_list_row", row.key)),
-        Sense::click(),
-    );
+    // Only the Tab stop takes focus from Tab; the arrow keys move between the rows.
+    let sense = if state.tab_stop {
+        Sense::click()
+    } else {
+        Sense::CLICK
+    };
+    let response = ui.interact(name_rect, Id::new(("category_list_row", row.key)), sense);
+    if state.take_focus {
+        response.request_focus();
+    }
+    let rect = response.rect;
     ui.ctx().accesskit_node_builder(response.id, |node| {
+        // egui gives only a focusable widget its bounds, and only the Tab stop is one.
+        node.set_bounds(accesskit::Rect {
+            x0: rect.min.x.into(),
+            y0: rect.min.y.into(),
+            x1: rect.max.x.into(),
+            y1: rect.max.y.into(),
+        });
         node.set_role(Role::TreeItem);
         node.set_label(row.name.clone());
         node.set_description(row.description.clone());
         node.set_level(row.depth + 1);
+        node.set_selected(state.selected);
         if row.has_children {
-            node.set_expanded(fold == Fold::Open);
+            node.set_expanded(state.fold == Fold::Open);
         }
     });
     let text = match row.key {
@@ -329,12 +479,63 @@ fn name_cell(ui: &mut egui::Ui, i18n: &Localizer, row: &ListRow, fold: Fold) -> 
     ui.painter()
         .galley(pos2(name_rect.left(), top), galley, color);
     ui.advance_cursor_after_rect(cell);
-    if !row.has_children {
-        return None;
+    let mut action = None;
+    if response.clicked() || response.gained_focus() {
+        action = Some(TableAction::Select(row.key));
     }
-    // Only a click folds it, so it is no Tab stop; the keys fold the selected row.
-    let fold_id = Id::new(("category_list_fold", row.key));
-    let triangle = ui.interact(slot, fold_id, Sense::CLICK);
+    if response.has_focus() {
+        action = row_keys(ui, row).or(action);
+    }
+    if row.has_children && fold_triangle_button(ui, i18n, row, slot, state.fold).clicked() {
+        if let RowKey::Category(id) = row.key {
+            action = Some(TableAction::Toggle(id));
+        }
+    }
+    action
+}
+
+/// The keys the focused name of `row` takes from egui's focus moves: ↑ and ↓ move the
+/// selection, and ← and → fold and unfold a row with categories under it.
+fn row_keys(ui: &egui::Ui, row: &ListRow) -> Option<TableAction> {
+    let id = Id::new(("category_list_row", row.key));
+    ui.memory_mut(|memory| {
+        memory.set_focus_lock_filter(
+            id,
+            EventFilter {
+                horizontal_arrows: true,
+                vertical_arrows: true,
+                ..EventFilter::default()
+            },
+        );
+    });
+    let pressed = |key| ui.input_mut(|input| input.consume_key(Modifiers::NONE, key));
+    let folding = match row.key {
+        RowKey::Category(id) if row.has_children => Some(id),
+        RowKey::Category(_) | RowKey::Transfer(_) => None,
+    };
+    if pressed(Key::ArrowDown) {
+        Some(TableAction::Down)
+    } else if pressed(Key::ArrowUp) {
+        Some(TableAction::Up)
+    } else if pressed(Key::ArrowLeft) {
+        folding.map(|id| TableAction::SetFold(id, Fold::Folded))
+    } else if pressed(Key::ArrowRight) {
+        folding.map(|id| TableAction::SetFold(id, Fold::Open))
+    } else {
+        None
+    }
+}
+
+/// The fold triangle of `row` in `slot`, folded as `fold` says. Only a click folds it,
+/// so it is no Tab stop; ← and → fold the selected row.
+fn fold_triangle_button(
+    ui: &mut egui::Ui,
+    i18n: &Localizer,
+    row: &ListRow,
+    slot: Rect,
+    fold: Fold,
+) -> Response {
+    let triangle = ui.interact(slot, Id::new(("category_list_fold", row.key)), Sense::CLICK);
     let label = match fold {
         Fold::Open => fl!(
             i18n,
@@ -344,11 +545,11 @@ fn name_cell(ui: &mut egui::Ui, i18n: &Localizer, row: &ListRow, fold: Fold) -> 
         Fold::Folded => fl!(i18n, "dialog-category-list-expand", name = row.name.clone()),
     };
     triangle.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
-    let icon_size = icon_width / 2.0;
+    let icon_size = ui.spacing().icon_width / 2.0;
     let icon = Rect::from_center_size(slot.center(), vec2(icon_size, icon_size));
     let color = ui.style().interact(&triangle).text_color();
     ui.painter().add(fold_triangle(icon, fold, color));
-    Some(triangle)
+    triangle
 }
 
 /// What became of the Category List this frame.
