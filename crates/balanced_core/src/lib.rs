@@ -12,6 +12,7 @@ mod money;
 mod stub;
 mod transaction;
 mod undo_log;
+mod usage;
 
 pub use account::{Account, AccountGroup, AccountId, AccountKind, AccountStatus, Visibility};
 pub use category::{Category, CategoryId};
@@ -24,3 +25,4 @@ pub use transaction::{
     SplitLine, SplitTarget, Transaction, TransactionId,
 };
 pub use undo_log::UndoEntryError;
+pub use usage::Usage;
