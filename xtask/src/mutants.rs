@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
 
+pub(crate) mod all;
 mod github;
 mod key;
 pub(crate) mod landed;

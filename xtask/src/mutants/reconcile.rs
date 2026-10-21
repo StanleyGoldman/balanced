@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
 
 //! A CI mutant run: test the mutants cargo-mutants is pointed at, then bring the
-//! `mutant` issues in line with what it found (ADR 0002). `mutants-shard` and
-//! `mutants-landed` differ only in which mutants they point it at.
+//! `mutant` issues in line with what it found (ADR 0002). `mutants-shard`,
+//! `mutants-landed` and `mutants-all` differ only in which mutants they point it at.
 
 use std::collections::BTreeSet;
 
@@ -153,6 +153,7 @@ fn summary(actions: &[Action], run: &Run, updates: IssueUpdates) -> String {
     let found_by = match run.found_by {
         FoundBy::PullRequest(number) => format!("Pull request [#{number}]({url}/pull/{number})"),
         FoundBy::Shard(Shard { index, count }) => format!("Shard {index}/{count}"),
+        FoundBy::Everything => "Every mutant".to_owned(),
     };
     let short = run.commit.get(..7).unwrap_or(&run.commit);
     let commit = format!("[`{short}`]({url}/commit/{})", run.commit);
@@ -328,6 +329,21 @@ mod tests {
             summary(&[], &run, IssueUpdates::Print),
             "### 🧬 Mutant issue updates (dry run, not made)\n\n\
              Pull request [#42](https://github.com/StanleyGoldman/balanced/pull/42) at \
+             [`0123456`](https://github.com/StanleyGoldman/balanced/commit/0123456789abcdef0123456789abcdef01234567): \
+             **no issue updates**\n"
+        );
+    }
+
+    #[test]
+    fn a_summary_of_a_full_run_names_every_mutant_as_its_scope() {
+        let run = Run {
+            found_by: FoundBy::Everything,
+            ..shard_run()
+        };
+        assert_eq!(
+            summary(&[], &run, IssueUpdates::Apply),
+            "### 🧬 Mutant issue updates\n\n\
+             Every mutant at \
              [`0123456`](https://github.com/StanleyGoldman/balanced/commit/0123456789abcdef0123456789abcdef01234567): \
              **no issue updates**\n"
         );

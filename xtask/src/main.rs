@@ -63,6 +63,7 @@ const TASKS: &[Task] = &[
     mutants::TASK,
     mutants::shard::TASK,
     mutants::landed::TASK,
+    mutants::all::TASK,
 ];
 
 fn main() -> ExitCode {
