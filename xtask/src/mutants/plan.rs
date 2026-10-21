@@ -37,6 +37,8 @@ pub(crate) enum FoundBy {
     PullRequest(u64),
     /// The nightly run of one shard.
     Shard(Shard),
+    /// A run by hand of every mutant, all the shards at once.
+    Everything,
 }
 
 /// One round-robin shard of every mutant, as cargo-mutants' `--shard` counts them
@@ -176,6 +178,7 @@ impl fmt::Display for Run {
             FoundBy::Shard(Shard { index, count }) => {
                 format!("the nightly run of shard {index}/{count}")
             }
+            FoundBy::Everything => "the full run of every mutant".to_owned(),
         };
         match &self.pipeline {
             Some(pipeline) => write!(f, "[{name}]({pipeline})")?,
@@ -585,6 +588,35 @@ mod tests {
                 reason: CloseReason::Caught,
                 comment: format!(
                     "Caught by the post-merge run of pull request #42 at commit {COMMIT}, so closing."
+                ),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_mutant_the_full_run_catches_is_closed_naming_that_run() {
+        let next = next_minus();
+        let run = Run {
+            commit: COMMIT.to_owned(),
+            found_by: FoundBy::Everything,
+            pipeline: None,
+        };
+
+        let actions = plan(
+            Some(&outcomes(&[(&next, "CaughtMutant")])),
+            &list(&[&next]),
+            &[issue_for(12, &next, 0)],
+            &run,
+        )
+        .unwrap();
+
+        assert_eq!(
+            actions,
+            [Action::Close {
+                issue: 12,
+                reason: CloseReason::Caught,
+                comment: format!(
+                    "Caught by the full run of every mutant at commit {COMMIT}, so closing."
                 ),
             }]
         );

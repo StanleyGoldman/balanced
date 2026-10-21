@@ -21,17 +21,20 @@
 # required check, so a run that never starts holds nothing up.
 #
 # By hand, `gh workflow run mutants.yml -f task=mutants-shard -f shard=3` (or
-# `-f task=mutants-landed`) runs one on `main`'s tip.
+# `-f task=mutants-landed`) runs one on `main`'s tip. `-f task=mutants-all` runs
+# `cargo xtask mutants-all`, which tests every mutant, all seven shards, in one
+# run: about seven nights' testing in a single job.
 
 name: mutants
 
-# The run's title in the Actions list: `mutants-shard 3/7`, or
+# The run's title in the Actions list: `mutants-shard 3/7`, `mutants-all`, or
 # `mutants-landed · <commit title>`, so it reads apart from `ci`'s run of the
 # same commit.
 run-name: >-
   ${{ (github.event_name == 'schedule' || inputs.task == 'mutants-shard')
     && format('mutants-shard {0}/7', github.event_name == 'schedule'
       && fromJSON('{"0 7 * * 0":"0","0 7 * * 1":"1","0 7 * * 2":"2","0 7 * * 3":"3","0 7 * * 4":"4","0 7 * * 5":"5","0 7 * * 6":"6"}')[github.event.schedule] || inputs.shard)
+    || inputs.task == 'mutants-all' && 'mutants-all'
     || format('mutants-landed · {0}', github.event.head_commit.message || github.sha) }}
 
 # One schedule per weekday, and a night's shard is its weekday's number, Sunday
@@ -59,7 +62,7 @@ on:
       task:
         description: The xtask task to run
         type: choice
-        options: [mutants-landed, mutants-shard]
+        options: [mutants-landed, mutants-shard, mutants-all]
       shard:
         description: The shard, for mutants-shard
         type: choice
@@ -73,7 +76,8 @@ permissions:
 # One run at a time, so two runs never edit one issue at once. GitHub keeps
 # only the newest waiting run and cancels any older one, so a merge that lands
 # while two runs are queued loses its landed run; the weekly round of shards
-# still tests those mutants.
+# still tests those mutants. While `mutants-all` runs, every run started after it
+# waits, and all but the newest of those are cancelled.
 concurrency:
   group: mutants
   cancel-in-progress: false
@@ -108,7 +112,7 @@ jobs:
 
       - uses: ./.github/actions/ci-setup
 
-      # The token goes to these two steps alone, so no action in the setup
+      # The token goes to these three steps alone, so no action in the setup
       # steps can read a token that writes issues.
       - name: cargo xtask mutants-landed
         if: github.event_name == 'push' || inputs.task == 'mutants-landed'
@@ -123,6 +127,11 @@ jobs:
               && fromJSON('{"0 7 * * 0":"0","0 7 * * 1":"1","0 7 * * 2":"2","0 7 * * 3":"3","0 7 * * 4":"4","0 7 * * 5":"5","0 7 * * 6":"6"}')[github.event.schedule] || inputs.shard }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: .github/in-image.sh cargo xtask mutants-shard "$SHARD"
+      - name: cargo xtask mutants-all
+        if: inputs.task == 'mutants-all'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/in-image.sh cargo xtask mutants-all
 
       # The issues the run opened, commented on and closed, which the task
       # writes once it has planned them.
