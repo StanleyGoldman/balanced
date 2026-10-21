@@ -25,7 +25,8 @@ pub enum UndoFormat {
     Changed,
 }
 
-/// Balanced's migrations, in order: the first is version 1.
+/// Balanced's migrations, in order: the first is version 1. The `.slt` tests run against
+/// the last; `tests/slt.rs` says how to test a schema between two of them.
 pub const MIGRATIONS: &[Migration] = &[Migration {
     sql: include_str!("migration/0001_schema.sql"),
     data: None,

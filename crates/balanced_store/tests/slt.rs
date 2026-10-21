@@ -3,6 +3,10 @@
 //! Runs every `tests/slt/*.slt` file against a new data file. Each file is one test and
 //! gets a file of its own, made by `Store::create`, so the SQL under test is the schema
 //! the app creates.
+//!
+//! So a file always sees the latest schema. To test a schema between migrations, write a
+//! Rust test in `upgrade.rs` with `Store::open_with_migrations`, or give this harness a
+//! target version per file once a migration after the first needs one.
 
 use balanced_store::Store;
 use rusqlite::Connection;
