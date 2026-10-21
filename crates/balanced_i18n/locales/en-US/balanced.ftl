@@ -254,6 +254,9 @@ dialog-preferences-gridlines-off = Off
 dialog-preferences-gridlines-horizontal = Horizontal
 dialog-preferences-gridlines-vertical = Vertical
 dialog-preferences-gridlines-both = Both
+# Committing a new transaction's payee fills its other cells from the last
+# transaction with that payee.
+dialog-preferences-payee-recall = Fill in a new transaction from its payee's last one
 dialog-preferences-group-account-bar = { -account-bar }
 # Each group heading in the Account bar shows the sum of its accounts' balances.
 dialog-preferences-group-totals = Show group totals
