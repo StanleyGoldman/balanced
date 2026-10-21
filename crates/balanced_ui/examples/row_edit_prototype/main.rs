@@ -1819,7 +1819,7 @@ impl Proto {
             .id_salt(("register", self.current))
             .striped(self.theme.settings().alternating_rows)
             .resizable(false)
-            .sense(Sense::click())
+            .sense(Sense::CLICK) // clickable, not a Tab stop between the editing row's fields
             .cell_layout(Layout::left_to_right(Align::Center))
             .column(Column::exact(84.0))
             .column(Column::exact(54.0))
