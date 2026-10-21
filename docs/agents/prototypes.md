@@ -5,7 +5,7 @@ A prototype is throwaway code that answers one question by giving the user somet
 ## Branch and PR
 
 - Each prototype gets its own branch, `prototype/<name>`, and a **draft** PR titled `PROTOTYPE: <what it prototypes>`. Its body opens with `Closes #<issue>`, so the PR shows in the issue's Development panel (`docs/agents/issue-tracker.md`, "Linking a pull request to its issue").
-- Label the prototype's issue `prototype`, beside any `wayfinder:prototype` a map gave it (that one belongs to the wayfinder process). Once the draft PR is open and the prototype awaits the user's session, add `ready-for-human`, so `gh issue list --label prototype --label ready-for-human` lists every prototype waiting on the user.
+- Label the prototype's issue `prototype`. When a map charted it as `wayfinder:prototype`, swap that label for `prototype` as you take the ticket. Once the draft PR is open and the prototype awaits the user's session, add `ready-for-human`, so `gh issue list --label prototype --label ready-for-human` lists every prototype waiting on the user.
 - The PR description states the question the prototype set out to answer, plus a running Q&A of what it showed. Update it as answers land.
 - When the prototype session ends, post the resolution comment (below) on the prototype's issue and close the PR unmerged. Decisions go back into real code or docs through their own PRs.
 - Once the PR is closed, remove the prototype's local worktree and branch: `git worktree remove .claude/worktrees/<name>`, then `git branch -D prototype/<name>`. The remote branch stays as the PR's record.
