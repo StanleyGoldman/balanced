@@ -155,6 +155,35 @@ fn register_filtered_dark() {
     check_snapshot(&mut harness, "register_filtered_dark");
 }
 
+/// Opens Everyday Checking and renames Fresh Market to Corner Shop in its Payee cell,
+/// leaving the cell open: the row is the editing row, with its buttons.
+fn edit_a_row(harness: &mut Harness<'static, App>) {
+    click(harness, Role::Button, "Everyday Checking");
+    click(harness, Role::Cell, "Fresh Market");
+    harness.event(Event::Text("Corner Shop".to_owned()));
+    pointer_gone(harness);
+}
+
+#[test]
+#[ignore = "image snapshot: run with `cargo xtask snapshots`"]
+fn register_editing_light() {
+    let mut harness = app(Theme::Light);
+
+    edit_a_row(&mut harness);
+
+    check_snapshot(&mut harness, "register_editing_light");
+}
+
+#[test]
+#[ignore = "image snapshot: run with `cargo xtask snapshots`"]
+fn register_editing_dark() {
+    let mut harness = app(Theme::Dark);
+
+    edit_a_row(&mut harness);
+
+    check_snapshot(&mut harness, "register_editing_dark");
+}
+
 /// Opens Everyday Checking's first Payment cell with `100/3` typed in it, then its
 /// keypad, and adds `+1` to the keypad's sum: the cell's preview and the keypad's
 /// result both show.

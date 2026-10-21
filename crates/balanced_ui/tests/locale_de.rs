@@ -326,6 +326,25 @@ fn the_calendars_today_button_reads_german() {
 }
 
 #[test]
+fn the_editing_rows_buttons_read_in_german() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    harness
+        .get_by_role_and_label(Role::Cell, "Fresh Market")
+        .click();
+    harness.run();
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    let shown = ["Speichern", "Abbrechen", "Mehrteilig", "Weitere Aktionen"].map(|label| {
+        harness
+            .query_all_by_role_and_label(Role::Button, label)
+            .count()
+    });
+    assert_eq!(shown, [1, 1, 1, 1]);
+}
+
+#[test]
 fn the_enter_moves_to_the_next_row_preference_reads_german() {
     let mut harness = app();
     open(&mut harness, "Extras");

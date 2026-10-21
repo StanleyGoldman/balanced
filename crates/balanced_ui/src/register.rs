@@ -17,8 +17,8 @@ use eframe::egui::text_edit::TextEditState;
 use eframe::egui::{
     self, Align, Align2, Area, Button, Checkbox, CursorIcon, Event, EventFilter, Frame, Id, Key,
     Label, Layout, Margin, Modifiers, Order, Popup, PopupCloseBehavior, Rangef, Rect, Response,
-    ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, WidgetInfo,
-    WidgetText, WidgetType, pos2, vec2,
+    ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, UiBuilder,
+    WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, TableBody, TableBuilder};
 use icu_calendar::{Date, Iso};
@@ -54,6 +54,10 @@ const RESIZE_HANDLE_WIDTH: f32 = 8.0;
 /// The radius of each dot of the Actions menu's ⋯, and the space between their centres.
 const ACTION_DOT_RADIUS: f32 = 1.5;
 const ACTION_DOT_SPACING: f32 = 4.5;
+
+/// The ⏷ that marks a button opening a list or a menu below it. The bundled
+/// emoji-icon-font draws it.
+const DROP_DOWN_GLYPH: &str = "⏷";
 
 /// The flag the Flag column shows on a flagged transaction. The bundled
 /// emoji-icon-font draws it.
@@ -915,6 +919,12 @@ pub(crate) struct Register {
     /// The Calculator's result, which goes into the paste target on the next frame,
     /// once the rows are laid out.
     pasting: Option<String>,
+    /// The editing row's buttons as drawn in the last frame, if any were.
+    buttons: Option<DrawnButtons>,
+    /// The editing row's button that takes keyboard focus once it is drawn.
+    focus_button: Option<RowButton>,
+    /// The editing row's button pressed in the last frame, which acts on this frame.
+    pressed: Option<RowButtonAt>,
 }
 
 impl Register {
@@ -930,6 +940,53 @@ impl Register {
                     .as_ref()
                     .is_some_and(|edit| edit.editor_id() == focused),
             })
+    }
+
+    /// Whether Tab goes to the Register: it owns the keyboard, or one of the editing
+    /// row's buttons has keyboard focus.
+    pub(crate) fn takes_tab(&self, ctx: &egui::Context) -> bool {
+        self.owns_keyboard(ctx) || self.focused_button(ctx).is_some()
+    }
+
+    /// The editing row's button that has keyboard focus, with its row, if one has.
+    fn focused_button(&self, ctx: &egui::Context) -> Option<RowButtonAt> {
+        let buttons = self.buttons?;
+        if ctx.memory(|memory| memory.top_modal_layer().is_some()) {
+            return None;
+        }
+        let focused = ctx.memory(egui::Memory::focused)?;
+        let button = buttons.button(focused)?;
+        Some(RowButtonAt {
+            row: buttons.row,
+            button,
+        })
+    }
+
+    /// The editing row: the row of the cell being edited, else the cell cursor's row
+    /// while it has changes not yet saved or its buttons hold the keyboard. A row with
+    /// the cell cursor and none of these is highlighted, not edited.
+    fn editing_row(&self, ctx: &egui::Context) -> Option<RowId> {
+        if let Some(edit) = &self.edit {
+            return Some(edit.cell().row);
+        }
+        if let Some(awaiting) = &self.awaiting_category {
+            return Some(awaiting.edit.cell.row);
+        }
+        let row = self.cursor?.row;
+        let in_buttons = self.focus_button.is_some()
+            || self
+                .focused_button(ctx)
+                .is_some_and(|focused| focused.row == row);
+        (self.unsaved.is_changed(row) || in_buttons).then_some(row)
+    }
+
+    /// The editing row as the rows are about to be drawn, whose Actions cell holds its
+    /// buttons this frame. The buttons drawn last frame are forgotten, so only this
+    /// frame's are found from here on.
+    fn editing_row_for_drawing(&mut self, ctx: &egui::Context) -> Option<RowId> {
+        let editing = self.editing_row(ctx);
+        self.buttons = None;
+        editing
     }
 
     /// The selected transaction's row, while `account`'s Register shows it. The draft
@@ -1057,15 +1114,19 @@ impl Register {
         }
     }
 
-    /// Settles what this frame's keys and clicks changed: `draft_row`, taken for the
-    /// frame, comes back up to date with the draft, as the changed row does with the
-    /// changes.
+    /// Settles what this frame's keys and clicks changed: a button waiting for keyboard
+    /// focus that wasn't drawn stops waiting, and `draft_row`, taken for the frame,
+    /// comes back up to date with the draft, as the changed row does with the changes.
     fn end_frame(
         &mut self,
         model: &RegisterModel,
         draft_row: Option<DraftRow>,
         draft_frame: DraftFrame<'_>,
     ) {
+        if self.buttons.is_none() {
+            // The editing row is out of view, so no button can take the keyboard.
+            self.focus_button = None;
+        }
         // A click on another row leaves the cell cursor there, and the refused edit
         // stops it leaving the row once asked about.
         self.draft_row = draft_row;
@@ -1297,6 +1358,8 @@ impl Register {
         self.posted_at = None;
         self.paste_target = None;
         self.pasting = None;
+        self.focus_button = None;
+        self.pressed = None;
     }
 
     /// Formats the draft row again when the draft changed since it was formatted, or
@@ -1391,6 +1454,29 @@ impl Register {
             .copied()
             .filter(|column| column.holds_cursor())
             .collect()
+    }
+
+    /// The columns of `row`'s cells that can be edited, left to right, or none when
+    /// the row is gone.
+    fn editable_columns(&self, rows: Rows<'_>, row: RowId) -> Vec<RegisterColumn> {
+        let Some(row) = rows.find(row) else {
+            return Vec::new();
+        };
+        self.cursor_columns()
+            .into_iter()
+            .filter(|column| column.field(row).is_some())
+            .collect()
+    }
+
+    /// Whether `step`, a Tab move from `cursor`, goes into the editing row's buttons:
+    /// a Tab forward from a cell with no cell after it in its row that can be edited.
+    fn tabs_into_buttons(&self, cursor: CellAddress, step: Move, rows: Rows<'_>) -> bool {
+        let columns = self.cursor_columns();
+        let Some(at) = columns.iter().position(|&column| column == cursor.column) else {
+            return false;
+        };
+        let editable = self.editable_columns(rows, cursor.row);
+        step == Move::NextEditable && !columns[at + 1..].iter().any(|c| editable.contains(c))
     }
 
     /// Carries out `action`, picked on transaction `id`'s row.
@@ -1623,21 +1709,7 @@ impl Register {
                 let register_id = ui.id();
                 let scroll_offset = key_scroll_offset
                     .or_else(|| centre_on.map(|index| centring_offset(ui, row_height, index)));
-                let mut table = TableBuilder::new(ui)
-                    .id_salt(("register", account))
-                    // The rows stripe themselves, so the Today divider takes no stripe.
-                    .striped(false)
-                    .resizable(false)
-                    .cell_layout(Layout::left_to_right(Align::Center))
-                    .auto_shrink(false)
-                    .max_scroll_height(f32::INFINITY);
-                for &column in &self.shown {
-                    table = table.column(column.width(theme, widths));
-                }
-                if let Some(offset) = scroll_offset {
-                    table = table.vertical_scroll_offset(offset);
-                }
-                table
+                register_table(ui, account, &self.shown, theme, widths, scroll_offset)
                     .header(row_height, |mut header| {
                         let frame = HeaderFrame {
                             i18n,
@@ -1672,6 +1744,7 @@ impl Register {
                             inline_completion: InlineCompletion::of(preferences),
                             register_id,
                             access: Access::of(summary.account()),
+                            editing: None,
                             viewport: Rect::NOTHING,
                         };
                         self.body(body, frame, row_height, pitch);
@@ -1764,10 +1837,16 @@ impl Register {
     }
 
     /// Lays out the rows in view of the Register's body, and notes which of them are
-    /// fully in view for keyboard scrolling. `frame`'s viewport is filled in here.
+    /// fully in view for keyboard scrolling. `frame`'s viewport and editing row are
+    /// filled in here.
     fn body(&mut self, mut body: TableBody<'_>, frame: BodyFrame<'_>, row_height: f32, pitch: f32) {
         let viewport = body.ui_mut().clip_rect();
-        let frame = BodyFrame { viewport, ..frame };
+        let editing = self.editing_row_for_drawing(body.ui_mut().ctx());
+        let frame = BodyFrame {
+            editing,
+            viewport,
+            ..frame
+        };
         let rows = frame.rows;
         let mut in_view: Option<(usize, usize)> = None;
         body.rows(row_height, rows.lines(), |mut table_row| {
@@ -1839,6 +1918,7 @@ impl Register {
             commands,
             register_id,
             access,
+            editing,
             viewport,
             ..
         } = *frame;
@@ -1846,6 +1926,7 @@ impl Register {
             row: row.id(),
             column,
         };
+        let editing = editing == Some(row.id());
         let cell = Cell {
             register_id,
             row,
@@ -1853,10 +1934,14 @@ impl Register {
             insets: self.insets(column),
             selected: self.cursor.is_some_and(|cursor| cursor.row == row.id()),
             cursor: self.cursor == Some(address),
+            editing,
             access,
             viewport,
         };
         let (response, mut action) = cell.show(ui, i18n, theme);
+        if editing && column == RegisterColumn::Actions {
+            action = action.or(self.row_buttons(ui, frame, row));
+        }
         if column == RegisterColumn::Category && row.other_side().is_some() {
             response.context_menu(|ui| action = action.or(go_to_item(ui, i18n, row)));
         }
@@ -1888,6 +1973,67 @@ impl Register {
             .layer_painter(ui.layer_id())
             .with_clip_rect(theme.rule_clip(ui.clip_rect(), viewport))
             .extend(rules);
+    }
+
+    /// Draws the editing `row`'s buttons from the right edge of its Actions cell `ui`
+    /// leftwards, over the row's cells beside it, gives keyboard focus to the button
+    /// waiting for it, and keeps a pressed button for the next frame, which acts on it.
+    /// Returns the command picked from More's menu.
+    fn row_buttons(
+        &mut self,
+        ui: &mut egui::Ui,
+        frame: &BodyFrame<'_>,
+        row: &RegisterRow,
+    ) -> Option<RowAction> {
+        let cell = ui.max_rect();
+        let right = cell.right() - Theme::EDGE_INSET;
+        let left = right - buttons_width(ui, frame.i18n) - Theme::ROW_BUTTON_GAP;
+        let strip = Rect::from_x_y_ranges(left..=cell.right(), cell.y_range());
+        let mut strip_ui = ui.new_child(
+            UiBuilder::new()
+                .max_rect(Rect::from_x_y_ranges(
+                    left + Theme::ROW_BUTTON_GAP..=right,
+                    cell.y_range(),
+                ))
+                .layout(Layout::left_to_right(Align::Center)),
+        );
+        strip_ui.set_clip_rect(strip.intersect(frame.viewport));
+        // Assistive technology reads the buttons as one group, the row's toolbar.
+        strip_ui
+            .ctx()
+            .accesskit_node_builder(strip_ui.unique_id(), |node| node.set_role(Role::Toolbar));
+        // The strip hides the cells under it, and takes the clicks between its buttons.
+        let fill = strip_ui.visuals().selection.bg_fill;
+        strip_ui.painter().rect_filled(strip, 0.0, fill);
+        let _blocked = strip_ui.interact(
+            strip,
+            frame.register_id.with("register_row_buttons"),
+            Sense::CLICK,
+        );
+        let spacing = strip_ui.spacing_mut();
+        spacing.item_spacing.x = Theme::ROW_BUTTON_GAP;
+        spacing.button_padding.x = Theme::ROW_BUTTON_PADDING;
+        let shown = edit_buttons(
+            &mut strip_ui,
+            frame.i18n,
+            frame.access,
+            row,
+            self.focus_button,
+        );
+        if let Some(button) = self.focus_button
+            && ui.memory(|memory| memory.has_focus(shown.drawn.id(button)))
+        {
+            self.focus_button = None;
+        }
+        self.buttons = Some(shown.drawn);
+        if let Some(button) = shown.pressed {
+            self.pressed = Some(RowButtonAt {
+                row: row.id(),
+                button,
+            });
+            ui.ctx().request_repaint();
+        }
+        shown.action
     }
 
     /// Draws the editor over the cell being edited, in `column`, with its ⏷ button and
@@ -2107,6 +2253,10 @@ impl Register {
         // A paste from the Calculator opens its cell's edit first, which then takes
         // the keys.
         self.take_paste(ctx, keys);
+        self.take_pressed(ctx, keys);
+        if self.tab_among_buttons(ctx, keys) {
+            return None;
+        }
         if !self.owns_keyboard(ctx) {
             self.tabs.clear();
             return None;
@@ -2129,23 +2279,12 @@ impl Register {
             || self.unsaved.is_changed(cursor.row);
         if saves && ctx.input_mut(|input| input.consume_key(Modifiers::COMMAND, Key::Enter)) {
             let Some((edit, refusal)) = self.commit_open_edit(ctx, keys) else {
-                return self.save_row(ctx, keys, cursor);
+                return self.save_row(ctx, keys, cursor, keys.after_enter);
             };
             self.refuse(ctx, keys.commands, refusal, edit.cell(), Some(edit), None);
             return None;
         }
-        let tab = (!self.tabs.is_empty()).then(|| self.tabs.remove(0));
-        if !self.tabs.is_empty() {
-            // Each Tab acts on the cell the one before it opened, so the rest wait.
-            ctx.request_repaint();
-        }
-        let tab = tab.map(|modifiers| {
-            if modifiers.shift {
-                Move::PreviousEditable
-            } else {
-                Move::NextEditable
-            }
-        });
+        let tab = self.next_tab(ctx);
         match self.edit.take() {
             Some(Edit::Text(edit)) => return self.handle_edit_keys(ctx, keys, edit, cursor, tab),
             Some(Edit::Date(edit)) => return self.handle_date_keys(ctx, keys, edit, cursor, tab),
@@ -2168,6 +2307,12 @@ impl Register {
             .find(|&(key, _)| input.consume_key(Modifiers::NONE, key))
             .map(|(_, step)| step)
         });
+        if let Some(step) = tab
+            && self.unsaved.is_changed(cursor.row)
+            && self.tabs_into_buttons(cursor, step, keys.rows)
+        {
+            return self.focus_save();
+        }
         if let Some(step) = pressed.or(tab) {
             let moved = self.move_cursor(cursor, step, keys.rows)?;
             if tab.is_some() {
@@ -2200,6 +2345,23 @@ impl Register {
             self.start_edit(ctx, keys, EditStart::Empty);
         }
         None
+    }
+
+    /// The move the first Tab press queued for the Register asks for, taken from the
+    /// queue, if there is one. Each Tab acts on the cell the one before it opened, so
+    /// the rest wait for later frames.
+    fn next_tab(&mut self, ctx: &egui::Context) -> Option<Move> {
+        let tab = (!self.tabs.is_empty()).then(|| self.tabs.remove(0));
+        if !self.tabs.is_empty() {
+            ctx.request_repaint();
+        }
+        tab.map(|modifiers| {
+            if modifiers.shift {
+                Move::PreviousEditable
+            } else {
+                Move::NextEditable
+            }
+        })
     }
 
     /// Acts on this frame's keys for `edit`, the cell being edited under `cursor`,
@@ -2323,8 +2485,11 @@ impl Register {
         }
         ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
         let step = match leave {
-            Leave::Enter => return self.save_row(ctx, keys, cursor),
+            Leave::Enter => return self.save_row(ctx, keys, cursor, keys.after_enter),
             Leave::Next => Move::Next,
+            Leave::Tab(step) if self.tabs_into_buttons(cursor, step, keys.rows) => {
+                return self.focus_save();
+            }
             Leave::Tab(step) => step,
             Leave::Stay => return None,
         };
@@ -2441,9 +2606,13 @@ impl Register {
             }
             ctx.memory_mut(|memory| memory.surrender_focus(editor_id(edit.cell)));
             if enter {
-                return self.save_row(ctx, keys, cursor);
+                return self.save_row(ctx, keys, cursor, keys.after_enter);
             }
-            let moved = self.move_cursor(cursor, tab?, keys.rows)?;
+            let step = tab?;
+            if self.tabs_into_buttons(cursor, step, keys.rows) {
+                return self.focus_save();
+            }
+            let moved = self.move_cursor(cursor, step, keys.rows)?;
             // Tab opens the cell it moved to, as it does from a text cell.
             self.start_edit(ctx, keys, EditStart::Saved);
             return moved.scroll_offset;
@@ -2481,6 +2650,112 @@ impl Register {
             }
         };
         amount_field::refuse_characters(ctx, reader);
+    }
+
+    /// Acts on the editing row's button pressed in the last frame, if any, taking the
+    /// keyboard from it: Save saves the row and stays on it, Add adds the draft row,
+    /// Cancel throws away the row's changes as Esc does, and Split asks for the
+    /// transaction's split lines.
+    fn take_pressed(&mut self, ctx: &egui::Context, keys: &KeyContext<'_>) {
+        let Some(RowButtonAt { row, button }) = self.pressed.take() else {
+            return;
+        };
+        self.release_buttons(ctx);
+        match button {
+            RowButton::Save => {
+                let cursor =
+                    self.cursor
+                        .filter(|cursor| cursor.row == row)
+                        .unwrap_or(CellAddress {
+                            row,
+                            column: RegisterColumn::Date,
+                        });
+                match self.commit_open_edit(ctx, keys) {
+                    None => {
+                        self.save_row(ctx, keys, cursor, AfterEnter::SameRow);
+                    }
+                    Some((edit, refusal)) => {
+                        self.refuse(ctx, keys.commands, refusal, edit.cell(), Some(edit), None);
+                    }
+                }
+            }
+            RowButton::Cancel => {
+                if let Some(edit) = self.edit.take() {
+                    ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+                }
+                self.discard_row(row);
+            }
+            RowButton::Split => match keys.rows.find(row).and_then(RegisterRow::transaction) {
+                Some(transaction) => {
+                    keys.commands.send(AppCommand::OpenSplitView(transaction));
+                }
+                // TODO(#426): the draft row's Split opens the Split dialog too.
+                None => keys
+                    .commands
+                    .send(AppCommand::ShowStatus(StatusMessage::NotAvailableYet)),
+            },
+            // More opens its menu as it is clicked.
+            RowButton::More => {}
+        }
+    }
+
+    /// Acts on a Tab press while one of the editing row's buttons has keyboard focus:
+    /// Tab moves it to the next button, and Shift+Tab to the one before. Tab from the
+    /// last button the row enables opens the row's first cell that can be edited, and
+    /// Shift+Tab from the first its last such cell. Returns whether it acted.
+    fn tab_among_buttons(&mut self, ctx: &egui::Context, keys: &KeyContext<'_>) -> bool {
+        let Some(RowButtonAt { row, button }) = self.focused_button(ctx) else {
+            return false;
+        };
+        if self.tabs.is_empty() {
+            return false;
+        }
+        let modifiers = self.tabs.remove(0);
+        if !self.tabs.is_empty() {
+            // Each Tab acts on the button the one before it focused.
+            ctx.request_repaint();
+        }
+        let next = if modifiers.shift {
+            button.previous()
+        } else {
+            button.next()
+        };
+        // The draft row's More is disabled, so Tab passes it by.
+        let next = next.filter(|&next| !(next == RowButton::More && row == RowId::Draft));
+        if let Some(next) = next {
+            self.focus_button = Some(next);
+            return true;
+        }
+        self.release_buttons(ctx);
+        let editable = self.editable_columns(keys.rows, row);
+        let column = if modifiers.shift {
+            editable.last()
+        } else {
+            editable.first()
+        };
+        if let Some(&column) = column {
+            self.cursor = Some(CellAddress { row, column });
+            self.start_edit(ctx, keys, EditStart::Saved);
+        }
+        true
+    }
+
+    /// Moves keyboard focus into the editing row's Save button, as Tab does from the
+    /// row's last cell that can be edited. The cell cursor stays where it is, so there
+    /// is nothing to scroll to.
+    fn focus_save(&mut self) -> Option<f32> {
+        self.focus_button = Some(RowButton::Save);
+        None
+    }
+
+    /// Takes keyboard focus from the editing row's button that has it, if any.
+    fn release_buttons(&mut self, ctx: &egui::Context) {
+        self.focus_button = None;
+        if let Some(RowButtonAt { button, .. }) = self.focused_button(ctx)
+            && let Some(buttons) = self.buttons
+        {
+            ctx.memory_mut(|memory| memory.surrender_focus(buttons.id(button)));
+        }
     }
 
     /// Moves the cell cursor from `cursor` by `step`. Returns `None`, leaving the
@@ -2768,18 +3043,19 @@ impl Register {
         self.lines_in_view?.offset_showing(keys.rows.line_of(index))
     }
 
-    /// Saves the row of `cursor`, the editing row, as Enter and Ctrl+Enter do, and
-    /// returns the scroll offset that brings the cell cursor into view when it has
-    /// left it. The draft row is added. A transaction's changes are sent as one
-    /// Command, and once the ledger applies it the next row's cell in the same column
-    /// opens, or the row stays highlighted when Enter doesn't move to the next row; a
-    /// refused save keeps the changes and opens the cell again. A row with no changes
-    /// moves on at once, or stays highlighted.
+    /// Saves the row of `cursor`, the editing row, as Enter, Ctrl+Enter and the Save
+    /// button do, and returns the scroll offset that brings the cell cursor into view
+    /// when it has left it. The draft row is added. A transaction's changes are sent as
+    /// one Command, and once the ledger applies it the next row's cell in the same
+    /// column opens, or the row stays highlighted, as `after` says; a refused save keeps
+    /// the changes and opens the cell again. A row with no changes moves on at once, or
+    /// stays highlighted.
     fn save_row(
         &mut self,
         ctx: &egui::Context,
         keys: &KeyContext<'_>,
         cursor: CellAddress,
+        after: AfterEnter,
     ) -> Option<f32> {
         if cursor.row == RowId::Draft {
             if let Err(missing) = self.post(keys) {
@@ -2793,7 +3069,7 @@ impl Register {
             .as_ref()
             .filter(|_| self.unsaved.is_changed(cursor.row))
         else {
-            match keys.after_enter {
+            match after {
                 AfterEnter::NextRow => {}
                 AfterEnter::SameRow => return None,
             }
@@ -2801,7 +3077,7 @@ impl Register {
             self.start_edit(ctx, keys, EditStart::Saved);
             return moved.scroll_offset;
         };
-        let next = match keys.after_enter {
+        let next = match after {
             AfterEnter::NextRow => keys
                 .rows
                 .position(cursor.row)
@@ -3016,6 +3292,8 @@ struct BodyFrame<'a> {
     inline_completion: InlineCompletion,
     register_id: Id,
     access: Access,
+    /// The editing row as the frame began, whose Actions cell holds its buttons.
+    editing: Option<RowId>,
     /// The visible part of the Register's body.
     viewport: Rect,
 }
@@ -3131,8 +3409,9 @@ impl PayeeRecall {
     }
 }
 
-/// Where the cell cursor goes once Enter or Ctrl+Enter saves a transaction's row, as
-/// the Preferences say.
+/// Where the cell cursor goes once a save of a transaction's row is applied: as the
+/// Preferences say after Enter or Ctrl+Enter, and to the same row after the Save
+/// button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AfterEnter {
     /// The next row's cell in the same column opens for editing.
@@ -3593,7 +3872,7 @@ fn list_button(ui: &egui::Ui, i18n: &Localizer, rect: Rect, editor: Id) -> Respo
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
-        "⏷",
+        DROP_DOWN_GLYPH,
         TextStyle::Body.resolve(ui.style()),
         visuals.text_color(),
     );
@@ -3766,6 +4045,33 @@ fn preview(i18n: &Localizer, edit: &CellEdit) -> Option<Preview> {
     Preview::of(i18n, reader, *currency, &edit.text)
 }
 
+/// The Register's table of `account` in `ui`, with `columns` at their widths, scrolled
+/// to `scroll_offset` when it is set.
+fn register_table<'a>(
+    ui: &'a mut egui::Ui,
+    account: AccountId,
+    columns: &[RegisterColumn],
+    theme: &Theme,
+    widths: &ColumnWidths,
+    scroll_offset: Option<f32>,
+) -> TableBuilder<'a> {
+    let mut table = TableBuilder::new(ui)
+        .id_salt(("register", account))
+        // The rows stripe themselves, so the Today divider takes no stripe.
+        .striped(false)
+        .resizable(false)
+        .cell_layout(Layout::left_to_right(Align::Center))
+        .auto_shrink(false)
+        .max_scroll_height(f32::INFINITY);
+    for &column in columns {
+        table = table.column(column.width(theme, widths));
+    }
+    if let Some(offset) = scroll_offset {
+        table = table.vertical_scroll_offset(offset);
+    }
+    table
+}
+
 /// The scroll offset that puts row `index` in the middle of a Register filling `ui`,
 /// or as near as the top allows.
 fn centring_offset(ui: &egui::Ui, row_height: f32, index: usize) -> f32 {
@@ -3911,6 +4217,9 @@ struct Cell<'a> {
     selected: bool,
     /// Whether the cell cursor is on this cell.
     cursor: bool,
+    /// Whether the cell's row is the editing row, whose Actions cell holds its buttons
+    /// in place of the Actions menu.
+    editing: bool,
     access: Access,
     /// The visible part of the Register's body.
     viewport: Rect,
@@ -3932,6 +4241,7 @@ impl Cell<'_> {
             insets,
             selected,
             cursor,
+            editing,
             access,
             viewport,
         } = *self;
@@ -3956,6 +4266,9 @@ impl Cell<'_> {
             RegisterColumn::Clr => return clr_cell(ui, i18n, row, &response, access),
             RegisterColumn::Flag => return flag_cell(ui, i18n, row, &response, access),
             RegisterColumn::Actions => {
+                // Around the menu, or the editing row's buttons, the cell selects the
+                // row.
+                cell_info(ui, &response, selected, "");
                 // The row's band across the whole Register, for telling whether the
                 // pointer is on this row.
                 let band = Rect::from_x_y_ranges(
@@ -3966,15 +4279,13 @@ impl Cell<'_> {
                     .ctx()
                     .pointer_hover_pos()
                     .is_some_and(|pointer| band.contains(pointer) && viewport.contains(pointer));
-                let open = Popup::is_id_open(ui.ctx(), Popup::default_response_id(&response));
+                let menu = id.with("register_actions_menu");
+                let open = Popup::is_id_open(ui.ctx(), menu);
                 let mut action = None;
                 // The draft row is no transaction yet, so it has no commands.
                 let draft = row.id() == RowId::Draft;
-                if (selected || hovered || open) && !draft {
-                    action = actions_menu(ui, i18n, &response, access, row);
-                } else {
-                    // Hidden, the menu leaves an empty cell that selects the row.
-                    cell_info(ui, &response, selected, "");
+                if (selected || hovered || open) && !draft && !editing {
+                    action = actions_menu(ui, i18n, rect, menu, access, row);
                 }
                 return (response, action);
             }
@@ -4247,31 +4558,30 @@ fn paint_text(
     Some(painted)
 }
 
-/// The row's Actions menu: a ⋯ button on the right of the Actions cell, which opens
-/// the menu below it. The default fonts lack ⋯, so its dots are painted. Returns the
-/// command picked from the menu: Flag, or Unflag on a flagged `row`, Delete, and on a
-/// transfer, Go to its other side. A read-only row's Flag and Delete are disabled.
+/// The row's Actions menu, with id `menu`: a ⋯ button on the right of the Actions
+/// cell at `cell`, which opens the menu below it. The default fonts lack ⋯, so its
+/// dots are painted. Returns the command picked from the menu (see [`actions_items`]).
 fn actions_menu(
     ui: &egui::Ui,
     i18n: &Localizer,
-    response: &Response,
+    cell: Rect,
+    menu: Id,
     access: Access,
     row: &RegisterRow,
 ) -> Option<RowAction> {
-    let flagged = row.is_flagged();
+    let size = cell.height();
+    let button = Rect::from_center_size(
+        pos2(
+            cell.right() - Theme::EDGE_INSET - size / 2.0,
+            cell.center().y,
+        ),
+        vec2(size, size),
+    );
+    let response = ui.interact(button, menu.with("button"), Sense::click());
     let label = fl!(i18n, "register-actions");
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), &label));
-    let rect = response.rect;
-    if ui.is_rect_visible(rect) {
-        let size = rect.height();
-        let button = Rect::from_center_size(
-            pos2(
-                rect.right() - Theme::EDGE_INSET - size / 2.0,
-                rect.center().y,
-            ),
-            vec2(size, size),
-        );
-        let visuals = ui.style().interact(response);
+    if ui.is_rect_visible(button) {
+        let visuals = ui.style().interact(&response);
         if response.hovered() || response.is_pointer_button_down_on() {
             ui.painter().rect_filled(button, 0.0, visuals.weak_bg_fill);
         }
@@ -4283,26 +4593,192 @@ fn actions_menu(
             );
         }
     }
-    Popup::menu(response)
-        .show(|ui| {
-            let editable = access == Access::Editable;
-            let flag = Button::new(if flagged {
-                fl!(i18n, "register-actions-unflag")
-            } else {
-                fl!(i18n, "register-actions-flag")
-            });
-            let flag = ui
-                .add_enabled(editable, flag)
-                .clicked()
-                .then_some(RowAction::SetFlagged(!flagged));
-            let delete = Button::new(fl!(i18n, "register-actions-delete"));
-            let delete = ui
-                .add_enabled(editable, delete)
-                .clicked()
-                .then_some(RowAction::Delete);
-            flag.or(delete).or(go_to_item(ui, i18n, row))
-        })
+    Popup::menu(&response)
+        .id(menu)
+        .show(|ui| actions_items(ui, i18n, access, row))
         .and_then(|menu| menu.inner)
+}
+
+/// The items of `row`'s Actions menu, in the menu `ui`: Flag, or Unflag on a flagged
+/// row, Delete, and on a transfer, Go to its other side. A read-only row's Flag and
+/// Delete are disabled. Returns the command picked.
+fn actions_items(
+    ui: &mut egui::Ui,
+    i18n: &Localizer,
+    access: Access,
+    row: &RegisterRow,
+) -> Option<RowAction> {
+    let flagged = row.is_flagged();
+    let editable = access == Access::Editable;
+    let flag = Button::new(if flagged {
+        fl!(i18n, "register-actions-unflag")
+    } else {
+        fl!(i18n, "register-actions-flag")
+    });
+    let flag = ui
+        .add_enabled(editable, flag)
+        .clicked()
+        .then_some(RowAction::SetFlagged(!flagged));
+    let delete = Button::new(fl!(i18n, "register-actions-delete"));
+    let delete = ui
+        .add_enabled(editable, delete)
+        .clicked()
+        .then_some(RowAction::Delete);
+    if flag.or(delete).is_some() {
+        // Enter on a focused menu item leaves the menu open.
+        ui.close();
+    }
+    flag.or(delete).or(go_to_item(ui, i18n, row))
+}
+
+/// A button in the editing row's Actions cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowButton {
+    /// Save, or Add on the draft row: saves the row and keeps the cell cursor on it,
+    /// or adds the draft row and opens a fresh one.
+    Save,
+    /// Throws away the row's changes, as Esc does.
+    Cancel,
+    /// Asks for the transaction's split lines.
+    Split,
+    /// Opens the row's Actions menu.
+    More,
+}
+
+impl RowButton {
+    /// The buttons left to right, which is their Tab order.
+    const ALL: [Self; 4] = [Self::Save, Self::Cancel, Self::Split, Self::More];
+
+    /// The button's place in [`Self::ALL`].
+    fn index(self) -> usize {
+        match self {
+            Self::Save => 0,
+            Self::Cancel => 1,
+            Self::Split => 2,
+            Self::More => 3,
+        }
+    }
+
+    /// The button after this one, unless it is the last.
+    fn next(self) -> Option<Self> {
+        Self::ALL.get(self.index() + 1).copied()
+    }
+
+    /// The button before this one, unless it is the first.
+    fn previous(self) -> Option<Self> {
+        Self::ALL.get(self.index().checked_sub(1)?).copied()
+    }
+}
+
+/// One of the editing row's buttons, on its row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RowButtonAt {
+    row: RowId,
+    button: RowButton,
+}
+
+/// The editing row's buttons as drawn: their row, and each button's id, in the order
+/// of [`RowButton::ALL`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DrawnButtons {
+    row: RowId,
+    ids: [Id; 4],
+}
+
+impl DrawnButtons {
+    /// The button with `id`, if it is one of them.
+    fn button(self, id: Id) -> Option<RowButton> {
+        let index = self.ids.iter().position(|&drawn| drawn == id)?;
+        Some(RowButton::ALL[index])
+    }
+
+    /// The id of `button`.
+    fn id(self, button: RowButton) -> Id {
+        self.ids[button.index()]
+    }
+}
+
+/// What the editing row's buttons did in one frame.
+struct ButtonsShown {
+    drawn: DrawnButtons,
+    /// The button pressed, other than More, whose menu acts itself.
+    pressed: Option<RowButton>,
+    /// The command picked from More's menu.
+    action: Option<RowAction>,
+}
+
+/// Draws the editing `row`'s buttons in its Actions cell `ui`, left to right: Save, or
+/// Add on the draft row, Cancel, Split, and More actions, whose menu is the row's
+/// Actions menu. The draft row is no transaction yet, so its More is disabled. `focus`
+/// asks for keyboard focus on one of them.
+fn edit_buttons(
+    ui: &mut egui::Ui,
+    i18n: &Localizer,
+    access: Access,
+    row: &RegisterRow,
+    focus: Option<RowButton>,
+) -> ButtonsShown {
+    let draft = row.id() == RowId::Draft;
+    let mut ids = [Id::NULL; 4];
+    let mut pressed = None;
+    let mut action = None;
+    for (button, slot) in RowButton::ALL.into_iter().zip(&mut ids) {
+        let response = match button {
+            RowButton::Save if draft => ui.button(fl!(i18n, "register-row-add")),
+            RowButton::Save => ui.button(fl!(i18n, "register-row-save")),
+            RowButton::Cancel => ui.button(fl!(i18n, "register-row-cancel")),
+            RowButton::Split => ui.button(fl!(i18n, "register-row-split")),
+            RowButton::More => {
+                let more = Button::new((fl!(i18n, "register-row-more"), DROP_DOWN_GLYPH));
+                let response = ui.add_enabled(!draft, more);
+                let label = fl!(i18n, "register-row-more", "a11y");
+                response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, !draft, &label));
+                response
+            }
+        };
+        if focus == Some(button) {
+            response.request_focus();
+        }
+        if button == RowButton::More {
+            action = Popup::menu(&response)
+                .show(|ui| actions_items(ui, i18n, access, row))
+                .and_then(|menu| menu.inner);
+        } else if response.clicked() {
+            pressed = Some(button);
+        }
+        *slot = response.id;
+    }
+    ButtonsShown {
+        drawn: DrawnButtons { row: row.id(), ids },
+        pressed,
+        action,
+    }
+}
+
+/// The width of the editing row's buttons side by side in `ui`, with Save as wide as Add
+/// or Save, whichever is wider.
+fn buttons_width(ui: &egui::Ui, i18n: &Localizer) -> f32 {
+    let text = |text: &str| {
+        WidgetText::from(text)
+            .into_galley(
+                ui,
+                Some(TextWrapMode::Extend),
+                f32::INFINITY,
+                TextStyle::Button,
+            )
+            .size()
+            .x
+    };
+    let spacing = ui.spacing();
+    // A button is its content and padding wide.
+    let button = |content: f32| content + 2.0 * Theme::ROW_BUTTON_PADDING;
+    let save = text(&fl!(i18n, "register-row-save")).max(text(&fl!(i18n, "register-row-add")));
+    let more = text(&fl!(i18n, "register-row-more")) + spacing.icon_spacing + text(DROP_DOWN_GLYPH);
+    let buttons = button(save)
+        + button(text(&fl!(i18n, "register-row-cancel")))
+        + button(text(&fl!(i18n, "register-row-split")))
+        + button(more);
+    buttons + 3.0 * Theme::ROW_BUTTON_GAP
 }
 
 /// The Go to item of a menu on transfer `row`, which goes to its other side; no item

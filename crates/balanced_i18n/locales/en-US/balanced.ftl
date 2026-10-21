@@ -139,6 +139,17 @@ register-actions-unflag = Unflag
 # The Actions menu item on one side of a transfer that opens the other side's Register,
 # naming the other account as the Category cell does: Go to [Savings].
 register-actions-go-to = Go to { $account }
+# The buttons in the Actions cell of the row being edited. Save keeps the row's changes,
+# and on the row for a new transaction Add adds it in Save's place. Cancel throws the
+# changes away, and Split opens the transaction's split lines.
+register-row-save = Save
+register-row-add = Add
+register-row-cancel = Cancel
+register-row-split = Split
+# The button beside them that opens the row's menu of commands, shown as More ⏷, and
+# as assistive technology reads it.
+register-row-more = More
+    .a11y = More actions
 # A Flag cell, which flags or unflags its transaction, as assistive technology reads it.
 register-flag = Flag { $payee }, { $date }, { $amount }
 # A Clr cell, which marks its transaction Cleared or Uncleared, or asks before setting

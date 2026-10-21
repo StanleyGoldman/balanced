@@ -90,6 +90,17 @@ register-clr-cleared = Bestätigt
     .mark = b
 register-clr-reconciled = Abgeglichen
     .mark = A
+# GnuCash's "Save", "_Add" and "Cancel".
+register-row-save = Speichern
+register-row-add = Hinzufügen
+register-row-cancel = Abbrechen
+# GnuCash's "Split" as it names a multi-split transaction, "Mehrteilig". An adjective
+# where en-US has a verb; a native speaker should check it.
+register-row-split = Mehrteilig
+# Coined: GnuCash has no "More actions". .a11y follows GnuCash's "Actions",
+# "Aktionen".
+register-row-more = Mehr
+    .a11y = Weitere Aktionen
 register-new-transaction = + Buchung
 register-current-balance = Aktuell { $amount }
 register-ending-balance = Endsaldo { $amount }

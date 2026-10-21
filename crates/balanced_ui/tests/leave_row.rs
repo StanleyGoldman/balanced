@@ -74,9 +74,9 @@ fn click_cell(harness: &mut Harness<'static, App>, label: &str) {
     harness.run();
 }
 
-/// Clicks the button labelled `label`.
+/// Clicks the button labelled `label`, other than one in the editing row's toolbar.
 fn click_button(harness: &mut Harness<'static, App>, label: &str) {
-    harness.get_by_role_and_label(Role::Button, label).click();
+    dialog_button(harness, label).click();
     harness.run();
 }
 
@@ -165,6 +165,23 @@ fn rename_fresh_market(harness: &mut Harness<'static, App>) {
     open(harness, "Everyday Checking");
     click_cell(harness, "Fresh Market");
     type_text(harness, "Corner Shop");
+}
+
+/// The Dialog's button labelled `label`, not a button of the same name in the editing
+/// row's toolbar behind it.
+fn dialog_button<'tree>(
+    harness: &'tree Harness<'static, App>,
+    label: &'tree str,
+) -> egui_kittest::Node<'tree> {
+    harness
+        .query_all_by_role_and_label(Role::Button, label)
+        .find(|button| {
+            button
+                .accesskit_node()
+                .parent()
+                .is_none_or(|parent| parent.role() != Role::Toolbar)
+        })
+        .expect("the Dialog has the button")
 }
 
 #[test]
@@ -320,7 +337,7 @@ fn save_as_the_window_closes_saves_the_row() {
     rename_fresh_market(&mut harness);
     close_window(&mut harness);
 
-    harness.get_by_role_and_label(Role::Button, "Save").click();
+    dialog_button(&harness, "Save").click();
     // The save, then the close it asks for: more frames than `run` allows.
     harness.run_steps(8);
 
@@ -377,7 +394,7 @@ fn always_save_ticked_over_the_preferences_dialog_ticks_its_preference_too() {
     close_window(&mut harness);
     tick_always_save(&mut harness);
 
-    harness.get_by_role_and_label(Role::Button, "Save").click();
+    dialog_button(&harness, "Save").click();
     harness.run_steps(8);
 
     let preference = harness
@@ -517,17 +534,10 @@ fn save_a_rename(harness: &mut Harness<'static, App>) {
 /// Renames Bean There to Cafe and closes the cell, leaving the row changed with no
 /// text field focused.
 fn change_bean_there(harness: &mut Harness<'static, App>) {
-    // Bean There's Balance, five cells after its Payee.
-    let balance = harness
-        .query_all_by_role(Role::Cell)
-        .map(|cell| cell.accesskit_node().label().unwrap_or_default())
-        .skip_while(|label| label != "Bean There")
-        .nth(5)
-        .expect("Bean There's row has a Balance cell");
     click_cell(harness, "Bean There");
     type_text(harness, "Cafe");
-    // A cell of the same row that holds no cell cursor closes the edit.
-    click_cell(harness, &balance);
+    // A click on the row's Date cell closes the edit and opens nothing.
+    click_cell(harness, "9/6/2026");
 }
 
 #[test]
