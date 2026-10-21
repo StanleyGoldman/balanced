@@ -1046,6 +1046,15 @@ mod tests {
     }
 
     #[test]
+    fn an_edited_lines_transfer_naming_both_an_account_and_an_other_side_is_refused() {
+        let entry = r#"{"edit_transaction":{"transaction":12,"edit":{"lines":{"amount":-100,"lines":[{"transfer":{"account":8,"other_side":17},"memo":"","amount":-100}]}}}}"#;
+
+        let error = decode(entry, usd_code()).unwrap_err();
+
+        assert!(matches!(error, UndoEntryError::Json(_)), "{error:?}");
+    }
+
+    #[test]
     fn the_wire_format_of_every_command_is_frozen() {
         let entries = every_command()
             .iter()

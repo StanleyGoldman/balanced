@@ -755,3 +755,108 @@ fn undo_after_a_reopen_puts_back_the_old_lines_and_redo_the_new() {
     assert_eq!(undone.accounts(), before.accounts());
     assert_eq!(household.ledger.snapshot().accounts(), after.accounts());
 }
+
+#[test]
+fn a_new_line_to_the_transactions_own_account_is_refused() {
+    let mut household = Household::new();
+    let costco = household.shop();
+    let (groceries, checking) = (household.groceries, household.checking);
+    let before = household.ledger.snapshot();
+
+    let result = household.ledger.apply(lines_edit(
+        costco,
+        "-100.00",
+        vec![
+            EditedSplitLine::for_tests(groceries, "Food", usd("-60.00")),
+            EditedSplitLine::transfer_for_tests(checking, "Change jar", usd("-40.00")),
+        ],
+    ));
+
+    assert_eq!(
+        result.unwrap_err(),
+        DomainError::TransferToOwnAccount { account: checking }
+    );
+    assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
+}
+
+/// Asserts that giving Payday, with Savings closed, the lines `lines` makes from the
+/// ids of Rainy day's and Holiday's other sides and Groceries is refused, naming Savings,
+/// and changes nothing.
+fn assert_lines_refused_while_savings_is_closed(
+    lines: impl Fn([TransactionId; 2], CategoryId) -> Vec<EditedSplitLine>,
+) {
+    let mut household = Household::new();
+    let payday = household.save_from_a_split();
+    let sides = household.payday_sides();
+    let savings = household.savings;
+    household.apply(DomainCommand::SetAccountStatus {
+        account: savings,
+        status: AccountStatus::Closed,
+    });
+    let before = household.ledger.snapshot();
+
+    let result = household.ledger.apply(lines_edit(
+        payday,
+        "-350.00",
+        lines(sides, household.groceries),
+    ));
+
+    assert_eq!(
+        result.expect_err("the ledger refuses the lines"),
+        DomainError::TransferAccountClosed { account: savings }
+    );
+    assert_eq!(household.ledger.snapshot().accounts(), before.accounts());
+}
+
+#[test]
+fn dropping_a_line_whose_other_side_is_in_a_closed_account_is_refused_naming_it() {
+    assert_lines_refused_while_savings_is_closed(|_, groceries| {
+        vec![EditedSplitLine::for_tests(
+            groceries,
+            "Food",
+            usd("-350.00"),
+        )]
+    });
+}
+
+#[test]
+fn keeping_a_line_whose_other_side_is_in_a_closed_account_is_refused_naming_it() {
+    assert_lines_refused_while_savings_is_closed(|[rainy_day, holiday], groceries| {
+        vec![
+            EditedSplitLine::for_tests(groceries, "Snacks", usd("-50.00")),
+            EditedSplitLine::kept_for_tests(rainy_day, "Rainy day", usd("-200.00")),
+            EditedSplitLine::kept_for_tests(holiday, "Holiday", usd("-100.00")),
+        ]
+    });
+}
+
+#[test]
+fn lines_split_a_transfer_keeping_its_other_side() {
+    let mut household = Household::new();
+    let (groceries, savings) = (household.groceries, household.savings);
+    household.apply(DomainCommand::PostTransaction {
+        account: household.checking,
+        transaction: NewTransaction::transfer(date(6), "Saving up", savings, usd("-300.00")),
+    });
+    let sent = only(household.posted(household.checking)).id();
+    let received = only(household.posted(savings)).id();
+
+    household.split(
+        sent,
+        "-300.00",
+        vec![
+            EditedSplitLine::kept_for_tests(received, "Saving up", usd("-250.00")),
+            EditedSplitLine::for_tests(groceries, "Lunch", usd("-50.00")),
+        ],
+    );
+
+    let side = only(household.posted(savings));
+    assert_eq!(
+        (side.id(), side.allocation(), side.amount()),
+        (received, &Allocation::Transfer(sent), usd("250.00"))
+    );
+    assert_eq!(
+        lines(&only(household.posted(household.checking)))[0].0,
+        SplitTarget::Transfer(received)
+    );
+}

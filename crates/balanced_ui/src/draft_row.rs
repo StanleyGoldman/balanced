@@ -61,7 +61,7 @@ impl Draft {
             }
             TransactionEdit::Amount(amount) => self.amount = Some(amount),
             // The draft row's Clr cell is empty: a posted transaction starts uncleared.
-            // TODO(#426): the draft row keeps the Split dialog's lines.
+            // It holds no split lines yet. TODO(#426): keep the Split dialog's lines.
             TransactionEdit::ClearedStatus(_) | TransactionEdit::Lines { .. } => {}
         }
     }

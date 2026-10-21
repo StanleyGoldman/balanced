@@ -180,7 +180,10 @@ pub enum TransactionEdit {
     /// account a split. The lines must add up to `amount`, which becomes the
     /// transaction's amount. A new line to an account gets an other side there, with
     /// the line's memo; a kept line's other side takes the line's new amount; and the
-    /// other side of every line the edit drops is deleted.
+    /// other side of every line the edit drops is deleted. A kept line names one of the
+    /// transaction's other sides, at most once, or the edit fails with
+    /// [`DomainError::UnknownTransaction`]. While any of the transaction's other sides is
+    /// in a closed account, its lines can't change.
     Lines {
         amount: Money,
         lines: Vec<EditedSplitLine>,
@@ -259,6 +262,7 @@ pub enum DomainError {
     OpeningBalancePayee { transaction: TransactionId },
     /// The command put the whole amount in one category or account, but the transaction
     /// is the opening balance, which has no category, or is split between categories.
+    /// Or it gave the opening balance split lines.
     #[error("the transaction isn't in one category or account: {transaction:?}")]
     NotInOneCategory { transaction: TransactionId },
     /// No category has the id, perhaps because it was deleted.
@@ -276,8 +280,8 @@ pub enum DomainError {
     /// A balance would no longer fit in an amount.
     #[error(transparent)]
     Money(#[from] MoneyError),
-    /// The command gave a split transaction an amount. Its amount is the sum of its
-    /// lines.
+    /// The command gave a split transaction an amount, or split lines that don't add up
+    /// to the amount it gave with them. A split's amount is the sum of its lines.
     #[error("a split transaction's amount is the sum of its lines: {transaction:?}")]
     SplitAmount { transaction: TransactionId },
     /// The command gave a transaction an amount in another currency than its account's.
