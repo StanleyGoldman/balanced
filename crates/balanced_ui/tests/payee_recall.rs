@@ -5,7 +5,7 @@
 
 use balanced_core::{
     AccountId, AccountStatus, AccountSummary, CategoryId, CurrencyCode, DomainCommand, Ledger,
-    Money, NewSplitLine, NewTransaction,
+    Money, NewSplitLine, NewTransaction, RegisterEntry, TransactionEdit,
 };
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
@@ -76,11 +76,16 @@ fn category(ledger: &Ledger, name: &str) -> CategoryId {
         .id()
 }
 
+/// `amount`, a decimal, in US dollars.
+fn usd(amount: &str) -> Money {
+    let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
+    Money::new(amount.parse().expect("a decimal"), usd).expect("an amount")
+}
+
 /// Posts a payment of `amount` to Corner Cafe in Joint Checking, on `day` October
 /// 2026, in the stub category named `category_name`.
 fn pay_corner_cafe(ledger: &mut Ledger, day: u8, category_name: &str, amount: &str) {
-    let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
-    let amount = Money::new(amount.parse().expect("a decimal"), usd).expect("an amount");
+    let amount = usd(amount);
     let date = Date::try_new_iso(2026, 10, day).expect("a day of October 2026");
     let transaction =
         NewTransaction::new(date, "Corner Cafe", category(ledger, category_name), amount);
@@ -95,8 +100,7 @@ fn pay_corner_cafe(ledger: &mut Ledger, day: u8, category_name: &str, amount: &s
 /// Posts a transfer of `amount` from the stub account named `from` to the one named
 /// `to`, to "Saving up" on 1 October 2026, with memo "Monthly top-up".
 fn transfer(ledger: &mut Ledger, from: &str, to: &str, amount: &str) {
-    let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
-    let amount = Money::new(amount.parse().expect("a decimal"), usd).expect("an amount");
+    let amount = usd(amount);
     let date = Date::try_new_iso(2026, 10, 1).expect("1 October 2026 is a date");
     let transaction = NewTransaction::transfer(date, "Saving up", account(ledger, to), amount)
         .memo("Monthly top-up");
@@ -106,6 +110,27 @@ fn transfer(ledger: &mut Ledger, from: &str, to: &str, amount: &str) {
             transaction,
         })
         .expect("the stub takes the transfer");
+}
+
+/// Renames the payee of the transaction to "Saving up" in the stub account named `name`
+/// to `payee`.
+fn rename_saving_up_in(ledger: &mut Ledger, name: &str, payee: &str) {
+    let snapshot = ledger.snapshot();
+    let transaction = snapshot
+        .account(account(ledger, name))
+        .expect("the stub has the account")
+        .register()
+        .iter()
+        .map(RegisterEntry::transaction)
+        .find(|transaction| transaction.payee() == "Saving up")
+        .expect("the account has the transfer")
+        .id();
+    ledger
+        .apply(DomainCommand::EditTransaction {
+            transaction,
+            edit: TransactionEdit::Payee(payee.to_owned()),
+        })
+        .expect("the stub renames the payee");
 }
 
 /// Closes the stub account named `name`.
@@ -732,20 +757,13 @@ fn a_transfer_into_this_account_from_one_now_closed_fills_memo_and_amount_but_no
 #[test]
 fn a_split_fills_memo_and_its_total_but_no_category() {
     let mut ledger = Ledger::stub();
-    let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
-    let money =
-        |amount: &str| Money::new(amount.parse().expect("a decimal"), usd).expect("an amount");
     // Its line to Emergency Fund puts a transfer with the same payee there too.
     let transaction = NewTransaction::split_for_tests(
         Date::try_new_iso(2026, 10, 1).expect("1 October 2026 is a date"),
         "Warehouse Club",
         vec![
-            NewSplitLine::for_tests(category(&ledger, "Groceries"), "", money("-60.00")),
-            NewSplitLine::transfer_for_tests(
-                account(&ledger, "Emergency Fund"),
-                "",
-                money("-40.00"),
-            ),
+            NewSplitLine::for_tests(category(&ledger, "Groceries"), "", usd("-60.00")),
+            NewSplitLine::transfer_for_tests(account(&ledger, "Emergency Fund"), "", usd("-40.00")),
         ],
     )
     .memo("Monthly stock-up");
@@ -801,4 +819,47 @@ fn a_category_typed_before_a_transfers_payee_is_kept() {
             "",
         ]
     );
+}
+
+#[test]
+fn a_payee_only_the_far_side_of_a_transfer_has_recalls_that_side() {
+    let mut ledger = Ledger::stub();
+    transfer(&mut ledger, "Joint Checking", "Emergency Fund", "-200.00");
+    rename_saving_up_in(&mut ledger, "Emergency Fund", "Rainy day");
+    let mut harness = everyday_checking_on(ledger);
+    type_payee(&mut harness, "Rainy day");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(
+        draft_row(&harness),
+        [
+            "",
+            "",
+            "Rainy day",
+            "[Joint Checking]",
+            "Monthly top-up",
+            "",
+            "200.00",
+        ]
+    );
+}
+
+#[test]
+fn with_payee_recall_off_a_transfers_payee_fills_nothing() {
+    let dir = tempfile::tempdir().expect("the test machine can make a temporary directory");
+    std::fs::write(
+        dir.path().join("preferences.toml"),
+        "version = 2\npayee_recall = false\n",
+    )
+    .expect("the test can write the preferences file");
+    let mut ledger = Ledger::stub();
+    transfer(&mut ledger, "Joint Checking", "Emergency Fund", "-200.00");
+    let mut harness = app_with(ledger, PreferencesFile::in_dir(dir.path()));
+    open_everyday_checking(&mut harness);
+    type_payee(&mut harness, "Saving up");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(draft_row(&harness), ["", "", "Saving up", "", "", "", ""]);
 }

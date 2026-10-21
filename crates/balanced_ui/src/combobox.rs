@@ -12,7 +12,7 @@ use balanced_core::{
 use balanced_i18n::Localizer;
 use icu_locale::Locale;
 
-use crate::register_model::{category_text, transfer_text};
+use crate::register_model::{category_text, transactions_by_id, transfer_text};
 
 /// One entry a combobox offers: the text it shows and enters, and the value it stands
 /// for.
@@ -229,16 +229,27 @@ impl FieldChoices {
 
 impl Recalled {
     /// What recalling each payee of `transactions` fills in `account`'s draft row, by
-    /// the payee's key: from its latest transaction, by date and then by id. A transfer
-    /// recalls from the side that was posted, not the other side made for it, which has
-    /// the later id.
+    /// the payee's key: from its latest transaction, by date and then by id. Of a
+    /// transfer's two sides with one payee, it is the side that was posted, not the
+    /// other side made for it.
     fn by_payee<'a>(
         transactions: impl Iterator<Item = &'a Transaction>,
-        view: &LedgerView,
+        view: &'a LedgerView,
         account: AccountId,
     ) -> HashMap<String, Self> {
+        let by_id = transactions_by_id(view);
+        let side = |id| {
+            *by_id
+                .get(&id)
+                .expect("a transfer's sides are in its snapshot")
+        };
         let mut latest: HashMap<String, &Transaction> = HashMap::new();
-        for transaction in transactions.filter(|transaction| !is_made_other_side(transaction)) {
+        for transaction in transactions {
+            if let Some(posted) = posted_side(transaction)
+                && payee_key(side(posted).1.payee()) == payee_key(transaction.payee())
+            {
+                continue;
+            }
             latest
                 .entry(payee_key(transaction.payee()))
                 .and_modify(|kept| {
@@ -248,32 +259,15 @@ impl Recalled {
                 })
                 .or_insert(transaction);
         }
-        let holders: HashMap<TransactionId, &Account> = view
-            .accounts()
-            .iter()
-            .flat_map(|summary| {
-                let holder = summary.account();
-                summary
-                    .register()
-                    .iter()
-                    .map(move |entry| (entry.transaction().id(), holder))
-            })
-            .collect();
         let currency = view
             .account(account)
             .map(|summary| summary.account().currency());
+        // A transfer to a closed account can't be posted.
+        let transfer_to =
+            |other: &Account| (!other.is_closed()).then(|| CategoryTarget::Transfer(other.id()));
         latest
             .into_iter()
             .filter_map(|(key, transaction)| {
-                let holder = |id| {
-                    *holders
-                        .get(&id)
-                        .expect("a transfer's sides are in its snapshot")
-                };
-                // A transfer to a closed account can't be posted.
-                let transfer = |holder: &Account| {
-                    (!holder.is_closed()).then(|| CategoryTarget::Transfer(holder.id()))
-                };
                 let (category, amount) = match *transaction.allocation() {
                     Allocation::Category(category) => (
                         Some(CategoryTarget::Category(category)),
@@ -281,11 +275,11 @@ impl Recalled {
                     ),
                     // Seen from its other side, the transfer comes from the source's
                     // account, for the amount with its sign flipped.
-                    Allocation::Transfer(other_side) if holder(other_side).id() == account => {
-                        (transfer(holder(transaction.id())), -transaction.amount())
+                    Allocation::Transfer(other_side) if side(other_side).0.id() == account => {
+                        (transfer_to(side(transaction.id()).0), -transaction.amount())
                     }
                     Allocation::Transfer(other_side) => {
-                        (transfer(holder(other_side)), transaction.amount())
+                        (transfer_to(side(other_side).0), transaction.amount())
                     }
                     // The draft row holds one category until #212.
                     Allocation::Split(_) => (None, transaction.amount()),
@@ -304,10 +298,17 @@ impl Recalled {
     }
 }
 
-/// Whether `transaction` is the other side made for a transfer or a split line posted
-/// in another account: it took an id after the one it points at.
-fn is_made_other_side(transaction: &Transaction) -> bool {
-    matches!(*transaction.allocation(), Allocation::Transfer(other_side) if other_side < transaction.id())
+/// The transaction a transfer or split line was posted as, when `transaction` is the
+/// other side made for it in another account. Posting gives the other side, and
+/// changing a transfer's account gives the new one, an id after the posted side's.
+fn posted_side(transaction: &Transaction) -> Option<TransactionId> {
+    match *transaction.allocation() {
+        Allocation::Transfer(other_side) if other_side < transaction.id() => Some(other_side),
+        Allocation::Transfer(_)
+        | Allocation::OpeningBalance
+        | Allocation::Category(_)
+        | Allocation::Split(_) => None,
+    }
 }
 
 /// The key a payee is remembered by: its text, trimmed, in lower case.
