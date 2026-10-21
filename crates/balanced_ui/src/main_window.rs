@@ -554,7 +554,7 @@ impl MainWindow {
             if !actions.is_empty() {
                 self.menu_nav.close(ui.ctx());
                 if let Some(register) = self.register_mut() {
-                    register.commit_edit(ui.ctx(), i18n, commands);
+                    register.commit_edit(ui.ctx(), i18n, preferences, commands);
                 }
             }
             for action in actions {

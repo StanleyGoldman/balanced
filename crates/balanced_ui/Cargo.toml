@@ -129,6 +129,10 @@ name = "new_category"
 required-features = ["test-support"]
 
 [[test]]
+name = "payee_recall"
+required-features = ["test-support"]
+
+[[test]]
 name = "preferences"
 required-features = ["test-support"]
 
