@@ -6,8 +6,8 @@
 use std::collections::{BTreeSet, HashMap};
 
 use balanced_core::{
-    AccountId, AccountSummary, Allocation, CategoryId, Generation, LedgerView, Money,
-    RegisterEntry, Transaction,
+    Account, AccountId, AccountSummary, Allocation, CategoryId, Generation, LedgerView, Money,
+    RegisterEntry, Transaction, TransactionId,
 };
 use balanced_i18n::Localizer;
 use icu_locale::Locale;
@@ -116,7 +116,9 @@ pub(crate) enum CategoryTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Recalled {
     payee: String,
-    category: CategoryTarget,
+    /// `None` when the transaction is a split, or a transfer whose account to fill in
+    /// is closed.
+    category: Option<CategoryTarget>,
     memo: String,
     /// `None` when the transaction's amount is in another currency than the account
     /// whose Register recalls it.
@@ -128,7 +130,7 @@ impl Recalled {
         &self.payee
     }
 
-    pub(crate) fn category(&self) -> CategoryTarget {
+    pub(crate) fn category(&self) -> Option<CategoryTarget> {
         self.category
     }
 
@@ -227,15 +229,16 @@ impl FieldChoices {
 
 impl Recalled {
     /// What recalling each payee of `transactions` fills in `account`'s draft row, by
-    /// the payee's key: from its latest transaction, by date and then by id, when that
-    /// one is in one category.
+    /// the payee's key: from its latest transaction, by date and then by id. A transfer
+    /// recalls from the side that was posted, not the other side made for it, which has
+    /// the later id.
     fn by_payee<'a>(
         transactions: impl Iterator<Item = &'a Transaction>,
         view: &LedgerView,
         account: AccountId,
     ) -> HashMap<String, Self> {
         let mut latest: HashMap<String, &Transaction> = HashMap::new();
-        for transaction in transactions {
+        for transaction in transactions.filter(|transaction| !is_made_other_side(transaction)) {
             latest
                 .entry(payee_key(transaction.payee()))
                 .and_modify(|kept| {
@@ -245,20 +248,53 @@ impl Recalled {
                 })
                 .or_insert(transaction);
         }
+        let holders: HashMap<TransactionId, &Account> = view
+            .accounts()
+            .iter()
+            .flat_map(|summary| {
+                let holder = summary.account();
+                summary
+                    .register()
+                    .iter()
+                    .map(move |entry| (entry.transaction().id(), holder))
+            })
+            .collect();
         let currency = view
             .account(account)
             .map(|summary| summary.account().currency());
         latest
             .into_iter()
             .filter_map(|(key, transaction)| {
-                // TODO(#384): recall from a transfer or a split too.
-                let Allocation::Category(category) = *transaction.allocation() else {
-                    return None;
+                let holder = |id| {
+                    *holders
+                        .get(&id)
+                        .expect("a transfer's sides are in its snapshot")
                 };
-                let amount = transaction.amount();
+                // A transfer to a closed account can't be posted.
+                let transfer = |holder: &Account| {
+                    (!holder.is_closed()).then(|| CategoryTarget::Transfer(holder.id()))
+                };
+                let (category, amount) = match *transaction.allocation() {
+                    Allocation::Category(category) => (
+                        Some(CategoryTarget::Category(category)),
+                        transaction.amount(),
+                    ),
+                    // Seen from its other side, the transfer comes from the source's
+                    // account, for the amount with its sign flipped.
+                    Allocation::Transfer(other_side) if holder(other_side).id() == account => {
+                        (transfer(holder(transaction.id())), -transaction.amount())
+                    }
+                    Allocation::Transfer(other_side) => {
+                        (transfer(holder(other_side)), transaction.amount())
+                    }
+                    // The draft row holds one category until #212.
+                    Allocation::Split(_) => (None, transaction.amount()),
+                    // Opening balances have no payee to recall.
+                    Allocation::OpeningBalance => return None,
+                };
                 let recalled = Self {
                     payee: transaction.payee().to_owned(),
-                    category: CategoryTarget::Category(category),
+                    category,
                     memo: transaction.memo().to_owned(),
                     amount: (Some(amount.currency()) == currency).then_some(amount),
                 };
@@ -266,6 +302,12 @@ impl Recalled {
             })
             .collect()
     }
+}
+
+/// Whether `transaction` is the other side made for a transfer or a split line posted
+/// in another account: it took an id after the one it points at.
+fn is_made_other_side(transaction: &Transaction) -> bool {
+    matches!(*transaction.allocation(), Allocation::Transfer(other_side) if other_side < transaction.id())
 }
 
 /// The key a payee is remembered by: its text, trimmed, in lower case.

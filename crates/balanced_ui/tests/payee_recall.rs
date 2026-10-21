@@ -4,8 +4,8 @@
 //! transaction has fills the draft row's empty cells from that transaction.
 
 use balanced_core::{
-    AccountId, AccountSummary, CategoryId, CurrencyCode, DomainCommand, Ledger, Money,
-    NewTransaction,
+    AccountId, AccountStatus, AccountSummary, CategoryId, CurrencyCode, DomainCommand, Ledger,
+    Money, NewSplitLine, NewTransaction,
 };
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
@@ -90,6 +90,32 @@ fn pay_corner_cafe(ledger: &mut Ledger, day: u8, category_name: &str, amount: &s
             transaction,
         })
         .expect("the stub takes the payment");
+}
+
+/// Posts a transfer of `amount` from the stub account named `from` to the one named
+/// `to`, to "Saving up" on 1 October 2026, with memo "Monthly top-up".
+fn transfer(ledger: &mut Ledger, from: &str, to: &str, amount: &str) {
+    let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
+    let amount = Money::new(amount.parse().expect("a decimal"), usd).expect("an amount");
+    let date = Date::try_new_iso(2026, 10, 1).expect("1 October 2026 is a date");
+    let transaction = NewTransaction::transfer(date, "Saving up", account(ledger, to), amount)
+        .memo("Monthly top-up");
+    ledger
+        .apply(DomainCommand::PostTransaction {
+            account: account(ledger, from),
+            transaction,
+        })
+        .expect("the stub takes the transfer");
+}
+
+/// Closes the stub account named `name`.
+fn close(ledger: &mut Ledger, name: &str) {
+    ledger
+        .apply(DomainCommand::SetAccountStatus {
+            account: account(ledger, name),
+            status: AccountStatus::Closed,
+        })
+        .expect("the stub closes the account");
 }
 
 /// The App on `ledger` with Everyday Checking open, its cell cursor on the draft row's
@@ -584,5 +610,195 @@ fn turning_payee_recall_off_in_the_preferences_dialog_stops_it_on_ok() {
     assert_eq!(
         draft_row(&harness),
         ["", "", "Trattoria Roma", "", "", "", ""]
+    );
+}
+
+#[test]
+fn a_transfer_between_two_other_accounts_fills_the_account_it_went_to() {
+    let mut ledger = Ledger::stub();
+    transfer(&mut ledger, "Joint Checking", "Emergency Fund", "-200.00");
+    let mut harness = everyday_checking_on(ledger);
+    type_payee(&mut harness, "Saving up");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(
+        draft_row(&harness),
+        [
+            "",
+            "",
+            "Saving up",
+            "[Emergency Fund]",
+            "Monthly top-up",
+            "200.00",
+            "",
+        ]
+    );
+}
+
+#[test]
+fn a_transfer_from_this_account_fills_the_account_it_went_to() {
+    let mut ledger = Ledger::stub();
+    transfer(
+        &mut ledger,
+        "Everyday Checking",
+        "Emergency Fund",
+        "-200.00",
+    );
+    let mut harness = everyday_checking_on(ledger);
+    type_payee(&mut harness, "Saving up");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(
+        draft_row(&harness),
+        [
+            "",
+            "",
+            "Saving up",
+            "[Emergency Fund]",
+            "Monthly top-up",
+            "200.00",
+            "",
+        ]
+    );
+}
+
+#[test]
+fn a_transfer_into_this_account_fills_the_account_it_came_from_and_flips_the_amount() {
+    let mut ledger = Ledger::stub();
+    transfer(
+        &mut ledger,
+        "Joint Checking",
+        "Everyday Checking",
+        "-200.00",
+    );
+    let mut harness = everyday_checking_on(ledger);
+    type_payee(&mut harness, "Saving up");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(
+        draft_row(&harness),
+        [
+            "",
+            "",
+            "Saving up",
+            "[Joint Checking]",
+            "Monthly top-up",
+            "",
+            "200.00",
+        ]
+    );
+}
+
+#[test]
+fn a_transfer_to_an_account_now_closed_fills_memo_and_amount_but_no_category() {
+    let mut ledger = Ledger::stub();
+    transfer(&mut ledger, "Joint Checking", "Emergency Fund", "-200.00");
+    close(&mut ledger, "Emergency Fund");
+    let mut harness = everyday_checking_on(ledger);
+    type_payee(&mut harness, "Saving up");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(
+        draft_row(&harness),
+        ["", "", "Saving up", "", "Monthly top-up", "200.00", ""]
+    );
+}
+
+#[test]
+fn a_transfer_into_this_account_from_one_now_closed_fills_memo_and_amount_but_no_category() {
+    let mut ledger = Ledger::stub();
+    transfer(
+        &mut ledger,
+        "Emergency Fund",
+        "Everyday Checking",
+        "-200.00",
+    );
+    close(&mut ledger, "Emergency Fund");
+    let mut harness = everyday_checking_on(ledger);
+    type_payee(&mut harness, "Saving up");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(
+        draft_row(&harness),
+        ["", "", "Saving up", "", "Monthly top-up", "", "200.00"]
+    );
+}
+
+#[test]
+fn a_split_fills_memo_and_its_total_but_no_category() {
+    let mut ledger = Ledger::stub();
+    let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
+    let money =
+        |amount: &str| Money::new(amount.parse().expect("a decimal"), usd).expect("an amount");
+    // Its line to Emergency Fund puts a transfer with the same payee there too.
+    let transaction = NewTransaction::split_for_tests(
+        Date::try_new_iso(2026, 10, 1).expect("1 October 2026 is a date"),
+        "Warehouse Club",
+        vec![
+            NewSplitLine::for_tests(category(&ledger, "Groceries"), "", money("-60.00")),
+            NewSplitLine::transfer_for_tests(
+                account(&ledger, "Emergency Fund"),
+                "",
+                money("-40.00"),
+            ),
+        ],
+    )
+    .memo("Monthly stock-up");
+    ledger
+        .apply(DomainCommand::PostTransaction {
+            account: account(&ledger, "Joint Checking"),
+            transaction,
+        })
+        .expect("the stub takes the split");
+    let mut harness = everyday_checking_on(ledger);
+    type_payee(&mut harness, "Warehouse Club");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(
+        draft_row(&harness),
+        [
+            "",
+            "",
+            "Warehouse Club",
+            "",
+            "Monthly stock-up",
+            "100.00",
+            ""
+        ]
+    );
+}
+
+#[test]
+fn a_category_typed_before_a_transfers_payee_is_kept() {
+    let mut ledger = Ledger::stub();
+    transfer(&mut ledger, "Joint Checking", "Emergency Fund", "-200.00");
+    let mut harness = everyday_checking_on(ledger);
+    // Date, Num, Payee, Category.
+    for _ in 0..3 {
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+    }
+    type_text(&mut harness, "Shopping");
+    press(&mut harness, Modifiers::SHIFT, Key::Tab);
+    type_text(&mut harness, "Saving up");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(
+        draft_row(&harness),
+        [
+            "",
+            "",
+            "Saving up",
+            "Shopping",
+            "Monthly top-up",
+            "200.00",
+            "",
+        ]
     );
 }
