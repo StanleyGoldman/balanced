@@ -370,6 +370,10 @@ dialog-category-list-category = Category
 # How many transactions and split lines are in a category or transfer to an account.
 dialog-category-list-txns = Txns
 dialog-category-list-total = Total
+# The triangle that hides or shows the categories under the category named $name, for
+# screen readers.
+dialog-category-list-collapse = Collapse { $name }
+dialog-category-list-expand = Expand { $name }
 # A row's usage, as a screen reader reads it after the row's name. $total is an amount.
 dialog-category-list-usage = { $count ->
         [one] 1 transaction

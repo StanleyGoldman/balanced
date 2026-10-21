@@ -3,7 +3,9 @@
 //! Reading the category tree and its usage in the Category List, driven through the
 //! AccessKit tree the way a user drives it.
 
-use balanced_core::Ledger;
+use balanced_core::{
+    AccountId, AccountSummary, CurrencyCode, DomainCommand, Ledger, Money, NewTransaction,
+};
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::egui::accesskit::Role;
@@ -46,6 +48,18 @@ fn category_list() -> Harness<'static, App> {
     harness
 }
 
+/// The id of the stub account named `name`.
+fn account(ledger: &Ledger, name: &str) -> AccountId {
+    ledger
+        .snapshot()
+        .accounts()
+        .iter()
+        .map(AccountSummary::account)
+        .find(|account| account.name() == name)
+        .expect("the stub has the account")
+        .id()
+}
+
 /// Whether the Category List is open.
 fn is_open(harness: &Harness<'static, App>) -> bool {
     harness
@@ -83,6 +97,32 @@ fn shows(harness: &Harness<'static, App>, text: &str) -> bool {
     harness
         .query_all_by_role(Role::Label)
         .any(|label| label.accesskit_node().value().as_deref() == Some(text))
+}
+
+/// Whether the row named `name` shows the categories under it, as a screen reader
+/// reads it.
+fn expanded(harness: &Harness<'static, App>, name: &str) -> Option<bool> {
+    harness
+        .get_by_role_and_label(Role::TreeItem, name)
+        .accesskit_node()
+        .data()
+        .is_expanded()
+}
+
+/// The names of the rows the Category List lays out, top to bottom, down to the first
+/// transfer row.
+fn categories(harness: &Harness<'static, App>) -> Vec<String> {
+    tree(harness)
+        .into_iter()
+        .map(|(_, name)| name)
+        .take_while(|name| !name.starts_with('['))
+        .collect()
+}
+
+/// Clicks the button labelled `label`, then runs the App until it settles.
+fn click(harness: &mut Harness<'static, App>, label: &str) {
+    harness.get_by_role_and_label(Role::Button, label).click();
+    harness.run();
 }
 
 /// Presses `key` with no modifiers, then runs the App until it settles.
@@ -199,4 +239,79 @@ fn the_txns_and_total_cells_show_the_usage() {
 
     assert!(shows(&harness, "8,005"));
     assert!(shows(&harness, "-$660,303.59"));
+}
+
+#[test]
+fn a_transfer_row_counts_the_transfers_to_its_account() {
+    let mut ledger = Ledger::stub();
+    let usd = CurrencyCode::new("USD").unwrap();
+    ledger
+        .apply(DomainCommand::PostTransaction {
+            account: account(&ledger, "Joint Checking"),
+            transaction: NewTransaction::transfer(
+                Date::try_new_iso(2026, 10, 1).unwrap(),
+                "Monthly saving",
+                account(&ledger, "Emergency Fund"),
+                Money::new("-200.00".parse().unwrap(), usd).unwrap(),
+            ),
+        })
+        .unwrap();
+    let mut harness = app_on(ledger);
+
+    open_category_list(&mut harness);
+
+    assert_eq!(
+        usage(&harness, "[Emergency Fund]"),
+        "1 transaction, totalling -$200.00"
+    );
+    assert_eq!(
+        usage(&harness, "[Joint Checking]"),
+        "1 transaction, totalling $200.00"
+    );
+    assert_eq!(usage(&harness, "[Everyday Checking]"), "No transactions");
+}
+
+#[test]
+fn collapsing_a_parent_hides_every_category_under_it() {
+    let mut harness = category_list();
+
+    click(&mut harness, "Collapse Food & Dining");
+
+    assert_eq!(
+        categories(&harness)[3..6],
+        ["Food & Dining", "Home", "Insurance"]
+    );
+    assert_eq!(expanded(&harness, "Food & Dining"), Some(false));
+}
+
+#[test]
+fn expanding_a_parent_shows_its_categories_again() {
+    let mut harness = category_list();
+    click(&mut harness, "Collapse Food & Dining");
+
+    click(&mut harness, "Expand Food & Dining");
+
+    assert_eq!(
+        categories(&harness)[3..8],
+        [
+            "Food & Dining",
+            "Groceries",
+            "Restaurants",
+            "Coffee Shops",
+            "Home"
+        ]
+    );
+    assert_eq!(expanded(&harness, "Food & Dining"), Some(true));
+}
+
+#[test]
+fn a_category_with_none_under_it_has_no_fold() {
+    let harness = category_list();
+
+    assert_eq!(expanded(&harness, "Groceries"), None);
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Collapse Groceries")
+            .is_none()
+    );
 }

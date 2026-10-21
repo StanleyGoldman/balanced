@@ -10,7 +10,7 @@ use balanced_core::AccountId;
 use balanced_i18n::Localizer;
 use eframe::egui::{
     self, Button, Color32, Event, Frame, Galley, Id, Panel, PanelState, Rect, Response, RichText,
-    ScrollArea, Sense, Shape, Stroke, StrokeKind, TextStyle, TextWrapMode, UiBuilder, WidgetInfo,
+    ScrollArea, Sense, Stroke, StrokeKind, TextStyle, TextWrapMode, UiBuilder, WidgetInfo,
     WidgetText, WidgetType, pos2, vec2,
 };
 
@@ -22,7 +22,7 @@ use crate::layout::Layout;
 use crate::preferences::{NetWorthPlacement, Preferences};
 use crate::route::Route;
 use crate::theme::Theme;
-use crate::triangle_button::{Direction, triangle_button};
+use crate::triangle_button::{Direction, Fold, fold_triangle, triangle_button};
 use crate::user_action::UserAction;
 
 /// Whether the Account bar shows its accounts or is folded to a narrow rail.
@@ -449,13 +449,6 @@ fn account_menu(ui: &mut egui::Ui, i18n: &Localizer, commands: &CommandSender, a
 /// The width of the rail the Account bar folds to.
 const RAIL_WIDTH: f32 = 28.0;
 
-/// Whether a section shows its accounts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Fold {
-    Open,
-    Folded,
-}
-
 /// The width of the fold triangle's column, which also indents the account rows.
 fn icon_column(ui: &egui::Ui) -> f32 {
     ui.spacing().icon_width + ui.spacing().item_spacing.x
@@ -556,16 +549,6 @@ fn whole_on_hover(response: Response, elided: bool, text: impl Into<WidgetText>)
     } else {
         response
     }
-}
-
-/// ▾ when the section is open and ▸ when it is folded, filling `icon`. The default
-/// fonts lack both glyphs, so the triangle is painted.
-fn fold_triangle(icon: Rect, fold: Fold, color: Color32) -> Shape {
-    let points = match fold {
-        Fold::Open => vec![icon.left_top(), icon.right_top(), icon.center_bottom()],
-        Fold::Folded => vec![icon.left_top(), icon.right_center(), icon.left_bottom()],
-    };
-    Shape::convex_polygon(points, color, Stroke::NONE)
 }
 
 /// An account row: the name on the left and the balance on the right, indented under
