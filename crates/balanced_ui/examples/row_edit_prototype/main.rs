@@ -1959,6 +1959,9 @@ impl Proto {
                     .rect_filled(ui.max_rect().expand2(vec2(4.0, 0.0)), 0.0, highlight);
             }
             if in_place {
+                // Leave room inside the row for the focus outline, which the cell clips.
+                ui.spacing_mut().button_padding.y = 1.0;
+                ui.spacing_mut().interact_size.y = self.theme.row_height() - 6.0;
                 self.edit_buttons(ui, Surface::Row, Which::Full);
             } else if selected && target != Target::Draft {
                 let r = ui.menu_button("Actions…", |ui| {
