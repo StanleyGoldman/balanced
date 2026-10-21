@@ -82,6 +82,7 @@ egui_kittest finds widgets through the same AccessKit tree a screen reader uses,
 
 - Every interactive custom-painted widget (Register rows, Account bar entries) calls `Response::widget_info` with the correct role and label.
 - Every text field has a visible label, or is connected to one with `.labelled_by(label.id)`.
+- egui gives a widget's AccessKit node its bounds only when the widget is focusable. A widget interacted with `Sense::CLICK`, which is clickable but no Tab stop (a tree row other than the selected one, a fold triangle), has a node with no rect, so a screen reader can't locate it and kittest's `click()` panics with "Every egui node should have a rect". Give such a node its bounds in `accesskit_node_builder` with `node.set_bounds(..)` from `response.rect`, or call `widget_info`, which fills them. `name_cell` in `crates/balanced_ui/src/category_list.rs` does the first.
 - Mark the chosen item of a set (a calendar's marked day, a list's highlighted row) with `ctx.accesskit_node_builder(response.id, |node| node.set_selected(true))`. egui writes `WidgetInfo::selected` to AccessKit as *toggled*, a checkbox's checked state, so a test reading `is_selected()` sees `None`.
 - A right-to-left layout (`Sides`' right side, `ui.horizontal` inside it) reaches AccessKit in the order widgets are added, so a screen reader reads its widgets in reverse of what the screen shows. Draw a name and its value as one `Label`, a `LayoutJob` built from one Fluent message, as the context header does with Current and Ending (`header_balance` in `main_window.rs`).
 
