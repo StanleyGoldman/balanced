@@ -10,6 +10,7 @@ use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::egui::accesskit::Action;
 use eframe::egui::accesskit::Role;
+use eframe::egui::style::ScrollStyle;
 use eframe::egui::{Event, Key, Modifiers, Vec2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
@@ -411,4 +412,59 @@ fn the_tree_is_one_tab_stop() {
         .collect();
 
     assert_eq!(focusable, ["Groceries"]);
+}
+
+#[test]
+fn the_scroll_bar_sits_beside_the_total_column_not_over_it() {
+    let harness = category_list();
+    let window = harness
+        .get_by_role_and_label(Role::Window, "Category List")
+        .rect();
+
+    let total = harness
+        .query_all_by_role(Role::Label)
+        .find(|label| label.accesskit_node().value().as_deref() == Some("-$660,303.59"))
+        .expect("Food & Dining's total is shown")
+        .rect();
+
+    // The stub's rows overflow the Dialog, so the table shows its scroll bar.
+    let bar = ScrollStyle::solid();
+    assert!(
+        window.right() - total.right() >= bar.bar_width + bar.bar_inner_margin,
+        "Total ends at {}, too close to the Dialog's edge at {}",
+        total.right(),
+        window.right()
+    );
+}
+
+#[test]
+fn deleting_a_transaction_in_the_register_takes_it_out_of_the_usage() {
+    let mut harness = app_on(Ledger::stub());
+    harness
+        .get_by_role_and_label(Role::Button, "Everyday Checking")
+        .click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Cell, "Costco").click();
+    harness.run();
+    harness.event(Event::Key {
+        key: Key::D,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::COMMAND,
+    });
+    harness.run();
+    press(&mut harness, Key::Enter);
+
+    open_category_list(&mut harness);
+
+    // Costco's split lines were -142.37 in Groceries and -63.90 in Household.
+    assert_eq!(
+        usage(&harness, "Groceries"),
+        "4,001 transactions, totalling -$500,086.42"
+    );
+    assert_eq!(
+        usage(&harness, "Household"),
+        "2,000 transactions, totalling -$400,000.00"
+    );
 }
