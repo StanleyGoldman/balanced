@@ -304,9 +304,6 @@ fn validate(f: &Fields) -> Result<(), (usize, String)> {
     if f.out() != 0 && f.inn() != 0 {
         return Err((5, "Enter a payment or a deposit, not both.".to_owned()));
     }
-    if f.total() == 0 {
-        return Err((5, "Enter a payment or deposit amount.".to_owned()));
-    }
     if let Some(lines) = &f.splits {
         if lines
             .iter()
