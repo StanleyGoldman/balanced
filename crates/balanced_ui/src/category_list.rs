@@ -20,7 +20,7 @@ use eframe::egui::{
 use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 use icu_locale::{LanguageIdentifier, Locale};
 
-use crate::command::{AppCommand, CommandSender, StatusMessage};
+use crate::command::{AppCommand, CommandSender};
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
@@ -56,8 +56,6 @@ pub(crate) struct CategoryListForm {
     /// Where focus goes now that a Dialog over the list has closed, until a frame
     /// restores it.
     focus_return: Option<FocusReturn>,
-    /// Why the ledger refused the last change, shown in place of the status line.
-    error: Option<DomainError>,
 }
 
 /// The delete confirm's form: which unused category, with none under it, it deletes.
@@ -276,20 +274,22 @@ impl ListRow {
 }
 
 impl CategoryListForm {
-    /// Hands the list the ledger's answer to the change it asked for: the New Category
-    /// Dialog closes once its category is created, and shows a refusal itself; any
-    /// other refusal shows in place of the status line.
-    pub(crate) fn applied(&mut self, ctx: &egui::Context, applied: Result<(), DomainError>) {
-        match (applied, &mut self.new_category) {
-            (Ok(()), Some(_)) => {
-                if let Some(dialog) = self.new_category.take() {
-                    self.focus_return = Some(dialog.close(ctx));
-                }
-            }
-            (Err(error), Some(dialog)) => dialog.form.rejected(error),
-            (Ok(()), None) => self.error = None,
-            (Err(error), None) => self.error = Some(error),
+    /// Hands the New Category Dialog open over the list the ledger's answer to the
+    /// category it asked for: it closes once the category is created, and shows a
+    /// refusal itself. Returns the answer when no Dialog over the list waits on it.
+    pub(crate) fn applied(
+        &mut self,
+        ctx: &egui::Context,
+        applied: Result<(), DomainError>,
+    ) -> Option<Result<(), DomainError>> {
+        let Some(dialog) = &mut self.new_category else {
+            return Some(applied);
+        };
+        match applied {
+            Ok(()) => self.focus_return = self.new_category.take().map(|dialog| dialog.close(ctx)),
+            Err(error) => dialog.form.rejected(error),
         }
+        None
     }
 
     /// Draws the tree and its usage beside the button column, above the status line,
@@ -327,7 +327,7 @@ impl CategoryListForm {
                             strip.cell(|ui| asked = self.buttons(ui, i18n, &model));
                         });
                 });
-                strip.cell(|ui| self.status_line(ui, i18n));
+                strip.cell(|ui| Self::status_line(ui, i18n));
             });
         match asked {
             None => {}
@@ -484,15 +484,9 @@ impl CategoryListForm {
         asked
     }
 
-    /// The status line below the tree: that changes apply at once, or why the ledger
-    /// refused the last one.
-    fn status_line(&self, ui: &mut egui::Ui, i18n: &Localizer) {
-        let text = match &self.error {
-            Some(error) => RichText::new(StatusMessage::Rejected(error.clone()).text(i18n))
-                .color(ui.visuals().error_fg_color),
-            None => RichText::new(fl!(i18n, "dialog-category-list-status")).weak(),
-        };
-        ui.label(text);
+    /// The status line below the tree: changes apply at once.
+    fn status_line(ui: &mut egui::Ui, i18n: &Localizer) {
+        ui.label(RichText::new(fl!(i18n, "dialog-category-list-status")).weak());
     }
 
     /// Does what a click or a key in the table asked for, in `model`, whose rows are
@@ -758,7 +752,8 @@ pub(crate) fn show(
 }
 
 /// The delete confirm, while it is open over the list. Delete has first focus, so
-/// Enter confirms.
+/// Enter confirms. It closes as its Command is sent, so a refusal goes to the Status
+/// bar.
 fn show_delete(
     ctx: &egui::Context,
     i18n: &Localizer,
@@ -786,16 +781,14 @@ fn show_delete(
         DialogOutcome::Open => return,
         DialogOutcome::Accepted => {
             let command = DomainCommand::DeleteCategory { category };
-            commands.send(AppCommand::SubmitDialog(command));
+            commands.send(AppCommand::Domain(command));
         }
         DialogOutcome::Cancelled => {}
         DialogOutcome::Back | DialogOutcome::Discarded => {
             unreachable!("a confirm has no Back or Discard button")
         }
     }
-    if let Some(dialog) = form.delete.take() {
-        form.focus_return = Some(dialog.close(ctx));
-    }
+    form.focus_return = form.delete.take().map(|dialog| dialog.close(ctx));
 }
 
 /// The New Category Dialog, while it is open over the list.
@@ -813,9 +806,7 @@ fn show_new_category(
     match new_category::show(ctx, i18n, theme, commands, dialog, view) {
         NewCategoryOutcome::Open => {}
         NewCategoryOutcome::Cancelled => {
-            if let Some(dialog) = form.new_category.take() {
-                form.focus_return = Some(dialog.close(ctx));
-            }
+            form.focus_return = form.new_category.take().map(|dialog| dialog.close(ctx));
         }
     }
 }

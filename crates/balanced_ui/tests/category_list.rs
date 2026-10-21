@@ -519,6 +519,15 @@ fn new_category_open(harness: &Harness<'static, App>) -> bool {
         .is_some()
 }
 
+/// The button column with only New… enabled.
+const ONLY_NEW: [(&str, bool); 5] = [
+    ("New…", true),
+    ("Edit…", false),
+    ("Merge…", false),
+    ("Hide", false),
+    ("Delete…", false),
+];
+
 /// Which of the button column's buttons are enabled, in order.
 fn enabled_buttons(harness: &Harness<'static, App>) -> Vec<(&'static str, bool)> {
     ["New…", "Edit…", "Merge…", "Hide", "Delete…"]
@@ -533,16 +542,7 @@ fn enabled_buttons(harness: &Harness<'static, App>) -> Vec<(&'static str, bool)>
 fn with_no_row_selected_only_new_is_enabled() {
     let harness = category_list();
 
-    assert_eq!(
-        enabled_buttons(&harness),
-        [
-            ("New…", true),
-            ("Edit…", false),
-            ("Merge…", false),
-            ("Hide", false),
-            ("Delete…", false),
-        ]
-    );
+    assert_eq!(enabled_buttons(&harness), ONLY_NEW);
 }
 
 #[test]
@@ -569,7 +569,7 @@ fn delete_is_not_offered_for_a_used_category() {
 
     click_row(&mut harness, "Groceries");
 
-    assert!(!enabled_buttons(&harness).contains(&("Delete…", true)));
+    assert_eq!(enabled_buttons(&harness), ONLY_NEW);
 }
 
 #[test]
@@ -582,7 +582,7 @@ fn delete_is_not_offered_for_a_parent() {
 
     click_row(&mut harness, "Pets");
 
-    assert!(!enabled_buttons(&harness).contains(&("Delete…", true)));
+    assert_eq!(enabled_buttons(&harness), ONLY_NEW);
 }
 
 #[test]
@@ -591,16 +591,7 @@ fn a_transfer_row_disables_every_button_but_new() {
 
     click_row(&mut harness, "[Emergency Fund]");
 
-    assert_eq!(
-        enabled_buttons(&harness),
-        [
-            ("New…", true),
-            ("Edit…", false),
-            ("Merge…", false),
-            ("Hide", false),
-            ("Delete…", false),
-        ]
-    );
+    assert_eq!(enabled_buttons(&harness), ONLY_NEW);
 }
 
 #[test]

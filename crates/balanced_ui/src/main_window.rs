@@ -637,10 +637,13 @@ impl MainWindow {
             }
             return;
         }
-        if let Some(dialog) = &mut self.category_list {
-            dialog.form.applied(ctx, applied);
-            return;
-        }
+        let applied = match &mut self.category_list {
+            Some(dialog) => match dialog.form.applied(ctx, applied) {
+                Some(unclaimed) => unclaimed,
+                None => return,
+            },
+            None => applied,
+        };
         let Some(dialog) = &mut self.new_category else {
             if let Err(error) = applied {
                 self.show_status(StatusMessage::Rejected(error));
