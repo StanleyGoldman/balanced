@@ -150,7 +150,7 @@ fn shows(harness: &Harness<'static, App>, label: &str) -> bool {
 
 /// Fills the draft row of the account just opened, from the Date cell under the
 /// cursor: Corner Shop paid `payment` on 15 October 2026, in `category`, if any.
-fn fill_draft(harness: &mut Harness<'static, App>, category: &str, payment: &str) {
+fn fill_draft(harness: &mut Harness<'static, App>, category: Option<&str>, payment: &str) {
     for c in "10/15/2026".chars() {
         send(harness, Event::Text(c.to_string()));
         harness.run();
@@ -160,7 +160,7 @@ fn fill_draft(harness: &mut Harness<'static, App>, category: &str, payment: &str
     press(harness, Modifiers::NONE, Key::Tab);
     type_text(harness, "Corner Shop");
     press(harness, Modifiers::NONE, Key::Tab);
-    if !category.is_empty() {
+    if let Some(category) = category {
         type_text(harness, category);
     }
     // Category, Memo, Payment.
@@ -283,7 +283,7 @@ fn discard_changes_lets_the_leave_go_on() {
 fn a_draft_row_with_no_category_says_why() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    fill_draft(&mut harness, "", "5.00");
+    fill_draft(&mut harness, None, "5.00");
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
@@ -295,7 +295,7 @@ fn a_draft_row_with_no_category_says_why() {
 fn continue_editing_a_draft_row_with_no_category_opens_its_category() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    fill_draft(&mut harness, "", "5.00");
+    fill_draft(&mut harness, None, "5.00");
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
     click_button(&mut harness, "Continue editing");
@@ -307,7 +307,7 @@ fn continue_editing_a_draft_row_with_no_category_opens_its_category() {
 fn leaving_a_draft_row_with_no_category_says_why_instead_of_asking() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    fill_draft(&mut harness, "", "5.00");
+    fill_draft(&mut harness, None, "5.00");
 
     click_cell(&mut harness, "Fresh Market");
 
@@ -326,7 +326,7 @@ fn a_draft_row_the_ledger_refuses_says_why() {
     // Too large for the account's balance to hold.
     fill_draft(
         &mut harness,
-        "Food & Dining:Groceries",
+        Some("Food & Dining:Groceries"),
         "792281625142643375935439503.35",
     );
 
@@ -346,7 +346,7 @@ fn continue_editing_after_the_ledger_refuses_opens_the_cell_saved_from() {
     open(&mut harness, "Everyday Checking");
     fill_draft(
         &mut harness,
-        "Food & Dining:Groceries",
+        Some("Food & Dining:Groceries"),
         "792281625142643375935439503.35",
     );
     press(&mut harness, Modifiers::NONE, Key::Enter);
@@ -518,4 +518,55 @@ fn continue_editing_a_refused_date_opens_it_on_the_rows_date() {
     click_button(&mut harness, "Continue editing");
 
     assert_eq!(editor(&harness, "Date").as_deref(), Some("9/5/2026"));
+}
+
+#[test]
+fn clicking_another_row_of_a_row_naming_no_category_says_why() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Auto & Transport:Fuel");
+    type_text(&mut harness, "Pets");
+    // ↑ clears the highlight, so the text stays as typed.
+    press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+
+    click_cell(&mut harness, "Bean There");
+
+    assert!(refused(&harness));
+    assert!(shows_text(
+        &harness,
+        "No category has that name. Pick one from the list, or create it."
+    ));
+    assert_eq!(status(&harness), Vec::<String>::new());
+}
+
+#[test]
+fn clicking_another_row_of_a_row_with_a_date_that_cant_be_read_says_why() {
+    let mut harness = app();
+    mistype_fresh_markets_date(&mut harness);
+
+    click_cell(&mut harness, "Bean There");
+
+    assert!(refused(&harness));
+    assert!(shows_text(
+        &harness,
+        "Not a date. Expected M/D/YYYY, for example 10/5/2026."
+    ));
+}
+
+#[test]
+fn clicking_another_cell_of_a_row_naming_no_category_keeps_editing_and_says_why() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Auto & Transport:Fuel");
+    type_text(&mut harness, "Pets");
+    press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+
+    click_cell(&mut harness, "Shell");
+
+    assert!(!refused(&harness));
+    assert_eq!(editor(&harness, "Category").as_deref(), Some("Pets"));
+    assert_eq!(
+        status(&harness),
+        ["No category has that name. Pick one from the list, or create it."]
+    );
 }

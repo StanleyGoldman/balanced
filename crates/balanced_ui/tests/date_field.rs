@@ -503,12 +503,14 @@ fn typing_on_a_date_cell_opens_it_and_acts_on_the_key() {
 }
 
 #[test]
-fn clicking_away_from_a_refused_date_keeps_the_edit_and_its_message() {
+fn clicking_another_cell_of_its_row_keeps_a_refused_dates_edit_and_its_message() {
     let mut harness = app();
     edit_date(&mut harness, "9/5/2026");
     type_keys(&mut harness, "5");
 
-    harness.get_by_role_and_label(Role::Cell, "Shell").click();
+    harness
+        .get_by_role_and_label(Role::Cell, "Fresh Market")
+        .click();
     harness.run();
 
     assert!(shows(&harness, FORMAT_MESSAGE));
