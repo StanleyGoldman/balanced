@@ -275,13 +275,15 @@ fn alt_released_after_a_chord_opens_no_menu() {
 }
 
 #[test]
-fn a_shortcut_pressed_mid_edit_commits_the_edit_first() {
+fn a_shortcut_pressed_mid_edit_saves_the_row_first() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "Fresh Market");
     type_text(&mut harness, "Corner Shop");
 
     press(&mut harness, Modifiers::COMMAND, Key::Q);
+    // Throws away any change to the row that wasn't saved.
+    press(&mut harness, Modifiers::NONE, Key::Escape);
 
     let payees: Vec<String> = harness
         .query_all_by_role(Role::Cell)

@@ -7,7 +7,7 @@ Balanced is a desktop personal-finance app in the tradition of Quicken classic, 
 The UI never mutates the domain. Each frame:
 
 1. Widgets edit their own local state (edit buffers, focus, scroll).
-2. Committing an edit sends a Command over a `CommandSender`.
+2. Saving an edit sends a Command over a `CommandSender`.
 3. `App::logic` drains the Commands and applies them to the `Ledger`.
 4. The `Ledger` publishes a new immutable `Arc<LedgerView>` snapshot, which every window reads.
 

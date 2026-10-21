@@ -105,13 +105,15 @@ struct DeleteTransactionForm {
     transaction: TransactionId,
 }
 
-/// The confirm for changing a Reconciled transaction's amount: which transaction, and
-/// the amount the cell edit would save, formatted as the Dialog opens. No Preferences
-/// change can reach it while it is open, so the text keeps up with the locale.
+/// The confirm for changing a Reconciled transaction's amount: which transaction, the
+/// amount its row's save would give it, formatted as the Dialog opens, and the save.
+/// No Preferences change can reach it while it is open, so the text keeps up with the
+/// locale.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReconciledAmountForm {
     transaction: TransactionId,
     amount: FormattedAmount,
+    save: DomainCommand,
 }
 
 /// The un-reconcile confirm's form: which Reconciled transaction it sets back to
@@ -209,6 +211,28 @@ impl MainWindow {
     /// The open Register, or `None` while none is.
     fn register_mut(&mut self) -> Option<&mut Register> {
         self.open_register.as_mut().map(|open| &mut open.register)
+    }
+
+    /// Whether showing `route` puts another account's Register in place of the open
+    /// one.
+    pub(crate) fn replaces_register(&self, route: Route) -> bool {
+        match route {
+            Route::Account(account) => self.open_account_id().is_some_and(|open| open != account),
+            Route::Tab(_) => false,
+        }
+    }
+
+    /// Saves the changes to the open Register's editing row, cell being edited and
+    /// all, as the Register goes. The draft row is not added.
+    pub(crate) fn save_editing_row(
+        &mut self,
+        i18n: &Localizer,
+        preferences: &Preferences,
+        commands: &CommandSender,
+    ) {
+        if let Some(register) = self.register_mut() {
+            register.save_on_leaving(i18n, preferences, commands);
+        }
     }
 
     /// Whether the Main view shows a Register: the Accounts tab is active and a
@@ -449,13 +473,15 @@ impl MainWindow {
                 let form = DeleteTransactionForm { transaction };
                 self.delete_transaction = Some(OpenDialog::new(ctx, form));
             }
-            &DialogKind::ChangeReconciledAmount {
+            DialogKind::ChangeReconciledAmount {
                 transaction,
                 amount,
+                save,
             } => {
                 let form = ReconciledAmountForm {
-                    transaction,
-                    amount: FormattedAmount::new(i18n, amount, AmountStyle::Bare),
+                    transaction: *transaction,
+                    amount: FormattedAmount::new(i18n, *amount, AmountStyle::Bare),
+                    save: save.clone(),
                 };
                 self.reconciled_amount = Some(OpenDialog::new(ctx, form));
             }
@@ -952,13 +978,12 @@ impl MainWindow {
         });
         match outcome {
             DialogOutcome::Open => return,
-            DialogOutcome::Accepted => {
-                commands.send(AppCommand::Domain(DomainCommand::EditTransaction {
-                    transaction: form.transaction,
-                    edit: TransactionEdit::Amount(form.amount.money()),
-                }));
+            DialogOutcome::Accepted => commands.send(AppCommand::Domain(form.save)),
+            DialogOutcome::Cancelled => {
+                if let Some(register) = self.register_mut() {
+                    register.confirm_cancelled();
+                }
             }
-            DialogOutcome::Cancelled => {}
             DialogOutcome::Back => unreachable!("the amount confirm has no Back button"),
         }
         self.close_dialog(ctx, |window| &mut window.reconciled_amount);

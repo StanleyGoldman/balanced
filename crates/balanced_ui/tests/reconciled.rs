@@ -117,7 +117,7 @@ fn click_cell(harness: &mut Harness<'static, App>, title: &str, payee: &str) {
 }
 
 /// Types `text` over the cell under `title` in the first row whose Payee is `payee`,
-/// then presses Enter to commit it.
+/// then presses Enter to save the row.
 fn commit(harness: &mut Harness<'static, App>, title: &str, payee: &str, text: &str) {
     click_cell(harness, title, payee);
     type_text(harness, text);
@@ -231,7 +231,7 @@ fn a_saved_amount_leaves_the_transaction_reconciled() {
 }
 
 #[test]
-fn cancel_keeps_the_old_amount() {
+fn cancel_saves_nothing_and_keeps_the_row_open() {
     let mut harness = everyday_checking();
     commit(&mut harness, "Payment", "Maple Property Management", "1500");
 
@@ -239,8 +239,12 @@ fn cancel_keeps_the_old_amount() {
         .get_by_role_and_label(Role::Button, "Cancel")
         .click();
     harness.run();
+    let open = editing(&harness);
+    // Throws the row's changes away, showing what the ledger holds.
+    press(&mut harness, Modifiers::NONE, Key::Escape);
 
     assert!(!asks(&harness, RENT_CONFIRM));
+    assert!(open);
     assert_eq!(
         cell_of(&harness, "Payment", "Maple Property Management"),
         "1,450.00"
@@ -248,13 +252,16 @@ fn cancel_keeps_the_old_amount() {
 }
 
 #[test]
-fn esc_keeps_the_old_amount() {
+fn esc_saves_nothing_and_keeps_the_row_open() {
     let mut harness = everyday_checking();
     commit(&mut harness, "Payment", "Maple Property Management", "1500");
 
     press(&mut harness, Modifiers::NONE, Key::Escape);
+    let open = editing(&harness);
+    press(&mut harness, Modifiers::NONE, Key::Escape);
 
     assert!(!asks(&harness, RENT_CONFIRM));
+    assert!(open);
     assert_eq!(
         cell_of(&harness, "Payment", "Maple Property Management"),
         "1,450.00"
@@ -379,14 +386,42 @@ fn the_delete_confirm_for_an_uncleared_transaction_asks_as_usual() {
 }
 
 #[test]
-fn tab_past_a_reconciled_amount_moves_the_cell_cursor_without_opening_a_cell() {
+fn a_reconciled_amount_asks_on_save_not_on_leaving_its_cell() {
+    let mut harness = everyday_checking();
+    click_cell(&mut harness, "Payment", "Maple Property Management");
+    type_text(&mut harness, "1500");
+
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    let asked_on_tab = asks(&harness, RENT_CONFIRM);
+    let moved = cursor_on(&harness, "Deposit", "Maple Property Management");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert!(!asked_on_tab);
+    assert!(moved);
+    assert!(asks(&harness, RENT_CONFIRM));
+}
+
+#[test]
+fn opening_another_account_says_why_a_changed_reconciled_amount_was_not_saved() {
     let mut harness = everyday_checking();
     click_cell(&mut harness, "Payment", "Maple Property Management");
     type_text(&mut harness, "1500");
     press(&mut harness, Modifiers::NONE, Key::Tab);
 
-    press(&mut harness, Modifiers::NONE, Key::Enter);
+    harness
+        .get_by_role_and_label(Role::Button, "Visa Rewards")
+        .click();
+    harness.run();
 
-    assert!(cursor_on(&harness, "Deposit", "Maple Property Management"));
-    assert!(!editing(&harness));
+    let shown: Vec<String> = harness
+        .get_by_role(Role::Status)
+        .query_all_by_role(Role::Label)
+        .filter_map(|label| label.accesskit_node().value())
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            "The changed row wasn't saved: a reconciled transaction's amount changes only once you confirm it."
+        ]
+    );
 }

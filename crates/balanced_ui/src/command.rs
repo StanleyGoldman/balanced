@@ -89,10 +89,11 @@ pub(crate) enum DialogKind {
     /// while no transaction is selected, or while its account is closed.
     DeleteTransaction,
     /// The confirm for changing a Reconciled transaction's amount to `amount`, from a
-    /// Payment or Deposit cell edit that is not sent until it is accepted.
+    /// save of its row, `save`, that is not sent until it is accepted.
     ChangeReconciledAmount {
         transaction: TransactionId,
         amount: Money,
+        save: DomainCommand,
     },
     /// The confirm for setting a Reconciled transaction back to Cleared. Nothing opens
     /// unless the open Register shows the transaction as Reconciled, or while its
@@ -125,6 +126,10 @@ pub(crate) enum StatusMessage {
     PasteNotAnAmount,
     /// Why a Category cell refused its typed text: no category has that name.
     NoSuchCategory,
+    /// Why the editing row's changes were lost as its Register went: they change a
+    /// Reconciled transaction's amount, which needs the confirm, and the confirm can't
+    /// open over a Register that is going.
+    ReconciledAmountNotSaved,
     /// The preferences file couldn't be read, so the app started from the default
     /// Preferences and kept the file as `preferences.toml.broken`.
     PreferencesReset,
@@ -162,6 +167,7 @@ impl StatusMessage {
             Self::NoPasteTarget => fl!(i18n, "status-no-paste-target"),
             Self::PasteNotAnAmount => fl!(i18n, "status-paste-not-an-amount"),
             Self::NoSuchCategory => fl!(i18n, "status-no-such-category"),
+            Self::ReconciledAmountNotSaved => fl!(i18n, "status-reconciled-amount-not-saved"),
             Self::PreferencesReset => fl!(i18n, "status-preferences-reset"),
             Self::PreferencesUnreadable => fl!(i18n, "status-preferences-unreadable"),
             Self::PreferencesNotSaved => fl!(i18n, "status-preferences-not-saved"),
@@ -229,6 +235,12 @@ impl CommandSender {
     pub(crate) fn new(ctx: egui::Context) -> (Self, Receiver<AppCommand>) {
         let (sender, receiver) = mpsc::channel();
         (Self { sender, ctx }, receiver)
+    }
+
+    /// A sender to a channel of its own, waking the same `ctx`, and its receiving end,
+    /// for Commands the App applies at once rather than on the next frame.
+    pub(crate) fn with_own_channel(&self) -> (Self, Receiver<AppCommand>) {
+        Self::new(self.ctx.clone())
     }
 
     pub(crate) fn send(&self, command: AppCommand) {

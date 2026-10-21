@@ -34,6 +34,7 @@ mod register_columns;
 mod register_filter;
 mod register_model;
 mod route;
+mod row_changes;
 #[cfg(feature = "test-support")]
 pub mod testing;
 mod theme;

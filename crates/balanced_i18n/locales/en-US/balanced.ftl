@@ -428,6 +428,7 @@ status-not-available-yet = Not available yet
 status-no-paste-target = Click a Payment or Deposit cell first, then Paste puts the result there.
 status-paste-not-an-amount = The calculator's sum isn't an amount, so there is nothing to paste.
 status-no-such-category = No category has that name. Pick one from the list, or create it.
+status-reconciled-amount-not-saved = The changed row wasn't saved: a reconciled transaction's amount changes only once you confirm it.
 status-account-closed = This account is closed, so its transactions can't be changed.
 status-transfer-account-closed = The other account of this transfer is closed, so the transfer can't be made, changed or deleted.
 status-transfer-to-own-account = A transfer moves money to another account. Pick an account other than this one.
