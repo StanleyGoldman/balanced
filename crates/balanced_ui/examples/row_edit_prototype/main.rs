@@ -1148,6 +1148,13 @@ impl Proto {
                 json!({ "target": format!("{target:?}"), "via": via, "unchanged": true }),
             );
             self.edit = None;
+            // An unchanged save still closes the row the way a changed one does.
+            if let Target::Txn(id) = target {
+                self.selected = Some(target);
+                if follow {
+                    self.follow_save(id);
+                }
+            }
             return true;
         }
         if let Err((col, msg)) = validate(&e.fields) {
@@ -1203,18 +1210,26 @@ impl Proto {
             if e.target == Target::Draft {
                 self.start_edit(Target::Draft, 0, "after add");
                 self.scroll_to = Some(usize::MAX);
-            } else if self.o[NEXT_ROW] {
-                let a = &self.accounts[self.current];
-                let next = a.position(id).map(|i| i + 1).unwrap_or(0);
-                let t = if next < a.txns.len() {
-                    Target::Txn(a.txns[next].id)
-                } else {
-                    Target::Draft
-                };
-                self.start_edit(t, 0, "after save");
+            } else {
+                self.follow_save(id);
             }
         }
         true
+    }
+
+    /// With "After Save, edit the next row" on, opens the row below saved row `id`.
+    fn follow_save(&mut self, id: u32) {
+        if !self.o[NEXT_ROW] {
+            return;
+        }
+        let a = &self.accounts[self.current];
+        let next = a.position(id).map(|i| i + 1).unwrap_or(0);
+        let t = if next < a.txns.len() {
+            Target::Txn(a.txns[next].id)
+        } else {
+            Target::Draft
+        };
+        self.start_edit(t, 0, "after save");
     }
 
     fn cancel(&mut self, via: &str) {
