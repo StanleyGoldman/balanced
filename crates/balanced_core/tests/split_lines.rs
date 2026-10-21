@@ -319,6 +319,41 @@ fn a_kept_lines_other_side_keeps_its_id_and_own_memo_and_takes_the_lines_new_amo
 }
 
 #[test]
+fn a_kept_line_whose_amount_changes_sign_flips_its_other_sides_sign() {
+    let mut household = Household::new();
+    let payday = household.save_from_a_split();
+    let [rainy_day, holiday] = household.payday_sides();
+    let groceries = household.groceries;
+
+    household.split(
+        payday,
+        "50.00",
+        vec![
+            EditedSplitLine::for_tests(groceries, "Food", usd("-50.00")),
+            EditedSplitLine::kept_for_tests(rainy_day, "Rainy day", usd("200.00")),
+            EditedSplitLine::kept_for_tests(holiday, "Holiday", usd("-100.00")),
+        ],
+    );
+
+    assert_eq!(
+        other_sides(&household),
+        [
+            (
+                Allocation::Transfer(payday),
+                "Rainy day".to_owned(),
+                usd("-200.00")
+            ),
+            (
+                Allocation::Transfer(payday),
+                "Holiday".to_owned(),
+                usd("100.00")
+            ),
+        ]
+    );
+    assert_eq!(household.balance(household.savings), usd("900.00"));
+}
+
+#[test]
 fn a_line_to_an_account_the_edit_drops_loses_its_other_side() {
     let mut household = Household::new();
     let payday = household.save_from_a_split();
