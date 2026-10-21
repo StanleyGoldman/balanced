@@ -1,6 +1,9 @@
 # Grilling resolution comment
 
-When a grilling ticket resolves, post one comment on the issue with this shape, then close the issue and append the context pointer to the map's Decisions-so-far. The pointer links to this comment, so the first line answers the ticket without scrolling.
+When a grilling ticket resolves, post one comment on the issue with this shape. Then finish by where the ticket sits:
+
+- **On a map:** close the issue and append the context pointer to the map's Decisions-so-far. The pointer links to this comment, so the first line answers the ticket without scrolling.
+- **On no map, resolved into behaviour to build:** keep the issue open and swap its triage label for `ready-for-agent`, so the ticket tracks the build.
 
 ```
 **Resolution:** <one or two sentences: the answer to the ticket's question>
