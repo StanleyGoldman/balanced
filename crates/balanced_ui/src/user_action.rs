@@ -33,6 +33,8 @@ pub(crate) enum UserAction {
     Quit,
     /// Open the Preferences Dialog.
     Preferences,
+    /// Open the Calculator.
+    Calculator,
     About,
     /// Reconcile the open account. It reports that it isn't available yet.
     Reconcile,
@@ -63,6 +65,7 @@ impl UserAction {
             Self::ManageAccounts => fl!(i18n, "menu-tools-manage-accounts"),
             Self::Quit => fl!(i18n, "menu-file-quit"),
             Self::Preferences => fl!(i18n, "menu-tools-preferences"),
+            Self::Calculator => fl!(i18n, "menu-tools-calculator"),
             Self::About => fl!(i18n, "menu-help-about"),
             Self::Reconcile => fl!(i18n, "register-account-actions-reconcile"),
             Self::EditAccountDetails => fl!(i18n, "register-account-actions-edit-account-details"),
@@ -87,6 +90,7 @@ impl UserAction {
             | Self::ManageAccounts
             | Self::Quit
             | Self::Preferences
+            | Self::Calculator
             | Self::About
             | Self::Reconcile
             | Self::EditAccountDetails
@@ -115,6 +119,7 @@ impl UserAction {
             Self::Preferences | Self::RegisterPreferences => {
                 AppCommand::OpenDialog(DialogKind::Preferences)
             }
+            Self::Calculator => AppCommand::OpenCalculator,
             Self::About => AppCommand::ShowStatus(StatusMessage::About),
             Self::Reconcile | Self::PrintRegister | Self::ExportToCsv => {
                 AppCommand::ShowStatus(StatusMessage::NotAvailableYet)

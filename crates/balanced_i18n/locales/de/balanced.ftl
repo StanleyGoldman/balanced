@@ -30,6 +30,7 @@ menu-tools = Extras
 # Coined from "Konten" and "verwalten".
 menu-tools-manage-accounts = Konten verwalten …
 menu-tools-preferences = Einstellungen …
+menu-tools-calculator = Taschenrechner
 menu-help = Hilfe
 menu-help-about = Über { -brand-name }
 menu-new-transaction = Neue Buchung
@@ -174,6 +175,15 @@ keypad-backspace = Rücktaste
 keypad-ok = OK
 keypad-waiting = …
 keypad-not-an-amount = Kein Betrag
+keypad-equals = Gleich
+
+## Calculator
+
+calculator = Taschenrechner
+calculator-paste = Einfügen
+calculator-close = Taschenrechner schließen
+status-no-paste-target = Klicken Sie zuerst auf eine Zelle für Zahlung oder Einzahlung, dann fügt Einfügen das Ergebnis dort ein.
+status-paste-not-an-amount = Die Rechnung im Taschenrechner ist kein Betrag, daher gibt es nichts einzufügen.
 
 ## Date field
 

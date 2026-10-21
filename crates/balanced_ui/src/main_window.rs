@@ -10,13 +10,14 @@ use balanced_i18n::{AmountStyle, Localizer};
 use eframe::egui::accesskit::Role;
 use eframe::egui::text::LayoutJob;
 use eframe::egui::{
-    self, Align, Button, CentralPanel, FontSelection, Id, Label, MenuBar, Panel, Response,
-    RichText, Sides,
+    self, Align, Button, CentralPanel, FontSelection, Id, Label, MenuBar, Panel, Rect, Response,
+    RichText, Sides, vec2,
 };
 use icu_calendar::{Date, Iso};
 
 use crate::account_bar::{AccountBar, BarFrame};
 use crate::accounts_model::AccountsModel;
+use crate::calculator::{self, Calculator};
 use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
 use crate::data_file::{self, DataFileRefusal};
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
@@ -69,6 +70,8 @@ pub(crate) struct MainWindow {
     data_file_refusal: Option<OpenDialog<DataFileRefusal>>,
     /// Go to date, while it is open.
     go_to_date: Option<OpenDialog<GoToDateForm>>,
+    /// The Calculator, while it is open.
+    calculator: Option<Calculator>,
     /// Where focus goes now that a Dialog has closed, until a frame restores it.
     focus_return: Option<FocusReturn>,
     menu_nav: MenuNav,
@@ -138,6 +141,7 @@ impl MainWindow {
             preferences: None,
             data_file_refusal: None,
             go_to_date: None,
+            calculator: None,
             focus_return: None,
             menu_nav: MenuNav::default(),
         }
@@ -231,6 +235,7 @@ impl MainWindow {
             | UserAction::ManageAccounts
             | UserAction::Quit
             | UserAction::Preferences
+            | UserAction::Calculator
             | UserAction::About
             | UserAction::EditAccountDetails
             | UserAction::RegisterPreferences => true,
@@ -334,6 +339,9 @@ impl MainWindow {
             // The Preferences, and a refusal shown meanwhile, belong to no one file.
             preferences: _,
             data_file_refusal: _,
+            // The Calculator holds a sum, not the file's contents; its Paste target
+            // goes with the Register.
+            calculator: _,
             focus_return: _,
             menu_nav: _,
         } = self;
@@ -353,6 +361,42 @@ impl MainWindow {
     /// open, since the native file picker leaves the Main window free meanwhile.
     pub(crate) fn refuse_data_file(&mut self, ctx: &egui::Context, refusal: DataFileRefusal) {
         self.data_file_refusal = Some(OpenDialog::new(ctx, refusal));
+    }
+
+    /// Opens the Calculator, unless it is already open.
+    pub(crate) fn open_calculator(&mut self) {
+        self.calculator.get_or_insert_with(Calculator::new);
+    }
+
+    /// The Calculator, while it is open, opening at the top right of `main_view`, in
+    /// the ledger's currency. Its Paste goes to the shown Register's last amount cell,
+    /// and the Status bar says why when there is none or the sum isn't an amount.
+    fn show_calculator(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        theme: &Theme,
+        view: &LedgerView,
+        main_view: Rect,
+    ) {
+        let Some(calculator) = &mut self.calculator else {
+            return;
+        };
+        let spot = main_view.right_top() + vec2(-Theme::DIALOG_MARGIN, Theme::DIALOG_MARGIN);
+        match calculator.show(ctx, i18n, theme, view.net_worth().currency(), spot) {
+            calculator::Outcome::Open => {}
+            calculator::Outcome::Closed => self.calculator = None,
+            calculator::Outcome::Paste(text) => {
+                let shown = self.shows_register();
+                match self.register_mut().filter(|_| shown) {
+                    Some(register) => register.paste(ctx, text),
+                    None => self.show_status(StatusMessage::NoPasteTarget),
+                }
+            }
+            calculator::Outcome::PasteRefused => {
+                self.show_status(StatusMessage::PasteNotAnAmount);
+            }
+        }
     }
 
     /// Shows `message` in the Status bar.
@@ -602,7 +646,7 @@ impl MainWindow {
             preferences,
         };
         self.account_bar.show(ui, &bar_frame);
-        CentralPanel::default().show(ui, |ui| match self.open_account(view) {
+        let main_view = CentralPanel::default().show(ui, |ui| match self.open_account(view) {
             Some(summary) => {
                 self.context_header(ui, i18n, theme, commands, view, summary, &accounts);
                 if let Some(OpenRegister { register, .. }) = &mut self.open_register {
@@ -624,6 +668,7 @@ impl MainWindow {
             }
         });
         self.accounts = Some(accounts);
+        self.show_calculator(ui.ctx(), i18n, theme, view, main_view.response.rect);
         self.delete_transaction_dialog(ui.ctx(), i18n, theme, commands, view);
         self.reconciled_amount_dialog(ui.ctx(), i18n, theme, commands, view);
         self.unreconcile_dialog(ui.ctx(), i18n, theme, commands, view);
@@ -1079,6 +1124,8 @@ impl MainWindow {
             let tools = ui.menu_button(fl!(i18n, "menu-tools"), |ui| {
                 item(ui, &mut drawn, UserAction::ManageAccounts);
                 item(ui, &mut drawn, UserAction::Preferences);
+                ui.separator();
+                item(ui, &mut drawn, UserAction::Calculator);
             });
             drawn.note_menu(&tools.response);
             let help = ui.menu_button(fl!(i18n, "menu-help"), |ui| {

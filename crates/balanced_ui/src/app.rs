@@ -346,6 +346,7 @@ impl App {
                 self.main_window.show_status(StatusMessage::NotAvailableYet);
             }
             AppCommand::SwitchPane => self.main_window.switch_pane(ctx),
+            AppCommand::OpenCalculator => self.main_window.open_calculator(),
             AppCommand::OpenDialog(kind) => {
                 if let Some(ledger) = ledger {
                     self.main_window.open_dialog(

@@ -871,6 +871,12 @@ pub(crate) struct Register {
     /// Register has caught up with its account. Starting over for another account
     /// keeps it, since Go to asks for it before the Register sees the account.
     go_to: Option<TransactionId>,
+    /// The Payment or Deposit cell last clicked or edited, where the Calculator's
+    /// Paste puts its result.
+    paste_target: Option<CellAddress>,
+    /// The Calculator's result, which goes into the paste target on the next frame,
+    /// once the rows are laid out.
+    pasting: Option<String>,
 }
 
 impl Register {
@@ -989,6 +995,8 @@ impl Register {
         self.draft = Draft::default();
         self.missing = None;
         self.posted_at = None;
+        self.paste_target = None;
+        self.pasting = None;
     }
 
     /// Formats the draft row again when the draft changed since it was formatted, or
@@ -1151,6 +1159,39 @@ impl Register {
     /// Queues a Tab press, with `modifiers` held, for the next frame.
     pub(crate) fn press_tab(&mut self, modifiers: Modifiers) {
         self.tabs.push(modifiers);
+    }
+
+    /// Puts `text`, the Calculator's result, into the Payment or Deposit cell last
+    /// clicked or edited, as if typed there: the cell's edit opens holding it, and saves
+    /// it when the cell is left. With no such cell shown, the Status bar says so.
+    pub(crate) fn paste(&mut self, ctx: &egui::Context, text: String) {
+        self.pasting = Some(text);
+        ctx.request_repaint();
+    }
+
+    /// Opens the paste target's edit on the text the Calculator pasted, if any.
+    fn take_paste(&mut self, ctx: &egui::Context, keys: &KeyContext<'_>) {
+        let Some(text) = self.pasting.take() else {
+            return;
+        };
+        let Some(target) = self
+            .paste_target
+            .filter(|&cell| field_at(keys.rows, cell).is_some())
+        else {
+            keys.commands
+                .send(AppCommand::ShowStatus(StatusMessage::NoPasteTarget));
+            return;
+        };
+        if !self.commit_open_edit(ctx, keys) {
+            return;
+        }
+        self.cursor = Some(target);
+        self.start_edit(ctx, keys, EditStart::Empty);
+        if let Some(Edit::Text(edit)) = &mut self.edit {
+            edit.text = text;
+            edit.preview = preview(keys.i18n, edit);
+            focus_at_end(ctx, edit);
+        }
     }
 
     /// Draws the Register of `summary`, an account in `view`, filling the space left in
@@ -1438,6 +1479,9 @@ impl Register {
         }
         // A refused date keeps the cell cursor until it is fixed or cancelled.
         if response.clicked() && !self.edit.as_ref().is_some_and(Edit::is_rejected) {
+            if column.holds_amount() {
+                self.paste_target = Some(address);
+            }
             self.place_cursor(row.id(), column);
             open_split_view(row, column, commands);
         }
@@ -1683,6 +1727,9 @@ impl Register {
     /// Enter, Tab and Esc are taken before the cell editor is added, which would
     /// otherwise act on them first.
     fn handle_keys(&mut self, ctx: &egui::Context, keys: &KeyContext<'_>) -> Option<f32> {
+        // A paste from the Calculator opens its cell's edit first, which then takes
+        // the keys.
+        self.take_paste(ctx, keys);
         if !self.owns_keyboard(ctx) {
             self.tabs.clear();
             return None;
@@ -2134,6 +2181,7 @@ impl Register {
             }
             CellField::Text(field) => (field.saved(row), EditField::Text(field)),
             CellField::Amount(side) => {
+                self.paste_target = Some(cursor);
                 let currency = row.currency();
                 let reader = keys.i18n.amount_reader(i18n_currency(currency));
                 let field = EditField::Amount {
