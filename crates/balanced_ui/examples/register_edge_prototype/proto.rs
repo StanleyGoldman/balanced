@@ -192,7 +192,7 @@ pub const STEPS: u8 = 12;
 pub const VARIANTS: [(&str, &str); 4] = [
     ("A", "overlay strip (today)"),
     ("B", "compact icon buttons"),
-    ("C", "strip drops below the row"),
+    ("C", "strip below the row (over the next row)"),
     ("D", "overflow into More"),
 ];
 

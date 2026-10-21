@@ -655,6 +655,9 @@ impl MainWindow {
             && split.form.proto_awaiting()
         {
             split.form.proto_created = path;
+            // The waiting line takes focus itself; a focus return would wait behind
+            // the Split dialog and take focus from the next Dialog over it.
+            self.focus_return = None;
             return;
         }
         if let (Some(path), Some(register)) = (path, self.register_mut()) {
@@ -1188,6 +1191,7 @@ impl MainWindow {
                     && split.form.proto_awaiting()
                 {
                     split.form.proto_category_cancelled();
+                    self.focus_return = None;
                     return;
                 }
                 if let Some(register) = self.register_mut() {

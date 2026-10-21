@@ -2051,7 +2051,9 @@ impl Register {
         let widths = button_widths(ui, frame.i18n, compact);
         let full: f32 = widths.iter().sum::<f32>() + 3.0 * Theme::ROW_BUTTON_GAP;
         let covers = right - full - Theme::ROW_BUTTON_GAP < self.proto_editable_right;
-        let below = variant == 2 && covers;
+        // C always drops the strip below, as Quicken's two-line mode does, so the
+        // editing row's own Balance, Clr and Flag cells stay clickable (#475).
+        let below = variant == 2;
         let mut overflow = Vec::new();
         let mut width = full;
         if variant == 3 && covers {
