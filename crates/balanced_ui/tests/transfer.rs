@@ -529,62 +529,33 @@ fn go_to_scrolls_a_far_off_other_side_into_view() {
 }
 
 #[test]
-fn ctrl_g_goes_to_the_selected_transfer_s_other_side() {
+fn ctrl_g_leaves_the_selected_transfer_where_it_is() {
     let mut harness = app_on(with_transfer("Emergency Fund"));
     open(&mut harness, "Everyday Checking");
     select_saving_up(&mut harness);
 
     press(&mut harness, Modifiers::COMMAND, Key::G);
+    // Ctrl+G opens Go to date; Esc closes it.
+    press(&mut harness, Modifiers::NONE, Key::Escape);
 
-    assert_eq!(row_of(&harness, "Saving up")[3], "[Everyday Checking]");
-    assert!(saving_up_is_selected(&harness));
+    assert_eq!(row_of(&harness, "Saving up")[3], "[Emergency Fund]");
 }
 
 #[test]
-fn go_to_transfer_in_the_edit_menu_goes_to_the_selected_transfer_s_other_side() {
+fn the_edit_menu_has_no_go_to_transfer() {
     let mut harness = app_on(with_transfer("Emergency Fund"));
     open(&mut harness, "Everyday Checking");
     select_saving_up(&mut harness);
 
     harness.get_by_role_and_label(Role::Button, "Edit").click();
     harness.run();
-    harness
-        .get_by_role_and_label(Role::Button, "Go to Transfer Ctrl+G")
-        .click();
-    harness.run();
 
-    assert_eq!(row_of(&harness, "Saving up")[3], "[Everyday Checking]");
-    assert!(saving_up_is_selected(&harness));
-}
-
-/// Whether the Edit menu's Go to Transfer item is disabled with the row whose Payee
-/// cell reads `payee` selected, opening the menu to look and closing it again.
-fn go_to_transfer_disabled_on(harness: &mut Harness<'static, App>, payee: &str) -> bool {
-    harness.get_by_role_and_label(Role::Cell, payee).click();
-    harness.run();
-    harness.get_by_role_and_label(Role::Button, "Edit").click();
-    harness.run();
-    let disabled = harness
-        .get_by_role_and_label(Role::Button, "Go to Transfer Ctrl+G")
-        .accesskit_node()
-        .is_disabled();
-    harness.get_by_role_and_label(Role::Button, "Edit").click();
-    harness.run();
-    disabled
-}
-
-#[test]
-fn go_to_transfer_is_disabled_on_a_row_that_is_no_transfer() {
-    let mut harness = app_on(with_transfer("Emergency Fund"));
-    open(&mut harness, "Everyday Checking");
-
-    assert_eq!(
-        [
-            go_to_transfer_disabled_on(&mut harness, "Saving up"),
-            go_to_transfer_disabled_on(&mut harness, "Costco"),
-        ],
-        [false, true]
-    );
+    let go_to: Vec<String> = harness
+        .query_all_by_role(Role::Button)
+        .filter_map(|button| button.accesskit_node().label())
+        .filter(|label| label.starts_with("Go to"))
+        .collect();
+    assert_eq!(go_to, ["Go to Date… Ctrl+G"]);
 }
 
 #[test]

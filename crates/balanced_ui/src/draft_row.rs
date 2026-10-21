@@ -69,7 +69,7 @@ impl Draft {
     /// cells from it where they are empty.
     pub(crate) fn recall(&mut self, recalled: &Recalled) {
         recalled.payee().clone_into(&mut self.payee);
-        self.category.get_or_insert(recalled.category());
+        self.category = self.category.or(recalled.category());
         if self.memo.is_empty() {
             recalled.memo().clone_into(&mut self.memo);
         }

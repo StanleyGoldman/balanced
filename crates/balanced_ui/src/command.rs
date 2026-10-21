@@ -10,6 +10,7 @@ use balanced_core::{
 };
 use balanced_i18n::Localizer;
 use eframe::egui;
+use icu_calendar::{Date, Iso};
 
 use crate::data_file::DataFilePicker;
 use crate::i18n::fl;
@@ -45,9 +46,9 @@ pub(crate) enum AppCommand {
     /// Put the cell cursor on the open Register's draft row, showing the Register,
     /// unless its account is closed.
     GoToDraftRow,
-    /// Do [`AppCommand::GoToTransaction`] on the other side of the transfer on the open
-    /// Register's selected row. A row that isn't a transfer does nothing.
-    GoToOtherSide,
+    /// Put the open Register's cell cursor on the first row dated on or after the
+    /// date, or on its last row when none is, and scroll that row into view.
+    GoToDate(Date<Iso>),
     /// Move keyboard focus from the Account bar to the Main view, or from anywhere
     /// else to the Account bar.
     SwitchPane,
@@ -103,6 +104,9 @@ pub(crate) enum DialogKind {
     NewCategory { name: String },
     /// The Preferences Dialog, starting from the Preferences in use.
     Preferences,
+    /// Go to date, starting on the Register's selected row's date, or today. Nothing
+    /// opens while no Register is shown.
+    GoToDate,
 }
 
 /// A Status bar message.

@@ -242,6 +242,12 @@ impl Default for ColumnWidths {
 }
 
 impl ColumnWidths {
+    /// The width of the Date column.
+    pub(crate) fn date(&self) -> f32 {
+        self.width(RegisterColumn::Date)
+            .expect("the Date column resizes, so it has a width")
+    }
+
     /// The widths `saved` holds under column ids, raised to [`MIN_COLUMN_WIDTH`]. A
     /// column `saved` leaves out takes its default width, and an unknown id is ignored.
     pub(crate) fn from_saved(saved: &BTreeMap<String, f32>) -> Self {
@@ -885,6 +891,11 @@ impl Register {
         self.row(account, id)
     }
 
+    /// The selected transaction's date, while `account`'s Register shows it.
+    pub(crate) fn selected_date(&self, account: AccountId) -> Option<Date<Iso>> {
+        self.selected_row(account)?.saved_date()
+    }
+
     /// Transaction `id`'s row, while `account`'s Register shows it.
     pub(crate) fn row(&self, account: AccountId, id: TransactionId) -> Option<&RegisterRow> {
         let model = self
@@ -999,6 +1010,25 @@ impl Register {
     /// scrolling its row to the middle of the Register.
     pub(crate) fn go_to(&mut self, id: TransactionId) {
         self.go_to = Some(id);
+    }
+
+    /// Puts the cell cursor on the Date cell of the row Go to date lands on for `date`
+    /// (see [`RegisterModel::row_on_or_after`]), scrolling the row to the middle of the
+    /// Register. With no rows shown it does nothing.
+    pub(crate) fn go_to_date(&mut self, date: Date<Iso>) {
+        let Some(row) = self
+            .model
+            .as_ref()
+            .and_then(|model| model.row_on_or_after(date))
+        else {
+            return;
+        };
+        self.cursor = Some(CellAddress {
+            row: row.id(),
+            column: RegisterColumn::Date,
+        });
+        self.reveal_draft = false;
+        self.centre_pending = true;
     }
 
     /// Puts the cell cursor on the draft row's first cell, scrolling it into view on
@@ -1865,8 +1895,9 @@ impl Register {
 
     /// Acts on this frame's keys for `edit`, the Date cell being edited under `cursor`,
     /// with `tab` the move a Tab press asks for, and returns the scroll offset that
-    /// brings the cell cursor into view when it has left it. The first Esc closes the
-    /// calendar and the next cancels the edit; a refused date keeps the edit open.
+    /// brings the cell cursor into view when it has left it. While the calendar is open
+    /// the field takes Enter and Esc itself; otherwise Esc cancels the edit and Enter
+    /// commits it. A refused date keeps the edit open.
     fn handle_date_keys(
         &mut self,
         ctx: &egui::Context,
@@ -1875,18 +1906,18 @@ impl Register {
         cursor: CellAddress,
         tab: Option<Move>,
     ) -> Option<f32> {
-        let (escape, enter) = ctx.input_mut(|input| {
-            (
-                input.consume_key(Modifiers::NONE, Key::Escape),
-                input.consume_key(Modifiers::NONE, Key::Enter),
-            )
-        });
+        let (escape, enter) = if edit.date.is_calendar_open() {
+            (false, false)
+        } else {
+            ctx.input_mut(|input| {
+                (
+                    input.consume_key(Modifiers::NONE, Key::Escape),
+                    input.consume_key(Modifiers::NONE, Key::Enter),
+                )
+            })
+        };
         if escape {
-            if edit.date.close_calendar() {
-                self.edit = Some(Edit::Date(edit));
-            } else {
-                ctx.memory_mut(|memory| memory.surrender_focus(editor_id(edit.cell)));
-            }
+            ctx.memory_mut(|memory| memory.surrender_focus(editor_id(edit.cell)));
             return None;
         }
         if enter || tab.is_some() {
