@@ -228,6 +228,11 @@ impl MainWindow {
         self.open_register.as_ref().map(|open| &open.register)
     }
 
+    /// PROTOTYPE: the open Register, for the App's Quit settings.
+    pub(crate) fn proto_register_mut(&mut self) -> Option<&mut Register> {
+        self.register_mut()
+    }
+
     /// The open Register, or `None` while none is.
     fn register_mut(&mut self) -> Option<&mut Register> {
         self.open_register.as_mut().map(|open| &mut open.register)
@@ -703,6 +708,33 @@ impl MainWindow {
                 }
             }
             for action in actions {
+                // PROTOTYPE #444: Ctrl+D on a Reconciled amount change asks the amount
+                // confirm first, then the delete confirm.
+                if action == UserAction::DeleteTransaction
+                    && let Some(register) = self.register_mut()
+                    && register.proto_reconciled_amount_pending()
+                {
+                    if crate::proto::is(crate::proto::Setting::CtrlDReconciled, 1) {
+                        crate::proto::decided(
+                            crate::proto::Setting::CtrlDReconciled,
+                            "amount confirm first, then delete",
+                        );
+                        if register.proto_save_then(
+                            ui.ctx(),
+                            i18n,
+                            preferences,
+                            commands,
+                            action.command(),
+                        ) {
+                            commands.send(action.command());
+                        }
+                        continue;
+                    }
+                    crate::proto::decided(
+                        crate::proto::Setting::CtrlDReconciled,
+                        "delete confirm only",
+                    );
+                }
                 commands.send(action.command());
             }
         }
@@ -891,6 +923,11 @@ impl MainWindow {
         commands: &CommandSender,
         preferences: &Preferences,
     ) {
+        // PROTOTYPE #462: an Undo or Redo asks with Discard and Continue editing only.
+        let undo_only = crate::proto::is(crate::proto::Setting::UndoPrompt, 1)
+            && self
+                .register()
+                .is_some_and(Register::proto_leaving_for_undo);
         let Some(dialog) = &mut self.leave_row else {
             return;
         };
@@ -904,17 +941,32 @@ impl MainWindow {
                 fl!(i18n, "dialog-leave-row-message"),
             ),
         };
-        let outcome = LightDialog::new(
-            Id::new("leave_row_dialog"),
-            save,
-            fl!(i18n, "dialog-leave-row-continue"),
-            theme,
-        )
-        .with_discard(fl!(i18n, "dialog-leave-row-discard"))
-        .show(ctx, dialog, |ui, form| {
-            ui.label(message);
-            ui.checkbox(&mut form.always, fl!(i18n, "dialog-leave-row-always"));
-        });
+        let light = if undo_only {
+            LightDialog::notice(
+                Id::new("leave_row_dialog"),
+                fl!(i18n, "dialog-leave-row-continue"),
+                theme,
+            )
+        } else {
+            LightDialog::new(
+                Id::new("leave_row_dialog"),
+                save,
+                fl!(i18n, "dialog-leave-row-continue"),
+                theme,
+            )
+        };
+        let outcome = light
+            .with_discard(fl!(i18n, "dialog-leave-row-discard"))
+            .show(ctx, dialog, |ui, form| {
+                ui.label(message);
+                if !undo_only {
+                    ui.checkbox(&mut form.always, fl!(i18n, "dialog-leave-row-always"));
+                }
+            });
+        let outcome = match outcome {
+            DialogOutcome::Accepted if undo_only => DialogOutcome::Cancelled,
+            outcome => outcome,
+        };
         let answer = match outcome {
             DialogOutcome::Open => return,
             DialogOutcome::Accepted => {

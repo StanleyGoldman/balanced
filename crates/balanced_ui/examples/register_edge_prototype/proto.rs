@@ -148,10 +148,9 @@ pub const SETTINGS: [SettingDef; 14] = [
         id: "ctrl-d",
         step: 9,
         ticket: 444,
-        title: "Ctrl+D in a Reconciled amount edit",
+        title: "Ctrl+D after changing a Reconciled amount",
         options: &[
-            "as built (today)",
-            "delete confirm only (amount edit dropped)",
+            "delete confirm only (today)",
             "amount confirm, then delete confirm",
         ],
     },
@@ -160,11 +159,11 @@ pub const SETTINGS: [SettingDef; 14] = [
         id: "quit",
         step: 10,
         ticket: 445,
-        title: "Quit in a Reconciled amount edit",
+        title: "Quit (Ctrl+Q) after changing a Reconciled amount",
         options: &[
-            "as built (today)",
-            "discard the amount silently",
-            "save the amount, no confirm",
+            "leave-row prompt; Save asks the amount confirm (today)",
+            "throw the row's changes away silently",
+            "save the amount, no prompt or confirm",
         ],
     },
     SettingDef {
@@ -231,7 +230,24 @@ pub fn set_variant(v: u8) {
     VARIANT.store(v % VARIANTS.len() as u8, Ordering::Relaxed);
 }
 
+/// A line the prototype shows over the window for a few seconds, for what the real
+/// app would do but the prototype doesn't (closing the window).
+pub fn notice(text: &str) {
+    NOTICE.with(|n| *n.borrow_mut() = Some((text.to_owned(), std::time::Instant::now())));
+    log("notice", json!({ "text": text }));
+}
+
+pub fn current_notice() -> Option<String> {
+    NOTICE.with(|n| {
+        n.borrow()
+            .as_ref()
+            .filter(|(_, at)| at.elapsed().as_secs() < 5)
+            .map(|(text, _)| text.clone())
+    })
+}
+
 thread_local! {
+    static NOTICE: RefCell<Option<(String, std::time::Instant)>> = const { RefCell::new(None) };
     static HARNESS: RefCell<Option<Harness>> = const { RefCell::new(None) };
     static RECTS: RefCell<HashMap<String, Rect>> = RefCell::new(HashMap::new());
 }

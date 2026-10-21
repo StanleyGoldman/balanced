@@ -242,6 +242,13 @@ impl App {
                 AppCommand::ShowStatus(message) => self.main_window.show_status(message),
                 // The confirm a Reconciled amount change asks for can't open as the
                 // window closes, so that row's changes are not saved.
+                // PROTOTYPE #445: Quit's "save, no confirm" applies the save itself.
+                AppCommand::OpenDialog(crate::command::DialogKind::ChangeReconciledAmount {
+                    save,
+                    ..
+                }) if crate::proto::is(crate::proto::Setting::QuitReconciled, 2) => {
+                    self.apply_domain(save);
+                }
                 AppCommand::OpenDialog(kind) => {
                     tracing::error!(
                         ?kind,
@@ -470,7 +477,7 @@ impl App {
             AppCommand::NewDataFile(path) => self.new_data_file(ctx, path),
             AppCommand::OpenDataFile(path) => self.open_data_file(ctx, path),
             AppCommand::ShowStatus(message) => self.main_window.show_status(message),
-            AppCommand::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            AppCommand::Quit => self.proto_quit(ctx),
         }
     }
 }
@@ -502,6 +509,24 @@ impl App {
         self.i18n = i18n;
     }
 
+    /// PROTOTYPE #445: Quit as the setting says, stopping short of closing the window.
+    fn proto_quit(&mut self, ctx: &egui::Context) {
+        use crate::proto::{self, Setting};
+        if proto::is(Setting::QuitReconciled, 1) {
+            proto::decided(Setting::QuitReconciled, "row's changes thrown away silently");
+            if let Some(register) = self.main_window.proto_register_mut() {
+                register.proto_discard_all(ctx);
+            }
+        } else if proto::is(Setting::QuitReconciled, 2) {
+            proto::decided(Setting::QuitReconciled, "row saved with no prompt or confirm");
+            self.save_editing_row();
+        }
+        if self.leave_editing_row(ctx, AppCommand::Quit) {
+            proto::notice("Quit: the window would close now (PROTOTYPE keeps it open)");
+            proto::log("would_quit", serde_json::json!({}));
+        }
+    }
+
     /// PROTOTYPE: starts again on `ledger`, throwing away every change.
     pub fn replace_ledger(&mut self, ledger: Ledger) {
         self.session = Session::Open { ledger, path: None };
@@ -527,11 +552,8 @@ impl eframe::App for App {
     /// applies every Command sent since the last frame, and shows the open Preferences
     /// Dialog's draft, or else the Preferences in use.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if ctx.input(|input| input.viewport().close_requested())
-            && !self.leave_editing_row(ctx, AppCommand::Quit)
-        {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-        }
+        // PROTOTYPE: the window's own close ends the prototype at once; Ctrl+Q and
+        // File → Quit go through `AppCommand::Quit` below and only say they would close.
         while let Ok(command) = self.command_receiver.try_recv() {
             self.apply(ctx, command);
         }

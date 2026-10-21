@@ -514,6 +514,17 @@ impl eframe::App for Proto {
         self.dock(ui);
         proto::with(|h| h.prompt_panel(ui));
         self.app.ui(ui, frame);
+        if let Some(text) = proto::current_notice() {
+            egui::Area::new(egui::Id::new("prototype_notice"))
+                .order(egui::Order::Tooltip)
+                .anchor(egui::Align2::CENTER_TOP, [0.0, 48.0])
+                .show(&ctx, |ui| {
+                    egui::Frame::popup(ui.style())
+                        .fill(ui.visuals().warn_fg_color.gamma_multiply(0.25).blend(ui.visuals().panel_fill))
+                        .show(ui, |ui| ui.label(RichText::new(text).strong()));
+                });
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        }
         if !self.inject.is_empty() {
             ctx.request_repaint();
         }

@@ -577,13 +577,23 @@ fn buttons(
     // Right to left, so the default button sits left of Cancel at the right edge, and
     // Back left of the default button.
     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-        let cancel = cancel.map(|cancel| ui.add(Button::new(cancel)));
-        let accept = ui.add(Button::new(accept));
-        let back = back.map(|back| ui.add(Button::new(back)));
+        let tracked = |response: egui::Response, text: &str| {
+            crate::proto::track(&response, format!("dialog button: {text}"));
+            response
+        };
+        let cancel = cancel.map(|cancel| tracked(ui.add(Button::new(&cancel)), &cancel));
+        let accept = tracked(ui.add(Button::new(&accept)), &accept);
+        let back = back.map(|back| tracked(ui.add(Button::new(&back)), &back));
         // Left to right in the room the others leave, so it sits at the left edge.
         let discard = discard.map(|discard| {
             ui.with_layout(Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.add(Button::new(discard))
+                // PROTOTYPE #464: Discard takes clicks only, so Tab never reaches it.
+                let button = if crate::proto::is(crate::proto::Setting::DiscardTab, 1) {
+                    Button::new(&discard).sense(egui::Sense::CLICK)
+                } else {
+                    Button::new(&discard)
+                };
+                tracked(ui.add(button), &discard)
             })
             .inner
         });

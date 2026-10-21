@@ -43,6 +43,7 @@ use crate::row_changes::RowChanges;
 use crate::save_refusal::{RefusalAnswer, SaveRefusal};
 use crate::split_dialog::{SplitDone, SplitStart};
 use crate::theme::Theme;
+use crate::proto::{self, Setting};
 
 /// The narrowest Payee and Category get before the Register scrolls sideways.
 const MIN_FLEX_WIDTH: f32 = 120.0;
@@ -167,7 +168,9 @@ impl RegisterColumn {
             | Self::Memo
             | Self::Payment
             | Self::Deposit => true,
-            Self::Balance | Self::Clr | Self::Flag | Self::Actions => false,
+            // PROTOTYPE #443: the cursor stops on Clr and Flag.
+            Self::Clr | Self::Flag => proto::is(Setting::ClrKeyboard, 1),
+            Self::Balance | Self::Actions => false,
         }
     }
 
@@ -818,9 +821,25 @@ pub(crate) struct Register {
     /// The lines the Split dialog's Done gave a row, which the row keeps from the next
     /// frame.
     split_done: Option<SplitDone>,
+    /// PROTOTYPE #473: the Split dialog a `[Split]` click on another row asked for,
+    /// which opens once the row it left is saved or its changes thrown away.
+    split_after_leave: Option<(RowId, SplitStart)>,
+    /// PROTOTYPE: each drawn row's 1-based place, for naming cells in the log.
+    proto_rows: HashMap<RowId, usize>,
 }
 
 impl Register {
+    /// PROTOTYPE: the log's name for `column`'s cell on `row`.
+    fn cell_name(&self, row: RowId, column: RegisterColumn) -> String {
+        match row {
+            RowId::Draft => format!("{column:?} cell, draft row"),
+            RowId::Transaction(_) => match self.proto_rows.get(&row) {
+                Some(n) => format!("{column:?} cell, row {n}"),
+                None => format!("{column:?} cell, row ?"),
+            },
+        }
+    }
+
     /// Whether keys go to the Register: the cell cursor is in it, no Dialog is open
     /// over it, and nothing holds keyboard focus but the Register's own cell editor.
     pub(crate) fn owns_keyboard(&self, ctx: &egui::Context) -> bool {
@@ -959,7 +978,7 @@ impl Register {
                     // The cell cursor stays where leaving took it.
                     Some(left) => {
                         self.open_after_save = left.resume;
-                        left.carry_on(commands);
+                        left.carry_on_saved(commands);
                     }
                     None => self.go_to_draft_row(),
                 }
@@ -980,7 +999,7 @@ impl Register {
                 self.open_after_save = saving.next;
                 if let Some(left) = self.take_saved_leaving() {
                     self.open_after_save = left.resume.or(saving.next);
-                    left.carry_on(commands);
+                    left.carry_on_saved(commands);
                 }
             } else if let Some(message) = self.ledger_refusal.take() {
                 // The ledger refused the save, sent at once or once the confirm was
@@ -1078,7 +1097,13 @@ impl Register {
         {
             return;
         }
+        let split = self.split_after_leave.take();
         let Some(from) = self.unsaved.reopened_cell() else {
+            // PROTOTYPE #473: nothing to ask about, so the Split dialog opens now.
+            if let Some((_, start)) = split {
+                proto::decided(Setting::SplitAfterPrompt, "no changes: Split opens at once");
+                commands.send(AppCommand::OpenDialog(DialogKind::Split(start)));
+            }
             return;
         };
         if self.cursor.map(|cursor| cursor.row) == Some(from.row) {
@@ -1088,9 +1113,13 @@ impl Register {
             ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
             edit.cell()
         });
+        let then = split.map(|(_, start)| {
+            proto::decided(Setting::SplitAfterPrompt, "Split dialog waits for the prompt's answer");
+            AppCommand::OpenDialog(DialogKind::Split(start))
+        });
         let leaving = Leaving {
             from,
-            then: None,
+            then,
             resume,
             step: LeaveStep::Asked,
         };
@@ -1172,6 +1201,55 @@ impl Register {
             LeaveStep::Asked
         };
         self.leaving = Some(leaving);
+    }
+
+    /// PROTOTYPE #462: whether the open leave-row prompt asks for an Undo or Redo.
+    pub(crate) fn proto_leaving_for_undo(&self) -> bool {
+        self.leaving
+            .as_ref()
+            .is_some_and(|leaving| matches!(leaving.then, Some(AppCommand::Undo | AppCommand::Redo)))
+    }
+
+    /// PROTOTYPE #444: whether the row's kept changes give a Reconciled transaction a
+    /// new amount, which its save asks to confirm.
+    pub(crate) fn proto_reconciled_amount_pending(&self) -> bool {
+        let (Some(model), Some(changes)) = (&self.model, &self.unsaved.changes) else {
+            return false;
+        };
+        let rows = Rows::new(model, None, self.changed_row.as_ref());
+        let saved = rows.saved(RowId::Transaction(changes.transaction()));
+        saved.is_some_and(|row| {
+            amount_change_asks_first(row.cleared_status())
+                && changes.amount().is_some_and(|amount| row.amount() != Some(amount))
+        })
+    }
+
+    /// PROTOTYPE #444: leaves the row by saving it, asking only the Reconciled amount
+    /// confirm, then sends `then`.
+    pub(crate) fn proto_save_then(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        preferences: &Preferences,
+        commands: &CommandSender,
+        then: AppCommand,
+    ) -> bool {
+        let saving = Preferences {
+            save_without_asking: true,
+            ..preferences.clone()
+        };
+        self.leave(ctx, i18n, &saving, commands, then)
+    }
+
+    /// PROTOTYPE #445: throws away the open edit and the row's changes, silently.
+    pub(crate) fn proto_discard_all(&mut self, ctx: &egui::Context) {
+        if let Some(edit) = self.edit.take() {
+            ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+        }
+        if let Some(changes) = &self.unsaved.changes {
+            let row = RowId::Transaction(changes.transaction());
+            self.unsaved.discard(row);
+        }
     }
 
     /// Takes `answer`, the leave-row prompt's, which the next frame carries out.
@@ -1374,6 +1452,35 @@ impl Register {
         };
         let editable = self.editable_columns(rows, cursor.row);
         step == Move::NextEditable && !columns[at + 1..].iter().any(|c| editable.contains(c))
+    }
+
+    /// PROTOTYPE #475: a Flag or Clr action on the changed editing row goes through the
+    /// leave-row prompt, as More's Flag does, when the setting says so.
+    fn act_or_ask(
+        &mut self,
+        row: RowId,
+        id: TransactionId,
+        action: RowAction,
+        commands: &CommandSender,
+    ) {
+        let flag_or_clr = matches!(
+            action,
+            RowAction::SetFlagged(_) | RowAction::SetClearedStatus(_) | RowAction::Unreconcile
+        );
+        let changed = self.unsaved.is_changed(row)
+            || self.edit.as_ref().is_some_and(|edit| edit.cell().row == row);
+        if flag_or_clr && changed && proto::is(Setting::FlagClrClick, 1) {
+            proto::decided(Setting::FlagClrClick, "asks with the leave-row prompt first");
+            self.picked = Some(Picked {
+                transaction: id,
+                action,
+            });
+            return;
+        }
+        if flag_or_clr && changed {
+            proto::decided(Setting::FlagClrClick, "acts at once on the saved transaction");
+        }
+        self.act(id, action, commands);
     }
 
     /// Carries out `action`, picked on transaction `id`'s row.
@@ -1788,6 +1895,7 @@ impl Register {
                 }
                 return;
             };
+            self.proto_rows.insert(row.id(), row_index + 1);
             let selected = self.cursor.is_some_and(|cursor| cursor.row == row.id());
             table_row.set_selected(selected);
             let stripe = frame.theme.stripe(row_index).filter(|_| !selected);
@@ -1848,6 +1956,7 @@ impl Register {
             viewport,
         };
         let (response, mut action) = cell.show(ui, i18n, theme);
+        proto::track(&response, self.cell_name(row.id(), column));
         if editing
             && column == RegisterColumn::Actions
             && let Some(picked) = self.row_buttons(ui, frame, row)
@@ -1882,10 +1991,16 @@ impl Register {
             self.place_cursor(row.id(), column);
             if !leaves_row {
                 open_split_from_cell(row, column, commands);
+            } else if proto::is(Setting::SplitAfterPrompt, 1)
+                && column == RegisterColumn::Category
+                && row.is_split()
+            {
+                // PROTOTYPE #473: the Split dialog opens once the prompt is answered.
+                self.split_after_leave = Some((row.id(), SplitStart::of(row)));
             }
         }
         if let (Some(action), Some(id)) = (action, row.transaction()) {
-            self.act(id, action, commands);
+            self.act_or_ask(row.id(), id, action, commands);
         }
         match &self.edit {
             Some(Edit::Text(edit)) if edit.cell == address => self.edit_cell(ui, frame, column),
@@ -1990,6 +2105,7 @@ impl Register {
             insets,
             heading_id(frame.register_id, column),
         );
+        proto::track(&response, format!("{column:?} editor"));
         if edit.combo.text() != typed {
             text_changed(ui.ctx(), frame, edit);
         }
@@ -2194,6 +2310,33 @@ impl Register {
             return self.open_refocused(ctx, keys, refocus);
         }
         let cursor = self.cursor?;
+        // PROTOTYPE #443: Space on Clr or Flag, or Ctrl+Shift+C anywhere in the row.
+        let space = proto::is(Setting::ClrKeyboard, 1)
+            && self.edit.is_none()
+            && matches!(cursor.column, RegisterColumn::Clr | RegisterColumn::Flag)
+            && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Space));
+        let shortcut = proto::is(Setting::ClrKeyboard, 3)
+            && ctx.input_mut(|input| input.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::C));
+        if space || shortcut {
+            ctx.input_mut(|input| {
+                input.events.retain(|event| {
+                    !matches!(event, Event::Text(text) if text == " " || text.eq_ignore_ascii_case("c"))
+                        && !matches!(event, Event::Copy)
+                });
+            });
+            if let Some(row) = keys.rows.find(cursor.row)
+                && let Some(id) = row.transaction()
+            {
+                let action = if space && cursor.column == RegisterColumn::Flag {
+                    RowAction::SetFlagged(!row.is_flagged())
+                } else {
+                    clr_action(row.cleared_status())
+                };
+                proto::decided(Setting::ClrKeyboard, &format!("{action:?}"));
+                self.act_or_ask(cursor.row, id, action, keys.commands);
+            }
+            return None;
+        }
         if let Some(moved) = self.resume_category_edit(ctx, keys, cursor) {
             return moved.scroll_offset;
         }
@@ -2324,7 +2467,18 @@ impl Register {
         if escape {
             // The first Esc closes the list and drops the completion; the next throws
             // away every change to the row.
+            // PROTOTYPE #455: one Esc throws the row away, list open or not.
             if list_open {
+                proto::decided(
+                    Setting::EscInList,
+                    if proto::is(Setting::EscInList, 1) {
+                        "Esc with the list open threw the row away"
+                    } else {
+                        "Esc closed the list only"
+                    },
+                );
+            }
+            if list_open && !proto::is(Setting::EscInList, 1) {
                 edit.combo.close_list();
                 if edit.combo.is_completed() {
                     edit.combo.drop_completion();
@@ -2337,8 +2491,24 @@ impl Register {
             }
             return None;
         }
+        // PROTOTYPE #417: Enter in an open list picks the entry and keeps the cell open.
+        if enter
+            && list_open
+            && proto::is(Setting::EnterInList, 1)
+            && let Some(ListRow::Choice(text)) = edit.highlighted(keys.choices)
+        {
+            edit.combo.set_text(text);
+            edit.combo.close_list();
+            focus_at_end(ctx, &edit);
+            proto::decided(Setting::EnterInList, "Enter picked the entry; the cell stays open");
+            self.edit = Some(Edit::Text(edit));
+            return None;
+        }
+        // PROTOTYPE #417: Enter moves to the next field, as Tab does.
+        let enter_moves = proto::is(Setting::EnterKey, 1);
         let leave = match tab {
             _ if std::mem::take(&mut edit.handed_back) => Some(Leave::Next),
+            _ if enter && enter_moves => Some(Leave::Tab(Move::NextEditable)),
             _ if enter => Some(Leave::Enter),
             Some(step) => Some(Leave::Tab(step)),
             None => None,
@@ -2505,6 +2675,12 @@ impl Register {
             self.discard_row(cursor.row);
             return None;
         }
+        // PROTOTYPE #417: Enter moves to the next field, as Tab does.
+        let (enter, tab) = if enter && proto::is(Setting::EnterKey, 1) {
+            (false, Some(Move::NextEditable))
+        } else {
+            (enter, tab)
+        };
         if enter || tab.is_some() {
             if let Commit::Refused(refusal) = commit_date(
                 keys.i18n,
@@ -3455,6 +3631,21 @@ fn commit(
             unsaved.draft.recall(recalled);
         }
         (Some(change), _) => unsaved.keep(rows, edit.cell, change, commands),
+        // PROTOTYPE #446: an unchanged draft Payee recalls again, filling empty cells.
+        (None, None)
+            if matches!(edit.field, EditField::Text(TextField::Payee))
+                && payee_recall == PayeeRecall::On
+                && !text.is_empty() =>
+        {
+            if proto::is(Setting::PayeeRecallAgain, 1)
+                && let Some(recalled) = choices.recalled(text)
+            {
+                unsaved.draft.recall(recalled);
+                proto::decided(Setting::PayeeRecallAgain, "recalled the unchanged payee again");
+            } else {
+                proto::decided(Setting::PayeeRecallAgain, "unchanged payee: no recall");
+            }
+        }
         (None, _) => {}
     }
     Commit::Done
@@ -3697,6 +3888,17 @@ struct Leaving {
 }
 
 impl Leaving {
+    /// PROTOTYPE #462: after a Save, an Undo or Redo that left the row stops there.
+    fn carry_on_saved(self, commands: &CommandSender) {
+        if proto::is(Setting::UndoPrompt, 2)
+            && matches!(self.then, Some(AppCommand::Undo | AppCommand::Redo))
+        {
+            proto::decided(Setting::UndoPrompt, "saved; the Undo/Redo stops there");
+            return;
+        }
+        self.carry_on(commands);
+    }
+
     /// Sends what left the row, now that the row is saved or its changes thrown away.
     fn carry_on(self, commands: &CommandSender) {
         if let Some(then) = self.then {
@@ -4092,8 +4294,23 @@ impl Cell<'_> {
             RegisterColumn::Balance => row
                 .balance()
                 .map_or_else(WidgetText::default, |balance| balance.styled(theme).into()),
-            RegisterColumn::Clr => return clr_cell(ui, i18n, row, &response, access),
-            RegisterColumn::Flag => return flag_cell(ui, i18n, row, &response, access),
+            // PROTOTYPE #443: Clr and Flag show the cell cursor when it stops there.
+            RegisterColumn::Clr | RegisterColumn::Flag => {
+                let shown = if column == RegisterColumn::Clr {
+                    clr_cell(ui, i18n, row, &response, access)
+                } else {
+                    flag_cell(ui, i18n, row, &response, access)
+                };
+                if cursor {
+                    ui.painter().rect_stroke(
+                        rect,
+                        0.0,
+                        theme.cell_cursor_stroke(),
+                        StrokeKind::Inside,
+                    );
+                }
+                return shown;
+            }
             RegisterColumn::Actions => {
                 // Around the menu, or the editing row's buttons, the cell selects the
                 // row.
@@ -4331,13 +4548,17 @@ fn clr_cell(
             ui.style().interact(response).text_color(),
         );
     }
-    let action = match status {
+    let action = (editable && response.clicked()).then_some(clr_action(status));
+    (response.clone(), action)
+}
+
+/// PROTOTYPE: what pressing the Clr cell of a transaction in `status` does.
+fn clr_action(status: ClearedStatus) -> RowAction {
+    match status {
         ClearedStatus::Uncleared => RowAction::SetClearedStatus(ClearedStatus::Cleared),
         ClearedStatus::Cleared => RowAction::SetClearedStatus(ClearedStatus::Uncleared),
         ClearedStatus::Reconciled => RowAction::Unreconcile,
-    };
-    let action = (editable && response.clicked()).then_some(action);
-    (response.clone(), action)
+    }
 }
 
 /// Reports a cell to AccessKit as a table cell labelled `label`, toggled when its row is
@@ -4444,15 +4665,27 @@ fn actions_items(
     } else {
         fl!(i18n, "register-actions-flag")
     });
-    let flag = ui
-        .add_enabled(editable, flag)
-        .clicked()
-        .then_some(RowAction::SetFlagged(!flagged));
+    let flag = ui.add_enabled(editable, flag);
+    proto::track(&flag, "menu: Flag");
+    let flag = flag.clicked().then_some(RowAction::SetFlagged(!flagged));
+    // PROTOTYPE #443: Mark Cleared / Mark Uncleared in the menu.
+    let clr = if proto::is(Setting::ClrKeyboard, 2) {
+        let label = match row.cleared_status() {
+            ClearedStatus::Uncleared => "Mark Cleared",
+            ClearedStatus::Cleared => "Mark Uncleared",
+            ClearedStatus::Reconciled => "Mark Cleared (un-reconcile)…",
+        };
+        let response = ui.add_enabled(editable, Button::new(label));
+        proto::track(&response, format!("menu: {label}"));
+        response.clicked().then(|| clr_action(row.cleared_status()))
+    } else {
+        None
+    };
     let delete = Button::new(fl!(i18n, "register-actions-delete"));
-    let delete = ui
-        .add_enabled(editable, delete)
-        .clicked()
-        .then_some(RowAction::Delete);
+    let delete = ui.add_enabled(editable, delete);
+    proto::track(&delete, "menu: Delete");
+    let delete = delete.clicked().then_some(RowAction::Delete);
+    let flag = flag.or(clr);
     if flag.or(delete).is_some() {
         // Enter on a focused menu item leaves the menu open.
         ui.close();
@@ -4575,6 +4808,7 @@ fn edit_buttons(
                 response
             }
         };
+        proto::track(&response, format!("row button: {button:?}"));
         if focus == Some(button) {
             response.request_focus();
         }
