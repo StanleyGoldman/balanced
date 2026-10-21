@@ -2586,6 +2586,12 @@ fn commit(
             };
             change
         }
+        // An emptied draft row amount leaves the draft with no amount typed, as it
+        // started.
+        EditField::Amount { .. } if text.is_empty() && row.id() == RowId::Draft => {
+            draft.clear_amount();
+            return Commit::Done;
+        }
         EditField::Amount {
             reader,
             currency,

@@ -236,6 +236,32 @@ fn enter_on_an_empty_payment_moves_on_to_deposit() {
 }
 
 #[test]
+fn enter_on_an_emptied_payment_moves_on_to_deposit() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    fill_draft(&mut harness, "10/15/2026", "Corner Cafe", "12");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    press(&mut harness, Modifiers::SHIFT, Key::Tab);
+    for _ in "12.00".chars() {
+        press(&mut harness, Modifiers::NONE, Key::Backspace);
+    }
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    let deposit = harness
+        .get_by_role_and_label(Role::ColumnHeader, "Deposit")
+        .rect()
+        .x_range();
+    let (_, top) = cursor(&harness);
+    let cursor_cell = harness
+        .query_all_by_role(Role::Cell)
+        .find(|cell| cell.accesskit_node().is_selected() == Some(true))
+        .expect("a cell holds the cell cursor");
+    assert!(deposit.contains(cursor_cell.rect().center().x));
+    assert_eq!(top, row_top(&harness, "Corner Cafe"));
+}
+
+#[test]
 fn a_row_with_no_date_is_refused_with_the_cursor_on_its_date() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");

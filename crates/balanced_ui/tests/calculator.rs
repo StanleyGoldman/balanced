@@ -252,13 +252,18 @@ fn column(harness: &Harness<'static, App>, title: &str) -> Vec<String> {
         .collect()
 }
 
-/// The Payment cell of the first row whose Payee is `payee`.
-fn payment_of(harness: &Harness<'static, App>, payee: &str) -> String {
+/// The cell under the header `title` of the first row whose Payee is `payee`.
+fn cell_of(harness: &Harness<'static, App>, title: &str, payee: &str) -> String {
     let row = column(harness, "Payee")
         .iter()
         .position(|cell| cell == payee)
         .expect("the Register lists the payee");
-    column(harness, "Payment").swap_remove(row)
+    column(harness, title).swap_remove(row)
+}
+
+/// The Payment cell of the first row whose Payee is `payee`.
+fn payment_of(harness: &Harness<'static, App>, payee: &str) -> String {
+    cell_of(harness, "Payment", payee)
 }
 
 /// The Status bar's text.
@@ -332,8 +337,13 @@ fn a_pasted_negative_result_in_payment_saves_as_a_deposit() {
 
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
-    assert_eq!(payment_of(&harness, "Fresh Market"), "");
-    harness.get_by_role_and_label(Role::Cell, "12.00");
+    assert_eq!(
+        (
+            payment_of(&harness, "Fresh Market"),
+            cell_of(&harness, "Deposit", "Fresh Market"),
+        ),
+        (String::new(), "12.00".to_owned())
+    );
 }
 
 #[test]

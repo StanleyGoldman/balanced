@@ -67,6 +67,11 @@ impl Draft {
         }
     }
 
+    /// Empties the amount cells, as if no amount had been typed.
+    pub(crate) fn clear_amount(&mut self) {
+        self.amount = None;
+    }
+
     /// Takes `recalled`'s spelling of the payee, and fills the Category, Memo and amount
     /// cells from it where they are empty.
     pub(crate) fn recall(&mut self, recalled: &Recalled) {
