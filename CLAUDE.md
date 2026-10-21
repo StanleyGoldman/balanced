@@ -97,6 +97,7 @@ CI is GitHub Actions (`.github/workflows/`), read and driven with `gh run` and `
 ### Pull requests
 
 - Implementation ends with a pull request: after the review fixes are committed, push the branch and open a PR that closes the ticket (`Closes #<n>`). This extends the `implement` skill, which stops at the commit; it is user-invoked, so it never appears in your skill list.
+- File each follow-up as its own issue labelled `needs-triage` before opening the PR. A follow-up is a gap, edge case or question the ticket doesn't cover that you noticed while building it. Then name the issue in the PR body ("#<m> tracks it"). A note in the PR alone gets lost once the PR merges.
 - Unassign the ticket (`gh issue edit <n> --remove-assignee @me`) once its PR is ready for review: when you open it as ready, or when you mark a draft ready. The open PR now shows the ticket's state, and an empty assignee says the next move is the user's review.
 - Open pull requests and leave merging to a human; never merge one yourself.
 - Stage by explicit path (`git add <paths>`) and check `git status` before committing: untracked output from another branch (e.g. build or prototype output ignored only on that branch) survives `git switch`.
