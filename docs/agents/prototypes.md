@@ -74,6 +74,7 @@ You drive the prototype as well as the conversation. Through the control file yo
      - no glyph draws as an empty box (the Gotchas in `docs/practices/egui.md`);
      - every control fits at the user's screen width, read off the prompt panel's last line rather than assumed: at 1228 points the calculator's entry row cut off its Enter button;
      - each earlier decision the plan says it applies behaves as the built code does. Read that code for what it does at the edges, e.g. when a field loses focus: the register replaces typed arithmetic with its result (#90), and the prototype never did;
+     - each stand-in for a built control looks the way the built control looks. Copy the built control's drawing code (sizes, frames, fills) rather than redrawing it with default egui widgets: the calculator prototype's calendar used framed buttons in uneven columns, and the user judged its new Today button on "the formatting of the entire control" until it was redrawn as `date_field.rs` draws it;
      - each field takes empty and edge inputs: an operator typed on an empty field seeded a bare `+` the reader refused, so Enter did nothing;
      - the harness still works with each popup open: the calculator popup filtered every text event in the window, so the F2 note box took no letters.
    - Fix what it finds before the user drives it. Judgement calls, such as a refusal shown only as "…", are the session's to surface.
