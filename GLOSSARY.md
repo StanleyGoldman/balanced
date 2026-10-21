@@ -133,3 +133,33 @@ _Avoid_: Journal entry
 **Other side**:
 The transaction a transfer records in the other account. The two sides share their date and amount, with the sign flipped; everything else belongs to each side. Each split line to an account has an other side of its own, which points back at the split and takes the line's memo; its date and amount change, and it is deleted, only from the split.
 _Avoid_: Mirror transaction, linked transaction, counterpart
+
+### Categories
+
+**Category**:
+What a transaction's money was spent on or came from, such as Groceries or Salary. Categories form a tree, written as a path with `:` between levels (`Food:Coffee`).
+_Avoid_: Tag, class, envelope
+
+**Subcategory**:
+A category under another category, its parent. It takes its parent's category type.
+_Avoid_: Child category, sub-item
+
+**Category type**:
+Whether a top-level category, and every subcategory under it, is Income or Expense.
+_Avoid_: Category kind, category class
+
+**Hidden category**:
+A category left out of the Category field's choices while it stays on its transactions and in reports. Hiding a parent hides its subcategories.
+_Avoid_: Archived category, inactive category
+
+**Category List**:
+The Dialog that lists every category with its usage and creates, edits, merges, hides and deletes them.
+_Avoid_: Category manager, categories window
+
+**Merge**:
+Moving every transaction and split line of the chosen categories into one other category, optionally deleting the emptied ones.
+_Avoid_: Combine, consolidate
+
+**Reassign**:
+Moving a deleted category's transactions and split lines to another category as part of the delete.
+_Avoid_: Recategorize, remap
