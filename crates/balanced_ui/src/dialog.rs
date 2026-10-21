@@ -211,9 +211,19 @@ pub(crate) struct HeavyDialog {
     cancel: String,
     close: String,
     backdrop: Color32,
-    /// The size it opens at, when not [`Theme::HEAVY_DIALOG_WIDTH`] wide and as tall
-    /// as its body.
-    size: Option<Vec2>,
+    size: HeavySize,
+}
+
+/// How big a heavy Dialog is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum HeavySize {
+    /// It opens [`Theme::HEAVY_DIALOG_WIDTH`] wide and as tall as its body.
+    Default,
+    /// It opens at this size.
+    Opens(Vec2),
+    /// It keeps its body this wide, or as wide as its title, and fits around it. It
+    /// doesn't resize, and its body doesn't scroll.
+    Fitted(f32),
 }
 
 impl HeavyDialog {
@@ -235,14 +245,24 @@ impl HeavyDialog {
             cancel,
             close,
             backdrop: theme.backdrop(),
-            size: None,
+            size: HeavySize::Default,
         }
     }
 
     /// The same Dialog, opening at `size` where the window has room.
     pub(crate) fn with_size(self, size: Vec2) -> Self {
         Self {
-            size: Some(size),
+            size: HeavySize::Opens(size),
+            ..self
+        }
+    }
+
+    /// The same Dialog, fitted around a body `width` wide, or as wide as its title,
+    /// where the window has room. It doesn't resize, and its body doesn't scroll, so
+    /// keep the body small.
+    pub(crate) fn fitted(self, width: f32) -> Self {
+        Self {
+            size: HeavySize::Fitted(width),
             ..self
         }
     }
@@ -291,12 +311,17 @@ impl HeavyDialog {
         // one. A gap as wide as egui's × follows the title, which keeps the title where
         // egui centres it beside its ×. The × sits in a slot as wide as that gap and as
         // tall as the title row.
-        let heading = TextStyle::Heading.resolve(&ctx.global_style());
-        let (gap, close_slot) = ctx.fonts_mut(|fonts| {
+        let style = ctx.global_style();
+        let heading = TextStyle::Heading.resolve(&style);
+        let (gap, close_slot, title_width) = ctx.fonts_mut(|fonts| {
             let gap = Vec2::splat(fonts.row_height(&heading));
             let title = fonts.layout_no_wrap(title.clone(), heading, Color32::PLACEHOLDER);
-            (gap, Vec2::new(gap.x, title.size().y.max(gap.y)))
+            let slot = Vec2::new(gap.x, title.size().y.max(gap.y));
+            (gap, slot, title.size().x)
         });
+        // The title, the gap after it and the ×, so a fitted Dialog shows its whole
+        // title.
+        let title_row = title_width + gap.x + style.spacing.item_spacing.x + close_slot.x;
         let mut heavy = Window::new((title, Atom::custom(id.with("close_gap"), gap)))
             .id(id)
             .order(Order::Middle)
@@ -306,17 +331,28 @@ impl HeavyDialog {
             .max_size(room.size())
             .constrain_to(room);
         heavy = match size {
-            None => heavy.default_width(Theme::HEAVY_DIALOG_WIDTH.min(room.width())),
-            Some(size) => heavy.default_size(size.min(room.size())),
+            HeavySize::Default => heavy.default_width(Theme::HEAVY_DIALOG_WIDTH.min(room.width())),
+            HeavySize::Opens(size) => heavy.default_size(size.min(room.size())),
+            HeavySize::Fitted(_) => heavy.auto_sized(),
         };
         if first_frame {
             heavy = heavy.current_pos(window.center());
         }
         let focused_before = ctx.memory(egui::Memory::focused);
         let shown = heavy.show(ctx, |ui| {
-            let height = ui.available_height();
-            body_area(ui, height, |ui| body(ui, &mut dialog.form));
-            let (accept, cancel, _) = buttons(ui, accept, Some(cancel), None);
+            let (accept, cancel, _) = if let HeavySize::Fitted(width) = size {
+                ui.set_width(width.max(title_row).min(room.width()));
+                body(ui, &mut dialog.form);
+                // An auto-sized window offers all the room it may grow to, which the
+                // buttons' row would centre itself in.
+                let row = Vec2::new(ui.available_width(), button_height(ui));
+                ui.allocate_ui(row, |ui| buttons(ui, accept, Some(cancel), None))
+                    .inner
+            } else {
+                let height = ui.available_height();
+                body_area(ui, height, |ui| body(ui, &mut dialog.form));
+                buttons(ui, accept, Some(cancel), None)
+            };
             let cancel = cancel.expect("a heavy Dialog has Cancel");
             let body_took_focus = ctx.memory(egui::Memory::focused) != focused_before;
             if first_frame && !body_took_focus {
@@ -410,15 +446,19 @@ fn heavy_backdrop(heavy: Id) -> LayerId {
 /// Draws a Dialog's `body` in `ui`, scrolling when it is taller than `height` less a
 /// row of buttons below it.
 fn body_area(ui: &mut egui::Ui, height: f32, body: impl FnOnce(&mut egui::Ui)) {
-    let spacing = ui.spacing();
-    let button_height = (ui.text_style_height(&TextStyle::Button) + 2.0 * spacing.button_padding.y)
-        .max(spacing.interact_size.y);
-    let body_height = height - button_height - spacing.item_spacing.y;
+    let body_height = height - button_height(ui) - ui.spacing().item_spacing.y;
     ScrollArea::vertical()
         .max_height(body_height.max(0.0))
         .min_scrolled_height(0.0)
         .auto_shrink([false, true])
         .show(ui, body);
+}
+
+/// The height of a row of a Dialog's buttons in `ui`.
+fn button_height(ui: &egui::Ui) -> f32 {
+    let spacing = ui.spacing();
+    (ui.text_style_height(&TextStyle::Button) + 2.0 * spacing.button_padding.y)
+        .max(spacing.interact_size.y)
 }
 
 /// A Dialog's default button reading `accept`, any Cancel button reading `cancel` and

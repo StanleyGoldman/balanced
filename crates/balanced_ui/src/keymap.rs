@@ -68,7 +68,7 @@ pub(crate) const KEYMAP: &[Binding] = &[
     ),
     Binding::new(Modifiers::COMMAND, Key::N, UserAction::NewTransaction),
     Binding::new(Modifiers::COMMAND, Key::D, UserAction::DeleteTransaction),
-    Binding::new(Modifiers::COMMAND, Key::G, UserAction::GoToOtherSide),
+    Binding::new(Modifiers::COMMAND, Key::G, UserAction::GoToDate),
     Binding::new(Modifiers::COMMAND, Key::Q, UserAction::Quit),
     Binding::new(Modifiers::NONE, Key::F6, UserAction::SwitchPane),
     Binding::new(Modifiers::SHIFT, Key::F6, UserAction::SwitchPane),

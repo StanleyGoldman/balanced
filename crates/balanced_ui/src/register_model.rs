@@ -597,6 +597,19 @@ impl RegisterModel {
         &self.rows
     }
 
+    /// The row Go to date lands on for `date`: of the rows dated on or after it, the
+    /// earliest dated, and the first shown among those that share its date. When no
+    /// row is, the latest dated, and the last shown among those. `None` while no row
+    /// is shown.
+    pub(crate) fn row_on_or_after(&self, date: Date<Iso>) -> Option<&RegisterRow> {
+        // `min_by_key` keeps the first of equal rows, and `max_by_key` the last.
+        self.rows
+            .iter()
+            .filter(|row| row.saved_date().is_some_and(|saved| saved >= date))
+            .min_by_key(|row| row.saved_date())
+            .or_else(|| self.rows.iter().max_by_key(|row| row.saved_date()))
+    }
+
     /// How many transactions the account has, shown or not.
     pub(crate) fn transaction_count(&self) -> usize {
         self.transactions.len()

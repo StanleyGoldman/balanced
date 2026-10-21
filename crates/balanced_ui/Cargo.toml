@@ -93,6 +93,10 @@ name = "draft_row"
 required-features = ["test-support"]
 
 [[test]]
+name = "go_to_date"
+required-features = ["test-support"]
+
+[[test]]
 name = "keyboard"
 required-features = ["test-support"]
 

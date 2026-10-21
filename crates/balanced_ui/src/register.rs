@@ -242,6 +242,12 @@ impl Default for ColumnWidths {
 }
 
 impl ColumnWidths {
+    /// The width of the Date column.
+    pub(crate) fn date(&self) -> f32 {
+        self.width(RegisterColumn::Date)
+            .expect("the Date column resizes, so it has a width")
+    }
+
     /// The widths `saved` holds under column ids, raised to [`MIN_COLUMN_WIDTH`]. A
     /// column `saved` leaves out takes its default width, and an unknown id is ignored.
     pub(crate) fn from_saved(saved: &BTreeMap<String, f32>) -> Self {
@@ -953,6 +959,25 @@ impl Register {
     /// scrolling its row to the middle of the Register.
     pub(crate) fn go_to(&mut self, id: TransactionId) {
         self.go_to = Some(id);
+    }
+
+    /// Puts the cell cursor on the Date cell of the row Go to date lands on for `date`
+    /// (see [`RegisterModel::row_on_or_after`]), scrolling the row to the middle of the
+    /// Register. With no rows shown it does nothing.
+    pub(crate) fn go_to_date(&mut self, date: Date<Iso>) {
+        let Some(row) = self
+            .model
+            .as_ref()
+            .and_then(|model| model.row_on_or_after(date))
+        else {
+            return;
+        };
+        self.cursor = Some(CellAddress {
+            row: row.id(),
+            column: RegisterColumn::Date,
+        });
+        self.reveal_draft = false;
+        self.centre_pending = true;
     }
 
     /// Puts the cell cursor on the draft row's first cell, scrolling it into view on
