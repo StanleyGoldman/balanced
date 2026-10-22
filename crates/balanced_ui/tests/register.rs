@@ -697,6 +697,46 @@ fn escape_cancels_the_edit_and_restores_the_saved_text() {
 }
 
 #[test]
+fn left_moves_the_caret_within_the_cell_being_edited() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "September rent");
+    type_text(&mut harness, "Ret");
+
+    press(&mut harness, Modifiers::NONE, Key::ArrowLeft);
+    type_text(&mut harness, "n");
+
+    assert_eq!(editor(&harness, "Memo").as_deref(), Some("Rent"));
+}
+
+#[test]
+fn left_at_the_start_of_the_text_keeps_the_cell_being_edited() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "September rent");
+    type_text(&mut harness, "ent");
+    press(&mut harness, Modifiers::NONE, Key::Home);
+
+    press(&mut harness, Modifiers::NONE, Key::ArrowLeft);
+    type_text(&mut harness, "R");
+
+    assert_eq!(editor(&harness, "Memo").as_deref(), Some("Rent"));
+}
+
+#[test]
+fn right_at_the_end_of_the_text_keeps_the_cell_being_edited() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "September rent");
+    type_text(&mut harness, "Ren");
+
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+    type_text(&mut harness, "t");
+
+    assert_eq!(editor(&harness, "Memo").as_deref(), Some("Rent"));
+}
+
+#[test]
 fn clicking_another_rows_cell_keeps_the_edit_and_saves_it_on_save() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");

@@ -42,8 +42,9 @@ egui's own focus handling and widgets read keys and clicks before app code does.
 
 ### Keys
 
-- **Esc:** give every cell's `TextEdit` `.event_filter(EventFilter { escape: true, ..Default::default() })`. Without it, egui drops the field's focus on Esc before app code sees the key, so the edit can't cancel or revert.
+- **Esc:** give every cell's `TextEdit` `.event_filter(EventFilter { escape: true, horizontal_arrows: true, ..Default::default() })`. Without it, egui drops the field's focus on Esc before app code sees the key, so the edit can't cancel or revert.
 - **Esc in a field without that filter:** egui has already taken the field's focus when `ui()` runs, so a handler that checks "one of my fields has focus" never fires. Read Esc while nothing has focus, or take it out of `RawInput` in `raw_input_hook`.
+- **← and → in a field with a custom filter:** add `horizontal_arrows: true` to any custom `EventFilter`. `EventFilter::default()` leaves it false, unlike the filter a `TextEdit` uses when given none, so egui's focus navigation reads ← or → first and moves focus to the nearest widget beside the field, ending the edit instead of moving the caret.
 - **↑ and ↓ in a field with a list:** add `vertical_arrows: true` to the field's `EventFilter`, then consume the arrows in app code to move the list's highlight. Otherwise egui reads a bare ↑ or ↓ at the start of the frame and moves focus to the nearest widget above or below, ending the edit.
 - **Tab in a grid:** a grid that owns Tab takes it out of `RawInput` in `eframe::App::raw_input_hook`. While no widget has focus, egui's focus navigation acts on Tab before `ui()` runs and moves focus to the next widget outside the grid.
 - **Tab stops in a table:** `TableBuilder::sense(Sense::click())` makes every cell a focus stop, since `Sense::click()` is `CLICK | FOCUSABLE`. In an editing row Tab then lands on each cell's background before its `TextEdit`, two Tabs per field. Use `Sense::CLICK` to keep clicks without the Tab stops.
