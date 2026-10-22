@@ -215,8 +215,8 @@ fn a_posted_transfers_other_side_takes_a_later_id() {
 
     let sent = household.save_200();
 
-    let received = only(household.posted(household.savings));
-    assert!(received.id() > sent, "{:?} after {sent:?}", received.id());
+    let received = only(household.posted(household.savings)).id();
+    assert!(received > sent, "{received:?} after {sent:?}");
 }
 
 #[test]

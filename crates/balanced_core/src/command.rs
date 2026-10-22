@@ -227,9 +227,9 @@ pub enum TransactionEdit {
     /// side.
     Category(CategoryId),
     /// The account the whole amount moves to or from, which makes the transaction a
-    /// transfer. Its other side in that account is new, with the payee and memo copied
-    /// and a later id than the transaction edited, and any other side it had before is
-    /// deleted.
+    /// transfer. Unless its other side is already in that account, its other side there
+    /// is new, with the payee and memo copied and a later id than the transaction
+    /// edited, and any other side it had before is deleted.
     Transfer(AccountId),
     /// The whole amount, in the account's currency. A split transaction's amount is
     /// the sum of its lines, so it can't be edited here.
