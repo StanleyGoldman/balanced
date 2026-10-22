@@ -828,6 +828,212 @@ fn another_rows_clr_cell_marks_it_cleared_and_stays_on_the_changed_row() {
     assert_eq!(cursor(&harness), "Corner Shop");
 }
 
+/// Fresh Market's Flag cell in Everyday Checking, which starts unflagged. Its row
+/// is above Shell's.
+const FRESH_MARKET_FLAG: &str = "Flag Fresh Market, 9/5/2026, -86.42";
+
+/// Opens Shell's Payee cell with Enter, leaving the edit open with nothing typed.
+fn open_shell_payee(harness: &mut Harness<'static, App>) {
+    open(harness, "Everyday Checking");
+    click_cell(harness, "Shell");
+    press(harness, Modifiers::NONE, Key::Enter);
+    assert_eq!(editor(harness, "Payee").as_deref(), Some("Shell"));
+}
+
+#[test]
+fn another_rows_flag_cell_moves_the_cursor_from_an_unchanged_open_cell() {
+    let mut harness = app();
+    open_shell_payee(&mut harness);
+
+    harness
+        .get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG)
+        .click();
+    harness.run();
+
+    let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
+    assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
+    assert_eq!(cursor(&harness), "Fresh Market");
+}
+
+/// Fresh Market's Clr cell in Everyday Checking, which starts Uncleared. Its row is
+/// above Shell's.
+const FRESH_MARKET_CLR: &str = "Clr Fresh Market, 9/5/2026, -86.42";
+
+#[test]
+fn another_rows_clr_cell_moves_the_cursor_from_an_unchanged_open_cell() {
+    let mut harness = app();
+    open_shell_payee(&mut harness);
+
+    harness
+        .get_by_role_and_label(Role::Button, FRESH_MARKET_CLR)
+        .click();
+    harness.run();
+
+    let clr = harness.get_by_role_and_label(Role::Button, FRESH_MARKET_CLR);
+    assert_eq!(clr.accesskit_node().value().as_deref(), Some("Cleared"));
+    assert_eq!(cursor(&harness), "Fresh Market");
+}
+
+/// Types over Shell's Payee cell, then deletes the typing and types Shell back,
+/// leaving the edit open with the text it started with.
+fn retype_shell_payee(harness: &mut Harness<'static, App>) {
+    open(harness, "Everyday Checking");
+    click_cell(harness, "Shell");
+    type_text(harness, "Corner Shop");
+    for _ in "Corner Shop".chars() {
+        press(harness, Modifiers::NONE, Key::Backspace);
+    }
+    type_text(harness, "Shell");
+    assert_eq!(editor(harness, "Payee").as_deref(), Some("Shell"));
+}
+
+#[test]
+fn another_rows_flag_cell_moves_the_cursor_from_an_open_cell_typed_back_as_it_was() {
+    let mut harness = app();
+    retype_shell_payee(&mut harness);
+
+    harness
+        .get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG)
+        .click();
+    harness.run();
+
+    let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
+    assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
+    assert_eq!(cursor(&harness), "Fresh Market");
+}
+
+#[test]
+fn another_rows_clr_cell_moves_the_cursor_from_an_open_cell_typed_back_as_it_was() {
+    let mut harness = app();
+    retype_shell_payee(&mut harness);
+
+    harness
+        .get_by_role_and_label(Role::Button, FRESH_MARKET_CLR)
+        .click();
+    harness.run();
+
+    let clr = harness.get_by_role_and_label(Role::Button, FRESH_MARKET_CLR);
+    assert_eq!(clr.accesskit_node().value().as_deref(), Some("Cleared"));
+    assert_eq!(cursor(&harness), "Fresh Market");
+}
+
+/// Renames Shell to Corner Shop in its Payee cell, leaving the edit open.
+fn rename_shell(harness: &mut Harness<'static, App>) {
+    open(harness, "Everyday Checking");
+    click_cell(harness, "Shell");
+    type_text(harness, "Corner Shop");
+}
+
+#[test]
+fn another_rows_flag_cell_keeps_the_cursor_in_an_open_cell_typed_differently() {
+    let mut harness = app();
+    rename_shell(&mut harness);
+
+    harness
+        .get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG)
+        .click();
+    harness.run();
+
+    let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
+    assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
+    // The typed text stays in the row, under the cell cursor.
+    assert_eq!(cursor(&harness), "Corner Shop");
+}
+
+#[test]
+fn another_rows_clr_cell_keeps_the_cursor_in_an_open_cell_typed_differently() {
+    let mut harness = app();
+    rename_shell(&mut harness);
+
+    harness
+        .get_by_role_and_label(Role::Button, FRESH_MARKET_CLR)
+        .click();
+    harness.run();
+
+    let clr = harness.get_by_role_and_label(Role::Button, FRESH_MARKET_CLR);
+    assert_eq!(clr.accesskit_node().value().as_deref(), Some("Cleared"));
+    // The typed text stays in the row, under the cell cursor.
+    assert_eq!(cursor(&harness), "Corner Shop");
+}
+
+#[test]
+fn another_rows_flag_cell_moves_the_cursor_from_an_unchanged_open_amount() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "48.20");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    assert_eq!(editor(&harness, "Payment").as_deref(), Some("48.20"));
+
+    harness
+        .get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG)
+        .click();
+    harness.run();
+
+    let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
+    assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
+    assert_eq!(cursor(&harness), "86.42");
+}
+
+#[test]
+fn another_rows_flag_cell_moves_the_cursor_from_an_unchanged_open_date() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "9/15/2026");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    assert!(editor(&harness, "Date").is_some());
+
+    harness
+        .get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG)
+        .click();
+    harness.run();
+
+    let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
+    assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
+    assert_eq!(cursor(&harness), "9/5/2026");
+}
+
+#[test]
+fn another_rows_flag_cell_keeps_the_cursor_on_a_row_with_kept_changes_and_an_unchanged_open_cell() {
+    let mut harness = app();
+    rename_shell(&mut harness);
+    // Tab keeps the payee and opens the Category cell as it was saved.
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    assert_eq!(
+        editor(&harness, "Category").as_deref(),
+        Some("Auto & Transport:Fuel")
+    );
+
+    harness
+        .get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG)
+        .click();
+    harness.run();
+
+    let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
+    assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
+    assert_eq!(cursor(&harness), "Auto & Transport:Fuel");
+}
+
+#[test]
+fn another_rows_flag_cell_keeps_the_cursor_in_an_open_cell_its_list_would_complete() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Shell");
+    // Delete takes away the Inline completion, and ↓ highlights Shell in the list.
+    type_text(&mut harness, "She");
+    press(&mut harness, Modifiers::NONE, Key::Delete);
+    press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("She"));
+
+    harness
+        .get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG)
+        .click();
+    harness.run();
+
+    let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
+    assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
+    assert_eq!(cursor(&harness), "She");
+}
+
 #[test]
 fn another_reconciled_rows_clr_cell_asks_its_own_confirm_not_the_prompt() {
     let mut harness = app();

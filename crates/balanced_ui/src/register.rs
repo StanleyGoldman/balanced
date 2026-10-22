@@ -614,6 +614,25 @@ impl Edit {
             Self::Date(edit) => edit.date.is_rejected(),
         }
     }
+
+    /// Whether committing the edit as it loses focus would find anything to keep in its
+    /// row in `rows`: its text differs from what the row shows, or can't be kept at all.
+    /// The list's highlighted row plays no part, as losing focus doesn't take it.
+    fn differs(&self, rows: Rows<'_>, choices: &FieldChoices, i18n: &Localizer) -> bool {
+        match self {
+            Self::Text(edit) => {
+                let Some(row) = rows.find(edit.cell.row) else {
+                    return false;
+                };
+                let text = edit.combo.text().trim();
+                if edit.empties_draft_amount(row, text) {
+                    return row.amount().is_some();
+                }
+                !matches!(edit.change(row, text, choices), Ok(None))
+            }
+            Self::Date(edit) => edit.date.is_changed(i18n),
+        }
+    }
 }
 
 /// The id of the editor over `cell`.
@@ -684,6 +703,39 @@ impl CellEdit {
     fn highlighted<'a>(&self, choices: &'a FieldChoices) -> Option<ListRow<'a>> {
         self.combo
             .highlighted(|text| field_rows(&self.field, choices, text))
+    }
+
+    /// Whether `text`, already trimmed, empties the amount of `row`, the draft row,
+    /// which leaves the draft with no amount typed rather than an amount of zero.
+    fn empties_draft_amount(&self, row: &RegisterRow, text: &str) -> bool {
+        matches!(self.field, EditField::Amount { .. })
+            && text.is_empty()
+            && row.id() == RowId::Draft
+    }
+
+    /// The edit that keeps `text`, already trimmed, in the edited field of `row`, or
+    /// `None` when it matches what the row shows. Fails with why `text` can't be kept.
+    fn change(
+        &self,
+        row: &RegisterRow,
+        text: &str,
+        choices: &FieldChoices,
+    ) -> Result<Option<TransactionEdit>, SaveRefusal> {
+        match &self.field {
+            EditField::Text(field) => field
+                .edit(row, text, choices)
+                .map_err(|NoSuchCategory| SaveRefusal::Status(StatusMessage::NoSuchCategory)),
+            EditField::Amount {
+                reader,
+                currency,
+                side,
+            } => amount_edit(row, *side, text, reader, *currency).map_err(|error| {
+                SaveRefusal::Amount {
+                    error,
+                    currency: *currency,
+                }
+            }),
+        }
     }
 }
 
@@ -1923,16 +1975,18 @@ impl Register {
             }
             // A click that leaves another row, which may ask about its changes, only
             // moves the cell cursor. A Clr or Flag click there acts on its own row
-            // without leaving the other one, so the cell cursor stays and nothing asks.
+            // without leaving a changed one, so the cell cursor stays and nothing asks.
             let leaves_row = self
                 .edit
                 .as_ref()
                 .map(Edit::cell)
                 .or_else(|| self.unsaved.reopened_cell())
                 .is_some_and(|cell| cell.row != row.id());
-            let acts_in_place =
-                action.is_some() && matches!(column, RegisterColumn::Clr | RegisterColumn::Flag);
-            if !(leaves_row && acts_in_place) {
+            let acts_in_place = leaves_row
+                && action.is_some()
+                && matches!(column, RegisterColumn::Clr | RegisterColumn::Flag)
+                && self.editing_row_changed(frame);
+            if !acts_in_place {
                 self.place_cursor(row.id(), column);
             }
             if !leaves_row {
@@ -2207,6 +2261,16 @@ impl Register {
             self.refused_leave = true;
             self.edit = Some(Edit::Date(edit));
         }
+    }
+
+    /// Whether the row being edited has anything to save: changes kept in it, or an
+    /// open edit whose text differs from what `frame`'s rows show. With no edit open,
+    /// only a row with kept changes is being edited.
+    fn editing_row_changed(&self, frame: &BodyFrame<'_>) -> bool {
+        self.edit.as_ref().is_none_or(|edit| {
+            self.unsaved.is_changed(edit.cell().row)
+                || edit.differs(frame.rows, frame.choices, frame.i18n)
+        })
     }
 
     /// Puts the cell cursor on a click in `column` of `row`. A click in a column the
@@ -3477,30 +3541,14 @@ fn commit(
         return Commit::Done;
     };
     let text = edit.combo.text().trim();
-    let change = match &edit.field {
-        EditField::Text(field) => {
-            let Ok(change) = field.edit(row, text, choices) else {
-                return Commit::Refused(SaveRefusal::Status(StatusMessage::NoSuchCategory));
-            };
-            change
-        }
-        // An emptied draft row amount leaves the draft with no amount typed, as it
-        // started.
-        EditField::Amount { .. } if text.is_empty() && row.id() == RowId::Draft => {
-            unsaved.draft.clear_amount();
-            return Commit::Done;
-        }
-        EditField::Amount {
-            reader,
-            currency,
-            side,
-        } => match amount_edit(row, *side, text, reader, *currency) {
-            Ok(change) => change,
-            Err(error) => {
-                let currency = *currency;
-                return Commit::Refused(SaveRefusal::Amount { error, currency });
-            }
-        },
+    // An emptied draft row amount leaves the draft with no amount typed, as it started.
+    if edit.empties_draft_amount(row, text) {
+        unsaved.draft.clear_amount();
+        return Commit::Done;
+    }
+    let change = match edit.change(row, text, choices) {
+        Ok(change) => change,
+        Err(refusal) => return Commit::Refused(refusal),
     };
     match (change, row.transaction()) {
         (Some(TransactionEdit::Payee(payee)), None)
