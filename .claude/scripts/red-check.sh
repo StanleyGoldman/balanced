@@ -19,7 +19,15 @@
 #
 # The file is restored by writing its saved text back, never by reversing the
 # replacement, so a <new> that is empty or occurs elsewhere can't damage it. Writing
-# moves the mtime forward, so cargo rebuilds it on the next run.
+# moves the mtime forward, so cargo rebuilds it on the next run. An interrupted run
+# (Ctrl+C, SIGTERM, a hang-up) restores it too; only SIGKILL leaves it broken.
+#
+# Each test command runs in its own systemd user scope capped at 16 GB of RAM and no
+# swap. A break that removes a loop guard can make a test allocate without end, and
+# without the cap it fills RAM and swap until the kernel kills the terminal holding
+# every session, this script included, before the file is restored. With the cap, the
+# kernel kills only the test, which nextest reports as a `SIGKILL` crash: status
+# "error". Needs `systemd-run` (part of systemd).
 #
 # Output: one JSON line on stdout:
 #   {"status": "red"|"green"|"error", "failed": [test names], "panics": [string],
@@ -46,7 +54,8 @@
 #          the break, with their names in "failed" (the file is untouched in all three);
 #          or the test command failed with no `FAIL` line, usually a break
 #          that doesn't compile (the file is restored; "restored" says so). No test
-#          ran red, so make a break that compiles.
+#          ran red, so make a break that compiles, or one that doesn't loop forever
+#          (a test killed by the memory cap shows `SIGKILL` in nextest's output).
 # Exit codes: 0 red, 1 green, 2 error.
 set -euo pipefail
 
@@ -58,9 +67,28 @@ fi
 file=$1 old=$2 new=$3
 shift 3
 
+if ! command -v systemd-run >/dev/null; then
+  jq -nc '{status: "error", failed: [], restored: true,
+    next: "systemd-run is missing: install systemd, then run this again"}'
+  exit 2
+fi
+
+# Runs the test command in a scope of its own, so the memory cap kills only the tests.
+# It runs in the background so a signal reaches the traps at once: bash holds a trap
+# until a foreground child exits, and a looping test never does.
+scope=red-check-$$
+run_capped() {
+  systemd-run --user --scope --quiet --unit="$scope" \
+    -p MemoryMax=16G -p MemorySwapMax=0 -- "$@" &
+  wait $!
+}
+
 saved=$(mktemp)
 log=$(mktemp)
-trap 'rm -f "$saved" "$log"' EXIT
+broken=false
+# Put the file back on any exit while it is broken, then remove the temp files.
+trap '$broken && cat -- "$saved" >"$file"; rm -f "$saved" "$log"' EXIT
+trap 'systemctl --user stop "$scope.scope" 2>/dev/null || true; exit 130' INT TERM HUP
 cp -- "$file" "$saved"
 
 # nextest prints each `FAIL [<time>] (<n>/<total>) <binary> <test>` line twice: as the
@@ -73,13 +101,15 @@ failed_tests() {
 }
 
 # The tests must pass before the break, or the break proves nothing.
-if ! "$@" >"$log" 2>&1; then
+if ! run_capped "$@" >"$log" 2>&1; then
   jq -nc --argjson failed "$(failed_tests)" '{status: "error", failed: $failed, restored: true,
     next: "the tests fail on the unbroken code: make them pass first, then run this again"}'
   exit 2
 fi
 
-# Break the file: replace the one occurrence of <old>.
+# Break the file: replace the one occurrence of <old>. Marked broken first, so a
+# signal during the write still restores it.
+broken=true
 if ! python3 -I -c '
 import sys
 path, old, new = sys.argv[1:4]
@@ -88,25 +118,27 @@ if text.count(old) != 1:
     sys.exit(f"found {text.count(old)} times")
 open(path, "w").write(text.replace(old, new))
 ' "$file" "$old" "$new" 2>"$log"; then
+  broken=false
   jq -nc --arg why "$(cat "$log")" '{status: "error", failed: [], restored: true,
     next: ("<old> must occur exactly once in the file: " + $why)}'
   exit 2
 fi
 
 set +e
-"$@" >"$log" 2>&1
+run_capped "$@" >"$log" 2>&1
 code=$?
 set -e
 
 # Restore by writing the saved text back over the file, which keeps the newer mtime.
 cat -- "$saved" >"$file"
+broken=false
 restored=false
 cmp -s -- "$saved" "$file" && restored=true
 
 failed=$(failed_tests)
 if [[ $code -ne 0 && $failed == "[]" ]]; then
   jq -nc --argjson restored "$restored" '{status: "error", failed: [], restored: $restored,
-    next: "the break did not compile, a test crashed or timed out, or the command was not `cargo nextest run`: rerun the command to read its output, make a break that compiles and fails an assertion, then run this again"}'
+    next: "the break did not compile, a test crashed, timed out or hit the 16 GB memory cap, or the command was not `cargo nextest run`: rerun the command to read its output, make a break that compiles and fails an assertion, then run this again"}'
   exit 2
 fi
 if [[ $code -ne 0 ]]; then
