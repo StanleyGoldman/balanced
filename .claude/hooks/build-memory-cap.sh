@@ -4,13 +4,13 @@
 # `export RUSTC_WRAPPER=<this checkout>/.config/rustc-memory-cap.sh` to
 # $CLAUDE_ENV_FILE, which Claude Code runs before each Bash command. The path is
 # absolute, so cargo finds the wrapper from any directory and in checkouts that
-# predate it. A settings.json `env` value can't be: Claude Code copies it unexpanded,
-# and cargo resolves a relative wrapper against its working directory.
+# predate it.
 #
 # Leaves the session as it is when a wrapper is already set (RUSTC_WRAPPER,
 # CARGO_BUILD_RUSTC_WRAPPER) or configured (`build.rustc-wrapper`, e.g. sccache in
 # ~/.cargo/config.toml): RUSTC_WRAPPER would override it, and that session's builds
-# stay uncapped. Also when cargo can't answer, or there is no $CLAUDE_ENV_FILE.
+# stay uncapped. Also when there is no $CLAUDE_ENV_FILE, or when cargo can't answer,
+# which it reports on stderr.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -26,4 +26,6 @@ if configured=$(cd "$root" && RUSTC_BOOTSTRAP=1 cargo -Zunstable-options config 
 fi
 if [[ $configured == *"is not set"* ]]; then
   printf "export RUSTC_WRAPPER='%s'\n" "$root/.config/rustc-memory-cap.sh" >>"$CLAUDE_ENV_FILE"
+else
+  echo "build-memory-cap: builds stay uncapped; cargo config get failed: $configured" >&2
 fi
