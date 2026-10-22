@@ -205,17 +205,23 @@ impl App {
     /// Puts `ledger`, over the data file at `path`, in place of the open one, which
     /// closes it, or of the welcome screen. The closed file's Recent files entry keeps
     /// the view it closed on, and the new file goes to the top of the Recent files and
-    /// opens on the view it last closed on, or else from scratch on the tab shown.
+    /// opens on the view it last closed on, or else from scratch on the tab shown. A
+    /// file the Recent files can't list opens unlisted, and the Status bar says so.
     fn switch_data_file(&mut self, ledger: Ledger, path: PathBuf) {
         self.note_closed();
         let listed = listed(path);
-        self.recent_files.note_opened(listed.clone());
-        self.save_recent_files();
+        let listing = self.recent_files.note_opened(listed.clone());
         self.session = Session::Open {
             ledger,
             path: Some(listed),
         };
         self.main_window.data_file_switched();
+        self.save_recent_files();
+        // Why the file isn't listed tells more than a failed save, so it shows last.
+        if listing.is_err() {
+            self.main_window
+                .show_status(StatusMessage::NotListedInRecentFiles);
+        }
         self.reopen_last_view();
     }
 
@@ -319,10 +325,12 @@ impl App {
         }
     }
 
-    /// Writes the Recent files to their file.
-    fn save_recent_files(&self) {
+    /// Writes the Recent files to their file. A failed write shows in the Status bar.
+    fn save_recent_files(&mut self) {
         if let Err(error) = self.recent_files_file.save(&self.recent_files) {
             tracing::warn!(?error, "saving the Recent files failed");
+            self.main_window
+                .show_status(StatusMessage::RecentFilesNotSaved);
         }
     }
 

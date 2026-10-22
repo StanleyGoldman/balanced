@@ -154,6 +154,11 @@ pub(crate) enum StatusMessage {
     PreferencesUnreadable,
     /// The Preferences apply, but writing them to the preferences file failed.
     PreferencesNotSaved,
+    /// The data file just opened isn't listed in Recent files, since the file that
+    /// keeps them can't store its path.
+    NotListedInRecentFiles,
+    /// Writing the Recent files to the recent files file failed.
+    RecentFilesNotSaved,
     /// Why the ledger refused a change.
     Rejected(DomainError),
     /// Why the ledger refused to change the date or amount of a split line's other side,
@@ -187,6 +192,8 @@ impl StatusMessage {
             Self::PreferencesReset => fl!(i18n, "status-preferences-reset"),
             Self::PreferencesUnreadable => fl!(i18n, "status-preferences-unreadable"),
             Self::PreferencesNotSaved => fl!(i18n, "status-preferences-not-saved"),
+            Self::NotListedInRecentFiles => fl!(i18n, "status-not-listed-in-recent-files"),
+            Self::RecentFilesNotSaved => fl!(i18n, "status-recent-files-not-saved"),
             Self::SplitLineOtherSide { split_account } => fl!(
                 i18n,
                 "status-split-line-other-side-in",
