@@ -14,7 +14,7 @@ use balanced_i18n::Localizer;
 use eframe::egui;
 
 use crate::clock::Clock;
-use crate::command::{AppCommand, CommandSender, StatusMessage};
+use crate::command::{AnswerTo, AppCommand, CommandSender, RowSave, StatusMessage};
 use crate::data_file::DataFileRefusal;
 use crate::i18n::fl;
 use crate::layout::Layout;
@@ -242,7 +242,7 @@ impl App {
             .save_editing_row(&self.i18n, &self.preferences, &commands);
         for command in saves.try_iter() {
             match command {
-                AppCommand::Domain(command) | AppCommand::SaveRow(command) => {
+                AppCommand::Domain(command) | AppCommand::SaveRow(RowSave { command, .. }) => {
                     self.apply_domain(command);
                 }
                 AppCommand::ShowStatus(message) => self.main_window.show_status(message),
@@ -288,9 +288,15 @@ impl App {
         }
     }
 
-    /// Applies `command`, a save of the Register's editing row, to the open ledger, and
-    /// tells the Register the ledger's answer: applied, or refused saying why.
-    fn save_row(&mut self, command: DomainCommand) {
+    /// Applies `save`, of a Register row, to the open ledger, and hands the ledger's
+    /// answer, applied or refused saying why, to what the save names: the Register, or
+    /// else the Status bar, which shows only a refusal.
+    fn save_row(&mut self, save: RowSave) {
+        let RowSave { command, answer } = save;
+        match answer {
+            AnswerTo::Register => {}
+            AnswerTo::StatusBar => return self.apply_domain(command),
+        }
         let Session::Open { ledger, .. } = &mut self.session else {
             return;
         };
@@ -395,7 +401,7 @@ impl App {
         };
         match command {
             AppCommand::Domain(command) => self.apply_domain(command),
-            AppCommand::SaveRow(command) => self.save_row(command),
+            AppCommand::SaveRow(save) => self.save_row(save),
             AppCommand::SubmitForm(command) => {
                 if let Some(ledger) = ledger {
                     let result = ledger.apply(command).map(drop);

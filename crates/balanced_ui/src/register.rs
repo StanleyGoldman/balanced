@@ -26,7 +26,7 @@ use icu_calendar::{Date, Iso};
 use crate::amount_field::{self, Preview};
 use crate::combo_field::{self, ComboText, DROP_DOWN_GLYPH, ListScope, text_typed};
 use crate::combobox::{CategoryTarget, FieldChoices, ListRow};
-use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
+use crate::command::{AnswerTo, AppCommand, CommandSender, DialogKind, RowSave, StatusMessage};
 use crate::date_field::{self, DateEdit};
 use crate::draft_row::{Draft, Missing};
 use crate::formatted_amount::i18n_currency;
@@ -765,9 +765,10 @@ pub(crate) struct Register {
     /// The row of the transaction with changes, showing them, as of the end of the
     /// last frame.
     changed_row: Option<RegisterRow>,
-    /// The save of a transaction's row sent to the ledger, until the Register catches
-    /// up with the ledger's answer.
-    saving: Option<Saving>,
+    /// The save of a transaction's row, or the post of the draft row, sent to the
+    /// ledger until the Register catches up with the ledger's answer. A rejected post
+    /// keeps the draft.
+    pending: Option<Pending>,
     /// The changed row being left, from when leaving it asks until the answer is
     /// carried out.
     leaving: Option<Leaving>,
@@ -778,9 +779,6 @@ pub(crate) struct Register {
     /// changes or the transactions' rows are rebuilt. `None` while the account can't
     /// change.
     draft_row: Option<DraftRow>,
-    /// The post of the draft row, sent to the ledger until the Register catches up with
-    /// the ledger's answer. A rejected post keeps the draft.
-    post: Post,
     /// The ledger's answer to the save or post of the editing row, until the Register
     /// catches up with it.
     ledger_answer: Option<LedgerAnswer>,
@@ -944,69 +942,14 @@ impl Register {
                 self.go_to_draft_row();
             }
         }
-        if self.post == Post::Sent
-            && let Some(answer) = self.ledger_answer.take()
-        {
-            self.post = Post::Idle;
-            let left = self.take_saved_leaving();
-            match answer {
-                LedgerAnswer::Applied => {
-                    if self.filter.is_set()
-                        && let Some(model) = &self.model
-                    {
-                        self.filter.keep(model.added(summary));
-                    }
-                    self.unsaved.draft = Draft::default();
-                    match left {
-                        // The cell cursor stays where leaving took it.
-                        Some(left) => {
-                            self.open_after_save = left.resume;
-                            left.carry_on(commands);
-                        }
-                        None => self.go_to_draft_row(),
-                    }
-                }
-                LedgerAnswer::Refused(message) => {
-                    // The ledger refused the post, saying why.
-                    let at = left
-                        .as_ref()
-                        .map(|left| left.from)
-                        .or_else(|| self.unsaved.reopened_cell())
-                        .unwrap_or(CellAddress::draft(RegisterColumn::Date));
-                    let refusal = SaveRefusal::Status(message);
-                    self.refuse(ctx, commands, refusal, at, None, left);
-                }
-            }
-        }
-        if let Some(saving) = self.saving.take() {
-            match self.ledger_answer.take() {
-                Some(LedgerAnswer::Applied) => {
-                    self.unsaved.changes = None;
-                    self.open_after_save = saving.next;
-                    if let Some(left) = self.take_saved_leaving() {
-                        self.open_after_save = left.resume.or(saving.next);
-                        left.carry_on(commands);
-                    }
-                }
-                Some(LedgerAnswer::Refused(message)) => {
-                    // The ledger refused the save, sent at once or once the confirm was
-                    // accepted, saying why: the row keeps its changes.
-                    let left = self.take_saved_leaving();
-                    let refusal = SaveRefusal::Status(message);
-                    self.refuse(ctx, commands, refusal, saving.from, None, left);
-                }
-                // The confirm is still open.
-                None if saving.confirm == Confirm::Asked => self.saving = Some(saving),
-                None => {
-                    // The confirm was cancelled, or there was nothing to send: the row
-                    // keeps its changes, the cell cursor comes back to it at once, so it
-                    // isn't left again, and its cell opens again. What left the row, if
-                    // anything, doesn't go on.
-                    self.cursor = Some(saving.from);
-                    self.open_after_save = Some(saving.from);
-                    self.take_saved_leaving();
-                }
-            }
+        match self.pending.take() {
+            Some(Pending::Post) => match self.ledger_answer.take() {
+                Some(answer) => self.post_answered(ctx, summary, commands, answer),
+                // The post is still on its way.
+                None => self.pending = Some(Pending::Post),
+            },
+            Some(Pending::Save(saving)) => self.save_answered(ctx, commands, saving),
+            None => {}
         }
         if let Some(id) = self.go_to.take() {
             self.cursor = Some(CellAddress {
@@ -1015,6 +958,86 @@ impl Register {
             });
             self.reveal_draft = false;
             self.centre_pending = true;
+        }
+    }
+
+    /// Carries out the ledger's answer to the post of the draft row: an applied post
+    /// empties the draft row, and keeps the new transaction in view while a filter is
+    /// set; a refused one keeps the draft and says why. A post that leaving the row
+    /// chose sends what left it once applied.
+    fn post_answered(
+        &mut self,
+        ctx: &egui::Context,
+        summary: &AccountSummary,
+        commands: &CommandSender,
+        answer: LedgerAnswer,
+    ) {
+        let left = self.take_saved_leaving();
+        match answer {
+            LedgerAnswer::Applied => {
+                if self.filter.is_set()
+                    && let Some(model) = &self.model
+                {
+                    self.filter.keep(model.added(summary));
+                }
+                self.unsaved.draft = Draft::default();
+                match left {
+                    // The cell cursor stays where leaving took it.
+                    Some(left) => {
+                        self.open_after_save = left.resume;
+                        left.carry_on(commands);
+                    }
+                    None => self.go_to_draft_row(),
+                }
+            }
+            LedgerAnswer::Refused(message) => {
+                // The ledger refused the post, saying why.
+                let at = left
+                    .as_ref()
+                    .map(|left| left.from)
+                    .or_else(|| self.unsaved.reopened_cell())
+                    .unwrap_or(CellAddress::draft(RegisterColumn::Date));
+                let refusal = SaveRefusal::Status(message);
+                self.refuse(ctx, commands, refusal, at, None, left);
+            }
+        }
+    }
+
+    /// Carries out the ledger's answer to `saving`, the save of a transaction's row, if
+    /// it came: an applied save drops the row's changes and opens the cell it moves on
+    /// to, and a refused one opens the cell it started from again. A save that leaving
+    /// the row chose sends what left it once applied. With no answer, the save waits
+    /// on while its confirm is open, and is dropped once the confirm is cancelled.
+    fn save_answered(&mut self, ctx: &egui::Context, commands: &CommandSender, saving: Saving) {
+        match self.ledger_answer.take() {
+            Some(LedgerAnswer::Applied) => {
+                self.unsaved.changes = None;
+                self.open_after_save = saving.next;
+                if let Some(left) = self.take_saved_leaving() {
+                    self.open_after_save = left.resume.or(saving.next);
+                    left.carry_on(commands);
+                }
+            }
+            Some(LedgerAnswer::Refused(message)) => {
+                // The ledger refused the save, sent at once or once the confirm was
+                // accepted, saying why: the row keeps its changes.
+                let left = self.take_saved_leaving();
+                let refusal = SaveRefusal::Status(message);
+                self.refuse(ctx, commands, refusal, saving.from, None, left);
+            }
+            // The confirm is still open.
+            None if saving.confirm == Confirm::Asked => {
+                self.pending = Some(Pending::Save(saving));
+            }
+            None => {
+                // The confirm was cancelled, or there was nothing to send: the row
+                // keeps its changes, the cell cursor comes back to it at once, so it
+                // isn't left again, and its cell opens again. What left the row, if
+                // anything, doesn't go on.
+                self.cursor = Some(saving.from);
+                self.open_after_save = Some(saving.from);
+                self.take_saved_leaving();
+            }
         }
     }
 
@@ -1079,11 +1102,7 @@ impl Register {
         commands: &CommandSender,
     ) {
         self.settle_refused_leave(ctx, commands);
-        if self.leaving.is_some()
-            || self.refused.is_some()
-            || self.saving.is_some()
-            || self.post == Post::Sent
-        {
+        if self.leaving.is_some() || self.refused.is_some() || self.pending.is_some() {
             return;
         }
         let Some(from) = self.unsaved.reopened_cell() else {
@@ -1228,12 +1247,12 @@ impl Register {
                         return;
                     }
                 } else if let Some(changes) = &self.unsaved.changes {
-                    let confirm = send_save(changes, keys.rows, keys.commands);
-                    self.saving = Some(Saving {
+                    let confirm = send_save(changes, AnswerTo::Register, keys.rows, keys.commands);
+                    self.pending = Some(Pending::Save(Saving {
                         from: leaving.from,
                         next: None,
                         confirm,
-                    });
+                    }));
                 }
                 self.leaving = Some(Leaving {
                     step: LeaveStep::Saving,
@@ -1261,13 +1280,12 @@ impl Register {
         self.lines_in_view = None;
         self.unsaved = Unsaved::default();
         self.changed_row = None;
-        self.saving = None;
+        self.pending = None;
         self.leaving = None;
         self.open_after_save = None;
         self.ledger_answer = None;
         self.refused = None;
         self.refocus = None;
-        self.post = Post::Idle;
         self.paste_target = None;
         self.pasting = None;
         self.focus_button = None;
@@ -1532,13 +1550,13 @@ impl Register {
 
     /// Whether a save or post of the editing row is waiting on the ledger's answer.
     fn waits_on_ledger(&self) -> bool {
-        self.saving.is_some() || self.post == Post::Sent
+        self.pending.is_some()
     }
 
     /// Tells the Register that the confirm a save of its editing row asked for was
     /// cancelled, so nothing was saved: the row keeps its changes.
     pub(crate) fn confirm_cancelled(&mut self) {
-        if let Some(saving) = &mut self.saving {
+        if let Some(Pending::Save(saving)) = &mut self.pending {
             saving.confirm = Confirm::Cancelled;
         }
     }
@@ -3044,12 +3062,12 @@ impl Register {
                 }),
             AfterEnter::SameRow => None,
         };
-        let confirm = send_save(changes, keys.rows, keys.commands);
-        self.saving = Some(Saving {
+        let confirm = send_save(changes, AnswerTo::Register, keys.rows, keys.commands);
+        self.pending = Some(Pending::Save(Saving {
             from: cursor,
             next,
             confirm,
-        });
+        }));
         None
     }
 
@@ -3082,8 +3100,11 @@ impl Register {
             .unsaved
             .draft
             .posting(keys.account, keys.draft_frame.currency)?;
-        keys.commands.send(AppCommand::SaveRow(command));
-        self.post = Post::Sent;
+        keys.commands.send(AppCommand::SaveRow(RowSave {
+            command,
+            answer: AnswerTo::Register,
+        }));
+        self.pending = Some(Pending::Post);
         Ok(())
     }
 }
@@ -3616,15 +3637,21 @@ impl Unsaved {
     /// longer kept whatever the ledger makes of them.
     fn save_silently(&mut self, rows: Rows<'_>, commands: &CommandSender) {
         if let Some(changes) = self.changes.take() {
-            send_save(&changes, rows, commands);
+            send_save(&changes, AnswerTo::StatusBar, rows, commands);
         }
     }
 }
 
-/// Sends the Command that saves `changes`, made to a transaction's row in `rows`, or
-/// asks for the confirm that sends it when they change the amount of a transaction
-/// whose amount change asks first. Returns whether it asked.
-fn send_save(changes: &RowChanges, rows: Rows<'_>, commands: &CommandSender) -> Confirm {
+/// Sends the Command that saves `changes`, made to a transaction's row in `rows`, with
+/// the ledger's answer going to `answer`, or asks for the confirm that sends it when
+/// they change the amount of a transaction whose amount change asks first. Returns
+/// whether it asked.
+fn send_save(
+    changes: &RowChanges,
+    answer: AnswerTo,
+    rows: Rows<'_>,
+    commands: &CommandSender,
+) -> Confirm {
     let Some(save) = changes.saving() else {
         return Confirm::NotAsked;
     };
@@ -3638,11 +3665,17 @@ fn send_save(changes: &RowChanges, rows: Rows<'_>, commands: &CommandSender) -> 
         commands.send(AppCommand::OpenDialog(DialogKind::ChangeReconciledAmount {
             transaction,
             amount,
-            save,
+            save: RowSave {
+                command: save,
+                answer,
+            },
         }));
         Confirm::Asked
     } else {
-        commands.send(AppCommand::SaveRow(save));
+        commands.send(AppCommand::SaveRow(RowSave {
+            command: save,
+            answer,
+        }));
         Confirm::NotAsked
     }
 }
@@ -3669,14 +3702,14 @@ struct Saving {
     confirm: Confirm,
 }
 
-/// Where the post of the draft row is.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum Post {
-    /// No post is on its way.
-    #[default]
-    Idle,
-    /// The post was sent, and waits on the ledger's answer.
-    Sent,
+/// What waits on the ledger's answer: a save of the editing row or a post of the draft
+/// row, never both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pending {
+    /// The save of a transaction's row.
+    Save(Saving),
+    /// The post of the draft row.
+    Post,
 }
 
 /// The ledger's answer to a save or post of the editing row.
@@ -4901,12 +4934,41 @@ mod tests {
         let fresh_market = harness.state().transaction("Fresh Market");
         assert_eq!(
             receiver.try_iter().collect::<Vec<_>>(),
-            [AppCommand::SaveRow(DomainCommand::Compound(vec![
-                DomainCommand::EditTransaction {
+            [AppCommand::SaveRow(RowSave {
+                command: DomainCommand::Compound(vec![DomainCommand::EditTransaction {
                     transaction: fresh_market,
                     edit: TransactionEdit::Payee("Corner Shop".to_owned()),
-                }
-            ]))]
+                }]),
+                answer: AnswerTo::Register,
+            })]
+        );
+    }
+
+    #[test]
+    fn a_save_as_the_window_closes_sends_its_answer_to_the_status_bar() {
+        let (mut harness, receiver) = register();
+        click_cell(&mut harness, "Fresh Market");
+        harness.event(Event::Text("Corner Shop".to_owned()));
+        harness.run();
+
+        let Shown {
+            register,
+            i18n,
+            commands,
+            ..
+        } = harness.state_mut();
+        register.save_on_closing(i18n, &Preferences::default(), commands);
+
+        let fresh_market = harness.state().transaction("Fresh Market");
+        assert_eq!(
+            receiver.try_iter().collect::<Vec<_>>(),
+            [AppCommand::SaveRow(RowSave {
+                command: DomainCommand::Compound(vec![DomainCommand::EditTransaction {
+                    transaction: fresh_market,
+                    edit: TransactionEdit::Payee("Corner Shop".to_owned()),
+                }]),
+                answer: AnswerTo::StatusBar,
+            })]
         );
     }
 
@@ -4924,12 +4986,13 @@ mod tests {
         let rent = harness.state().transaction("Maple Property Management");
         assert_eq!(
             receiver.try_iter().collect::<Vec<_>>(),
-            [AppCommand::SaveRow(DomainCommand::Compound(vec![
-                DomainCommand::EditTransaction {
+            [AppCommand::SaveRow(RowSave {
+                command: DomainCommand::Compound(vec![DomainCommand::EditTransaction {
                     transaction: rent,
                     edit: TransactionEdit::Number(None),
-                }
-            ]))]
+                }]),
+                answer: AnswerTo::Register,
+            })]
         );
     }
 
@@ -5008,7 +5071,10 @@ mod tests {
         let posted = receiver.try_iter().any(|command| {
             matches!(
                 command,
-                AppCommand::SaveRow(DomainCommand::PostTransaction { .. })
+                AppCommand::SaveRow(RowSave {
+                    command: DomainCommand::PostTransaction { .. },
+                    answer: AnswerTo::Register,
+                })
             )
         });
         assert!(posted);
