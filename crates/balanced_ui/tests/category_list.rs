@@ -1245,13 +1245,12 @@ fn search_unfolds_a_folded_parent_above_a_match() {
     assert_eq!(expanded(&harness, "Home"), Some(true));
 }
 
-/// Clicks the row named `name` while `modifiers` are held, pressed before the click and
-/// released after it as a user holds Ctrl or Shift, then runs the App until it settles.
+/// Clicks the row named `name` while `modifiers` are held, then runs the App until it
+/// settles.
 fn click_row_holding(harness: &mut Harness<'static, App>, modifiers: Modifiers, name: &str) {
-    harness.event(Event::ModifiersChanged(modifiers));
-    harness.run();
-    click_row(harness, name);
-    harness.event(Event::ModifiersChanged(Modifiers::NONE));
+    harness
+        .get_by_role_and_label(Role::TreeItem, name)
+        .click_modifiers(modifiers);
     harness.run();
 }
 
