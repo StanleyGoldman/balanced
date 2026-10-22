@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use balanced_core::{
     Account, AccountId, AccountKind, AccountSummary, ClearedStatus, CurrencyCode, DomainCommand,
-    DomainError, Generation, LedgerView, Money, TransactionEdit, TransactionId,
+    DomainError, LedgerView, Money, TransactionEdit, TransactionId,
 };
 use balanced_i18n::{AmountParseError, AmountReader, Localizer};
 use eframe::egui::accesskit::{self, Role};
@@ -765,8 +765,8 @@ pub(crate) struct Register {
     /// The row of the transaction with changes, showing them, as of the end of the
     /// last frame.
     changed_row: Option<RegisterRow>,
-    /// The save of a transaction's row sent to the ledger, until a later snapshot
-    /// shows whether it was applied.
+    /// The save of a transaction's row sent to the ledger, until the Register catches
+    /// up with the ledger's answer.
     saving: Option<Saving>,
     /// The changed row being left, from when leaving it asks until the answer is
     /// carried out.
@@ -778,12 +778,12 @@ pub(crate) struct Register {
     /// changes or the transactions' rows are rebuilt. `None` while the account can't
     /// change.
     draft_row: Option<DraftRow>,
-    /// The generation of the snapshot a post was sent against, until a later snapshot
-    /// shows whether the ledger applied it. A rejected post keeps the draft.
-    posted_at: Option<Generation>,
-    /// The save of the editing row the ledger refused, saying why, until the Register
-    /// catches up with the refusal.
-    ledger_refusal: Option<StatusMessage>,
+    /// The post of the draft row, sent to the ledger until the Register catches up with
+    /// the ledger's answer. A rejected post keeps the draft.
+    post: Post,
+    /// The ledger's answer to the save or post of the editing row, until the Register
+    /// catches up with it.
+    ledger_answer: Option<LedgerAnswer>,
     /// A refused save, from when the "Can't save this transaction" Dialog opens until
     /// its answer is carried out.
     refused: Option<Refused>,
@@ -926,17 +926,15 @@ impl Register {
 
     /// Catches up with what changed since the last frame: another account, `summary`'s,
     /// starts the Register over with the cell cursor on its draft row, unless it is
-    /// closed; a post that `view` shows applied empties the draft row, and stays in
-    /// view until the filter changes; and a save of a transaction's row that `view`
-    /// shows applied drops its changes and opens the cell it moves on to, while a
-    /// refused one opens the cell it started from again. A save or post that leaving
-    /// the row chose sends what left it once applied, and brings the cell cursor back
-    /// to the row when refused.
+    /// closed; a post the ledger applied empties the draft row, and stays in view until
+    /// the filter changes; and a save of a transaction's row the ledger applied drops
+    /// its changes and opens the cell it moves on to, while a refused one opens the cell
+    /// it started from again. A save or post that leaving the row chose sends what left
+    /// it once applied, and brings the cell cursor back to the row when refused.
     fn catch_up(
         &mut self,
         ctx: &egui::Context,
         summary: &AccountSummary,
-        view: &LedgerView,
         commands: &CommandSender,
     ) {
         let account = summary.account().id();
@@ -946,58 +944,68 @@ impl Register {
                 self.go_to_draft_row();
             }
         }
-        if let Some(sent_at) = self.posted_at.take() {
+        if self.post == Post::Sent
+            && let Some(answer) = self.ledger_answer.take()
+        {
+            self.post = Post::Idle;
             let left = self.take_saved_leaving();
-            if view.generation() != sent_at {
-                if self.filter.is_set()
-                    && let Some(model) = &self.model
-                {
-                    self.filter.keep(model.added(summary));
-                }
-                self.unsaved.draft = Draft::default();
-                match left {
-                    // The cell cursor stays where leaving took it.
-                    Some(left) => {
-                        self.open_after_save = left.resume;
-                        left.carry_on(commands);
+            match answer {
+                LedgerAnswer::Applied => {
+                    if self.filter.is_set()
+                        && let Some(model) = &self.model
+                    {
+                        self.filter.keep(model.added(summary));
                     }
-                    None => self.go_to_draft_row(),
+                    self.unsaved.draft = Draft::default();
+                    match left {
+                        // The cell cursor stays where leaving took it.
+                        Some(left) => {
+                            self.open_after_save = left.resume;
+                            left.carry_on(commands);
+                        }
+                        None => self.go_to_draft_row(),
+                    }
                 }
-            } else if let Some(message) = self.ledger_refusal.take() {
-                // The ledger refused the post, saying why.
-                let at = left
-                    .as_ref()
-                    .map(|left| left.from)
-                    .or_else(|| self.unsaved.reopened_cell())
-                    .unwrap_or(CellAddress::draft(RegisterColumn::Date));
-                let refusal = SaveRefusal::Status(message);
-                self.refuse(ctx, commands, refusal, at, None, left);
+                LedgerAnswer::Refused(message) => {
+                    // The ledger refused the post, saying why.
+                    let at = left
+                        .as_ref()
+                        .map(|left| left.from)
+                        .or_else(|| self.unsaved.reopened_cell())
+                        .unwrap_or(CellAddress::draft(RegisterColumn::Date));
+                    let refusal = SaveRefusal::Status(message);
+                    self.refuse(ctx, commands, refusal, at, None, left);
+                }
             }
         }
         if let Some(saving) = self.saving.take() {
-            if view.generation() != saving.at {
-                self.unsaved.changes = None;
-                self.open_after_save = saving.next;
-                if let Some(left) = self.take_saved_leaving() {
-                    self.open_after_save = left.resume.or(saving.next);
-                    left.carry_on(commands);
+            match self.ledger_answer.take() {
+                Some(LedgerAnswer::Applied) => {
+                    self.unsaved.changes = None;
+                    self.open_after_save = saving.next;
+                    if let Some(left) = self.take_saved_leaving() {
+                        self.open_after_save = left.resume.or(saving.next);
+                        left.carry_on(commands);
+                    }
                 }
-            } else if let Some(message) = self.ledger_refusal.take() {
-                // The ledger refused the save, sent at once or once the confirm was
-                // accepted, saying why: the row keeps its changes.
-                let left = self.take_saved_leaving();
-                let refusal = SaveRefusal::Status(message);
-                self.refuse(ctx, commands, refusal, saving.from, None, left);
-            } else if saving.confirm == Confirm::Asked {
+                Some(LedgerAnswer::Refused(message)) => {
+                    // The ledger refused the save, sent at once or once the confirm was
+                    // accepted, saying why: the row keeps its changes.
+                    let left = self.take_saved_leaving();
+                    let refusal = SaveRefusal::Status(message);
+                    self.refuse(ctx, commands, refusal, saving.from, None, left);
+                }
                 // The confirm is still open.
-                self.saving = Some(saving);
-            } else {
-                // The confirm was cancelled: the row keeps its changes, the cell
-                // cursor comes back to it at once, so it isn't left again, and its cell
-                // opens again. What left the row, if anything, doesn't go on.
-                self.cursor = Some(saving.from);
-                self.open_after_save = Some(saving.from);
-                self.take_saved_leaving();
+                None if saving.confirm == Confirm::Asked => self.saving = Some(saving),
+                None => {
+                    // The confirm was cancelled, or there was nothing to send: the row
+                    // keeps its changes, the cell cursor comes back to it at once, so it
+                    // isn't left again, and its cell opens again. What left the row, if
+                    // anything, doesn't go on.
+                    self.cursor = Some(saving.from);
+                    self.open_after_save = Some(saving.from);
+                    self.take_saved_leaving();
+                }
             }
         }
         if let Some(id) = self.go_to.take() {
@@ -1074,7 +1082,7 @@ impl Register {
         if self.leaving.is_some()
             || self.refused.is_some()
             || self.saving.is_some()
-            || self.posted_at.is_some()
+            || self.post == Post::Sent
         {
             return;
         }
@@ -1222,7 +1230,6 @@ impl Register {
                 } else if let Some(changes) = &self.unsaved.changes {
                     let confirm = send_save(changes, keys.rows, keys.commands);
                     self.saving = Some(Saving {
-                        at: keys.generation,
                         from: leaving.from,
                         next: None,
                         confirm,
@@ -1257,10 +1264,10 @@ impl Register {
         self.saving = None;
         self.leaving = None;
         self.open_after_save = None;
-        self.ledger_refusal = None;
+        self.ledger_answer = None;
         self.refused = None;
         self.refocus = None;
-        self.posted_at = None;
+        self.post = Post::Idle;
         self.paste_target = None;
         self.pasting = None;
         self.focus_button = None;
@@ -1506,11 +1513,26 @@ impl Register {
     /// Returns it when no save of the editing row is waiting on the ledger, such as a
     /// save as another row's changes start, which the Status bar says instead.
     pub(crate) fn save_refused(&mut self, message: StatusMessage) -> Option<StatusMessage> {
-        if self.saving.is_none() && self.posted_at.is_none() {
+        if !self.waits_on_ledger() {
             return Some(message);
         }
-        self.ledger_refusal = Some(message);
+        self.ledger_answer = Some(LedgerAnswer::Refused(message));
         None
+    }
+
+    /// Tells the Register that the ledger applied a save, which drops the editing row's
+    /// changes, or empties the draft row, once the Register catches up with it. A save
+    /// the editing row isn't waiting on, such as one sent as another row's changes
+    /// start, changes nothing here.
+    pub(crate) fn save_applied(&mut self) {
+        if self.waits_on_ledger() {
+            self.ledger_answer = Some(LedgerAnswer::Applied);
+        }
+    }
+
+    /// Whether a save or post of the editing row is waiting on the ledger's answer.
+    fn waits_on_ledger(&self) -> bool {
+        self.saving.is_some() || self.post == Post::Sent
     }
 
     /// Tells the Register that the confirm a save of its editing row asked for was
@@ -1583,7 +1605,7 @@ impl Register {
         self.show_columns(&preferences.register_columns);
         let account = summary.account().id();
         let closed = summary.account().is_closed();
-        self.catch_up(ui.ctx(), summary, view, commands);
+        self.catch_up(ui.ctx(), summary, commands);
         let today_divider = today_divider(preferences, today);
         let (model, rebuilt) = self.take_model(summary, view, today, today_divider, i18n);
         self.filter_bar(ui, i18n, &model);
@@ -1606,7 +1628,6 @@ impl Register {
         let keys = KeyContext {
             i18n,
             account,
-            generation: view.generation(),
             closed,
             rows,
             draft_frame,
@@ -3025,7 +3046,6 @@ impl Register {
         };
         let confirm = send_save(changes, keys.rows, keys.commands);
         self.saving = Some(Saving {
-            at: keys.generation,
             from: cursor,
             next,
             confirm,
@@ -3063,7 +3083,7 @@ impl Register {
             .draft
             .posting(keys.account, keys.draft_frame.currency)?;
         keys.commands.send(AppCommand::SaveRow(command));
-        self.posted_at = Some(keys.generation);
+        self.post = Post::Sent;
         Ok(())
     }
 }
@@ -3320,8 +3340,6 @@ impl DraftFrame<'_> {
 struct KeyContext<'a> {
     i18n: &'a Localizer,
     account: AccountId,
-    /// The generation of the snapshot the Register shows.
-    generation: Generation,
     closed: bool,
     rows: Rows<'a>,
     /// What the draft row is formatted with, for a cell opened after a commit changed
@@ -3641,16 +3659,33 @@ enum Confirm {
 }
 
 /// The save of a transaction's row, sent to the ledger or waiting on the confirm,
-/// until a later snapshot shows whether it was applied.
+/// until the Register catches up with the ledger's answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Saving {
-    /// The generation of the snapshot the save was sent against.
-    at: Generation,
     /// The cell the save started from, which opens again if the save is refused.
     from: CellAddress,
     /// The cell that opens once the save is applied, if any.
     next: Option<CellAddress>,
     confirm: Confirm,
+}
+
+/// Where the post of the draft row is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Post {
+    /// No post is on its way.
+    #[default]
+    Idle,
+    /// The post was sent, and waits on the ledger's answer.
+    Sent,
+}
+
+/// The ledger's answer to a save or post of the editing row.
+#[derive(Debug, Clone)]
+enum LedgerAnswer {
+    /// The ledger applied it.
+    Applied,
+    /// The ledger refused it, saying why.
+    Refused(StatusMessage),
 }
 
 /// A refused save of the editing row, from when the "Can't save this transaction"

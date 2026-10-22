@@ -71,6 +71,12 @@ pub fn open_data_file(harness: &Harness<'_, App>, path: &Path) {
         .send(AppCommand::OpenDataFile(path.to_owned()));
 }
 
+/// Sends `command` to the open ledger, as a widget does, so it is applied in the same
+/// frame as the Commands the App sent before it.
+pub fn send_domain(harness: &Harness<'_, App>, command: DomainCommand) {
+    harness.state().send(AppCommand::Domain(command));
+}
+
 /// A closed data file named `name` in `dir`, in US dollars, holding checking accounts
 /// named `accounts`, created in that order, so the last one is the change Undo
 /// reverses first.

@@ -489,6 +489,13 @@ impl MainWindow {
         }
     }
 
+    /// Tells the Register that the ledger applied a save of its editing row.
+    pub(crate) fn save_applied(&mut self) {
+        if let Some(register) = self.register_mut() {
+            register.save_applied();
+        }
+    }
+
     /// Hands the open Dialog the outcome of the Command its form submitted: it closes
     /// once the Command is applied, and shows a rejection inline. With no Dialog open
     /// to take it, a rejection goes to the Status bar.
