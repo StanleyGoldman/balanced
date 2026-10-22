@@ -382,7 +382,7 @@ dialog-delete-account-delete = Delete
 
 # The Category List: every category as a tree, with how much each is used.
 dialog-category-list-title = Category List
-# The filter row above the tree. Show picks rows by type or by whether anything uses
+# The filter bar above the tree. Show picks rows by type or by whether anything uses
 # them; Search keeps the rows whose names hold the text typed.
 dialog-category-list-show = Show
 dialog-category-list-show-all = All

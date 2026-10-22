@@ -2,7 +2,7 @@
 
 //! The Category List: a heavy Dialog showing every category as a tree, with its type,
 //! how many transactions and split lines use each and their total, and every account a
-//! transaction can transfer to. A filter row above the tree narrows it by type, by
+//! transaction can transfer to. A filter bar above the tree narrows it by type, by
 //! usage and by name, and leaves hidden categories out unless asked to show them.
 //! Ctrl+click and Shift+click select several rows. Buttons beside the tree create,
 //! edit, merge, hide and delete categories; each change applies as soon as its confirm
@@ -42,7 +42,7 @@ pub(crate) struct CategoryListForm {
     model: Option<ListModel>,
     /// The categories whose subcategories are hidden.
     folded: HashSet<CategoryId>,
-    /// Which rows the filter row lets the tree show.
+    /// Which rows the filter bar lets the tree show.
     filter: Filter,
     /// The index in the model of each row shown, top to bottom: every row the filter
     /// keeps but those under a folded category. `None` once the model, the filter or
@@ -171,7 +171,7 @@ impl TargetPicker {
     }
 }
 
-/// Which rows the filter row lets the tree show: those Show picks whose names hold the
+/// Which rows the filter bar lets the tree show: those Show picks whose names hold the
 /// Search text, hidden ones only when asked for, and every category above one of them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Filter {
@@ -640,7 +640,7 @@ impl CategoryListForm {
             .size(Size::remainder())
             .size(Size::exact(status_height))
             .vertical(|mut strip| {
-                strip.cell(|ui| self.filter_row(ui, i18n));
+                strip.cell(|ui| self.filter_bar(ui, i18n));
                 strip.strip(|builder| {
                     builder
                         .size(Size::remainder())
@@ -697,9 +697,9 @@ impl CategoryListForm {
         self.model = Some(model);
     }
 
-    /// The filter row above the tree: the Show dropdown, the Search box and Show hidden
+    /// The filter bar above the tree: the Show dropdown, the Search box and Show hidden
     /// categories.
-    fn filter_row(&mut self, ui: &mut egui::Ui, i18n: &Localizer) {
+    fn filter_bar(&mut self, ui: &mut egui::Ui, i18n: &Localizer) {
         ui.horizontal(|ui| {
             let label = ui.label(fl!(i18n, "dialog-category-list-show"));
             ComboBox::from_id_salt("category_list_show")
