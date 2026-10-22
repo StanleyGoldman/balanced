@@ -1719,6 +1719,9 @@ impl Register {
                 let register_id = ui.id();
                 let scroll_offset = key_scroll_offset
                     .or_else(|| centre_on.map(|index| centring_offset(ui, row_height, index)));
+                // Where the Actions column lies, from its heading, which is laid out
+                // before the rows whose cells the editing row's buttons cover.
+                let mut actions = None;
                 register_table(ui, account, &self.shown, theme, widths, scroll_offset)
                     .header(row_height, |mut header| {
                         let frame = HeaderFrame {
@@ -1731,6 +1734,9 @@ impl Register {
                         let shown = self.shown.clone();
                         for column in shown {
                             header.col(|ui| {
+                                if column == RegisterColumn::Actions {
+                                    actions = Some(ui.max_rect().x_range());
+                                }
                                 let heading = Heading {
                                     register_id,
                                     column,
@@ -1755,9 +1761,10 @@ impl Register {
                             register_id,
                             access: Access::of(summary.account()),
                             editing: None,
+                            buttons: None,
                             viewport: Rect::NOTHING,
                         };
-                        self.body(body, frame, row_height, pitch);
+                        self.body(body, frame, actions, row_height, pitch);
                     });
             });
         self.end_frame(&model, draft_row, draft_frame);
@@ -1848,13 +1855,25 @@ impl Register {
     }
 
     /// Lays out the rows in view of the Register's body, and notes which of them are
-    /// fully in view for keyboard scrolling. `frame`'s viewport and editing row are
-    /// filled in here.
-    fn body(&mut self, mut body: TableBody<'_>, frame: BodyFrame<'_>, row_height: f32, pitch: f32) {
+    /// fully in view for keyboard scrolling. `frame`'s viewport, editing row and the
+    /// span of its buttons, which end at the right of `actions`, the Actions column,
+    /// are filled in here.
+    fn body(
+        &mut self,
+        mut body: TableBody<'_>,
+        frame: BodyFrame<'_>,
+        actions: Option<Rangef>,
+        row_height: f32,
+        pitch: f32,
+    ) {
         let viewport = body.ui_mut().clip_rect();
         let editing = self.editing_row_for_drawing(body.ui_mut().ctx());
+        let buttons = editing
+            .and(actions)
+            .map(|actions| buttons_span(body.ui_mut(), frame.i18n, actions));
         let frame = BodyFrame {
             editing,
+            buttons,
             viewport,
             ..frame
         };
@@ -1930,6 +1949,7 @@ impl Register {
             register_id,
             access,
             editing,
+            buttons,
             viewport,
             ..
         } = *frame;
@@ -1937,7 +1957,16 @@ impl Register {
             row: row.id(),
             column,
         };
-        let editing = editing == Some(row.id());
+        let cell_x = ui.max_rect().x_range();
+        let cover = if editing != Some(row.id()) {
+            EditingCover::NotEditing
+        } else if column != RegisterColumn::Actions
+            && buttons.is_some_and(|span| span.contains(cell_x.min) && span.contains(cell_x.max))
+        {
+            EditingCover::Covered
+        } else {
+            EditingCover::Uncovered
+        };
         let cell = Cell {
             register_id,
             row,
@@ -1945,12 +1974,12 @@ impl Register {
             insets: self.insets(column),
             selected: self.cursor.is_some_and(|cursor| cursor.row == row.id()),
             cursor: self.cursor == Some(address),
-            editing,
+            cover,
             access,
             viewport,
         };
         let (response, mut action) = cell.show(ui, i18n, theme);
-        if editing
+        if cover.is_editing_row()
             && column == RegisterColumn::Actions
             && let Some(picked) = self.row_buttons(ui, frame, row)
             && let Some(transaction) = row.transaction()
@@ -2022,8 +2051,9 @@ impl Register {
     ) -> Option<RowAction> {
         let cell = ui.max_rect();
         let right = cell.right() - Theme::EDGE_INSET;
-        let left = right - buttons_width(ui, frame.i18n) - Theme::ROW_BUTTON_GAP;
-        let strip = Rect::from_x_y_ranges(left..=cell.right(), cell.y_range());
+        let span = buttons_span(ui, frame.i18n, cell.x_range());
+        let left = span.min;
+        let strip = Rect::from_x_y_ranges(span, cell.y_range());
         let mut strip_ui = ui.new_child(
             UiBuilder::new()
                 .max_rect(Rect::from_x_y_ranges(
@@ -3307,6 +3337,9 @@ struct BodyFrame<'a> {
     access: Access,
     /// The editing row as the frame began, whose Actions cell holds its buttons.
     editing: Option<RowId>,
+    /// Where across the Register the editing row's buttons lie, over the row's cells
+    /// beside its Actions cell, while there is an editing row.
+    buttons: Option<Rangef>,
     /// The visible part of the Register's body.
     viewport: Rect,
 }
@@ -4187,11 +4220,42 @@ struct Cell<'a> {
     /// Whether the cell cursor is on this cell.
     cursor: bool,
     /// Whether the cell's row is the editing row, whose Actions cell holds its buttons
-    /// in place of the Actions menu.
-    editing: bool,
+    /// in place of the Actions menu, and whether those buttons cover the cell.
+    cover: EditingCover,
     access: Access,
     /// The visible part of the Register's body.
     viewport: Rect,
+}
+
+/// Where a cell stands toward the editing row and its buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditingCover {
+    /// The cell's row isn't the editing row.
+    NotEditing,
+    /// The cell is on the editing row, clear of its buttons, or is the Actions cell
+    /// that holds them.
+    Uncovered,
+    /// The cell is on the editing row, wholly under its buttons, which leaves it out
+    /// of reach of the pointer and of assistive technology alike.
+    Covered,
+}
+
+impl EditingCover {
+    /// Whether the cell is on the editing row.
+    fn is_editing_row(self) -> bool {
+        match self {
+            Self::NotEditing => false,
+            Self::Uncovered | Self::Covered => true,
+        }
+    }
+
+    /// Whether the editing row's buttons cover the whole cell.
+    fn is_covered(self) -> bool {
+        match self {
+            Self::NotEditing | Self::Uncovered => false,
+            Self::Covered => true,
+        }
+    }
 }
 
 impl Cell<'_> {
@@ -4210,12 +4274,16 @@ impl Cell<'_> {
             insets,
             selected,
             cursor,
-            editing,
+            cover,
             access,
             viewport,
         } = *self;
         let rect = ui.max_rect();
         let id = register_id.with(("register_cell", row.id(), column));
+        if cover.is_covered() {
+            // A cell only hovered, with no widget info, gets no AccessKit node.
+            return (ui.interact(rect, id, Sense::hover()), None);
+        }
         let response = ui.interact(rect, id, Sense::click());
         let text: WidgetText = match column {
             RegisterColumn::Date => row.date().into(),
@@ -4253,7 +4321,7 @@ impl Cell<'_> {
                 let mut action = None;
                 // The draft row is no transaction yet, so it has no commands.
                 let draft = row.id() == RowId::Draft;
-                if (selected || hovered || open) && !draft && !editing {
+                if (selected || hovered || open) && !draft && !cover.is_editing_row() {
                     action = actions_menu(ui, i18n, rect, menu, access, row);
                 }
                 return (response, action);
@@ -4733,6 +4801,16 @@ fn edit_buttons(
         pressed,
         action,
     }
+}
+
+/// Where across the Register the editing row's buttons lie in `ui`, with the gap before
+/// them, drawn from the right edge of `actions`, its Actions cell, leftwards.
+fn buttons_span(ui: &egui::Ui, i18n: &Localizer, actions: Rangef) -> Rangef {
+    let right = actions.max - Theme::EDGE_INSET;
+    Rangef::new(
+        right - buttons_width(ui, i18n) - Theme::ROW_BUTTON_GAP,
+        actions.max,
+    )
 }
 
 /// The width of the editing row's buttons side by side in `ui`, with Save as wide as Add

@@ -143,14 +143,23 @@ fn backspace_after_dropping_a_completion_deletes_a_typed_character() {
     assert_eq!(editor(&harness, "Payee"), "Trat");
 }
 
-/// The draft row's cells, from Date to Deposit. It is the last row, of eleven cells.
+/// The draft row's cells, from Date to Deposit. It is the last row, whose cells the
+/// editing row's buttons leave out of the tree while they cover them.
 fn draft_row(harness: &Harness<'static, App>) -> Vec<String> {
-    let cells: Vec<String> = harness
+    let cells: Vec<_> = harness
         .query_all_by_role(Role::Cell)
-        .map(|cell| cell.accesskit_node().label().unwrap_or_default())
+        .map(|cell| {
+            let label = cell.accesskit_node().label().unwrap_or_default();
+            (cell.rect().top(), label)
+        })
         .collect();
-    let start = cells.len() - 11;
-    cells[start..start + 7].to_vec()
+    let last = cells.last().expect("the Register shows the draft row").0;
+    cells
+        .into_iter()
+        .filter(|(top, _)| (*top - last).abs() < 1.0)
+        .take(7)
+        .map(|(_, label)| label)
+        .collect()
 }
 
 /// The labels of the open list's highlighted rows.
