@@ -1387,9 +1387,10 @@ impl Register {
 
     /// Carries out the command picked this frame from the editing row's More actions
     /// menu, if any. Delete goes straight to its confirm, which throws the row's
-    /// changes away as it deletes. Any other command leaves the row first, so a changed
-    /// row asks about its changes and the command waits for the answer: Continue
-    /// editing drops it.
+    /// changes away as it deletes. Flag and Cleared status read none of the row's
+    /// changes, so they act at once on the saved transaction and the row keeps its
+    /// changes. Go to leaves the row first, so a changed row asks about its changes and
+    /// Go to waits for the answer: Continue editing drops it.
     fn act_on_picked(
         &mut self,
         ctx: &egui::Context,
@@ -1405,11 +1406,11 @@ impl Register {
             return;
         };
         match action {
-            RowAction::Delete => self.act(transaction, action, commands),
-            RowAction::SetFlagged(_)
+            RowAction::Delete
+            | RowAction::SetFlagged(_)
             | RowAction::SetClearedStatus(_)
-            | RowAction::GoTo(_)
-            | RowAction::Unreconcile => {
+            | RowAction::Unreconcile => self.act(transaction, action, commands),
+            RowAction::GoTo(_) => {
                 let then = action.command(transaction);
                 if self.leave(ctx, i18n, preferences, commands, then.clone()) {
                     commands.send(then);
@@ -1872,14 +1873,19 @@ impl Register {
                 self.paste_target = Some(address);
             }
             // A click that leaves another row, which may ask about its changes, only
-            // moves the cell cursor.
+            // moves the cell cursor. A Clr or Flag click there acts on its own row
+            // without leaving the other one, so the cell cursor stays and nothing asks.
             let leaves_row = self
                 .edit
                 .as_ref()
                 .map(Edit::cell)
                 .or_else(|| self.unsaved.reopened_cell())
                 .is_some_and(|cell| cell.row != row.id());
-            self.place_cursor(row.id(), column);
+            let toggles =
+                action.is_some() && matches!(column, RegisterColumn::Clr | RegisterColumn::Flag);
+            if !(leaves_row && toggles) {
+                self.place_cursor(row.id(), column);
+            }
             if !leaves_row {
                 open_split_from_cell(row, column, commands);
             }

@@ -716,55 +716,129 @@ fn fresh_market_flagged(harness: &Harness<'static, App>) -> bool {
 }
 
 #[test]
-fn flag_from_more_on_a_changed_row_asks_first() {
+fn flag_from_more_on_a_changed_row_flags_it_at_once_and_keeps_the_changes() {
     let mut harness = app();
     rename_fresh_market(&mut harness);
 
     pick_more(&mut harness, "Flag");
 
+    assert!(!prompted(&harness));
+    assert!(fresh_market_flagged(&harness));
+    // The rename is still unsaved, so leaving the row asks about it.
+    click_cell(&mut harness, "Bean There");
     assert!(prompted(&harness));
-    assert!(!fresh_market_flagged(&harness));
+}
+
+/// Fresh Market's cell with `role` in the column whose cells' labels start with
+/// `column`, under whatever payee its row shows.
+fn fresh_market_cell<'tree>(
+    harness: &'tree Harness<'static, App>,
+    role: Role,
+    column: &str,
+) -> egui_kittest::Node<'tree> {
+    harness
+        .query_all_by_role(role)
+        .find(|cell| {
+            cell.accesskit_node().label().is_some_and(|label| {
+                label.starts_with(column) && label.ends_with(", 9/5/2026, -86.42")
+            })
+        })
+        .expect("Fresh Market's row has the cell")
+}
+
+/// Presses Fresh Market's cell with `role` in the column whose cells' labels start
+/// with `column`, as assistive technology does: on the editing row, the row's buttons
+/// cover its Clr and Flag cells from the pointer.
+fn press_fresh_market(harness: &mut Harness<'static, App>, role: Role, column: &str) {
+    fresh_market_cell(harness, role, column).click_accesskit();
+    harness.run();
 }
 
 #[test]
-fn continue_editing_after_flag_from_more_keeps_the_changes_and_flags_nothing() {
+fn the_flag_cell_of_a_changed_row_flags_it_at_once_and_keeps_the_changes() {
     let mut harness = app();
     rename_fresh_market(&mut harness);
-    pick_more(&mut harness, "Flag");
 
-    click_button(&mut harness, "Continue editing");
-
-    assert!(!prompted(&harness));
-    assert!(!fresh_market_flagged(&harness));
-    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Corner Shop"));
-    assert!(!can_undo(&mut harness));
-}
-
-#[test]
-fn save_after_flag_from_more_saves_the_row_then_flags_it() {
-    let mut harness = app();
-    rename_fresh_market(&mut harness);
-    pick_more(&mut harness, "Flag");
-
-    click_button(&mut harness, "Save");
+    press_fresh_market(&mut harness, Role::CheckBox, "Flag ");
 
     assert!(!prompted(&harness));
-    assert!(shows(&harness, "Corner Shop"));
     assert!(fresh_market_flagged(&harness));
+    // The rename is still unsaved, so leaving the row asks about it.
+    click_cell(&mut harness, "Bean There");
+    assert!(prompted(&harness));
 }
 
 #[test]
-fn discard_after_flag_from_more_throws_the_changes_away_then_flags_the_row() {
+fn the_clr_cell_of_a_changed_row_marks_it_cleared_at_once_and_keeps_the_changes() {
     let mut harness = app();
     rename_fresh_market(&mut harness);
-    pick_more(&mut harness, "Flag");
 
-    click_button(&mut harness, "Discard");
+    press_fresh_market(&mut harness, Role::Button, "Clr ");
 
     assert!(!prompted(&harness));
-    assert!(shows(&harness, "Fresh Market"));
-    assert!(!shows(&harness, "Corner Shop"));
-    assert!(fresh_market_flagged(&harness));
+    let status = fresh_market_cell(&harness, Role::Button, "Clr ")
+        .accesskit_node()
+        .value();
+    assert_eq!(status.as_deref(), Some("Cleared"));
+    // The rename is still unsaved, so leaving the row asks about it.
+    click_cell(&mut harness, "Bean There");
+    assert!(prompted(&harness));
+}
+
+/// Shell's Flag cell in Everyday Checking, which starts unflagged.
+const SHELL_FLAG: &str = "Flag Shell, 9/15/2026, -48.20";
+
+#[test]
+fn another_rows_flag_cell_flags_it_and_stays_on_the_changed_row() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+
+    harness
+        .get_by_role_and_label(Role::CheckBox, SHELL_FLAG)
+        .click();
+    harness.run();
+
+    assert!(!prompted(&harness));
+    let shell = harness.get_by_role_and_label(Role::CheckBox, SHELL_FLAG);
+    assert_eq!(shell.accesskit_node().toggled(), Some(Toggled::True));
+    assert_eq!(cursor(&harness), "Corner Shop");
+}
+
+/// Shell's Clr cell in Everyday Checking, which starts Uncleared.
+const SHELL_CLR: &str = "Clr Shell, 9/15/2026, -48.20";
+
+#[test]
+fn another_rows_clr_cell_marks_it_cleared_and_stays_on_the_changed_row() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+
+    harness
+        .get_by_role_and_label(Role::Button, SHELL_CLR)
+        .click();
+    harness.run();
+
+    assert!(!prompted(&harness));
+    let shell = harness.get_by_role_and_label(Role::Button, SHELL_CLR);
+    assert_eq!(shell.accesskit_node().value().as_deref(), Some("Cleared"));
+    assert_eq!(cursor(&harness), "Corner Shop");
+}
+
+#[test]
+fn another_reconciled_rows_clr_cell_asks_its_own_confirm_not_the_prompt() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+
+    harness
+        .get_by_role_and_label(Role::Button, "Clr Acme Corp, 9/1/2026, 3,200.00")
+        .click();
+    harness.run();
+
+    assert!(!prompted(&harness));
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Mark Cleared")
+            .is_some()
+    );
 }
 
 #[test]

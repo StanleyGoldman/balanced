@@ -659,6 +659,38 @@ fn continue_editing_after_go_to_from_more_stays_on_the_row() {
 }
 
 #[test]
+fn save_after_go_to_from_more_saves_the_row_then_goes() {
+    let mut harness = app_on(with_transfer("Emergency Fund"));
+    open(&mut harness, "Everyday Checking");
+    rename_saving_up(&mut harness);
+    pick_more(&mut harness, "Go to [Emergency Fund]");
+
+    // The prompt's Save, not the one in the editing row's toolbar behind it.
+    harness
+        .query_all_by_role_and_label(Role::Button, "Save")
+        .find(|button| {
+            button
+                .accesskit_node()
+                .parent()
+                .is_none_or(|parent| parent.role() != Role::Toolbar)
+        })
+        .expect("the prompt has Save")
+        .click();
+    harness.run();
+
+    assert!(!prompted(&harness));
+    // The other side, in Emergency Fund, keeps its payee.
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Cell, "Saving up")
+            .is_some()
+    );
+    assert_eq!(row_of(&harness, "Saving up")[3], "[Everyday Checking]");
+    open(&mut harness, "Everyday Checking");
+    assert_eq!(row_of(&harness, "Rainy day")[3], "[Emergency Fund]");
+}
+
+#[test]
 fn go_to_from_more_on_an_unchanged_row_goes_at_once() {
     let mut harness = app_on(with_transfer("Emergency Fund"));
     open(&mut harness, "Everyday Checking");
