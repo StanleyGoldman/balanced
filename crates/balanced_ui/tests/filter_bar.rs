@@ -323,10 +323,46 @@ fn a_zero_amount_is_neither_a_payment_nor_a_deposit() {
         column(&harness, "Payee"),
         ["Opening Balance", "Acme Corp", "Acme Corp", ""]
     );
+
     choose(&mut harness, "Transaction type", "Payments");
-    assert!(!column(&harness, "Payee").contains(&"Corner Cafe".to_owned()));
+    assert_eq!(
+        column(&harness, "Payee"),
+        [
+            "Maple Property Management",
+            "Fresh Market",
+            "Bean There",
+            "City Power & Light",
+            "Costco",
+            "Shell",
+            "Trattoria Roma",
+            "Daily Grind",
+            "Northside Water",
+            "Maple Property Management",
+            "",
+        ]
+    );
+
     choose(&mut harness, "Transaction type", "All transactions");
-    assert!(column(&harness, "Payee").contains(&"Corner Cafe".to_owned()));
+    assert_eq!(
+        column(&harness, "Payee"),
+        [
+            "Opening Balance",
+            "Acme Corp",
+            "Maple Property Management",
+            "Fresh Market",
+            "Bean There",
+            "City Power & Light",
+            "Costco",
+            "Shell",
+            "Acme Corp",
+            "Trattoria Roma",
+            "Daily Grind",
+            "Corner Cafe",
+            "Northside Water",
+            "Maple Property Management",
+            "",
+        ]
+    );
 }
 
 #[test]
