@@ -161,6 +161,15 @@ fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
             category: category.raw(),
             parent: parent.map(CategoryId::raw),
         },
+        DomainCommand::EditCategory {
+            category,
+            name,
+            parent,
+        } => v1::Command::EditCategory {
+            category: category.raw(),
+            name: name.clone(),
+            parent: parent.map(CategoryId::raw),
+        },
         DomainCommand::SetCategoryType {
             category,
             category_type,
@@ -525,6 +534,15 @@ fn from_wire(
         },
         v1::Command::MoveCategory { category, parent } => DomainCommand::MoveCategory {
             category: CategoryId::new(category),
+            parent: parent.map(CategoryId::new),
+        },
+        v1::Command::EditCategory {
+            category,
+            name,
+            parent,
+        } => DomainCommand::EditCategory {
+            category: CategoryId::new(category),
+            name,
             parent: parent.map(CategoryId::new),
         },
         v1::Command::SetCategoryType {
@@ -1093,7 +1111,7 @@ mod tests {
     }
 
     /// One of every category Command, every field set and unset.
-    fn category_commands() -> [DomainCommand; 15] {
+    fn category_commands() -> [DomainCommand; 17] {
         [
             DomainCommand::CreateCategory {
                 name: "Fuel".to_owned(),
@@ -1136,6 +1154,16 @@ mod tests {
             },
             DomainCommand::MoveCategory {
                 category: CategoryId::new(6),
+                parent: None,
+            },
+            DomainCommand::EditCategory {
+                category: CategoryId::new(6),
+                name: "Petrol".to_owned(),
+                parent: Some(CategoryId::new(5)),
+            },
+            DomainCommand::EditCategory {
+                category: CategoryId::new(6),
+                name: "Petrol".to_owned(),
                 parent: None,
             },
             DomainCommand::SetCategoryType {
@@ -1200,10 +1228,11 @@ mod tests {
             DomainCommand::RestoreCategory { .. } => 15,
             DomainCommand::RenameCategory { .. } => 16,
             DomainCommand::MoveCategory { .. } => 17,
-            DomainCommand::SetCategoryType { .. } => 18,
-            DomainCommand::SetCategoryVisibility { .. } => 19,
-            DomainCommand::ReassignCategory { .. } => 20,
-            DomainCommand::ReassignUses { .. } => 21,
+            DomainCommand::EditCategory { .. } => 18,
+            DomainCommand::SetCategoryType { .. } => 19,
+            DomainCommand::SetCategoryVisibility { .. } => 20,
+            DomainCommand::ReassignCategory { .. } => 21,
+            DomainCommand::ReassignUses { .. } => 22,
         }
     }
 
@@ -1212,7 +1241,7 @@ mod tests {
         let mut seen: Vec<usize> = every_command().iter().map(variant).collect();
         seen.dedup();
 
-        assert_eq!(seen, (0..22).collect::<Vec<_>>());
+        assert_eq!(seen, (0..23).collect::<Vec<_>>());
     }
 
     #[test]

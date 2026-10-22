@@ -87,6 +87,11 @@ pub(crate) enum Command {
         category: u32,
         parent: Option<u32>,
     },
+    EditCategory {
+        category: u32,
+        name: String,
+        parent: Option<u32>,
+    },
     SetCategoryType {
         category: u32,
         category_type: CategoryType,

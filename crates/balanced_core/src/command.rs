@@ -109,6 +109,14 @@ pub enum DomainCommand {
         category: CategoryId,
         parent: Option<CategoryId>,
     },
+    /// Rename a category and move it, as [`DomainCommand::MoveCategory`] does, in one
+    /// step. The new name is checked against the new parent's categories only, so it
+    /// may be one the old parent holds.
+    EditCategory {
+        category: CategoryId,
+        name: String,
+        parent: Option<CategoryId>,
+    },
     /// Make a top-level category, with every category under it, Income or Expense. A
     /// subcategory takes its top-level category's type, so it can't be given one.
     SetCategoryType {

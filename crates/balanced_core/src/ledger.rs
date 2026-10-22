@@ -1014,8 +1014,13 @@ impl Ledger {
                 self.rename_category(category, &name)?
             }
             DomainCommand::MoveCategory { category, parent } => {
-                self.move_category(category, parent)?
+                self.move_category(category, parent, None)?
             }
+            DomainCommand::EditCategory {
+                category,
+                name,
+                parent,
+            } => self.move_category(category, parent, Some(&name))?,
             DomainCommand::SetCategoryType {
                 category,
                 category_type,
@@ -1806,11 +1811,18 @@ impl Ledger {
         })
     }
 
+    /// Moves category `id` under `parent`, renaming it to `name` as well when there is
+    /// one, so the name is checked against the new parent's categories only.
     fn move_category(
         &mut self,
         id: CategoryId,
         parent: Option<CategoryId>,
+        name: Option<&str>,
     ) -> Result<DomainCommand, DomainError> {
+        let name = name.map(str::trim);
+        if name.is_some_and(str::is_empty) {
+            return Err(DomainError::BlankCategoryName);
+        }
         let index = self.category_index(id)?;
         let new_parent = parent
             .map(|parent| {
@@ -1828,13 +1840,23 @@ impl Ledger {
         let moved = &self.view.categories[index];
         let (old_parent, old_type, old_visibility) =
             (moved.parent(), moved.category_type(), moved.visibility());
-        self.check_unique_name(moved.name(), parent, Some(id))?;
-        self.change_category(index, |category| category.set_parent(parent))?;
+        self.check_unique_name(name.unwrap_or(moved.name()), parent, Some(id))?;
+        let old_name = self.change_category(index, |category| {
+            category.set_parent(parent);
+            name.map(|name| category.rename(name.to_owned()))
+        })?;
         // Undo moves the branch back first, so showing it again never shows its new
         // parent too.
-        let mut inverse = vec![DomainCommand::MoveCategory {
-            category: id,
-            parent: old_parent,
+        let mut inverse = vec![match old_name {
+            Some(name) => DomainCommand::EditCategory {
+                category: id,
+                name,
+                parent: old_parent,
+            },
+            None => DomainCommand::MoveCategory {
+                category: id,
+                parent: old_parent,
+            },
         }];
         if let Some(parent_type) = parent_type.filter(|&parent_type| parent_type != old_type) {
             self.set_branch_type(id, parent_type)?;

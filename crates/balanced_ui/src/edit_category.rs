@@ -49,22 +49,29 @@ impl EditCategoryForm {
         }
     }
 
-    /// The Commands making the form's changes, in order: the new name, the new parent,
-    /// then the new type of a category at the top of the tree.
+    /// The Commands making the form's changes, in order: the new name and the new
+    /// parent, as one Command when both change so the name is checked only against the
+    /// new parent's categories, then the new type of a category at the top of the tree.
     fn changes(&self) -> Vec<DomainCommand> {
         let id = self.category.id();
+        let renamed = self.name.trim() != self.category.name();
+        let moved = self.parent != self.category.parent();
         let mut changes = Vec::new();
-        if self.name.trim() != self.category.name() {
-            changes.push(DomainCommand::RenameCategory {
+        match (renamed, moved) {
+            (true, true) => changes.push(DomainCommand::EditCategory {
                 category: id,
                 name: self.name.clone(),
-            });
-        }
-        if self.parent != self.category.parent() {
-            changes.push(DomainCommand::MoveCategory {
+                parent: self.parent,
+            }),
+            (true, false) => changes.push(DomainCommand::RenameCategory {
+                category: id,
+                name: self.name.clone(),
+            }),
+            (false, true) => changes.push(DomainCommand::MoveCategory {
                 category: id,
                 parent: self.parent,
-            });
+            }),
+            (false, false) => {}
         }
         if self.parent.is_none() && self.category_type != self.category.category_type() {
             changes.push(DomainCommand::SetCategoryType {

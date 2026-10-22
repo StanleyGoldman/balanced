@@ -45,6 +45,8 @@ expression: entries
 {"rename_category":{"category":6,"name":"Petrol"}}
 {"move_category":{"category":6,"parent":5}}
 {"move_category":{"category":6,"parent":null}}
+{"edit_category":{"category":6,"name":"Petrol","parent":5}}
+{"edit_category":{"category":6,"name":"Petrol","parent":null}}
 {"set_category_type":{"category":5,"category_type":"income"}}
 {"set_category_type":{"category":5,"category_type":"expense"}}
 {"set_category_visibility":{"category":5,"visibility":"hidden"}}
