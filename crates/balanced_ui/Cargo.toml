@@ -40,6 +40,7 @@ test-support = ["dep:egui-wgpu", "dep:egui_kittest", "dep:tempfile", "balanced_i
 
 [dev-dependencies]
 egui_kittest.workspace = true
+divan.workspace = true
 balanced_core = { workspace = true, features = ["test-support"] }
 balanced_i18n = { workspace = true, features = ["test-support"] }
 icu_locale.workspace = true
@@ -182,6 +183,18 @@ required-features = ["test-support"]
 
 [[test]]
 name = "startup"
+required-features = ["test-support"]
+
+# Times what a window rebuilds after each Command, on a large data file.
+[[bench]]
+name = "rebuild"
+harness = false
+required-features = ["test-support"]
+
+# Times one frame of the App, idle and after a Command, on a large data file.
+[[bench]]
+name = "frame"
+harness = false
 required-features = ["test-support"]
 
 [lints]

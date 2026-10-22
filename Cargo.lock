@@ -556,6 +556,7 @@ dependencies = [
  "balanced_core",
  "balanced_i18n",
  "directories",
+ "divan",
  "eframe",
  "egui-wgpu",
  "egui_extras",
