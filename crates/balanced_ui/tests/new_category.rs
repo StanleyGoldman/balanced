@@ -8,7 +8,7 @@ use balanced_core::Ledger;
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::App as _;
-use eframe::egui::accesskit::Role;
+use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::{Event, Key, Modifiers, Vec2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
@@ -229,6 +229,76 @@ fn a_duplicate_name_shows_inline_and_keeps_the_dialog_open() {
         "A category named “insurance” is already there."
     ));
     assert_eq!(field(&harness, "Name").as_deref(), Some("Home : insurance"));
+}
+
+/// Whether the radio button labelled `label` is chosen, or `None` when there is none.
+fn chosen(harness: &Harness<'static, App>, label: &str) -> Option<bool> {
+    harness
+        .query_by_role_and_label(Role::RadioButton, label)
+        .map(|radio| radio.accesskit_node().data().toggled() == Some(Toggled::True))
+}
+
+#[test]
+fn a_top_level_name_offers_income_or_expense_with_expense_chosen() {
+    let harness = new_category_for("Pets");
+
+    assert_eq!(
+        (chosen(&harness, "Expense"), chosen(&harness, "Income")),
+        (Some(true), Some(false))
+    );
+}
+
+#[test]
+fn a_name_under_another_category_offers_no_type() {
+    let harness = new_category_for("home:Pets");
+
+    assert_eq!(
+        (chosen(&harness, "Expense"), chosen(&harness, "Income")),
+        (None, None)
+    );
+}
+
+#[test]
+fn choosing_income_creates_an_income_category() {
+    let mut harness = new_category_for("Pets");
+    harness
+        .get_by_role_and_label(Role::RadioButton, "Income")
+        .click();
+    harness.run();
+
+    harness.get_by_role_and_label(Role::Button, "OK").click();
+    harness.run();
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+    harness.get_by_role_and_label(Role::Button, "Tools").click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Category List…")
+        .click();
+    harness.run();
+
+    let pets = harness
+        .get_by_role_and_label(Role::TreeItem, "Pets")
+        .accesskit_node()
+        .description();
+    // The row the Category cell was in is Shell's, for -48.20.
+    assert_eq!(
+        pets.as_deref(),
+        Some("Income: 1 transaction, totalling -$48.20")
+    );
+}
+
+#[test]
+fn typing_a_colon_takes_the_type_choice_away() {
+    let mut harness = new_category_for("Pets");
+    harness
+        .get_by_role_and_label(Role::TextInput, "Name")
+        .focus();
+    harness.run();
+
+    type_text(&mut harness, ":Cats");
+
+    assert_eq!(chosen(&harness, "Income"), None);
 }
 
 #[test]

@@ -13,7 +13,7 @@ use crate::transaction::{
     NewTransactionParts, SplitLine, SplitTarget,
 };
 use crate::{
-    Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId,
+    Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId, CategoryType,
     ClearedStatus, CurrencyCode, DomainCommand, Money, MoneyError, MoveDirection, NewTransaction,
     OtherSide, Transaction, TransactionEdit, TransactionId, Visibility, WriteError,
 };
@@ -48,6 +48,10 @@ pub(crate) fn decode(entry: &str, currency: CurrencyCode) -> Result<DomainComman
     from_wire(serde_json::from_str(entry)?, currency)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per Command, each mapping its fields one by one"
+)]
 fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
     Ok(match command {
         DomainCommand::CreateAccount {
@@ -134,19 +138,20 @@ fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
                 .map(other_side_to_wire)
                 .collect::<Result<_, _>>()?,
         },
-        DomainCommand::CreateCategory { name, parent } => v1::Command::CreateCategory {
+        DomainCommand::CreateCategory {
+            name,
+            parent,
+            category_type,
+        } => v1::Command::CreateCategory {
             name: name.clone(),
             parent: parent.map(CategoryId::raw),
+            category_type: category_type_to_wire(*category_type),
         },
         DomainCommand::DeleteCategory { category } => v1::Command::DeleteCategory {
             category: category.raw(),
         },
         DomainCommand::RestoreCategory { category } => v1::Command::RestoreCategory {
-            category: v1::Category {
-                id: category.id().raw(),
-                name: category.name().to_owned(),
-                parent: category.parent().map(CategoryId::raw),
-            },
+            category: category_to_wire(category),
         },
     })
 }
@@ -338,6 +343,22 @@ fn visibility_to_wire(visibility: Visibility) -> v1::Visibility {
     }
 }
 
+fn category_to_wire(category: &Category) -> v1::Category {
+    v1::Category {
+        id: category.id().raw(),
+        name: category.name().to_owned(),
+        parent: category.parent().map(CategoryId::raw),
+        category_type: category_type_to_wire(category.category_type()),
+    }
+}
+
+fn category_type_to_wire(category_type: CategoryType) -> v1::CategoryType {
+    match category_type {
+        CategoryType::Income => v1::CategoryType::Income,
+        CategoryType::Expense => v1::CategoryType::Expense,
+    }
+}
+
 fn status_to_wire(status: AccountStatus) -> v1::AccountStatus {
     match status {
         AccountStatus::Open => v1::AccountStatus::Open,
@@ -345,6 +366,10 @@ fn status_to_wire(status: AccountStatus) -> v1::AccountStatus {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per Command, each mapping its fields one by one"
+)]
 fn from_wire(
     command: v1::Command,
     currency: CurrencyCode,
@@ -437,9 +462,14 @@ fn from_wire(
                 .map(|other_side| other_side_from_wire(other_side, currency))
                 .collect::<Result<_, _>>()?,
         },
-        v1::Command::CreateCategory { name, parent } => DomainCommand::CreateCategory {
+        v1::Command::CreateCategory {
+            name,
+            parent,
+            category_type,
+        } => DomainCommand::CreateCategory {
             name,
             parent: parent.map(CategoryId::new),
+            category_type: category_type_from_wire(category_type),
         },
         v1::Command::DeleteCategory { category } => DomainCommand::DeleteCategory {
             category: CategoryId::new(category),
@@ -455,7 +485,15 @@ fn category_from_wire(category: v1::Category) -> Category {
         CategoryId::new(category.id),
         category.name,
         category.parent.map(CategoryId::new),
+        category_type_from_wire(category.category_type),
     )
+}
+
+fn category_type_from_wire(category_type: v1::CategoryType) -> CategoryType {
+    match category_type {
+        v1::CategoryType::Income => CategoryType::Income,
+        v1::CategoryType::Expense => CategoryType::Expense,
+    }
 }
 
 fn account_from_wire(account: v1::Account, currency: CurrencyCode) -> Account {
@@ -968,21 +1006,36 @@ mod tests {
     }
 
     /// One of every category Command, every field set and unset.
-    fn category_commands() -> [DomainCommand; 4] {
+    fn category_commands() -> [DomainCommand; 5] {
         [
             DomainCommand::CreateCategory {
                 name: "Fuel".to_owned(),
                 parent: Some(CategoryId::new(5)),
+                category_type: CategoryType::Expense,
             },
             DomainCommand::CreateCategory {
-                name: "Coffee".to_owned(),
+                name: "Salary".to_owned(),
                 parent: None,
+                category_type: CategoryType::Income,
             },
             DomainCommand::DeleteCategory {
                 category: CategoryId::new(6),
             },
             DomainCommand::RestoreCategory {
-                category: Category::new(CategoryId::new(6), "Fuel".to_owned(), None),
+                category: Category::new(
+                    CategoryId::new(6),
+                    "Fuel".to_owned(),
+                    None,
+                    CategoryType::Expense,
+                ),
+            },
+            DomainCommand::RestoreCategory {
+                category: Category::new(
+                    CategoryId::new(7),
+                    "Salary".to_owned(),
+                    None,
+                    CategoryType::Income,
+                ),
             },
         ]
     }

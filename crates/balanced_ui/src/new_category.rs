@@ -3,20 +3,26 @@
 //! The New Category Dialog's form. Its name is read as a path: the text after the last
 //! `:` names the new category, and the text before it the category it goes under.
 
-use balanced_core::{Category, CategoryId, DomainCommand, DomainError, LedgerView};
+use balanced_core::{Category, CategoryId, CategoryType, DomainCommand, DomainError, LedgerView};
 use balanced_i18n::Localizer;
 use eframe::egui::{self, Id, Label, RichText, TextEdit};
 
 use crate::command::{AppCommand, CommandSender, StatusMessage};
 use crate::dialog::{DialogOutcome, HeavyDialog, OpenDialog};
 use crate::i18n::fl;
-use crate::register_model::{CATEGORY_SEPARATOR, category_text};
+use crate::register_model::{CATEGORY_SEPARATOR, category_text, type_label};
 use crate::theme::Theme;
+
+/// The types a top-level category can take, in the order the Dialog offers them: Expense,
+/// the one chosen at first, then Income.
+const TYPE_CHOICES: [CategoryType; 2] = [CategoryType::Expense, CategoryType::Income];
 
 /// What the New Category Dialog holds while it is open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NewCategoryForm {
     name: String,
+    /// The type a top-level category takes. A subcategory takes its parent's instead.
+    category_type: CategoryType,
     error: Option<FormError>,
     /// The path of the category the form asked the ledger for, while it waits for the
     /// answer.
@@ -40,6 +46,7 @@ impl NewCategoryForm {
     pub(crate) fn new(name: String) -> Self {
         Self {
             name,
+            category_type: CategoryType::Expense,
             error: None,
             submitted: None,
             focus_name: true,
@@ -74,6 +81,7 @@ impl NewCategoryForm {
         Some(DomainCommand::CreateCategory {
             name: name.to_owned(),
             parent,
+            category_type: self.category_type,
         })
     }
 
@@ -90,7 +98,8 @@ impl NewCategoryForm {
         self.focus_name = true;
     }
 
-    /// Draws the Name field, with the error below it while there is one, else a hint.
+    /// Draws the Name field, with the error below it while there is one, else a hint,
+    /// and the choice of Income or Expense while the name is of a top-level category.
     pub(crate) fn show(&mut self, ui: &mut egui::Ui, i18n: &Localizer) {
         let label = ui.label(fl!(i18n, "dialog-new-category-name"));
         let field = ui
@@ -125,6 +134,18 @@ impl NewCategoryForm {
                     RichText::new(fl!(i18n, "dialog-new-category-hint")).weak(),
                 ));
             }
+        }
+        if !self.name.contains(CATEGORY_SEPARATOR) {
+            ui.horizontal(|ui| {
+                ui.label(fl!(i18n, "dialog-new-category-type"));
+                for category_type in TYPE_CHOICES {
+                    ui.radio_value(
+                        &mut self.category_type,
+                        category_type,
+                        type_label(i18n, category_type),
+                    );
+                }
+            });
         }
     }
 }

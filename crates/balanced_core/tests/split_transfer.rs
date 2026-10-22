@@ -6,9 +6,9 @@
 use std::path::PathBuf;
 
 use balanced_core::{
-    AccountId, AccountKind, AccountStatus, AccountSummary, Allocation, CategoryId, ClearedStatus,
-    CurrencyCode, DomainCommand, DomainError, Ledger, Money, NewSplitLine, NewTransaction,
-    SplitLine, SplitTarget, Transaction, TransactionEdit, TransactionId,
+    AccountId, AccountKind, AccountStatus, AccountSummary, Allocation, CategoryId, CategoryType,
+    ClearedStatus, CurrencyCode, DomainCommand, DomainError, Ledger, Money, NewSplitLine,
+    NewTransaction, SplitLine, SplitTarget, Transaction, TransactionEdit, TransactionId,
 };
 use icu_calendar::{Date, Iso};
 use tempfile::TempDir;
@@ -60,6 +60,7 @@ impl Household {
             DomainCommand::CreateCategory {
                 name: "Groceries".to_owned(),
                 parent: None,
+                category_type: CategoryType::Expense,
             },
         );
         let checking = account_id(&ledger, "Checking");

@@ -212,6 +212,10 @@ impl Theme {
     /// How far the Category List indents a subcategory past its parent.
     pub(crate) const CATEGORY_LIST_INDENT: f32 = 18.0;
 
+    /// The width of the Category List's Type column: room for "Expense" in German,
+    /// "Ausgabe", and its heading.
+    pub(crate) const CATEGORY_LIST_TYPE_WIDTH: f32 = 80.0;
+
     /// The width of the Category List's Txns column.
     pub(crate) const CATEGORY_LIST_COUNT_WIDTH: f32 = 72.0;
 

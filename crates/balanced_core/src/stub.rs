@@ -95,7 +95,11 @@ impl StubCategory {
             Self::Shopping => ("Shopping", None),
             Self::Household => ("Household", Some(Self::Shopping)),
         };
-        let category = NewCategory::new(name);
+        let mut category = NewCategory::new(name);
+        // Income's subcategories take its type.
+        if matches!(self, Self::Income) {
+            category = category.income();
+        }
         match parent {
             Some(parent) => category.under(parent.id()),
             None => category,

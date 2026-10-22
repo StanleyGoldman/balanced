@@ -114,8 +114,15 @@ impl Store {
     /// Adds a category.
     pub fn insert_category(&self, category: &CategoryRow) -> Result<(), StoreError> {
         self.connection
-            .prepare_cached("INSERT INTO category (id, parent_id, name) VALUES (?1, ?2, ?3)")?
-            .execute(params![category.id, category.parent_id, category.name])?;
+            .prepare_cached(
+                "INSERT INTO category (id, parent_id, name, type) VALUES (?1, ?2, ?3, ?4)",
+            )?
+            .execute(params![
+                category.id,
+                category.parent_id,
+                category.name,
+                category.category_type
+            ])?;
         Ok(())
     }
 

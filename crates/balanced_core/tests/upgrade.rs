@@ -10,7 +10,8 @@ use balanced_store::{MIGRATIONS, Migration, UndoFormat};
 use icu_calendar::Date;
 use tempfile::TempDir;
 
-/// Version 2: a table of tags, which leaves the undo log's format as it was.
+/// A step after Balanced's own: a table of tags, which leaves the undo log's format as
+/// it was.
 const TAGS: Migration = Migration {
     sql: "CREATE TABLE tag (id INTEGER PRIMARY KEY, name TEXT NOT NULL) STRICT",
     data: None,
@@ -21,10 +22,10 @@ fn usd_code() -> CurrencyCode {
     CurrencyCode::new("USD").expect("USD is an ISO 4217 currency")
 }
 
-/// A data file at version 1 in a temporary directory, where account Everyday was created
-/// then Joint was created and undone, closed. The directory lives as long as the test
-/// holds it.
-fn version_1_file_with_history() -> (TempDir, PathBuf) {
+/// A data file at the current version in a temporary directory, where account Everyday
+/// was created then Joint was created and undone, closed. The directory lives as long as
+/// the test holds it.
+fn current_file_with_history() -> (TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("the temp dir is writable");
     let path = dir.path().join("Household.balanced");
     let mut ledger = Ledger::create(&path, usd_code()).expect("a new path takes a data file");
@@ -59,7 +60,7 @@ fn names(ledger: &Ledger) -> Vec<String> {
 
 #[test]
 fn undo_and_redo_work_after_an_upgrade_that_keeps_the_undo_format() {
-    let (_dir, path) = version_1_file_with_history();
+    let (_dir, path) = current_file_with_history();
 
     let mut ledger = open_upgraded(&path, &[TAGS]);
 
@@ -72,7 +73,7 @@ fn undo_and_redo_work_after_an_upgrade_that_keeps_the_undo_format() {
 
 #[test]
 fn an_upgrade_that_changes_the_undo_format_leaves_nothing_to_undo_or_redo() {
-    let (_dir, path) = version_1_file_with_history();
+    let (_dir, path) = current_file_with_history();
     let new_format = Migration {
         undo_format: UndoFormat::Changed,
         ..TAGS

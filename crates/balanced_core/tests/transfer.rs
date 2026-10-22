@@ -5,9 +5,9 @@
 use std::path::PathBuf;
 
 use balanced_core::{
-    AccountId, AccountKind, AccountStatus, AccountSummary, Allocation, CategoryId, ClearedStatus,
-    CurrencyCode, Damage, DomainCommand, DomainError, Ledger, Money, NewTransaction, OpenError,
-    Transaction, TransactionEdit, TransactionId,
+    AccountId, AccountKind, AccountStatus, AccountSummary, Allocation, CategoryId, CategoryType,
+    ClearedStatus, CurrencyCode, Damage, DomainCommand, DomainError, Ledger, Money, NewTransaction,
+    OpenError, Transaction, TransactionEdit, TransactionId,
 };
 use balanced_store::{AllocationRow, Store, TransactionRow};
 use icu_calendar::{Date, Iso};
@@ -61,6 +61,7 @@ impl Household {
             DomainCommand::CreateCategory {
                 name: "Groceries".to_owned(),
                 parent: None,
+                category_type: CategoryType::Expense,
             },
         );
         let checking = account_id(&ledger, "Checking");

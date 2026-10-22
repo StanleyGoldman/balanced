@@ -52,6 +52,12 @@ tab-planning = Planung
 tab-investing = Investitionen
 tab-property-debt = Anlagen & Verbindlichkeiten
 
+## Category types
+
+# KMyMoney's New Category dialog.
+category-type-income = Einnahme
+category-type-expense = Ausgabe
+
 ## Account bar
 
 account-bar-title = Konten
@@ -117,6 +123,9 @@ register-transaction-count =
 dialog-cancel = Abbrechen
 dialog-close = Dialog schließen
 dialog-ok = OK
+dialog-new-category-type = Typ
+dialog-category-list-type = Typ
+dialog-category-list-typed-usage = { $category_type }: { $usage }
 dialog-go-to-date-title = Zu Datum gehen
 dialog-go-to-date-date = Datum
 # Coined from GnuCash's "Springen" for its register's Jump.

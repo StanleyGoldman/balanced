@@ -71,12 +71,13 @@ fn accounts(connection: &Connection) -> rusqlite::Result<Vec<StoredAccount>> {
 
 fn categories(connection: &Connection) -> rusqlite::Result<Vec<CategoryRow>> {
     connection
-        .prepare("SELECT id, parent_id, name FROM category ORDER BY id")?
+        .prepare("SELECT id, parent_id, name, type FROM category ORDER BY id")?
         .query_map([], |row| {
             Ok(CategoryRow {
                 id: row.get(0)?,
                 parent_id: row.get(1)?,
                 name: row.get(2)?,
+                category_type: row.get(3)?,
             })
         })?
         .collect()

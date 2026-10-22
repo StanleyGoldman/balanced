@@ -6,9 +6,9 @@
 use icu_calendar::{Date, Iso};
 
 use crate::{
-    Account, AccountId, AccountKind, AccountStatus, Category, CategoryId, ClearedStatus,
-    EditedSplitLine, Money, MoneyError, NewTransaction, Transaction, TransactionId, Visibility,
-    WriteError,
+    Account, AccountId, AccountKind, AccountStatus, Category, CategoryId, CategoryType,
+    ClearedStatus, EditedSplitLine, Money, MoneyError, NewTransaction, Transaction, TransactionId,
+    Visibility, WriteError,
 };
 
 /// A change to the ledger. `Ledger::apply` applies it, or rejects it with a
@@ -86,10 +86,12 @@ pub enum DomainCommand {
         other_sides: Vec<OtherSide>,
     },
     /// Add a category named `name` under `parent`, or at the top of the tree. It takes
-    /// the next category id.
+    /// the next category id. A top-level category is of `category_type`; a subcategory
+    /// takes its parent's type instead.
     CreateCategory {
         name: String,
         parent: Option<CategoryId>,
+        category_type: CategoryType,
     },
     /// Delete a category that no transaction and no other category uses.
     DeleteCategory { category: CategoryId },

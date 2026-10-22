@@ -4,7 +4,7 @@
 //! AccessKit tree the way a user drives it.
 
 use balanced_core::{
-    AccountId, CategoryId, CurrencyCode, DomainCommand, Ledger, Money, NewTransaction,
+    AccountId, CategoryId, CategoryType, CurrencyCode, DomainCommand, Ledger, Money, NewTransaction,
 };
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
@@ -88,8 +88,8 @@ fn tree(harness: &Harness<'static, App>) -> Vec<(usize, String)> {
         .collect()
 }
 
-/// What a screen reader reads after the name of the row named `name`: how many
-/// transactions and split lines use it, and their total.
+/// What a screen reader reads after the name of the row named `name`: a category's
+/// type, then how many transactions and split lines use it, and their total.
 fn usage(harness: &Harness<'static, App>, name: &str) -> String {
     harness
         .get_by_role_and_label(Role::TreeItem, name)
@@ -226,11 +226,11 @@ fn a_category_counts_its_whole_transactions_and_its_split_lines() {
 
     assert_eq!(
         usage(&harness, "Groceries"),
-        "4,002 transactions, totalling -$500,228.79"
+        "Expense: 4,002 transactions, totalling -$500,228.79"
     );
     assert_eq!(
         usage(&harness, "Household"),
-        "2,001 transactions, totalling -$400,063.90"
+        "Expense: 2,001 transactions, totalling -$400,063.90"
     );
 }
 
@@ -241,7 +241,7 @@ fn a_parent_counts_its_own_transactions_and_its_subcategories() {
     // Old Checking's closing withdrawal of -250.42 is in Shopping itself.
     assert_eq!(
         usage(&harness, "Shopping"),
-        "2,002 transactions, totalling -$400,314.32"
+        "Expense: 2,002 transactions, totalling -$400,314.32"
     );
 }
 
@@ -253,12 +253,59 @@ fn a_parent_counts_its_subcategories_at_every_depth() {
     // -64.80 in Restaurants and -4.75 and -5.25 in Coffee Shops.
     assert_eq!(
         usage(&harness, "Restaurants"),
-        "4,003 transactions, totalling -$160,074.80"
+        "Expense: 4,003 transactions, totalling -$160,074.80"
     );
     assert_eq!(
         usage(&harness, "Food & Dining"),
-        "8,005 transactions, totalling -$660,303.59"
+        "Expense: 8,005 transactions, totalling -$660,303.59"
     );
+}
+
+#[test]
+fn each_category_reads_its_type_before_its_usage() {
+    let mut ledger = Ledger::stub();
+    ledger
+        .apply(DomainCommand::CreateCategory {
+            name: "Gifts".to_owned(),
+            parent: None,
+            category_type: CategoryType::Income,
+        })
+        .unwrap();
+    let mut harness = app_on(ledger);
+    open_category_list(&mut harness);
+
+    // Household Checking's ten repeated transactions include Acme Corp for 1,000.00 in
+    // Salary, and Everyday Checking adds two paydays of 3,200.00.
+    assert_eq!(
+        usage(&harness, "Salary"),
+        "Income: 2,002 transactions, totalling $2,006,400.00"
+    );
+    assert_eq!(usage(&harness, "Gifts"), "Income: No transactions");
+    assert_eq!(
+        usage(&harness, "Shopping"),
+        "Expense: 2,002 transactions, totalling -$400,314.32"
+    );
+}
+
+#[test]
+fn the_type_column_shows_each_categorys_type() {
+    let harness = category_list();
+
+    let types: Vec<String> = harness
+        .query_all_by_role(Role::Label)
+        .filter_map(|label| label.accesskit_node().value())
+        .filter(|value| ["Income", "Expense"].contains(&value.as_str()))
+        .collect();
+
+    // The tree's order: Auto & Transport and Food & Dining with their subcategories,
+    // Home and its two, then Income and its two, then Shopping and Household.
+    let expected = [
+        ["Expense"; 10].as_slice(),
+        ["Income"; 3].as_slice(),
+        ["Expense"; 2].as_slice(),
+    ]
+    .concat();
+    assert_eq!(types, expected);
 }
 
 #[test]
@@ -476,21 +523,22 @@ fn deleting_a_transaction_in_the_register_takes_it_out_of_the_usage() {
     // Costco's split lines were -142.37 in Groceries and -63.90 in Household.
     assert_eq!(
         usage(&harness, "Groceries"),
-        "4,001 transactions, totalling -$500,086.42"
+        "Expense: 4,001 transactions, totalling -$500,086.42"
     );
     assert_eq!(
         usage(&harness, "Household"),
-        "2,000 transactions, totalling -$400,000.00"
+        "Expense: 2,000 transactions, totalling -$400,000.00"
     );
 }
 
 /// Adds a category nothing uses, named `name`, under `parent` or at the top of the
-/// tree, returning its id.
+/// tree as an Expense category, returning its id.
 fn create_category(ledger: &mut Ledger, name: &str, parent: Option<CategoryId>) -> CategoryId {
     ledger
         .apply(DomainCommand::CreateCategory {
             name: name.to_owned(),
             parent,
+            category_type: CategoryType::Expense,
         })
         .expect("the ledger creates the category");
     ledger

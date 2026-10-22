@@ -13,7 +13,8 @@ use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
 use tempfile::TempDir;
 
-/// Version 2: every account gains a nickname, its name in capitals.
+/// The first step after Balanced's own: every account gains a nickname, its name in
+/// capitals.
 const NICKNAMES: Migration = Migration {
     sql: "ALTER TABLE account ADD COLUMN nickname TEXT NOT NULL DEFAULT ''",
     data: Some(|connection| {
@@ -23,7 +24,7 @@ const NICKNAMES: Migration = Migration {
     undo_format: UndoFormat::Kept,
 };
 
-/// Version 3: a table of tags, with no Rust step.
+/// The second step after Balanced's own: a table of tags, with no Rust step.
 const TAGS: Migration = Migration {
     sql: "CREATE TABLE tag (id INTEGER PRIMARY KEY, name TEXT NOT NULL) STRICT",
     data: None,
@@ -35,9 +36,20 @@ fn migrations(extra: &[Migration]) -> Vec<Migration> {
     MIGRATIONS.iter().chain(extra).copied().collect()
 }
 
-/// A data file at version 1 in a temporary directory, holding one account, closed. The
-/// directory lives as long as the test holds it.
-fn version_1_file() -> (TempDir, PathBuf) {
+/// The schema version of a file that has had every one of Balanced's own migrations.
+fn current() -> usize {
+    MIGRATIONS.len()
+}
+
+/// The name of the backup of `Household.balanced` taken before upgrading it from the
+/// current version.
+fn backup_name() -> String {
+    format!("Household (before upgrade, v{}).balanced", current())
+}
+
+/// A data file at the current version in a temporary directory, holding one account,
+/// closed. The directory lives as long as the test holds it.
+fn current_file() -> (TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("the temp dir is writable");
     let path = dir.path().join("Household.balanced");
     let store = Store::create(&path, "USD").expect("a new path takes a data file");
@@ -86,12 +98,12 @@ fn user_version(path: &Path) -> String {
 
 #[test]
 fn opening_an_older_file_upgrades_it_to_the_latest_version() {
-    let (_dir, path) = version_1_file();
+    let (_dir, path) = current_file();
 
     let store = Store::open_with_migrations(&path, &migrations(&[NICKNAMES, TAGS]));
     drop(store.expect("the upgrade succeeds"));
 
-    assert_eq!(user_version(&path), "3");
+    assert_eq!(user_version(&path), (current() + 2).to_string());
     assert_eq!(query(&path, "PRAGMA integrity_check"), ["ok"]);
     assert_eq!(
         query(&path, "PRAGMA foreign_key_check"),
@@ -103,13 +115,13 @@ fn opening_an_older_file_upgrades_it_to_the_latest_version() {
 
 #[test]
 fn an_upgrade_first_backs_the_file_up_beside_it() {
-    let (dir, path) = version_1_file();
+    let (dir, path) = current_file();
 
     drop(Store::open_with_migrations(&path, &migrations(&[NICKNAMES, TAGS])).unwrap());
 
-    let backup = dir.path().join("Household (before upgrade, v1).balanced");
+    let backup = dir.path().join(backup_name());
     assert!(backup.exists());
-    assert_eq!(user_version(&backup), "1");
+    assert_eq!(user_version(&backup), current().to_string());
     assert_eq!(query(&backup, "SELECT name FROM account"), ["Everyday"]);
     let reopened = Store::open(&backup);
     assert!(reopened.is_ok(), "{reopened:?}");
@@ -123,7 +135,7 @@ const BROKEN: Migration = Migration {
 };
 
 /// Opens the file at `path` with Balanced's migrations and `extra`, expecting the upgrade
-/// to fail, and checks it left the file at version 1 with its backup kept.
+/// to fail, and checks it left the file at its version with its backup kept.
 fn failed_upgrade(dir: &TempDir, path: &Path, extra: &[Migration]) -> UpgradeError {
     let error =
         Store::open_with_migrations(path, &migrations(extra)).expect_err("the upgrade fails");
@@ -131,7 +143,7 @@ fn failed_upgrade(dir: &TempDir, path: &Path, extra: &[Migration]) -> UpgradeErr
     let OpenError::UpgradeFailed { backup, source } = error else {
         panic!("{error:?}");
     };
-    assert_eq!(user_version(path), "1");
+    assert_eq!(user_version(path), current().to_string());
     assert_eq!(
         query(
             path,
@@ -140,17 +152,14 @@ fn failed_upgrade(dir: &TempDir, path: &Path, extra: &[Migration]) -> UpgradeErr
         Vec::<String>::new(),
         "the steps before the failing one are rolled back too"
     );
-    assert_eq!(
-        backup,
-        dir.path().join("Household (before upgrade, v1).balanced")
-    );
-    assert_eq!(user_version(&backup), "1");
+    assert_eq!(backup, dir.path().join(backup_name()));
+    assert_eq!(user_version(&backup), current().to_string());
     source
 }
 
 #[test]
 fn a_failing_step_rolls_the_whole_upgrade_back() {
-    let (dir, path) = version_1_file();
+    let (dir, path) = current_file();
 
     let error = failed_upgrade(&dir, &path, &[NICKNAMES, BROKEN]);
 
@@ -159,7 +168,7 @@ fn a_failing_step_rolls_the_whole_upgrade_back() {
 
 #[test]
 fn a_failing_rust_step_rolls_the_whole_upgrade_back() {
-    let (dir, path) = version_1_file();
+    let (dir, path) = current_file();
     let failing = Migration {
         sql: "",
         data: Some(|connection| {
@@ -176,7 +185,7 @@ fn a_failing_rust_step_rolls_the_whole_upgrade_back() {
 
 #[test]
 fn an_upgrade_that_breaks_a_foreign_key_rolls_back() {
-    let (dir, path) = version_1_file();
+    let (dir, path) = current_file();
     let orphan = Migration {
         sql: "INSERT INTO \"transaction\" (id, account_id, date, payee, memo, allocation, amount)
               VALUES (1, 99, '2026-10-19', '', '', 'opening_balance', 0)",
@@ -220,8 +229,8 @@ fn an_upgrade_whose_backup_cant_be_written_is_refused_and_writes_nothing() {
 
 #[test]
 fn an_earlier_backup_is_never_replaced() {
-    let (dir, path) = version_1_file();
-    let earlier = dir.path().join("Household (before upgrade, v1).balanced");
+    let (dir, path) = current_file();
+    let earlier = dir.path().join(backup_name());
     std::fs::write(&earlier, "an earlier backup").unwrap();
 
     drop(Store::open_with_migrations(&path, &migrations(&[NICKNAMES])).unwrap());
@@ -230,13 +239,16 @@ fn an_earlier_backup_is_never_replaced() {
         std::fs::read_to_string(&earlier).unwrap(),
         "an earlier backup"
     );
-    let backup = dir.path().join("Household (before upgrade, v1) 2.balanced");
-    assert_eq!(user_version(&backup), "1");
+    let backup = dir.path().join(format!(
+        "Household (before upgrade, v{}) 2.balanced",
+        current()
+    ));
+    assert_eq!(user_version(&backup), current().to_string());
 }
 
-/// The file at `path` at version 1, with one entry on each undo stack.
-fn version_1_file_with_history() -> (TempDir, PathBuf) {
-    let (dir, path) = version_1_file();
+/// A data file at the current version, with one entry on each undo stack.
+fn current_file_with_history() -> (TempDir, PathBuf) {
+    let (dir, path) = current_file();
     let store = Store::open(&path).expect("the test's file opens");
     store
         .push_entry(Stack::Undo, r#"{"delete_account":{"account":1}}"#)
@@ -250,7 +262,7 @@ fn version_1_file_with_history() -> (TempDir, PathBuf) {
 
 #[test]
 fn an_upgrade_that_keeps_the_undo_format_keeps_the_undo_log() {
-    let (_dir, path) = version_1_file_with_history();
+    let (_dir, path) = current_file_with_history();
 
     let store = Store::open_with_migrations(&path, &migrations(&[NICKNAMES, TAGS])).unwrap();
 
@@ -261,7 +273,7 @@ fn an_upgrade_that_keeps_the_undo_format_keeps_the_undo_log() {
 
 #[test]
 fn an_upgrade_through_a_step_that_changes_the_undo_format_clears_both_stacks() {
-    let (_dir, path) = version_1_file_with_history();
+    let (_dir, path) = current_file_with_history();
     let new_format = Migration {
         undo_format: UndoFormat::Changed,
         ..TAGS
@@ -297,12 +309,12 @@ fn a_step_the_file_already_had_doesnt_clear_the_undo_log() {
 
 #[test]
 fn an_upgrade_can_stop_at_an_intermediate_version() {
-    let (_dir, path) = version_1_file();
+    let (_dir, path) = current_file();
     let all = migrations(&[NICKNAMES, TAGS]);
 
-    drop(Store::open_with_migrations(&path, &all[..2]).unwrap());
+    drop(Store::open_with_migrations(&path, &all[..=current()]).unwrap());
 
-    assert_eq!(user_version(&path), "2");
+    assert_eq!(user_version(&path), (current() + 1).to_string());
     assert_eq!(query(&path, "SELECT nickname FROM account"), ["EVERYDAY"]);
     assert_eq!(
         query(&path, "SELECT name FROM sqlite_schema WHERE name = 'tag'"),
