@@ -266,8 +266,9 @@ mod tests {
             "the embedded messages load, and ICU4X's compiled data covers the test's locale",
         );
         i18n.amount_reader(
-            Currency::new(code, decimal_places)
-                .expect("the test's code is three uppercase letters and its decimal places fit"),
+            Currency::new(code, decimal_places).expect(
+                "the test's code is three uppercase letters and its decimal places fit a u8",
+            ),
         )
     }
 

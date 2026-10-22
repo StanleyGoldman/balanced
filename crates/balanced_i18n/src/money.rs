@@ -576,7 +576,7 @@ mod tests {
 
     fn currency(code: &str, decimal_places: u32) -> Currency {
         Currency::new(code, decimal_places)
-            .expect("the test's code is three uppercase letters and its decimal places fit")
+            .expect("the test's code is three uppercase letters and its decimal places fit a u8")
     }
 
     fn usd() -> Currency {
