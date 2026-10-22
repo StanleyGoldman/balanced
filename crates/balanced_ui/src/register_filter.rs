@@ -97,7 +97,7 @@ pub(crate) enum TransactionType {
     All,
     /// Money out: negative amounts.
     Payments,
-    /// Money in: zero or positive amounts.
+    /// Money in: positive amounts. A zero amount is neither a payment nor a deposit.
     Deposits,
     Flagged,
 }
@@ -106,11 +106,10 @@ impl TransactionType {
     const ALL: [Self; 4] = [Self::All, Self::Payments, Self::Deposits, Self::Flagged];
 
     fn shows(self, row: &RegisterRow) -> bool {
-        let side = row.amount().map(AmountSide::of);
         match self {
             Self::All => true,
-            Self::Payments => side == Some(AmountSide::Payment),
-            Self::Deposits => side == Some(AmountSide::Deposit),
+            Self::Payments => row.amount_on(AmountSide::Payment).is_some(),
+            Self::Deposits => row.amount_on(AmountSide::Deposit).is_some(),
             Self::Flagged => row.is_flagged(),
         }
     }

@@ -313,6 +313,59 @@ fn deposits_shows_only_money_in() {
 }
 
 #[test]
+fn a_zero_amount_is_neither_a_payment_nor_a_deposit() {
+    let mut harness = app_showing("Everyday Checking");
+    click(&mut harness, Role::Button, "+ Transaction");
+    add_transaction(&mut harness, "10/15/2026", "Corner Cafe", "0");
+
+    choose(&mut harness, "Transaction type", "Deposits");
+    assert_eq!(
+        column(&harness, "Payee"),
+        ["Opening Balance", "Acme Corp", "Acme Corp", ""]
+    );
+
+    choose(&mut harness, "Transaction type", "Payments");
+    assert_eq!(
+        column(&harness, "Payee"),
+        [
+            "Maple Property Management",
+            "Fresh Market",
+            "Bean There",
+            "City Power & Light",
+            "Costco",
+            "Shell",
+            "Trattoria Roma",
+            "Daily Grind",
+            "Northside Water",
+            "Maple Property Management",
+            "",
+        ]
+    );
+
+    choose(&mut harness, "Transaction type", "All transactions");
+    assert_eq!(
+        column(&harness, "Payee"),
+        [
+            "Opening Balance",
+            "Acme Corp",
+            "Maple Property Management",
+            "Fresh Market",
+            "Bean There",
+            "City Power & Light",
+            "Costco",
+            "Shell",
+            "Acme Corp",
+            "Trattoria Roma",
+            "Daily Grind",
+            "Corner Cafe",
+            "Northside Water",
+            "Maple Property Management",
+            "",
+        ]
+    );
+}
+
+#[test]
 fn flagged_shows_only_flagged_transactions() {
     let mut harness = app_showing("Everyday Checking");
 
