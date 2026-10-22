@@ -2,6 +2,8 @@
 
 //! Categories: what money was spent on or came from, in a tree.
 
+use crate::Visibility;
+
 /// Identifies a category for as long as it exists. Ids are never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CategoryId(u32);
@@ -34,7 +36,8 @@ impl CategoryType {
     pub const ALL: [Self; 2] = [Self::Income, Self::Expense];
 }
 
-/// A category: its name, its type, and the category it sits under, if any.
+/// A category: its name, its type, whether it is hidden, and the category it sits
+/// under, if any.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Category {
     id: CategoryId,
@@ -45,6 +48,7 @@ pub struct Category {
         reason = "the glossary's term is category type, and `type` is a keyword"
     )]
     category_type: CategoryType,
+    visibility: Visibility,
 }
 
 impl Category {
@@ -53,12 +57,14 @@ impl Category {
         name: String,
         parent: Option<CategoryId>,
         category_type: CategoryType,
+        visibility: Visibility,
     ) -> Self {
         Self {
             id,
             name,
             parent,
             category_type,
+            visibility,
         }
     }
 
@@ -78,6 +84,17 @@ impl Category {
     /// Whether it is Income or Expense: the same as its top-level category's.
     pub fn category_type(&self) -> CategoryType {
         self.category_type
+    }
+
+    /// Whether the Category field offers the category. A hidden one is still found by
+    /// its full path, and its transactions still show it.
+    pub fn visibility(&self) -> Visibility {
+        self.visibility
+    }
+
+    /// Shows or hides the category.
+    pub(crate) fn set_visibility(&mut self, visibility: Visibility) {
+        self.visibility = visibility;
     }
 
     /// Puts the category under `parent`, or at the top of the tree.
@@ -148,6 +165,7 @@ impl NewCategory {
             name: self.name,
             parent: self.parent,
             category_type: parent_type.unwrap_or(self.category_type),
+            visibility: Visibility::Shown,
         }
     }
 }

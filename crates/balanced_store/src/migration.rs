@@ -40,6 +40,13 @@ pub const MIGRATIONS: &[Migration] = &[
         // no longer decodes.
         undo_format: UndoFormat::Changed,
     },
+    Migration {
+        sql: include_str!("migration/0003_category_hidden.sql"),
+        data: None,
+        // An entry restoring a category written before this step has no visibility,
+        // and reads as shown, as every category was.
+        undo_format: UndoFormat::Kept,
+    },
 ];
 
 /// The schema version a file has after every one of `migrations`.

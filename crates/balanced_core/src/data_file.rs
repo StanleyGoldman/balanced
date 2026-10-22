@@ -212,6 +212,11 @@ impl Ledger {
                     row.name,
                     row.parent_id.map(CategoryId::new),
                     category_type(&row.category_type)?,
+                    if row.hidden {
+                        Visibility::Hidden
+                    } else {
+                        Visibility::Shown
+                    },
                 ))
             })
             .collect::<Result<_, OpenError>>()?;
@@ -512,6 +517,7 @@ pub(crate) fn category_row(category: &Category) -> CategoryRow {
         parent_id: category.parent().map(CategoryId::raw),
         name: category.name().to_owned(),
         category_type: category_type_name(category.category_type()).to_owned(),
+        hidden: category.visibility() == Visibility::Hidden,
     }
 }
 

@@ -25,6 +25,7 @@ pub struct CategoryRow {
     pub name: String,
     /// `income` or `expense`.
     pub category_type: String,
+    pub hidden: bool,
 }
 
 /// A transaction in account `account_id`.

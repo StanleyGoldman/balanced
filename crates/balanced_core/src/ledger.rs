@@ -1014,6 +1014,10 @@ impl Ledger {
                 category,
                 category_type,
             } => self.set_category_type(category, category_type)?,
+            DomainCommand::SetCategoryVisibility {
+                category,
+                visibility,
+            } => self.set_category_visibility(category, visibility)?,
         };
         Ok(Applied { inverse })
     }
@@ -1719,6 +1723,7 @@ impl Ledger {
             name.to_owned(),
             parent,
             parent_type.unwrap_or(category_type),
+            Visibility::Shown,
         );
         self.store.insert_category(&category_row(&category))?;
         self.next_category = id.next();
@@ -1873,6 +1878,31 @@ impl Ledger {
             }
         }
         Ok(())
+    }
+
+    /// Shows or hides category `id` and every category under it. The inverse gives each
+    /// its old visibility, from the top of the branch down, so a category's own setting
+    /// comes after the one above it.
+    fn set_category_visibility(
+        &mut self,
+        id: CategoryId,
+        visibility: Visibility,
+    ) -> Result<DomainCommand, DomainError> {
+        let mut inverse = Vec::new();
+        for branch in self.view.branch(id) {
+            let index = self.category_index(branch)?;
+            let old = self.view.categories[index].visibility();
+            inverse.push(DomainCommand::SetCategoryVisibility {
+                category: branch,
+                visibility: old,
+            });
+            // The branch starts at `id`, so an unknown category is refused before any
+            // change.
+            if old != visibility {
+                self.change_category(index, |category| category.set_visibility(visibility))?;
+            }
+        }
+        Ok(DomainCommand::Compound(inverse))
     }
 
     fn delete_category(&mut self, id: CategoryId) -> Result<DomainCommand, DomainError> {

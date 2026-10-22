@@ -168,6 +168,13 @@ fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
             category: category.raw(),
             category_type: category_type_to_wire(*category_type),
         },
+        DomainCommand::SetCategoryVisibility {
+            category,
+            visibility,
+        } => v1::Command::SetCategoryVisibility {
+            category: category.raw(),
+            visibility: visibility_to_wire(*visibility),
+        },
     })
 }
 
@@ -364,6 +371,7 @@ fn category_to_wire(category: &Category) -> v1::Category {
         name: category.name().to_owned(),
         parent: category.parent().map(CategoryId::raw),
         category_type: category_type_to_wire(category.category_type()),
+        visibility: visibility_to_wire(category.visibility()),
     }
 }
 
@@ -507,6 +515,13 @@ fn from_wire(
             category: CategoryId::new(category),
             category_type: category_type_from_wire(category_type),
         },
+        v1::Command::SetCategoryVisibility {
+            category,
+            visibility,
+        } => DomainCommand::SetCategoryVisibility {
+            category: CategoryId::new(category),
+            visibility: visibility_from_wire(visibility),
+        },
     })
 }
 
@@ -516,6 +531,7 @@ fn category_from_wire(category: v1::Category) -> Category {
         category.name,
         category.parent.map(CategoryId::new),
         category_type_from_wire(category.category_type),
+        visibility_from_wire(category.visibility),
     )
 }
 
@@ -1036,7 +1052,7 @@ mod tests {
     }
 
     /// One of every category Command, every field set and unset.
-    fn category_commands() -> [DomainCommand; 10] {
+    fn category_commands() -> [DomainCommand; 12] {
         [
             DomainCommand::CreateCategory {
                 name: "Fuel".to_owned(),
@@ -1057,6 +1073,7 @@ mod tests {
                     "Fuel".to_owned(),
                     None,
                     CategoryType::Expense,
+                    Visibility::Shown,
                 ),
             },
             DomainCommand::RestoreCategory {
@@ -1065,6 +1082,7 @@ mod tests {
                     "Salary".to_owned(),
                     None,
                     CategoryType::Income,
+                    Visibility::Hidden,
                 ),
             },
             DomainCommand::RenameCategory {
@@ -1086,6 +1104,14 @@ mod tests {
             DomainCommand::SetCategoryType {
                 category: CategoryId::new(5),
                 category_type: CategoryType::Expense,
+            },
+            DomainCommand::SetCategoryVisibility {
+                category: CategoryId::new(5),
+                visibility: Visibility::Hidden,
+            },
+            DomainCommand::SetCategoryVisibility {
+                category: CategoryId::new(5),
+                visibility: Visibility::Shown,
             },
         ]
     }
@@ -1114,6 +1140,7 @@ mod tests {
             DomainCommand::RenameCategory { .. } => 16,
             DomainCommand::MoveCategory { .. } => 17,
             DomainCommand::SetCategoryType { .. } => 18,
+            DomainCommand::SetCategoryVisibility { .. } => 19,
         }
     }
 
@@ -1122,7 +1149,7 @@ mod tests {
         let mut seen: Vec<usize> = every_command().iter().map(variant).collect();
         seen.dedup();
 
-        assert_eq!(seen, (0..19).collect::<Vec<_>>());
+        assert_eq!(seen, (0..20).collect::<Vec<_>>());
     }
 
     #[test]
@@ -1149,6 +1176,18 @@ mod tests {
                 other_sides: Vec::new(),
             }
         );
+    }
+
+    #[test]
+    fn a_category_written_without_a_visibility_reads_back_shown() {
+        let entry = r#"{"restore_category":{"category":{"id":6,"name":"Fuel","parent":null,"category_type":"expense"}}}"#;
+
+        let command = decode(entry, usd_code()).unwrap();
+
+        let DomainCommand::RestoreCategory { category } = command else {
+            panic!("{command:?}");
+        };
+        assert_eq!(category.visibility(), Visibility::Shown);
     }
 
     #[test]

@@ -114,6 +114,12 @@ pub enum DomainCommand {
         category: CategoryId,
         category_type: CategoryType,
     },
+    /// Show or hide a category, with every category under it. A hidden category leaves
+    /// the Category field's list, but keeps its transactions.
+    SetCategoryVisibility {
+        category: CategoryId,
+        visibility: Visibility,
+    },
 }
 
 /// A transfer's other side, or a split line's, in the account that holds it.
