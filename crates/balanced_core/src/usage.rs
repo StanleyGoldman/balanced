@@ -249,6 +249,17 @@ mod tests {
     }
 
     #[test]
+    fn a_snapshot_whose_usage_was_counted_equals_one_whose_usage_was_not() {
+        // Two ledgers, since one ledger's snapshots share a view and its counts.
+        let counted = ledger([paid("Fresh Market", GROCERIES, dec!(-86.42))]).snapshot();
+        let uncounted = ledger([paid("Fresh Market", GROCERIES, dec!(-86.42))]).snapshot();
+
+        counted.category_usage(GROCERIES);
+
+        assert_eq!(*counted, *uncounted);
+    }
+
+    #[test]
     fn a_category_counts_and_totals_the_transactions_in_it() {
         let ledger = ledger([
             paid("Fresh Market", GROCERIES, dec!(-86.42)),

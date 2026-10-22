@@ -2898,6 +2898,65 @@ mod tests {
     }
 
     #[test]
+    fn a_register_holding_transactions_is_not_empty() {
+        let ledger = three_payments();
+
+        let view = ledger.snapshot();
+
+        assert!(!view.accounts()[0].register().is_empty());
+    }
+
+    #[test]
+    fn a_register_whose_transactions_are_all_deleted_is_empty() {
+        let mut ledger = three_payments();
+        let (visa, transactions) = ids(&ledger.snapshot(), "Visa");
+        for transaction in transactions {
+            ledger
+                .apply(DomainCommand::DeleteTransaction { transaction })
+                .unwrap();
+        }
+
+        let view = ledger.snapshot();
+
+        assert!(view.account(visa).unwrap().register().is_empty());
+    }
+
+    #[test]
+    fn a_registers_entries_count_down_as_they_are_read() {
+        let ledger = three_payments();
+        let view = ledger.snapshot();
+        let mut entries = view.accounts()[0].register().iter();
+
+        let before = entries.size_hint();
+        entries.next();
+
+        assert_eq!((before, entries.size_hint()), ((4, Some(4)), (3, Some(3))));
+    }
+
+    #[test]
+    fn a_registers_entries_read_backwards_from_the_last() {
+        let ledger = three_payments();
+
+        let view = ledger.snapshot();
+
+        let backwards: Vec<_> = view.accounts()[0]
+            .register()
+            .iter()
+            .rev()
+            .map(|entry| (entry.transaction().payee(), entry.balance()))
+            .collect();
+        assert_eq!(
+            backwards,
+            [
+                ("Bean There", usd(dec!(565.00))),
+                ("Fresh Market", usd(dec!(569.75))),
+                ("Acme Corp", usd(dec!(600.00))),
+                ("", usd(dec!(100.00))),
+            ]
+        );
+    }
+
+    #[test]
     fn deleting_a_transaction_takes_it_out_of_the_running_balances() {
         let mut ledger = three_payments();
         let fresh_market = transaction(&ledger, "Fresh Market");
