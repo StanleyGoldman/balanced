@@ -723,66 +723,71 @@ fn flag_from_more_on_a_changed_row_flags_it_at_once_and_keeps_the_changes() {
     pick_more(&mut harness, "Flag");
 
     assert!(!prompted(&harness));
-    assert!(fresh_market_flagged(&harness));
     // The rename is still unsaved, so leaving the row asks about it.
     click_cell(&mut harness, "Bean There");
     assert!(prompted(&harness));
+    // The flag went on at once, so throwing the rename away keeps it.
+    click_button(&mut harness, "Discard");
+    assert!(fresh_market_flagged(&harness));
 }
 
 /// Fresh Market's cell with `role` in the column whose cells' labels start with
-/// `column`, under whatever payee its row shows.
-fn fresh_market_cell<'tree>(
+/// `column`, under whatever payee its row shows, if assistive technology can reach it.
+fn query_fresh_market_cell<'tree>(
     harness: &'tree Harness<'static, App>,
     role: Role,
     column: &str,
-) -> egui_kittest::Node<'tree> {
-    harness
-        .query_all_by_role(role)
-        .find(|cell| {
-            cell.accesskit_node().label().is_some_and(|label| {
-                label.starts_with(column) && label.ends_with(", 9/5/2026, -86.42")
-            })
-        })
-        .expect("Fresh Market's row has the cell")
-}
-
-/// Presses Fresh Market's cell with `role` in the column whose cells' labels start
-/// with `column`, as assistive technology does: on the editing row, the row's buttons
-/// cover its Clr and Flag cells from the pointer.
-fn press_fresh_market(harness: &mut Harness<'static, App>, role: Role, column: &str) {
-    fresh_market_cell(harness, role, column).click_accesskit();
-    harness.run();
+) -> Option<egui_kittest::Node<'tree>> {
+    harness.query_all_by_role(role).find(|cell| {
+        cell.accesskit_node()
+            .label()
+            .is_some_and(|label| label.starts_with(column) && label.ends_with(", 9/5/2026, -86.42"))
+    })
 }
 
 #[test]
-fn the_flag_cell_of_a_changed_row_flags_it_at_once_and_keeps_the_changes() {
+fn the_editing_rows_buttons_take_the_cells_under_them_out_of_reach() {
     let mut harness = app();
-    rename_fresh_market(&mut harness);
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    assert!(query_fresh_market_cell(&harness, Role::Button, "Clr ").is_some());
+    assert!(query_fresh_market_cell(&harness, Role::CheckBox, "Flag ").is_some());
 
-    press_fresh_market(&mut harness, Role::CheckBox, "Flag ");
+    // Opens the Payee cell, which makes the row the editing row.
+    press(&mut harness, Modifiers::NONE, Key::Enter);
 
-    assert!(!prompted(&harness));
-    assert!(fresh_market_flagged(&harness));
-    // The rename is still unsaved, so leaving the row asks about it.
-    click_cell(&mut harness, "Bean There");
-    assert!(prompted(&harness));
+    assert!(query_fresh_market_cell(&harness, Role::Button, "Clr ").is_none());
+    assert!(query_fresh_market_cell(&harness, Role::CheckBox, "Flag ").is_none());
+    // Other rows keep theirs.
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, SHELL_CLR)
+            .is_some()
+    );
+    assert!(
+        harness
+            .query_by_role_and_label(Role::CheckBox, SHELL_FLAG)
+            .is_some()
+    );
 }
 
 #[test]
-fn the_clr_cell_of_a_changed_row_marks_it_cleared_at_once_and_keeps_the_changes() {
+fn the_editing_rows_cells_clear_of_its_buttons_stay_in_reach() {
     let mut harness = app();
-    rename_fresh_market(&mut harness);
+    open(&mut harness, "Everyday Checking");
+    // Moves Clr from beside Flag to before Memo, past Payment, Deposit and Balance.
+    click_button(&mut harness, "Choose columns");
+    for _ in 0..4 {
+        click_button(&mut harness, "Move Clr up");
+    }
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+    click_cell(&mut harness, "Fresh Market");
 
-    press_fresh_market(&mut harness, Role::Button, "Clr ");
+    // Opens the Payee cell, which makes the row the editing row.
+    press(&mut harness, Modifiers::NONE, Key::Enter);
 
-    assert!(!prompted(&harness));
-    let status = fresh_market_cell(&harness, Role::Button, "Clr ")
-        .accesskit_node()
-        .value();
-    assert_eq!(status.as_deref(), Some("Cleared"));
-    // The rename is still unsaved, so leaving the row asks about it.
-    click_cell(&mut harness, "Bean There");
-    assert!(prompted(&harness));
+    assert!(query_fresh_market_cell(&harness, Role::Button, "Clr ").is_some());
+    assert!(query_fresh_market_cell(&harness, Role::CheckBox, "Flag ").is_none());
 }
 
 /// Shell's Flag cell in Everyday Checking, which starts unflagged.
