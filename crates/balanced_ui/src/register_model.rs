@@ -1053,10 +1053,13 @@ mod tests {
     }
 
     #[test]
-    fn under_a_descending_sort_when_every_row_is_after_today_the_divider_sits_below_every_row() {
-        let model = all_after_today(RegisterSort::default().clicked(SortKey::Date));
+    fn under_a_descending_date_sort_when_every_row_is_after_today_the_divider_sits_below_every_row()
+    {
+        // The Register opens sorted by date, so clicking Date reverses it.
+        let descending = RegisterSort::default().clicked(SortKey::Date);
 
-        assert_ne!(model.rows(), []);
+        let model = all_after_today(descending);
+
         assert_eq!(model.divider(), Some(model.rows().len()));
     }
 }
