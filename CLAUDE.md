@@ -84,6 +84,7 @@ CI is GitHub Actions (`.github/workflows/`), read and driven with `gh run` and `
 ### Implementation
 
 - Assign the ticket to the user as an `/implement` run starts (`gh issue edit <n> --add-assignee @me`), so the tracker shows it is being worked.
+- Read the ticket with **Read an issue** from `docs/agents/issue-tracker.md`, which fetches its comments with the body. Its grilling resolution comment outranks the body: it settles the scope (which fixes go to their own tickets) and the names (a findings doc's path).
 - Before branching, look for an earlier run on the ticket: `gh pr list --search "<n> in:body" --state open` and `git worktree list`. If one exists, resume its worktree and PR. A run can stop mid-merge, with conflicts resolved but not yet staged. Then run `ListAgents`: a live peer session named for the ticket (`implement 318`) is building it, with no PR or pushed branch yet, so leave the ticket to that session and tell the user.
 - Start an `/implement` run with `git fetch origin main` and branch the work from `origin/main`: a worktree can predate merged blockers, so their code looks missing.
 - Then check that everything the ticket reuses (a field, a clock, a Dialog) is already built. When one is still an open ticket that isn't among its blockers, ask the user whether to add it as a blocker or build an interim stand-in.
