@@ -929,9 +929,8 @@ impl Register {
     /// closed; a post the ledger applied empties the draft row, and stays in view until
     /// the filter changes; and a save of a transaction's row the ledger applied drops
     /// its changes and opens the cell it moves on to, while a refused one opens the cell
-    /// it started from again. A save or post that leaving
-    /// the row chose sends what left it once applied, and brings the cell cursor back
-    /// to the row when refused.
+    /// it started from again. A save or post that leaving the row chose sends what left
+    /// it once applied, and brings the cell cursor back to the row when refused.
     fn catch_up(
         &mut self,
         ctx: &egui::Context,
@@ -1522,8 +1521,8 @@ impl Register {
 
     /// Tells the Register that the ledger applied a save, which drops the editing row's
     /// changes, or empties the draft row, once the Register catches up with it. A save
-    /// no save of the editing row is waiting on, such as one sent as another row's
-    /// changes start, changes nothing here.
+    /// the editing row isn't waiting on, such as one sent as another row's changes
+    /// start, changes nothing here.
     pub(crate) fn save_applied(&mut self) {
         if self.waits_on_ledger() {
             self.ledger_answer = Some(LedgerAnswer::Applied);
@@ -3677,6 +3676,7 @@ enum Post {
 /// The ledger's answer to a save or post of the editing row.
 #[derive(Debug, Clone)]
 enum LedgerAnswer {
+    /// The ledger applied it.
     Applied,
     /// The ledger refused it, saying why.
     Refused(StatusMessage),

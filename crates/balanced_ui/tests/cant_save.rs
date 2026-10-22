@@ -468,19 +468,19 @@ fn press_enter_with(harness: &mut Harness<'static, App>, other: DomainCommand) {
     harness.run();
 }
 
-/// The Command that renames the account named `name` in `ledger`, which the ledger
-/// applies.
-fn rename(ledger: &Ledger, name: &str) -> DomainCommand {
+/// The Command that renames the account named `name` in `ledger` to `to`, which the
+/// ledger applies.
+fn rename(ledger: &Ledger, name: &str, to: &str) -> DomainCommand {
     DomainCommand::RenameAccount {
         account: account(ledger, name),
-        name: "Daily Checking".to_owned(),
+        name: to.to_owned(),
     }
 }
 
 #[test]
 fn a_save_refused_as_another_change_is_applied_keeps_the_rows_changes() {
     let ledger = with_closed_transfer();
-    let other = rename(&ledger, "Everyday Checking");
+    let other = rename(&ledger, "Everyday Checking", "Daily Checking");
     let mut harness = app_on(ledger);
     change_closed_transfer(&mut harness);
 
@@ -497,7 +497,7 @@ fn a_save_refused_as_another_change_is_applied_keeps_the_rows_changes() {
 #[test]
 fn a_post_refused_as_another_change_is_applied_keeps_the_draft() {
     let ledger = Ledger::stub();
-    let other = rename(&ledger, "Everyday Checking");
+    let other = rename(&ledger, "Everyday Checking", "Daily Checking");
     let mut harness = app_on(ledger);
     open(&mut harness, "Everyday Checking");
     // Too large for the account's balance to hold.
