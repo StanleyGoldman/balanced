@@ -28,14 +28,14 @@ fn a_new_file_is_stamped_as_a_balanced_file() {
 }
 
 #[test]
-fn a_new_file_is_at_schema_version_2() {
+fn a_new_file_is_at_schema_version_3() {
     let (_dir, connection) = created_file();
 
     let user_version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
 
-    assert_eq!(user_version, 2);
+    assert_eq!(user_version, 3);
 }
 
 #[test]

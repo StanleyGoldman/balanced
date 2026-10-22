@@ -41,12 +41,14 @@ expression: entries
 {"create_category":{"name":"Salary","parent":null,"category_type":"income"}}
 {"delete_category":{"category":6}}
 {"restore_category":{"category":{"id":6,"name":"Fuel","parent":null,"category_type":"expense"}}}
-{"restore_category":{"category":{"id":7,"name":"Salary","parent":null,"category_type":"income"}}}
+{"restore_category":{"category":{"id":7,"name":"Salary","parent":null,"category_type":"income","visibility":"hidden"}}}
 {"rename_category":{"category":6,"name":"Petrol"}}
 {"move_category":{"category":6,"parent":5}}
 {"move_category":{"category":6,"parent":null}}
 {"set_category_type":{"category":5,"category_type":"income"}}
 {"set_category_type":{"category":5,"category_type":"expense"}}
+{"set_category_visibility":{"category":5,"visibility":"hidden"}}
+{"set_category_visibility":{"category":5,"visibility":"shown"}}
 {"reassign_category":{"from":6,"to":3}}
 {"reassign_uses":{"from":3,"to":6,"uses":[{"transaction":12},{"split_line":{"split":13,"line":1}}]}}
 {"reassign_uses":{"from":3,"to":6,"uses":[]}}

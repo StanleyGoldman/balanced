@@ -598,15 +598,16 @@ fn selecting_an_unused_category_with_none_under_it_enables_delete() {
 
     click_row(&mut harness, "Pets");
 
-    assert_eq!(enabled_buttons(&harness), NEW_EDIT_AND_DELETE);
+    assert_eq!(enabled_buttons(&harness), NEW_EDIT_HIDE_AND_DELETE);
 }
 
-/// The button column with a category selected: New…, Edit… and Delete… enabled.
-const NEW_EDIT_AND_DELETE: [(&str, bool); 5] = [
+/// The button column with a category selected: New…, Edit…, Hide and Delete…
+/// enabled.
+const NEW_EDIT_HIDE_AND_DELETE: [(&str, bool); 5] = [
     ("New…", true),
     ("Edit…", true),
     ("Merge…", false),
-    ("Hide", false),
+    ("Hide", true),
     ("Delete…", true),
 ];
 
@@ -616,7 +617,7 @@ fn selecting_a_used_category_enables_delete() {
 
     click_row(&mut harness, "Groceries");
 
-    assert_eq!(enabled_buttons(&harness), NEW_EDIT_AND_DELETE);
+    assert_eq!(enabled_buttons(&harness), NEW_EDIT_HIDE_AND_DELETE);
 }
 
 #[test]
@@ -629,7 +630,7 @@ fn selecting_a_parent_enables_delete() {
 
     click_row(&mut harness, "Pets");
 
-    assert_eq!(enabled_buttons(&harness), NEW_EDIT_AND_DELETE);
+    assert_eq!(enabled_buttons(&harness), NEW_EDIT_HIDE_AND_DELETE);
 }
 
 #[test]

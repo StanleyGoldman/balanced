@@ -91,6 +91,10 @@ pub(crate) enum Command {
         category: u32,
         category_type: CategoryType,
     },
+    SetCategoryVisibility {
+        category: u32,
+        visibility: Visibility,
+    },
     ReassignCategory {
         from: u32,
         to: u32,
@@ -123,11 +127,22 @@ pub(crate) enum AccountKind {
     Liability,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Visibility {
+    #[default]
     Shown,
     Hidden,
+}
+
+impl Visibility {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes the field by reference"
+    )]
+    fn is_shown(&self) -> bool {
+        *self == Self::Shown
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -164,6 +179,10 @@ pub(crate) struct Category {
         reason = "the glossary's term is category type, and `type` is a keyword"
     )]
     pub(crate) category_type: CategoryType,
+    /// A shown category leaves it out. An entry written before categories could be
+    /// hidden has none, and reads as shown.
+    #[serde(default, skip_serializing_if = "Visibility::is_shown")]
+    pub(crate) visibility: Visibility,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

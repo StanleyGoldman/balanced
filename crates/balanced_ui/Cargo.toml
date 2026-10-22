@@ -65,6 +65,10 @@ name = "data_file"
 required-features = ["test-support"]
 
 [[test]]
+name = "category_hide"
+required-features = ["test-support"]
+
+[[test]]
 name = "edit_category"
 required-features = ["test-support"]
 

@@ -3,14 +3,16 @@
 //! The Category List: a heavy Dialog showing every category as a tree, with its type,
 //! how many transactions and split lines use each and their total, and every account a
 //! transaction can transfer to. A filter row above the tree narrows it by type, by
-//! usage and by name. Buttons beside the tree create, edit and delete categories; each
-//! change applies as soon as its confirm is accepted, as one undo step.
+//! usage and by name, and leaves hidden categories out unless asked to show them.
+//! Buttons beside the tree create, edit, hide and delete categories; each change
+//! applies as soon as its confirm is accepted, or at once where there is none, as one
+//! undo step.
 
 use std::collections::{BTreeMap, HashSet};
 
 use balanced_core::{
     AccountId, Category, CategoryId, CategoryType, DomainCommand, DomainError, Generation,
-    LedgerView, Usage,
+    LedgerView, Usage, Visibility,
 };
 use balanced_i18n::{AmountStyle, Localizer};
 use eframe::egui::accesskit::{self, Role};
@@ -134,18 +136,23 @@ impl DeleteConfirm {
 }
 
 /// Which rows the filter row lets the tree show: those Show picks whose names hold the
-/// Search text, and every category above one of them.
+/// Search text, hidden ones only when asked for, and every category above one of them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Filter {
     show: Show,
     /// The Search box's text, as typed.
     search: String,
+    /// Whether Show hidden categories is ticked.
+    show_hidden: bool,
 }
 
 impl Filter {
     /// Whether `row` is one the filter picks, before the categories above a pick are
     /// added. `search` is the Search text, trimmed and lowercased.
     fn picks(&self, row: &ListRow, search: &str) -> bool {
+        if row.hidden && !self.show_hidden {
+            return false;
+        }
         let shown = match self.show {
             Show::All => true,
             Show::Income => row.category_type == Some(CategoryType::Income),
@@ -197,6 +204,8 @@ impl Show {
 enum ButtonAction {
     New,
     Edit(CategoryId),
+    /// Hide the category, or show it again, as the [`Visibility`] says.
+    SetVisibility(CategoryId, Visibility),
     Delete(CategoryId),
 }
 
@@ -251,6 +260,8 @@ struct ListRow {
     name: String,
     /// Whether any category sits under it.
     has_children: bool,
+    /// Whether it is a hidden category.
+    hidden: bool,
     /// A category's type, or `None` for an account.
     category_type: Option<CategoryType>,
     /// The Type cell's text, or `None` for an account.
@@ -321,15 +332,11 @@ impl ListModel {
             let name = category.name().to_owned();
             let has_children = under.is_some();
             let category_type = Some(category.category_type());
-            rows.push(ListRow::new(
-                i18n,
-                key,
-                depth,
-                name,
-                has_children,
-                category_type,
-                usage,
-            ));
+            let mut row = ListRow::new(i18n, key, depth, name, has_children, category_type, usage);
+            if category.visibility() == Visibility::Hidden {
+                row = row.hidden(i18n);
+            }
+            rows.push(row);
             pending.extend(
                 under
                     .into_iter()
@@ -471,6 +478,7 @@ impl ListRow {
             depth,
             name,
             has_children,
+            hidden: false,
             category_type,
             type_text,
             used: count > 0,
@@ -479,6 +487,20 @@ impl ListRow {
             ),
             total,
             description,
+        }
+    }
+
+    /// The same row, of a hidden category: a screen reader reads that before its usage.
+    fn hidden(self, i18n: &Localizer) -> Self {
+        let description = fl!(
+            i18n,
+            "dialog-category-list-hidden-usage",
+            usage = self.description.clone()
+        );
+        Self {
+            hidden: true,
+            description,
+            ..self
         }
     }
 }
@@ -510,8 +532,15 @@ impl CategoryListForm {
     }
 
     /// Draws the tree and its usage beside the button column, above the status line,
-    /// filling `ui`.
-    fn show(&mut self, ui: &mut egui::Ui, i18n: &Localizer, theme: &Theme, view: &LedgerView) {
+    /// filling `ui`. A change made without a confirm goes to `commands` at once.
+    fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        theme: &Theme,
+        commands: &CommandSender,
+        view: &LedgerView,
+    ) {
         if let Some(focus) = self.focus_return.take() {
             self.focus_return = focus.restore_in(ui.ctx(), dialog_id());
         }
@@ -574,6 +603,13 @@ impl CategoryListForm {
                     self.edit = Some(OpenDialog::new(ui.ctx(), form));
                 }
             }
+            Some(ButtonAction::SetVisibility(category, visibility)) => {
+                let command = DomainCommand::SetCategoryVisibility {
+                    category,
+                    visibility,
+                };
+                commands.send(AppCommand::Domain(command));
+            }
             Some(ButtonAction::Delete(category)) => {
                 self.delete = Some(OpenDialog::new(ui.ctx(), DeleteConfirm::new(category)));
             }
@@ -581,7 +617,8 @@ impl CategoryListForm {
         self.model = Some(model);
     }
 
-    /// The filter row above the tree: the Show dropdown and the Search box.
+    /// The filter row above the tree: the Show dropdown, the Search box and Show hidden
+    /// categories.
     fn filter_row(&mut self, ui: &mut egui::Ui, i18n: &Localizer) {
         ui.horizontal(|ui| {
             let label = ui.label(fl!(i18n, "dialog-category-list-show"));
@@ -601,6 +638,10 @@ impl CategoryListForm {
                     .desired_width(Theme::SEARCH_BOX_WIDTH),
             )
             .labelled_by(label.id);
+            ui.checkbox(
+                &mut self.filter.show_hidden,
+                fl!(i18n, "dialog-category-list-show-hidden"),
+            );
         });
     }
 
@@ -695,8 +736,9 @@ impl CategoryListForm {
         }
     }
 
-    /// The button column: New… always, and Edit… and Delete… for a selected category.
-    /// Merge… and Hide wait on their own Dialogs. Returns what a click asked for.
+    /// The button column: New… always, and Edit…, Hide and Delete… for a selected
+    /// category, Hide reading Unhide on a hidden one. Merge… waits on its own Dialog.
+    /// Returns what a click asked for.
     fn buttons(
         &self,
         ui: &mut egui::Ui,
@@ -725,8 +767,18 @@ impl CategoryListForm {
             }
             // TODO(#489): Merge… the selected categories.
             button(fl!(i18n, "dialog-category-list-merge"), false);
-            // TODO(#491): Hide and Unhide a category.
-            button(fl!(i18n, "dialog-category-list-hide"), false);
+            let hiding = selected.and_then(|row| match row.key {
+                RowKey::Category(id) if row.hidden => Some((id, Visibility::Shown)),
+                RowKey::Category(id) => Some((id, Visibility::Hidden)),
+                RowKey::Transfer(_) => None,
+            });
+            let text = match hiding {
+                Some((_, Visibility::Shown)) => fl!(i18n, "dialog-category-list-unhide"),
+                Some((_, Visibility::Hidden)) | None => fl!(i18n, "dialog-category-list-hide"),
+            };
+            if button(text, hiding.is_some()) {
+                asked = hiding.map(|(id, visibility)| ButtonAction::SetVisibility(id, visibility));
+            }
             if button(fl!(i18n, "dialog-category-list-delete"), editable.is_some()) {
                 asked = editable.map(ButtonAction::Delete);
             }
@@ -890,19 +942,43 @@ fn name_cell(
         }
     });
     let text = match row.key {
+        RowKey::Category(_) if row.hidden => RichText::new(&row.name).italics().weak(),
         RowKey::Category(_) => RichText::new(&row.name),
         RowKey::Transfer(_) => RichText::new(&row.name).weak(),
     };
+    // A hidden category's name is followed by its mark, which keeps its room as the
+    // name is cut short.
+    let gap = ui.spacing().item_spacing.x;
+    let mark = row.hidden.then(|| {
+        let mark = RichText::new(fl!(i18n, "dialog-category-list-hidden"))
+            .small()
+            .weak();
+        WidgetText::from(mark).into_galley(
+            ui,
+            Some(TextWrapMode::Extend),
+            f32::INFINITY,
+            TextStyle::Small,
+        )
+    });
+    let mark_width = mark.as_ref().map_or(0.0, |mark| mark.size().x + gap);
     let galley = WidgetText::from(text).into_galley(
         ui,
         Some(TextWrapMode::Truncate),
-        name_rect.width(),
+        (name_rect.width() - mark_width).max(0.0),
         TextStyle::Body,
     );
-    let top = name_rect.center().y - galley.size().y / 2.0;
     let color = ui.visuals().text_color();
-    ui.painter()
-        .galley(pos2(name_rect.left(), top), galley, color);
+    let middle = name_rect.center().y;
+    let name_end = name_rect.left() + galley.size().x;
+    ui.painter().galley(
+        pos2(name_rect.left(), middle - galley.size().y / 2.0),
+        galley,
+        color,
+    );
+    if let Some(mark) = mark {
+        let top = middle - mark.size().y / 2.0;
+        ui.painter().galley(pos2(name_end + gap, top), mark, color);
+    }
     ui.advance_cursor_after_rect(cell);
     let mut action = None;
     if response.clicked() || response.gained_focus() {
@@ -1008,7 +1084,9 @@ pub(crate) fn show(
     )
     .with_size(Theme::CATEGORY_LIST_SIZE)
     .body_fills()
-    .show(ctx, dialog, |ui, form| form.show(ui, i18n, theme, view));
+    .show(ctx, dialog, |ui, form| {
+        form.show(ui, i18n, theme, commands, view);
+    });
     // Drawn after the list, so they are raised above it.
     show_delete(ctx, i18n, theme, commands, &mut dialog.form, view);
     show_new_category(ctx, i18n, theme, commands, &mut dialog.form, view);
