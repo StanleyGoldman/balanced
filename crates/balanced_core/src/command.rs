@@ -114,6 +114,30 @@ pub enum DomainCommand {
         category: CategoryId,
         category_type: CategoryType,
     },
+    /// Move every transaction and split line in category `from` to category `to`, which
+    /// may not be `from` or a category under it. Transactions in closed accounts move
+    /// too. Categories under `from` keep theirs.
+    ReassignCategory { from: CategoryId, to: CategoryId },
+    /// Move exactly the transactions and split lines in `uses`, each in category
+    /// `from`, to category `to`: the inverse of [`DomainCommand::ReassignCategory`],
+    /// which leaves alone what was in `to` before.
+    ReassignUses {
+        from: CategoryId,
+        to: CategoryId,
+        uses: Vec<CategoryUse>,
+    },
+}
+
+/// One use of a category: a transaction whose whole amount is in it, or one line of a
+/// split.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CategoryUse {
+    Transaction(TransactionId),
+    /// The line at `line`, counting from 0, of split transaction `split`.
+    SplitLine {
+        split: TransactionId,
+        line: usize,
+    },
 }
 
 /// A transfer's other side, or a split line's, in the account that holds it.
@@ -301,6 +325,16 @@ pub enum DomainError {
     /// The category's name is empty or only spaces.
     #[error("a category needs a name")]
     BlankCategoryName,
+    /// The command reassigned a category's transactions to the category itself or one
+    /// under it, which would be deleted with it.
+    #[error("a category's transactions can't move to it or a category under it: {category:?}")]
+    ReassignIntoItself { category: CategoryId },
+    /// The command named a transaction or split line that isn't in the category it gave.
+    #[error("the transaction isn't in the category: {transaction:?} {category:?}")]
+    NotInCategory {
+        transaction: TransactionId,
+        category: CategoryId,
+    },
     /// A balance would no longer fit in an amount.
     #[error(transparent)]
     Money(#[from] MoneyError),

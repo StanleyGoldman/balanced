@@ -91,6 +91,24 @@ pub(crate) enum Command {
         category: u32,
         category_type: CategoryType,
     },
+    ReassignCategory {
+        from: u32,
+        to: u32,
+    },
+    ReassignUses {
+        from: u32,
+        to: u32,
+        uses: Vec<CategoryUse>,
+    },
+}
+
+/// A transaction whose whole amount is in a category, or one line, counting from 0, of
+/// a split.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CategoryUse {
+    Transaction(u32),
+    SplitLine { split: u32, line: u32 },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
