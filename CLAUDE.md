@@ -34,6 +34,7 @@ CI is GitHub Actions (`.github/workflows/`), read and driven with `gh run` and `
 - Tag each question `cheap` or `expensive` to reverse. A public API, a data format, or an ADR-level choice is `expensive`.
 - Settle `firm` questions yourself. List them at the end under "Assumed, shout if wrong" and ask only the rest.
 - Batch `cheap` questions tagged `firm` or `leaning` into one round. The user replies "accept all" or names the exceptions. This overrides the one-question-per-round rule for these questions.
+- When triage brings a ticket the user hasn't read, grill it alone, and open its first question with the problem in plain words: what the user does, what goes wrong, and what each option would mean for them. Code paths can follow, for reference. A batch covers only tickets the user has already read.
 - Post the resolution comment in the shape given in `docs/agents/grilling.md`.
 
 ### Subagents
