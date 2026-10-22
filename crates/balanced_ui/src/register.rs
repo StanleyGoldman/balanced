@@ -1110,8 +1110,8 @@ impl Register {
     /// closing. The cell being edited is kept in its row first. A changed row is not
     /// left: the leave-row prompt asks about it, or, with "Save a changed transaction
     /// without asking" on, it saves, and `then` is sent once the row is saved or its
-    /// changes thrown away. Once the prompt is answered Save or Discard, and while that
-    /// save is on its way, `then` takes the place of what left the row before it, and
+    /// changes thrown away. Once the prompt is answered Save or Discard, and while a save
+    /// is on its way, `then` takes the place of what left the row before it, and
     /// of the cell that move opened, so only the latest leave goes on.
     pub(crate) fn leave(
         &mut self,
@@ -1122,7 +1122,7 @@ impl Register {
         then: AppCommand,
     ) -> bool {
         if let Some(leaving) = &mut self.leaving
-            && leaving.goes_on()
+            && leaving.chose_to_leave()
         {
             leaving.then = Some(then);
             leaving.resume = None;
@@ -3747,9 +3747,9 @@ struct Leaving {
 }
 
 impl Leaving {
-    /// Whether the row is being left whatever comes next: the answer was Save or
+    /// Whether the user chose to leave the row: the prompt was answered Save or
     /// Discard, or the save it chose is on its way.
-    fn goes_on(&self) -> bool {
+    fn chose_to_leave(&self) -> bool {
         match self.step {
             LeaveStep::Answered(LeaveAnswer::Save | LeaveAnswer::Discard) | LeaveStep::Saving => {
                 true

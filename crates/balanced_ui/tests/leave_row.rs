@@ -122,12 +122,17 @@ fn can_undo(harness: &mut Harness<'static, App>) -> bool {
     enabled
 }
 
-/// Asks to close the window, as its title bar's × does, for one frame.
-fn close_window(harness: &mut Harness<'static, App>) {
+/// Asks to close the window, as its title bar's × does, in the next frame only.
+fn request_close(harness: &mut Harness<'static, App>) {
     root_events(harness).push(ViewportEvent::Close);
     harness.step();
     // `egui_kittest` keeps a viewport's events from frame to frame; eframe doesn't.
     root_events(harness).clear();
+}
+
+/// Asks to close the window, as its title bar's × does, then lets the App settle.
+fn close_window(harness: &mut Harness<'static, App>) {
+    request_close(harness);
     harness.run();
 }
 
@@ -914,10 +919,14 @@ fn save_then_close_while_on_its_way(harness: &mut Harness<'static, App>) {
     dialog_button(harness, "Save").click();
     harness.step();
     harness.step();
-    root_events(harness).push(ViewportEvent::Close);
-    harness.step();
-    // `egui_kittest` keeps a viewport's events from frame to frame; eframe doesn't.
-    root_events(harness).clear();
+    request_close(harness);
+}
+
+/// Whether the "Can't save this transaction" Dialog is open.
+fn cant_save_shown(harness: &Harness<'static, App>) -> bool {
+    harness.query_all_by_role(Role::Label).any(|label| {
+        label.accesskit_node().value().as_deref() == Some("Can't save this transaction")
+    })
 }
 
 /// Clicks the open prompt's `answer`, then asks to close the window in the frame
@@ -926,10 +935,7 @@ fn save_then_close_while_on_its_way(harness: &mut Harness<'static, App>) {
 fn answer_then_close_before_carried_out(harness: &mut Harness<'static, App>, answer: &str) {
     dialog_button(harness, answer).click();
     harness.step();
-    root_events(harness).push(ViewportEvent::Close);
-    harness.step();
-    // `egui_kittest` keeps a viewport's events from frame to frame; eframe doesn't.
-    root_events(harness).clear();
+    request_close(harness);
 }
 
 /// Renames Fresh Market, opens Visa Rewards, then answers Save to the prompt that asks
@@ -1029,13 +1035,7 @@ fn closing_the_window_just_after_add_is_dropped_when_the_ledger_refuses_the_row(
 
     assert!(!viewport_commands(&mut harness).contains(&ViewportCommand::Close));
     harness.run();
-    assert!(
-        harness.query_all_by_role(Role::Label).any(|label| label
-            .accesskit_node()
-            .value()
-            .as_deref()
-            == Some("Can't save this transaction"))
-    );
+    assert!(cant_save_shown(&harness));
 }
 
 #[test]
