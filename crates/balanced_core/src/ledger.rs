@@ -485,10 +485,15 @@ impl LedgerView {
 
     /// Whether category `id` is `ancestor` or sits under it, at any depth.
     fn is_within(&self, id: CategoryId, ancestor: CategoryId) -> bool {
-        std::iter::successors(Some(id), |&child| {
+        id == ancestor || self.above(id).any(|above| above == ancestor)
+    }
+
+    /// Each category above category `id`: its parent first, up to its top-level
+    /// category.
+    fn above(&self, id: CategoryId) -> impl Iterator<Item = CategoryId> + '_ {
+        std::iter::successors(self.category(id).and_then(Category::parent), |&child| {
             self.category(child).and_then(Category::parent)
         })
-        .any(|above| above == ancestor)
     }
 
     /// Category `id` and every category under it, at every depth: the category first,
@@ -1713,17 +1718,15 @@ impl Ledger {
         if name.is_empty() {
             return Err(DomainError::BlankCategoryName);
         }
-        let parent = parent
-            .map(|parent| {
-                self.view
+        let (category_type, visibility) = match parent {
+            Some(parent) => {
+                let above = self
+                    .view
                     .category(parent)
-                    .map(|parent| (parent.id(), parent.category_type(), parent.visibility()))
-                    .ok_or(DomainError::UnknownCategory { category: parent })
-            })
-            .transpose()?;
-        let (parent, category_type, visibility) = match parent {
-            Some((parent, parent_type, visibility)) => (Some(parent), parent_type, visibility),
-            None => (None, category_type, Visibility::Shown),
+                    .ok_or(DomainError::UnknownCategory { category: parent })?;
+                (above.category_type(), above.visibility())
+            }
+            None => (category_type, Visibility::Shown),
         };
         self.check_unique_name(name, parent, None)?;
         let id = self.next_category;
@@ -1809,20 +1812,19 @@ impl Ledger {
         parent: Option<CategoryId>,
     ) -> Result<DomainCommand, DomainError> {
         let index = self.category_index(id)?;
-        let new_parent = match parent {
-            Some(parent) => {
-                let new_parent = self
-                    .view
+        let new_parent = parent
+            .map(|parent| {
+                self.view
                     .category(parent)
-                    .ok_or(DomainError::UnknownCategory { category: parent })?;
-                let new_parent = (new_parent.category_type(), new_parent.visibility());
-                if self.view.is_within(parent, id) {
-                    return Err(DomainError::CategoryUnderItself { category: id });
-                }
-                Some(new_parent)
-            }
-            None => None,
-        };
+                    .ok_or(DomainError::UnknownCategory { category: parent })
+            })
+            .transpose()?;
+        let parent_type = new_parent.map(Category::category_type);
+        let parent_hidden =
+            new_parent.is_some_and(|parent| parent.visibility() == Visibility::Hidden);
+        if parent.is_some_and(|parent| self.view.is_within(parent, id)) {
+            return Err(DomainError::CategoryUnderItself { category: id });
+        }
         let moved = &self.view.categories[index];
         let (old_parent, old_type, old_visibility) =
             (moved.parent(), moved.category_type(), moved.visibility());
@@ -1834,21 +1836,19 @@ impl Ledger {
             category: id,
             parent: old_parent,
         }];
-        if let Some((parent_type, parent_visibility)) = new_parent {
-            if parent_type != old_type {
-                self.set_branch_type(id, parent_type)?;
-                // Moved back under a parent, the branch takes that parent's type again;
-                // moved back to the top, it keeps the new type until it is given its old one.
-                if old_parent.is_none() {
-                    inverse.push(DomainCommand::SetCategoryType {
-                        category: id,
-                        category_type: old_type,
-                    });
-                }
+        if let Some(parent_type) = parent_type.filter(|&parent_type| parent_type != old_type) {
+            self.set_branch_type(id, parent_type)?;
+            // Moved back under a parent, the branch takes that parent's type again;
+            // moved back to the top, it keeps the new type until it is given its old one.
+            if old_parent.is_none() {
+                inverse.push(DomainCommand::SetCategoryType {
+                    category: id,
+                    category_type: old_type,
+                });
             }
-            if parent_visibility == Visibility::Hidden && old_visibility == Visibility::Shown {
-                inverse.push(self.set_category_visibility(id, Visibility::Hidden)?);
-            }
+        }
+        if parent_hidden && old_visibility == Visibility::Shown {
+            inverse.push(self.set_category_visibility(id, Visibility::Hidden)?);
         }
         Ok(one_or_compound(inverse))
     }
@@ -1897,17 +1897,20 @@ impl Ledger {
         id: CategoryId,
         visibility: Visibility,
     ) -> Result<DomainCommand, DomainError> {
-        let mut hidden_above = Vec::new();
-        if visibility == Visibility::Shown {
-            let mut above = self.view.categories[self.category_index(id)?].parent();
-            while let Some(parent) = above {
-                let category = &self.view.categories[self.category_index(parent)?];
-                if category.visibility() == Visibility::Hidden {
-                    hidden_above.push(parent);
-                }
-                above = category.parent();
-            }
-        }
+        let hidden_above: Vec<CategoryId> = match visibility {
+            Visibility::Shown => self
+                .view
+                .above(id)
+                .filter(|&above| {
+                    self.view
+                        .category(above)
+                        .is_some_and(|category| category.visibility() == Visibility::Hidden)
+                })
+                .collect(),
+            Visibility::Hidden => Vec::new(),
+        };
+        // An unknown `id` has nothing above it, so building the inverse refuses it
+        // before any change.
         let top = hidden_above.last().copied().unwrap_or(id);
         let inverse = self.visibility_inverse(top)?;
         for branch in self.view.branch(id) {
