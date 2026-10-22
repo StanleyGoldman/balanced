@@ -10,7 +10,7 @@
 use std::cell::RefCell;
 
 use balanced_core::{
-    AccountId, DomainCommand, Ledger, LedgerView, NewTransaction, TransactionEdit, TransactionId,
+    AccountId, DomainCommand, Ledger, LedgerView, NewTransaction, Transaction, TransactionEdit,
 };
 use divan::Bencher;
 use tempfile::TempDir;
@@ -36,7 +36,10 @@ struct Household {
 
 impl Household {
     fn new(scale: u32) -> Self {
-        let directory = TempDir::new().expect("a temporary directory");
+        // Under the build's own directory, so the data file is on disk, where a commit
+        // pays for its fsync as the app's does, rather than in a RAM-backed `/tmp`.
+        let directory =
+            TempDir::new_in(env!("CARGO_TARGET_TMPDIR")).expect("a temporary directory");
         let path = directory.path().join("household.balanced");
         let ledger = Ledger::create_stub(&path, STUB_TRANSACTIONS * scale)
             .expect("the stub is written to a new file");
@@ -55,24 +58,24 @@ impl Household {
         }
     }
 
-    /// The id of the transaction at `index` in Household Checking's register, counted
-    /// from the end when `index` is negative.
-    fn transaction(&self, index: isize) -> TransactionId {
+    /// The transaction at `index` in Household Checking's register, counted from the
+    /// end when `index` is negative.
+    fn transaction(&self, index: isize) -> Transaction {
         let view = self.ledger.borrow().snapshot();
-        let summary = view.account(self.account).expect("Household Checking");
-        let len = summary.register().iter().len();
+        let register = view
+            .account(self.account)
+            .expect("Household Checking")
+            .register();
         let index = if index < 0 {
-            len - index.unsigned_abs()
+            register.len() - index.unsigned_abs()
         } else {
             index.unsigned_abs()
         };
-        summary
-            .register()
-            .iter()
-            .nth(index)
+        register
+            .get(index)
             .expect("the register holds the entry")
             .transaction()
-            .id()
+            .clone()
     }
 
     /// Times `command`, applied to the ledger as it was before every earlier run. The
@@ -102,16 +105,8 @@ impl Household {
 #[divan::bench(args = SCALES, sample_size = 1, sample_count = 30)]
 fn post(bencher: Bencher<'_, '_>, scale: u32) {
     let household = Household::new(scale);
+    let last = household.transaction(-1);
     let view = household.ledger.borrow().snapshot();
-    let last = view
-        .account(household.account)
-        .expect("Household Checking")
-        .register()
-        .iter()
-        .last()
-        .expect("the register holds entries")
-        .transaction()
-        .clone();
     let groceries = view
         .categories()
         .iter()
@@ -130,19 +125,9 @@ fn post(bencher: Bencher<'_, '_>, scale: u32) {
 #[divan::bench(args = SCALES, sample_size = 1, sample_count = 30)]
 fn edit_date(bencher: Bencher<'_, '_>, scale: u32) {
     let household = Household::new(scale);
-    let last = household.ledger.borrow().snapshot();
-    let last_date = last
-        .account(household.account)
-        .expect("Household Checking")
-        .register()
-        .iter()
-        .last()
-        .expect("the register holds entries")
-        .transaction()
-        .date();
     let command = DomainCommand::EditTransaction {
-        transaction: household.transaction(1),
-        edit: TransactionEdit::Date(last_date),
+        transaction: household.transaction(1).id(),
+        edit: TransactionEdit::Date(household.transaction(-1).date()),
     };
     household.bench(bencher, &command);
 }
@@ -153,7 +138,7 @@ fn delete(bencher: Bencher<'_, '_>, scale: u32) {
     let household = Household::new(scale);
     let middle = isize::try_from(STUB_TRANSACTIONS * scale / 2).expect("the index fits");
     let command = DomainCommand::DeleteTransaction {
-        transaction: household.transaction(middle),
+        transaction: household.transaction(middle).id(),
     };
     household.bench(bencher, &command);
 }
@@ -164,7 +149,7 @@ fn flag(bencher: Bencher<'_, '_>, scale: u32) {
     let household = Household::new(scale);
     let middle = isize::try_from(STUB_TRANSACTIONS * scale / 2).expect("the index fits");
     let command = DomainCommand::SetFlagged {
-        transaction: household.transaction(middle),
+        transaction: household.transaction(middle).id(),
         flagged: true,
     };
     household.bench(bencher, &command);

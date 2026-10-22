@@ -4,8 +4,7 @@
 //! that can't go through says why, and offers Continue editing or Discard changes.
 
 use balanced_core::{
-    AccountId, AccountStatus, AccountSummary, CurrencyCode, DomainCommand, Ledger, Money,
-    NewTransaction,
+    AccountId, AccountStatus, CurrencyCode, DomainCommand, Ledger, Money, NewTransaction,
 };
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
@@ -382,7 +381,7 @@ fn account(ledger: &Ledger, name: &str) -> AccountId {
         .snapshot()
         .accounts()
         .iter()
-        .map(AccountSummary::account)
+        .map(|summary| summary.account())
         .find(|account| account.name() == name)
         .expect("the stub has the account")
         .id()

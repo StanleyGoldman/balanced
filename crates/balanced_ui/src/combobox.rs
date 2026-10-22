@@ -6,8 +6,8 @@
 use std::collections::{BTreeSet, HashMap};
 
 use balanced_core::{
-    Account, AccountId, AccountSummary, Allocation, CategoryId, Generation, LedgerView, Money,
-    RegisterEntry, Transaction, TransactionId,
+    Account, AccountId, Allocation, CategoryId, Generation, LedgerView, Money, RegisterEntry,
+    Transaction, TransactionId,
 };
 use balanced_i18n::Localizer;
 use icu_locale::Locale;
@@ -179,7 +179,7 @@ impl FieldChoices {
         let transactions = || {
             view.accounts()
                 .iter()
-                .flat_map(AccountSummary::register)
+                .flat_map(|summary| summary.register())
                 .map(RegisterEntry::transaction)
                 .filter(|transaction| *transaction.allocation() != Allocation::OpeningBalance)
                 .filter(|transaction| !transaction.payee().is_empty())
@@ -193,7 +193,7 @@ impl FieldChoices {
         let accounts = view
             .accounts()
             .iter()
-            .map(AccountSummary::account)
+            .map(|summary| summary.account())
             .filter(|other| other.id() != account && !other.is_closed())
             .map(|other| {
                 (

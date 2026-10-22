@@ -117,6 +117,32 @@ The first indexes, from the spec, are `transaction_register_order (account_id, d
 3. **Keep `quick_check` on every open.** It costs 30 ms cold at 1× and 300 ms cold at the 10× stress size. Revisit by deferring it to after the first frame only if open time becomes a complaint. Running it in the background would need a second connection, which the exclusive lock forbids.
 4. **Keep loading the whole file.** 41 MiB at 10× is no reason for partial loading. If opening a very large file ever needs to be faster, the cheaper lever is `Store::read`: read plain rows and let `AccountSummary::new` compute the running balances, which it already does for new ledgers. That would keep the views as the test oracle but take them off the open path, which spends 270 ms on them at 10×.
 
+## After #442
+
+[#442](https://github.com/StanleyGoldman/balanced/issues/442) acted on recommendation 1. Measured 2026-10-21 with the committed benchmark, `crates/balanced_core/benches/commands.rs` (see [tooling](../practices/tooling.md#measuring-performance)), on the same machine at load average 1.5, pinned to one core. Each Command ran 30 times, undone untimed between runs, with a snapshot held as a window holds one. The data file was on disk, so each time includes the commit's fsync.
+
+| Command on Household Checking, median ms | 1× before | 1× after | 10× before | 10× after |
+|---|---|---|---|---|
+| Post, dated on the register's last date | 6.0 | 2.8 | 41.8 | 5.1 |
+| Edit the first payment's date to the last date (reorders the register) | 6.4 | 3.9 | 55.6 | 8.3 |
+| Delete the transaction in the middle | 7.4 | 4.2 | 35.3 | 6.2 |
+| Flag the transaction in the middle | 5.3 | 3.0 | 22.9 | 4.6 |
+
+The "before" numbers differ from the [Write-through](#write-through) table above, because this benchmark is not that probe: the probe was not kept, so the benchmark picks its own transactions and file location. Compare within this table.
+
+What changed:
+
+- **Snapshots share structure.** `LedgerView` holds each account as an `Arc<AccountSummary>`, so a Command copies a list of pointers and the accounts it changes. Each register holds its transactions as `Arc<Transaction>`, with the running balances in a separate `Vec<Money>`, so a changed account copies pointers and numbers, not transactions.
+- **Running balances are counted from the changed entry on.** An edit that keeps the amount and the place counts none. The Cleared balance moves by the changed transactions' amounts.
+- **Category and transfer usage is counted when first read.** `UsageCounts::count`, added after this research, walked every transaction on every Command. It took about 45 of the 48 ms a post cost at 10× once the rest was shared. Now only the Category List pays it, once per generation it reads.
+
+What still grows with the file:
+
+- A changed account copies its pointer and balance vectors: about 1.5–2 ms at 10× on top of the 1× cost. A post at 10× lands within 6 ms. Recommendation 1's "close to the 3 ms commit" holds at 1×.
+- A date edit that moves a transaction from the start of the register to the end counts every balance again. Back-dated edits pay for what they move.
+- `find_transaction` still scans every account's register.
+- The Category List's first read after a change counts usage over the whole file. [#504](https://github.com/StanleyGoldman/balanced/issues/504) times the UI's per-generation rebuilds, and this is one of them.
+
 ## Method
 
 ### Machine

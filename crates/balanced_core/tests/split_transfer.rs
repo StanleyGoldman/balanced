@@ -157,7 +157,7 @@ fn account_id(ledger: &Ledger, name: &str) -> AccountId {
         .snapshot()
         .accounts()
         .iter()
-        .map(AccountSummary::account)
+        .map(|summary| summary.account())
         .find(|account| account.name() == name)
         .expect("the test created the account")
         .id()

@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::sync::{Arc, OnceLock};
 
 use crate::{
     AccountId, AccountSummary, Allocation, Category, CategoryId, CurrencyCode, Money, MoneyError,
@@ -62,6 +63,36 @@ pub(crate) struct UsageCounts {
     none: Usage,
 }
 
+/// The [`UsageCounts`] of a [`LedgerView`](crate::LedgerView), counted the first time
+/// one is read rather than on every change.
+///
+/// Any two compare equal: the usage follows from the accounts and categories, which the
+/// view compares beside it, whether or not it has been counted yet.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct LazyUsage(OnceLock<UsageCounts>);
+
+impl LazyUsage {
+    /// The usage of `categories` and `accounts`, which must be what this was counted
+    /// from if it already was, counting it now if it wasn't.
+    pub(crate) fn get(
+        &self,
+        categories: &[Category],
+        accounts: &[Arc<AccountSummary>],
+        currency: CurrencyCode,
+    ) -> &UsageCounts {
+        self.0
+            .get_or_init(|| UsageCounts::count(categories, accounts, currency))
+    }
+}
+
+impl PartialEq for LazyUsage {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for LazyUsage {}
+
 impl UsageCounts {
     /// No usage at all, in `currency`.
     pub(crate) fn empty(currency: CurrencyCode) -> Self {
@@ -75,7 +106,7 @@ impl UsageCounts {
     /// The usage of `categories` and `accounts` in `accounts`' transactions.
     pub(crate) fn count(
         categories: &[Category],
-        accounts: &[AccountSummary],
+        accounts: &[Arc<AccountSummary>],
         currency: CurrencyCode,
     ) -> Self {
         let mut counts = Self::empty(currency);
@@ -105,7 +136,7 @@ impl UsageCounts {
                 .get(&other_side)
                 .expect("a transfer's other side is in an account of the same snapshot")
         };
-        for entry in accounts.iter().flat_map(AccountSummary::register) {
+        for entry in accounts.iter().flat_map(|summary| summary.register()) {
             let transaction = entry.transaction();
             let amount = transaction.amount();
             match transaction.allocation() {
@@ -377,6 +408,31 @@ mod tests {
         assert_eq!(
             (household.count(), household.total()),
             (1, Ok(usd(dec!(-10.00))))
+        );
+    }
+
+    #[test]
+    fn usage_read_before_a_change_is_counted_again_after_it() {
+        let mut ledger = ledger([paid("Fresh Market", GROCERIES, dec!(-10.00))]);
+        let before = ledger.snapshot();
+        let read_before = before.category_usage(GROCERIES).count();
+
+        ledger
+            .apply(DomainCommand::PostTransaction {
+                account: AccountId::new(0),
+                transaction: paid("Bean There", GROCERIES, dec!(-5.00)),
+            })
+            .unwrap();
+
+        let after = ledger.snapshot().category_usage(GROCERIES).clone();
+        assert_eq!(
+            (
+                read_before,
+                after.count(),
+                after.total(),
+                before.category_usage(GROCERIES).count()
+            ),
+            (1, 2, Ok(usd(dec!(-15.00))), 1)
         );
     }
 }

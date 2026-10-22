@@ -3,6 +3,7 @@
 //! `Ledger` over a data file: what it writes is what a reopen reads back.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use balanced_core::{
     AccountGroup, AccountId, AccountKind, AccountStatus, AccountSummary, Category, CategoryId,
@@ -43,7 +44,7 @@ fn reopen(ledger: Ledger, path: &Path) -> Ledger {
 
 /// Everything a snapshot holds except its generation and its Undo and Redo state.
 type Contents = (
-    Vec<AccountSummary>,
+    Vec<Arc<AccountSummary>>,
     Vec<Category>,
     Money,
     Vec<Result<Money, MoneyError>>,
@@ -105,7 +106,7 @@ fn id(ledger: &Ledger, name: &str) -> AccountId {
         .snapshot()
         .accounts()
         .iter()
-        .map(AccountSummary::account)
+        .map(|summary| summary.account())
         .find(|account| account.name() == name)
         .expect("the test created the account")
         .id()
@@ -468,7 +469,7 @@ fn status_of(ledger: &Ledger, id: TransactionId) -> ClearedStatus {
         .snapshot()
         .accounts()
         .iter()
-        .flat_map(AccountSummary::register)
+        .flat_map(|summary| summary.register())
         .map(RegisterEntry::transaction)
         .find(|transaction| transaction.id() == id)
         .expect("the test posted the transaction")

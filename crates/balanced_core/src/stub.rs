@@ -314,7 +314,7 @@ fn generated_account(generated: u32, money: impl Fn(&str) -> Money) -> NewAccoun
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AccountSummary, RegisterEntry, Transaction};
+    use crate::{RegisterEntry, Transaction};
 
     #[test]
     fn the_generated_account_has_four_transactions_a_day_and_ends_where_it_opened() {
@@ -328,7 +328,7 @@ mod tests {
             .find(|summary| summary.account().name() == "Household Checking")
             .unwrap();
         let register = generated.register();
-        let dates = |index: usize| register[index].transaction().date();
+        let dates = |index: usize| register.get(index).unwrap().transaction().date();
         // The opening balance, then 20,000 transactions over 5,000 days.
         assert_eq!(register.len(), 20_001);
         assert_eq!((dates(0), dates(4)), (date(2013, 1, 1), date(2013, 1, 1)));
@@ -348,7 +348,7 @@ mod tests {
         let flagged: Vec<&str> = view
             .accounts()
             .iter()
-            .flat_map(AccountSummary::register)
+            .flat_map(|summary| summary.register())
             .map(RegisterEntry::transaction)
             .filter(|transaction| transaction.is_flagged())
             .map(Transaction::payee)

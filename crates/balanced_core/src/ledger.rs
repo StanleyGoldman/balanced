@@ -15,7 +15,7 @@ use crate::transaction::{
     EditedSplitLine, EditedSplitTarget, NewTransaction, SplitLine, SplitTarget, TransactionId,
 };
 use crate::undo_log;
-use crate::usage::UsageCounts;
+use crate::usage::{LazyUsage, UsageCounts};
 use crate::{
     Account, AccountGroup, AccountId, AccountKind, AccountStatus, Allocation, Applied, Category,
     CategoryId, CurrencyCode, DomainCommand, DomainError, Money, MoneyError, MoveDirection,
@@ -75,36 +75,112 @@ impl Generation {
 }
 
 /// A transaction in its account's register, with the account's balance after it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RegisterEntry {
-    transaction: Transaction,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegisterEntry<'a> {
+    transaction: &'a Transaction,
     balance: Money,
 }
 
-impl RegisterEntry {
-    pub(crate) fn new(transaction: Transaction, balance: Money) -> Self {
-        Self {
-            transaction,
-            balance,
-        }
-    }
-
-    pub fn transaction(&self) -> &Transaction {
-        &self.transaction
+impl<'a> RegisterEntry<'a> {
+    pub fn transaction(self) -> &'a Transaction {
+        self.transaction
     }
 
     /// The running balance: the account's balance once this transaction and every one
     /// before it in the register is counted.
-    pub fn balance(&self) -> Money {
+    pub fn balance(self) -> Money {
         self.balance
     }
 }
 
+/// An account's transactions in date order, each with its running balance.
+/// Transactions on the same date keep the order they were posted in.
+#[derive(Debug, Clone, Copy)]
+pub struct Register<'a> {
+    transactions: &'a [Arc<Transaction>],
+    balances: &'a [Money],
+}
+
+impl<'a> Register<'a> {
+    /// How many transactions the register holds.
+    pub fn len(self) -> usize {
+        self.transactions.len()
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.transactions.is_empty()
+    }
+
+    /// The entry at `index`, or `None` past the last.
+    pub fn get(self, index: usize) -> Option<RegisterEntry<'a>> {
+        Some(RegisterEntry {
+            transaction: self.transactions.get(index)?,
+            balance: *self.balances.get(index)?,
+        })
+    }
+
+    /// Every entry, in register order.
+    pub fn iter(self) -> Entries<'a> {
+        Entries {
+            transactions: self.transactions.iter(),
+            balances: self.balances.iter(),
+        }
+    }
+}
+
+impl<'a> IntoIterator for Register<'a> {
+    type Item = RegisterEntry<'a>;
+    type IntoIter = Entries<'a>;
+
+    fn into_iter(self) -> Entries<'a> {
+        self.iter()
+    }
+}
+
+/// The entries of a [`Register`], in register order.
+#[derive(Debug, Clone)]
+pub struct Entries<'a> {
+    transactions: std::slice::Iter<'a, Arc<Transaction>>,
+    balances: std::slice::Iter<'a, Money>,
+}
+
+impl<'a> Iterator for Entries<'a> {
+    type Item = RegisterEntry<'a>;
+
+    fn next(&mut self) -> Option<RegisterEntry<'a>> {
+        Some(RegisterEntry {
+            transaction: self.transactions.next()?,
+            balance: *self.balances.next()?,
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.transactions.size_hint()
+    }
+}
+
+impl DoubleEndedIterator for Entries<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        Some(RegisterEntry {
+            transaction: self.transactions.next_back()?,
+            balance: *self.balances.next_back()?,
+        })
+    }
+}
+
+impl ExactSizeIterator for Entries<'_> {}
+
 /// An account in a [`LedgerView`], with its transactions and its balances.
+///
+/// Snapshots share the transactions a change leaves alone, so a change copies pointers
+/// to them rather than the transactions themselves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountSummary {
     account: Account,
-    register: Vec<RegisterEntry>,
+    /// The account's transactions, in register order.
+    transactions: Vec<Arc<Transaction>>,
+    /// The running balance after each of `transactions`.
+    balances: Vec<Money>,
     balance: Money,
     cleared_balance: Money,
 }
@@ -117,38 +193,39 @@ impl AccountSummary {
         transactions: Vec<Transaction>,
         currency: CurrencyCode,
     ) -> Result<Self, MoneyError> {
-        let mut register = Vec::with_capacity(transactions.len());
-        let mut balance = Money::zero(currency);
-        let mut cleared_balance = Money::zero(currency);
-        for transaction in transactions {
-            balance = balance.checked_add(transaction.amount())?;
-            if transaction.cleared_status().counts_as_cleared() {
-                cleared_balance = cleared_balance.checked_add(transaction.amount())?;
-            }
-            register.push(RegisterEntry {
-                transaction,
-                balance,
-            });
-        }
-        Ok(Self {
+        let cleared_balance = transactions
+            .iter()
+            .try_fold(Money::zero(currency), |sum, transaction| {
+                sum.checked_add(cleared_amount(transaction))
+            })?;
+        let mut summary = Self {
             account,
-            register,
-            balance,
+            transactions: transactions.into_iter().map(Arc::new).collect(),
+            balances: Vec::new(),
+            balance: Money::zero(currency),
             cleared_balance,
-        })
+        };
+        summary.count_balances_from(0)?;
+        Ok(summary)
     }
 
-    /// `account` holding `register`, whose last running balance is `balance` and whose
-    /// Cleared balance is `cleared_balance`, as the data file's views counted them.
+    /// `account` holding `register`, its transactions in register order each with its
+    /// running balance, whose last running balance is `balance` and whose Cleared
+    /// balance is `cleared_balance`, as the data file's views counted them.
     pub(crate) fn loaded(
         account: Account,
-        register: Vec<RegisterEntry>,
+        register: Vec<(Transaction, Money)>,
         balance: Money,
         cleared_balance: Money,
     ) -> Self {
+        let (transactions, balances) = register
+            .into_iter()
+            .map(|(transaction, balance)| (Arc::new(transaction), balance))
+            .unzip();
         Self {
             account,
-            register,
+            transactions,
+            balances,
             balance,
             cleared_balance,
         }
@@ -156,18 +233,23 @@ impl AccountSummary {
 
     /// A copy of the account's transactions, in register order.
     fn transactions(&self) -> Vec<Transaction> {
-        self.register
+        self.transactions
             .iter()
-            .map(|entry| entry.transaction.clone())
+            .map(|transaction| Transaction::clone(transaction))
             .collect()
+    }
+
+    /// The transaction at `entry` in the register.
+    fn transaction(&self, entry: usize) -> &Transaction {
+        &self.transactions[entry]
     }
 
     /// Whether the account holds a side of a transfer, or a split with a line to another
     /// account.
     fn holds_transfer(&self) -> bool {
-        self.register
+        self.transactions
             .iter()
-            .any(|entry| !entry.transaction.other_side_ids().is_empty())
+            .any(|transaction| !transaction.other_side_ids().is_empty())
     }
 
     pub fn account(&self) -> &Account {
@@ -176,8 +258,11 @@ impl AccountSummary {
 
     /// The account's transactions in date order, each with its running balance.
     /// Transactions on the same date keep the order they were posted in.
-    pub fn register(&self) -> &[RegisterEntry] {
-        &self.register
+    pub fn register(&self) -> Register<'_> {
+        Register {
+            transactions: &self.transactions,
+            balances: &self.balances,
+        }
     }
 
     /// The account's balance, in the account's currency: the running balance after its
@@ -191,10 +276,10 @@ impl AccountSummary {
     pub fn balance_on(&self, date: Date<Iso>) -> Money {
         // The register is in date order, so the entries up to `date` come first.
         let counted = self
-            .register
-            .partition_point(|entry| entry.transaction.date() <= date);
+            .transactions
+            .partition_point(|transaction| transaction.date() <= date);
         match counted.checked_sub(1) {
-            Some(last) => self.register[last].balance,
+            Some(last) => self.balances[last],
             None => Money::zero(self.balance.currency()),
         }
     }
@@ -204,17 +289,104 @@ impl AccountSummary {
     pub fn cleared_balance(&self) -> Money {
         self.cleared_balance
     }
+
+    /// The account with `transaction`, which it doesn't hold, added in register order.
+    /// Fails when a balance overflows.
+    fn inserted(&self, transaction: Transaction) -> Result<Self, MoneyError> {
+        let key = transaction.register_order();
+        let Err(entry) = self
+            .transactions
+            .binary_search_by_key(&key, |held| held.register_order())
+        else {
+            panic!("added {:?}, which its account holds", transaction.id());
+        };
+        let mut summary = self.clone();
+        summary.cleared_balance = summary
+            .cleared_balance
+            .checked_add(cleared_amount(&transaction))?;
+        summary.transactions.insert(entry, Arc::new(transaction));
+        summary.count_balances_from(entry)?;
+        Ok(summary)
+    }
+
+    /// The account with the transaction at `entry` taken out, and that transaction.
+    /// Fails when a balance overflows.
+    fn removed(&self, entry: usize) -> Result<(Self, Transaction), MoneyError> {
+        let mut summary = self.clone();
+        let transaction = summary.transactions.remove(entry);
+        summary.cleared_balance = summary
+            .cleared_balance
+            .checked_sub(cleared_amount(&transaction))?;
+        summary.count_balances_from(entry)?;
+        Ok((summary, Arc::unwrap_or_clone(transaction)))
+    }
+
+    /// The account with `edited` in place of the transaction at `entry`, which has the
+    /// same id, moved into date order when its date changed. Fails when a balance
+    /// overflows.
+    fn replaced(&self, entry: usize, edited: Transaction) -> Result<Self, MoneyError> {
+        let mut summary = self.clone();
+        let old = summary.transactions.remove(entry);
+        summary.cleared_balance = summary
+            .cleared_balance
+            .checked_sub(cleared_amount(&old))?
+            .checked_add(cleared_amount(&edited))?;
+        let key = edited.register_order();
+        let Err(place) = summary
+            .transactions
+            .binary_search_by_key(&key, |held| held.register_order())
+        else {
+            panic!("{:?} is in its account twice", edited.id());
+        };
+        // An edit that keeps the amount and the place moves no balance.
+        let from = if place == entry && edited.amount() == old.amount() {
+            summary.transactions.len()
+        } else {
+            entry.min(place)
+        };
+        summary.transactions.insert(place, Arc::new(edited));
+        summary.count_balances_from(from)?;
+        Ok(summary)
+    }
+
+    /// Counts the running balances again from the entry at `from` on, keeping the ones
+    /// before it, and the balance after the last. Fails when a balance overflows.
+    fn count_balances_from(&mut self, from: usize) -> Result<(), MoneyError> {
+        self.balances.truncate(from);
+        let mut balance = match from.checked_sub(1) {
+            Some(last) => self.balances[last],
+            None => Money::zero(self.balance.currency()),
+        };
+        self.balances.reserve(self.transactions.len() - from);
+        for transaction in &self.transactions[from..] {
+            balance = balance.checked_add(transaction.amount())?;
+            self.balances.push(balance);
+        }
+        self.balance = balance;
+        Ok(())
+    }
+}
+
+/// What `transaction` adds to its account's Cleared balance: its amount once Cleared or
+/// Reconciled, else zero.
+fn cleared_amount(transaction: &Transaction) -> Money {
+    if transaction.cleared_status().counts_as_cleared() {
+        transaction.amount()
+    } else {
+        Money::zero(transaction.amount().currency())
+    }
 }
 
 /// An immutable snapshot of the ledger, shared by every window that reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LedgerView {
     generation: Generation,
-    accounts: Vec<AccountSummary>,
+    /// Shared with earlier snapshots while a change leaves them alone.
+    accounts: Vec<Arc<AccountSummary>>,
     categories: Vec<Category>,
     net_worth: Money,
     totals: Totals,
-    usage: UsageCounts,
+    usage: LazyUsage,
     can_undo: bool,
     can_redo: bool,
 }
@@ -227,7 +399,7 @@ impl LedgerView {
 
     /// Every account, hidden and closed ones included, in Account bar order: by
     /// group, then by sub-group, then by the account's order within its sub-group.
-    pub fn accounts(&self) -> &[AccountSummary] {
+    pub fn accounts(&self) -> &[Arc<AccountSummary>] {
         &self.accounts
     }
 
@@ -235,6 +407,7 @@ impl LedgerView {
     pub fn account(&self, id: AccountId) -> Option<&AccountSummary> {
         self.accounts
             .iter()
+            .map(Arc::as_ref)
             .find(|summary| summary.account.id() == id)
     }
 
@@ -251,13 +424,19 @@ impl LedgerView {
     /// How many transactions and split lines are in category `id` or any category under
     /// it, at every depth, and their total. A deleted category has none.
     pub fn category_usage(&self, id: CategoryId) -> &Usage {
-        self.usage.category(id)
+        self.usage().category(id)
     }
 
     /// How many transactions and split lines in other accounts transfer to account
     /// `id`, and their total. A deleted account has none.
     pub fn transfer_usage(&self, id: AccountId) -> &Usage {
-        self.usage.transfer(id)
+        self.usage().transfer(id)
+    }
+
+    /// The usage of every category and account, counted the first time it is read.
+    fn usage(&self) -> &UsageCounts {
+        self.usage
+            .get(&self.categories, &self.accounts, self.net_worth.currency())
     }
 
     /// The names on the way from the top of the category tree down to category `id`,
@@ -285,9 +464,9 @@ impl LedgerView {
             .enumerate()
             .find_map(|(account, summary)| {
                 summary
-                    .register
+                    .transactions
                     .iter()
-                    .position(|entry| entry.transaction.id() == id)
+                    .position(|transaction| transaction.id() == id)
                     .map(|entry| TransactionPosition { account, entry })
             })
     }
@@ -302,7 +481,7 @@ impl LedgerView {
         // `find_transaction` returns indices in this same view.
         let summary = &self.accounts[position.account];
         matches!(
-            summary.register[position.entry].transaction.allocation(),
+            summary.transaction(position.entry).allocation(),
             Allocation::Split(_)
         )
         .then(|| summary.account.id())
@@ -322,7 +501,7 @@ impl LedgerView {
                 let summary = &self.accounts[side.account];
                 Ok(OtherSide::new(
                     summary.account.id(),
-                    summary.register[side.entry].transaction.clone(),
+                    summary.transaction(side.entry).clone(),
                 ))
             })
             .collect()
@@ -338,23 +517,6 @@ impl LedgerView {
             .accounts
             .partition_point(|summary| summary.account.kind() <= kind);
         start..end
-    }
-
-    /// The account at `index` in [`Self::accounts`], rebuilt in `currency` after `edit`
-    /// changes its transactions, with what `edit` returned. Fails when a balance
-    /// overflows.
-    fn edit_register<T>(
-        &self,
-        index: usize,
-        currency: CurrencyCode,
-        edit: impl FnOnce(&mut Vec<Transaction>) -> T,
-    ) -> Result<(AccountSummary, T), MoneyError> {
-        // Callers take `index` from a lookup in `self.accounts`.
-        let summary = &self.accounts[index];
-        let mut transactions = summary.transactions();
-        let edited = edit(&mut transactions);
-        let summary = AccountSummary::new(summary.account.clone(), transactions, currency)?;
-        Ok((summary, edited))
     }
 
     /// The sum of every account's balance, hidden and closed accounts included.
@@ -381,10 +543,10 @@ impl LedgerView {
         self.generation = self.generation.next();
     }
 
-    /// Counts the usage of every category and account again, after a change.
-    fn count_usage(&mut self) {
-        self.usage =
-            UsageCounts::count(&self.categories, &self.accounts, self.net_worth.currency());
+    /// Forgets the usage of every category and account after a change, so it is counted
+    /// again when next read.
+    fn usage_changed(&mut self) {
+        self.usage = LazyUsage::default();
     }
 
     /// Whether there is a change Undo can reverse.
@@ -426,7 +588,7 @@ impl Totals {
     }
 
     /// The totals of `accounts`, in `currency`.
-    fn count(accounts: &[AccountSummary], currency: CurrencyCode) -> Self {
+    fn count(accounts: &[Arc<AccountSummary>], currency: CurrencyCode) -> Self {
         let total = |include: &dyn Fn(&Account) -> bool| {
             accounts
                 .iter()
@@ -535,7 +697,7 @@ impl Ledger {
             }
         }
         let mut transaction_ids = (0..).map(TransactionId::new);
-        let mut summaries: Vec<AccountSummary> = Vec::new();
+        let mut summaries: Vec<Arc<AccountSummary>> = Vec::new();
         let mut net_worth = Money::zero(currency);
         let mut next_account = AccountId::new(0);
         for (id, new) in (0..).zip(accounts) {
@@ -563,7 +725,7 @@ impl Ledger {
             net_worth = net_worth.checked_add(summary.balance)?;
             // Last in its sub-group: after every account of its kind or an earlier one.
             let position = summaries.partition_point(|summary| summary.account.kind() <= kind);
-            summaries.insert(position, summary);
+            summaries.insert(position, Arc::new(summary));
         }
         write_rows(&store, &categories, &summaries);
         let totals = Totals::count(&summaries, currency);
@@ -586,19 +748,18 @@ impl Ledger {
     /// `accounts` add up to.
     pub(crate) fn from_parts(
         store: Store,
-        accounts: Vec<AccountSummary>,
+        accounts: Vec<Arc<AccountSummary>>,
         categories: Vec<Category>,
         net_worth: Money,
         totals: Totals,
         next: NextIds,
     ) -> Self {
-        let usage = UsageCounts::count(&categories, &accounts, net_worth.currency());
         Self {
             view: Arc::new(LedgerView {
                 generation: Generation::FIRST,
                 accounts,
                 categories,
-                usage,
+                usage: LazyUsage::default(),
                 net_worth,
                 totals,
                 can_undo: false,
@@ -710,7 +871,7 @@ impl Ledger {
         let error = match change(self) {
             Ok(changed) => match self.store.commit() {
                 Ok(()) => {
-                    Arc::make_mut(&mut self.view).count_usage();
+                    Arc::make_mut(&mut self.view).usage_changed();
                     return Ok(changed);
                 }
                 Err(error) => DomainError::from(error),
@@ -884,7 +1045,7 @@ impl Ledger {
         view.accounts_changed();
         let transactions = summary.transactions();
         Ok(DomainCommand::RestoreAccount {
-            account: summary.account,
+            account: summary.account.clone(),
             transactions,
             place,
         })
@@ -921,7 +1082,7 @@ impl Ledger {
     fn change_account<T>(&mut self, index: usize, change: impl FnOnce(&mut Account) -> T) -> T {
         let view = Arc::make_mut(&mut self.view);
         // Callers take `index` from a lookup in this same list of accounts.
-        let changed = change(&mut view.accounts[index].account);
+        let changed = change(&mut Arc::make_mut(&mut view.accounts[index]).account);
         view.accounts_changed();
         changed
     }
@@ -1007,7 +1168,7 @@ impl Ledger {
         write_account(&self.store, &summary, place)?;
         let index = self.view.sub_group(summary.account.kind()).start + place;
         let view = Arc::make_mut(&mut self.view);
-        view.accounts.insert(index, summary);
+        view.accounts.insert(index, Arc::new(summary));
         view.net_worth = net_worth;
         view.accounts_changed();
         Ok(())
@@ -1055,7 +1216,7 @@ impl Ledger {
             return Err(DomainError::UnknownCategory { category });
         }
         // Both indices were just found in this same view.
-        let old = &self.view.accounts[position.account].register[position.entry].transaction;
+        let old = self.view.accounts[position.account].transaction(position.entry);
         if edit.reaches_other_side()
             && let Some(account) = self.view.account_of_split_for(old)
         {
@@ -1093,8 +1254,8 @@ impl Ledger {
             for other_side in other_sides {
                 let position = self.changeable_other_side(other_side)?;
                 // `changeable_other_side` found both indices in this same view.
-                let edited = self.view.accounts[position.account].register[position.entry]
-                    .transaction
+                let edited = self.view.accounts[position.account]
+                    .transaction(position.entry)
                     .edited(edit.clone())?;
                 self.rewrite_transaction(position, edited)?;
             }
@@ -1113,20 +1274,11 @@ impl Ledger {
         edited: Transaction,
     ) -> Result<(), DomainError> {
         // `position` comes from a lookup in this same view.
-        let old = &self.view.accounts[position.account].register[position.entry].transaction;
-        let row = transaction_row(self.view.accounts[position.account].account.id(), &edited);
-        // The account is rebuilt, since a new amount moves every balance after it, and a
-        // new date moves the transaction into date order.
-        let moved = edited.date() != old.date();
-        let currency = self.view.net_worth.currency();
-        let (summary, ()) =
-            self.view
-                .edit_register(position.account, currency, |transactions| {
-                    transactions[position.entry] = edited;
-                    if moved {
-                        transactions.sort_by_key(Transaction::register_order);
-                    }
-                })?;
+        let summary = &self.view.accounts[position.account];
+        let row = transaction_row(summary.account.id(), &edited);
+        // A new amount moves every balance after it, and a new date moves the
+        // transaction into date order.
+        let summary = summary.replaced(position.entry, edited)?;
         self.replace_account(position.account, summary)?;
         // The row is checked only now, so the ledger's own errors come first.
         self.store.update_transaction(&row?)?;
@@ -1145,8 +1297,8 @@ impl Ledger {
     ) -> Result<DomainCommand, DomainError> {
         // `position` was found in this same view.
         let account = self.view.accounts[position.account].account.id();
-        let old = self.view.accounts[position.account].register[position.entry]
-            .transaction
+        let old = self.view.accounts[position.account]
+            .transaction(position.entry)
             .clone();
         let id = self.next_transaction;
         let (allocation, other) = match target {
@@ -1195,8 +1347,8 @@ impl Ledger {
     ) -> Result<DomainCommand, DomainError> {
         // `position` was found in this same view.
         let account = self.view.accounts[position.account].account.id();
-        let old = self.view.accounts[position.account].register[position.entry]
-            .transaction
+        let old = self.view.accounts[position.account]
+            .transaction(position.entry)
             .clone();
         let old_sides = self.view.other_sides_of(&old)?;
         let LinesPlan {
@@ -1226,8 +1378,7 @@ impl Ledger {
                 PendingSide::Kept { id, amount } => {
                     let position = self.changeable_other_side(id)?;
                     // `changeable_other_side` found both indices in this same view.
-                    let kept =
-                        &self.view.accounts[position.account].register[position.entry].transaction;
+                    let kept = self.view.accounts[position.account].transaction(position.entry);
                     if kept.amount() != -amount {
                         let moved = kept.edited(TransactionEdit::Amount(-amount))?;
                         self.rewrite_transaction(position, moved)?;
@@ -1318,7 +1469,7 @@ impl Ledger {
     ) -> Result<DomainCommand, DomainError> {
         let position = self.changeable(id)?;
         // Both indices were just found in this same view.
-        let old = &self.view.accounts[position.account].register[position.entry].transaction;
+        let old = self.view.accounts[position.account].transaction(position.entry);
         let undo = DomainCommand::SetFlagged {
             transaction: id,
             flagged: old.is_flagged(),
@@ -1327,7 +1478,8 @@ impl Ledger {
         let row = transaction_row(self.view.accounts[position.account].account.id(), &flagged)?;
         // A flag moves no balance, so the register keeps its entries and balances.
         let view = Arc::make_mut(&mut self.view);
-        view.accounts[position.account].register[position.entry].transaction = flagged;
+        Arc::make_mut(&mut view.accounts[position.account]).transactions[position.entry] =
+            Arc::new(flagged);
         view.accounts_changed();
         self.store.update_transaction(&row)?;
         Ok(undo)
@@ -1396,18 +1548,10 @@ impl Ledger {
         index: usize,
         transaction: Transaction,
     ) -> Result<(), DomainError> {
-        let currency = self.view.net_worth.currency();
         // `index` comes from a lookup in this same list of accounts.
-        let row = transaction_row(self.view.accounts[index].account.id(), &transaction);
-        let (summary, ()) = self.view.edit_register(index, currency, |transactions| {
-            let key = transaction.register_order();
-            let Err(position) =
-                transactions.binary_search_by_key(&key, Transaction::register_order)
-            else {
-                panic!("added {:?}, which its account holds", transaction.id());
-            };
-            transactions.insert(position, transaction);
-        })?;
+        let summary = &self.view.accounts[index];
+        let row = transaction_row(summary.account.id(), &transaction);
+        let summary = summary.inserted(transaction)?;
         self.replace_account(index, summary)?;
         // The row is checked only now, so the ledger's own errors come first.
         self.store.insert_transaction(&row?)?;
@@ -1417,7 +1561,7 @@ impl Ledger {
     fn delete_transaction(&mut self, id: TransactionId) -> Result<DomainCommand, DomainError> {
         let position = self.changeable(id)?;
         // `changeable` found both indices in this same view.
-        let deleted = &self.view.accounts[position.account].register[position.entry].transaction;
+        let deleted = self.view.accounts[position.account].transaction(position.entry);
         if let Some(account) = self.view.account_of_split_for(deleted) {
             return Err(DomainError::SplitLineOtherSide { account });
         }
@@ -1437,12 +1581,9 @@ impl Ledger {
         &mut self,
         position: TransactionPosition,
     ) -> Result<(AccountId, Transaction), DomainError> {
-        let currency = self.view.net_worth.currency();
+        // `position` comes from a lookup in this same view.
         let (summary, transaction) =
-            self.view
-                .edit_register(position.account, currency, |transactions| {
-                    transactions.remove(position.entry)
-                })?;
+            self.view.accounts[position.account].removed(position.entry)?;
         let account = summary.account.id();
         self.replace_account(position.account, summary)?;
         self.store.delete_transaction(transaction.id().raw())?;
@@ -1542,8 +1683,8 @@ impl Ledger {
             .view
             .accounts
             .iter()
-            .flat_map(AccountSummary::register)
-            .any(|entry| entry.transaction.uses_category(id));
+            .flat_map(|summary| &summary.transactions)
+            .any(|transaction| transaction.uses_category(id));
         if has_child || in_a_transaction {
             return Err(DomainError::CategoryInUse { category: id });
         }
@@ -1589,7 +1730,7 @@ impl Ledger {
         // Windows still holding the old snapshot keep it; the ledger moves to a copy.
         let view = Arc::make_mut(&mut self.view);
         // Callers take `index` from a lookup in this same list of accounts.
-        view.accounts[index] = summary;
+        view.accounts[index] = Arc::new(summary);
         view.net_worth = net_worth;
         view.accounts_changed();
         Ok(())
@@ -1615,15 +1756,15 @@ fn restoring(account: AccountId, old: Transaction, other_sides: Vec<OtherSide>) 
 fn write_account(store: &Store, summary: &AccountSummary, place: usize) -> Result<(), DomainError> {
     let account = &summary.account;
     store.insert_account(&account_row(account, place))?;
-    for entry in &summary.register {
-        store.insert_transaction(&transaction_row(account.id(), &entry.transaction)?)?;
+    for transaction in &summary.transactions {
+        store.insert_transaction(&transaction_row(account.id(), transaction)?)?;
     }
     Ok(())
 }
 
 /// Writes `categories`, each after the one it sits under, and `accounts`, in Account bar
 /// order, to `store`, a new, empty data file.
-fn write_rows(store: &Store, categories: &[Category], accounts: &[AccountSummary]) {
+fn write_rows(store: &Store, categories: &[Category], accounts: &[Arc<AccountSummary>]) {
     let write = || -> Result<(), DomainError> {
         store.begin()?;
         for category in categories {
@@ -2033,10 +2174,10 @@ mod tests {
         let view = ledger.snapshot();
 
         let register = view.accounts()[0].register();
-        let split = &register[1];
+        let split = register.get(1).unwrap();
         assert_eq!(split.transaction().amount(), usd(dec!(-206.27)));
         assert_eq!(split.balance(), usd(dec!(293.73)));
-        assert_eq!(register[2].balance(), usd(dec!(283.73)));
+        assert_eq!(register.get(2).unwrap().balance(), usd(dec!(283.73)));
     }
 
     #[test]
@@ -2068,7 +2209,7 @@ mod tests {
         let view = ledger.snapshot();
 
         let register = view.accounts()[0].register();
-        let rent = register[1].transaction();
+        let rent = register.get(1).unwrap().transaction();
         assert_eq!(
             (rent.number(), rent.payee(), rent.memo(), rent.allocation()),
             (
@@ -2078,7 +2219,7 @@ mod tests {
                 &Allocation::Category(household)
             )
         );
-        let costco = register[2].transaction();
+        let costco = register.get(2).unwrap().transaction();
         let Allocation::Split(lines) = costco.allocation() else {
             panic!("Costco was posted as a split");
         };
@@ -2810,7 +2951,7 @@ mod tests {
         let mut transactions: Vec<_> = view
             .accounts()
             .iter()
-            .flat_map(AccountSummary::register)
+            .flat_map(|summary| summary.register())
             .map(|entry| entry.transaction().id())
             .collect();
         transactions.extend(undone.1);
@@ -2900,7 +3041,10 @@ mod tests {
 
     /// The id of the `index`th transaction in the first account's register.
     fn transaction_id(ledger: &Ledger, index: usize) -> TransactionId {
-        ledger.snapshot().accounts()[0].register()[index]
+        ledger.snapshot().accounts()[0]
+            .register()
+            .get(index)
+            .unwrap()
             .transaction()
             .id()
     }
@@ -2922,7 +3066,7 @@ mod tests {
             .unwrap();
 
         let view = ledger.snapshot();
-        let transaction = view.accounts()[0].register()[1].transaction();
+        let transaction = view.accounts()[0].register().get(1).unwrap().transaction();
         assert_eq!(transaction.payee(), "Corner Shop");
         assert_ne!(view.generation(), Generation::FIRST);
     }
@@ -2974,7 +3118,7 @@ mod tests {
             .unwrap();
 
         let view = ledger.snapshot();
-        let transaction = view.accounts()[0].register()[1].transaction();
+        let transaction = view.accounts()[0].register().get(1).unwrap().transaction();
         assert_eq!(
             (transaction.number(), transaction.memo()),
             (Some("1042"), "Party food")
@@ -2992,7 +3136,12 @@ mod tests {
 
         let view = ledger.snapshot();
         assert_eq!(
-            view.accounts()[0].register()[1].transaction().number(),
+            view.accounts()[0]
+                .register()
+                .get(1)
+                .unwrap()
+                .transaction()
+                .number(),
             None
         );
     }
@@ -3026,7 +3175,11 @@ mod tests {
             ))
             .unwrap();
 
-        let transaction = before.accounts()[0].register()[1].transaction();
+        let transaction = before.accounts()[0]
+            .register()
+            .get(1)
+            .unwrap()
+            .transaction();
         assert_eq!(transaction.payee(), "Fresh Market");
         assert_eq!(before.generation(), Generation::FIRST);
     }
@@ -3180,7 +3333,12 @@ mod tests {
         let view = ledger.snapshot();
         let savings = view.accounts().last().unwrap();
         assert_eq!(
-            savings.register()[0].transaction().cleared_status(),
+            savings
+                .register()
+                .get(0)
+                .unwrap()
+                .transaction()
+                .cleared_status(),
             ClearedStatus::Reconciled
         );
     }
@@ -3392,7 +3550,7 @@ mod tests {
         let balances: Vec<Money> = view
             .accounts()
             .iter()
-            .map(AccountSummary::cleared_balance)
+            .map(|summary| summary.cleared_balance())
             .collect();
         let stored: Vec<Money> = view
             .accounts()
@@ -3538,7 +3696,10 @@ mod tests {
 
     /// The `index`th transaction in the first account's register.
     fn nth_transaction(ledger: &Ledger, index: usize) -> Transaction {
-        ledger.snapshot().accounts()[0].register()[index]
+        ledger.snapshot().accounts()[0]
+            .register()
+            .get(index)
+            .unwrap()
             .transaction()
             .clone()
     }
@@ -3768,7 +3929,12 @@ mod tests {
 
         let view = ledger.snapshot();
         assert_eq!(
-            view.accounts()[0].register()[0].transaction().memo(),
+            view.accounts()[0]
+                .register()
+                .get(0)
+                .unwrap()
+                .transaction()
+                .memo(),
             "Moved banks"
         );
     }
@@ -3785,7 +3951,12 @@ mod tests {
 
         let view = ledger.snapshot();
         assert_eq!(
-            view.accounts()[0].register()[1].transaction().allocation(),
+            view.accounts()[0]
+                .register()
+                .get(1)
+                .unwrap()
+                .transaction()
+                .allocation(),
             &Allocation::Category(household)
         );
     }
@@ -3908,7 +4079,7 @@ mod tests {
 
         let view = ledger.snapshot();
         let everyday = &view.accounts()[0];
-        let entry = &everyday.register()[1];
+        let entry = everyday.register().get(1).unwrap();
         assert_eq!(entry.transaction().amount(), usd(dec!(-40.00)));
         assert_eq!(entry.balance(), usd(dec!(60.00)));
         assert_eq!(everyday.balance(), usd(dec!(60.00)));
@@ -4125,7 +4296,7 @@ mod tests {
         let mut ids: Vec<TransactionId> = view
             .accounts()
             .iter()
-            .flat_map(AccountSummary::register)
+            .flat_map(|summary| summary.register())
             .map(|entry| entry.transaction().id())
             .collect();
         let count = ids.len();
@@ -4156,7 +4327,7 @@ mod tests {
             .snapshot()
             .accounts()
             .iter()
-            .map(AccountSummary::account)
+            .map(|summary| summary.account())
             .find(|account| account.name() == name)
             .map(Account::id)
             .unwrap()
@@ -4265,7 +4436,13 @@ mod tests {
         ledger.apply(close(AccountStatus::Open)).unwrap();
 
         assert_eq!(flags(&ledger)[1], flag("Bravo", false, false));
-        let opening = ledger.snapshot().account(bravo).unwrap().register()[0]
+        let opening = ledger
+            .snapshot()
+            .account(bravo)
+            .unwrap()
+            .register()
+            .get(0)
+            .unwrap()
             .transaction()
             .id();
         ledger
@@ -4475,5 +4652,175 @@ mod tests {
 
         assert_eq!(applied, "Charlie,Bravo,Rainy Day");
         assert_eq!(flags(&ledger), before);
+    }
+
+    /// Everyday, with four payments of different amounts on days 2, 4, 6 and 8, the
+    /// first two Cleared, and Joint and Savings holding only their opening balances.
+    fn three_accounts() -> Ledger {
+        let groceries = CategoryId::new(0);
+        let payment =
+            |day, payee, amount| NewTransaction::new(date(day), payee, groceries, usd(amount));
+        Ledger::with_accounts(
+            usd_code(),
+            [NewCategory::new("Groceries")],
+            [
+                account("Everyday", AccountKind::Checking, usd(dec!(100.00)))
+                    .with_transactions_at(
+                        ClearedStatus::Cleared,
+                        [
+                            payment(2, "Fresh Market", dec!(-10.00)),
+                            payment(4, "Bean There", dec!(-20.00)),
+                        ],
+                    )
+                    .with_transactions([
+                        payment(6, "Shell", dec!(-30.00)),
+                        payment(8, "Hardware Barn", dec!(-40.00)),
+                    ]),
+                account("Joint", AccountKind::Checking, usd(dec!(50.00))),
+                account("Savings", AccountKind::Savings, usd(dec!(500.00))),
+            ],
+        )
+        .unwrap()
+    }
+
+    /// The names of the accounts in `after` that it doesn't share with `before`.
+    fn not_shared(before: &LedgerView, after: &LedgerView) -> Vec<String> {
+        after
+            .accounts()
+            .iter()
+            .filter(|summary| {
+                !before
+                    .accounts()
+                    .iter()
+                    .any(|old| Arc::ptr_eq(old, summary))
+            })
+            .map(|summary| summary.account().name().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn a_command_shares_every_account_it_leaves_alone_with_the_snapshot_before() {
+        let mut ledger = three_accounts();
+        let everyday = account_id(&ledger, "Everyday");
+        let joint = account_id(&ledger, "Joint");
+        let savings = account_id(&ledger, "Savings");
+        let shell = transaction_id(&ledger, 3);
+        let groceries = CategoryId::new(0);
+        let commands = [
+            (
+                DomainCommand::PostTransaction {
+                    account: everyday,
+                    transaction: NewTransaction::new(date(3), "Shell", groceries, usd(dec!(-5.00))),
+                },
+                vec!["Everyday"],
+            ),
+            (set_flagged(shell, true), vec!["Everyday"]),
+            (
+                edit(shell, TransactionEdit::Date(date(1))),
+                vec!["Everyday"],
+            ),
+            (
+                DomainCommand::PostTransaction {
+                    account: everyday,
+                    transaction: NewTransaction::transfer(
+                        date(9),
+                        "To savings",
+                        savings,
+                        usd(dec!(-20.00)),
+                    ),
+                },
+                vec!["Everyday", "Savings"],
+            ),
+            (
+                DomainCommand::DeleteTransaction { transaction: shell },
+                vec!["Everyday"],
+            ),
+            (
+                DomainCommand::RenameAccount {
+                    account: joint,
+                    name: "Shared".to_owned(),
+                },
+                vec!["Shared"],
+            ),
+        ];
+
+        for (command, changed) in commands {
+            let before = ledger.snapshot();
+            ledger.apply(command.clone()).unwrap();
+
+            assert_eq!(
+                not_shared(&before, &ledger.snapshot()),
+                changed,
+                "{command:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_edited_account_shares_the_transactions_the_edit_leaves_alone() {
+        let mut ledger = three_accounts();
+        let before = ledger.snapshot();
+        let shell = transaction_id(&ledger, 3);
+
+        ledger
+            .apply(edit(
+                shell,
+                TransactionEdit::Payee("Corner Shop".to_owned()),
+            ))
+            .unwrap();
+
+        let after = ledger.snapshot();
+        let shared: Vec<bool> = before.accounts()[0]
+            .register()
+            .iter()
+            .zip(after.accounts()[0].register())
+            .map(|(old, new)| std::ptr::eq(old.transaction(), new.transaction()))
+            .collect();
+        assert_eq!(shared, [true, true, true, false, true]);
+    }
+
+    #[test]
+    fn a_back_dated_change_counts_the_balances_a_full_rebuild_counts() {
+        let groceries = CategoryId::new(0);
+        let commands = |ledger: &Ledger| {
+            let everyday = account_id(ledger, "Everyday");
+            let bean_there = transaction_id(ledger, 2);
+            let hardware_barn = transaction_id(ledger, 4);
+            [
+                DomainCommand::PostTransaction {
+                    account: everyday,
+                    transaction: NewTransaction::new(date(3), "Shell", groceries, usd(dec!(-5.00))),
+                },
+                edit(hardware_barn, TransactionEdit::Date(date(3))),
+                edit(bean_there, TransactionEdit::Date(date(7))),
+                edit(bean_there, TransactionEdit::Amount(usd(dec!(-12.50)))),
+                edit(
+                    hardware_barn,
+                    TransactionEdit::ClearedStatus(ClearedStatus::Cleared),
+                ),
+                edit(
+                    bean_there,
+                    TransactionEdit::ClearedStatus(ClearedStatus::Uncleared),
+                ),
+                DomainCommand::DeleteTransaction {
+                    transaction: bean_there,
+                },
+            ]
+        };
+
+        for command in commands(&three_accounts()) {
+            let mut ledger = three_accounts();
+            ledger.apply(command.clone()).unwrap();
+
+            let view = ledger.snapshot();
+            let summary = &view.accounts()[0];
+            let rebuilt = AccountSummary::new(
+                summary.account().clone(),
+                summary.transactions(),
+                usd_code(),
+            )
+            .unwrap();
+            assert_eq!(**summary, rebuilt, "{command:?}");
+        }
     }
 }

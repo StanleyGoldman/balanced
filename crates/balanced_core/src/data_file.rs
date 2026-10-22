@@ -16,7 +16,7 @@ use balanced_store::{
 use icu_calendar::{Date, Iso};
 use rust_decimal::Decimal;
 
-use crate::ledger::{AccountSummary, History, NextIds, RegisterEntry, Totals};
+use crate::ledger::{AccountSummary, History, NextIds, Totals};
 use crate::transaction::{SplitLine, SplitTarget};
 use crate::undo_log::{self, UndoEntryError};
 use crate::{
@@ -215,14 +215,14 @@ impl Ledger {
             })
             .collect();
         // Transactions come by account, in register order.
-        let mut registers: HashMap<u32, Vec<RegisterEntry>> = HashMap::new();
+        let mut registers: HashMap<u32, Vec<(Transaction, Money)>> = HashMap::new();
         for stored in contents.transactions {
             let account = stored.row.account_id;
             let transaction = transaction(stored.row, money(stored.amount), currency)?;
             registers
                 .entry(account)
                 .or_default()
-                .push(RegisterEntry::new(transaction, money(stored.balance)));
+                .push((transaction, money(stored.balance)));
         }
         let mut accounts = contents
             .accounts
@@ -253,12 +253,12 @@ impl Ledger {
                     money(stored.balance),
                     money(stored.cleared_balance),
                 );
-                Ok(((kind, row.position), summary))
+                Ok(((kind, row.position), Arc::new(summary)))
             })
             .collect::<Result<Vec<_>, OpenError>>()?;
         // The store orders kinds by name; the Account bar orders them by group.
         accounts.sort_by_key(|&(order, _)| order);
-        let accounts: Vec<AccountSummary> =
+        let accounts: Vec<Arc<AccountSummary>> =
             accounts.into_iter().map(|(_, summary)| summary).collect();
         check_transfers(&accounts)?;
         let mut group_totals = [Money::zero(currency); AccountGroup::ALL.len()];
@@ -297,10 +297,10 @@ impl Ledger {
 /// Refuses `accounts` as damaged when a transfer's two sides disagree, naming the
 /// disagreeing side with the lowest id. The schema guards only that each other side
 /// exists.
-fn check_transfers(accounts: &[AccountSummary]) -> Result<(), OpenError> {
+fn check_transfers(accounts: &[Arc<AccountSummary>]) -> Result<(), OpenError> {
     let transactions: HashMap<TransactionId, &Transaction> = accounts
         .iter()
-        .flat_map(AccountSummary::register)
+        .flat_map(|summary| summary.register())
         .map(|entry| (entry.transaction().id(), entry.transaction()))
         .collect();
     let mut sides: Vec<(&Transaction, Transaction)> = transactions

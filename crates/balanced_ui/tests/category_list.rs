@@ -3,9 +3,7 @@
 //! Reading the category tree and its usage in the Category List, driven through the
 //! AccessKit tree the way a user drives it.
 
-use balanced_core::{
-    AccountId, AccountSummary, CurrencyCode, DomainCommand, Ledger, Money, NewTransaction,
-};
+use balanced_core::{AccountId, CurrencyCode, DomainCommand, Ledger, Money, NewTransaction};
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::egui::accesskit::Action;
@@ -59,7 +57,7 @@ fn account(ledger: &Ledger, name: &str) -> AccountId {
         .snapshot()
         .accounts()
         .iter()
-        .map(AccountSummary::account)
+        .map(|summary| summary.account())
         .find(|account| account.name() == name)
         .expect("the stub has the account")
         .id()
