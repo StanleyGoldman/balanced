@@ -887,7 +887,7 @@ fn show_delete(
     match outcome {
         DialogOutcome::Open => return,
         DialogOutcome::Accepted => {
-            let command = DomainCommand::DeleteCategory { category };
+            let command = delete_command(&branch, dialog.form.target);
             commands.send(AppCommand::Domain(command));
         }
         DialogOutcome::Cancelled => {}
@@ -914,6 +914,22 @@ fn deepest_first(view: &LedgerView, category: CategoryId) -> Vec<CategoryId> {
     }
     branch.reverse();
     branch
+}
+
+/// The Command that deletes the categories in `branch`, each after every category under
+/// it, first moving their transactions to `target` when there is one. It is one undo
+/// step.
+fn delete_command(branch: &[CategoryId], target: Option<CategoryId>) -> DomainCommand {
+    let deletes = branch
+        .iter()
+        .map(|&category| DomainCommand::DeleteCategory { category });
+    let Some(to) = target else {
+        return DomainCommand::Compound(deletes.collect());
+    };
+    let reassigns = branch
+        .iter()
+        .map(|&from| DomainCommand::ReassignCategory { from, to });
+    DomainCommand::Compound(reassigns.chain(deletes).collect())
 }
 
 /// What the delete confirm says about `category`, whose full path is `name`: how many

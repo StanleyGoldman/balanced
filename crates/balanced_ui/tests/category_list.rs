@@ -881,3 +881,47 @@ fn enter_deletes_nothing_until_a_target_is_picked() {
     assert!(harness.query_by_role_and_label(Role::ComboBox, MOVE_TO).is_some());
     assert!(categories(&harness).contains(&"Groceries".to_owned()));
 }
+
+/// Deletes the row named `name`, moving its transactions to `path`, then closes the
+/// Category List.
+fn delete_moving_to(harness: &mut Harness<'static, App>, name: &str, path: &str) {
+    delete_row(harness, name);
+    choose_target(harness, path);
+    click(harness, "Delete");
+    click(harness, "Close");
+}
+
+#[test]
+fn deleting_a_used_category_moves_its_transactions_to_the_target() {
+    let mut harness = category_list();
+
+    delete_moving_to(&mut harness, "Groceries", "Shopping:Household");
+    open_category_list(&mut harness);
+
+    assert!(!categories(&harness).contains(&"Groceries".to_owned()));
+    // Its 2,001 transactions totalling -$400,063.90, and Groceries' 4,002 totalling
+    // -$500,228.79.
+    assert_eq!(
+        usage(&harness, "Household"),
+        "Expense: 6,003 transactions, totalling -$900,292.69"
+    );
+}
+
+#[test]
+fn one_undo_puts_back_a_reassigned_category_and_its_transactions() {
+    let mut harness = category_list();
+    delete_moving_to(&mut harness, "Groceries", "Shopping:Household");
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    open_category_list(&mut harness);
+
+    assert_eq!(
+        usage(&harness, "Groceries"),
+        "Expense: 4,002 transactions, totalling -$500,228.79"
+    );
+    assert_eq!(
+        usage(&harness, "Household"),
+        "Expense: 2,001 transactions, totalling -$400,063.90"
+    );
+}
