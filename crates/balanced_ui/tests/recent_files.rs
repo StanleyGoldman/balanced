@@ -417,3 +417,71 @@ fn a_new_file_over_a_listed_one_forgets_its_saved_view() {
 
     assert_eq!(selected_tab(&harness), "Bills");
 }
+
+/// The text the Status bar shows.
+fn status(harness: &Harness<'static, App>) -> Vec<String> {
+    harness
+        .get_by_role(Role::Status)
+        .query_all_by_role(Role::Label)
+        .filter_map(|label| label.accesskit_node().value())
+        .collect()
+}
+
+/// The labels of the File menu's Recent files, each after its number.
+fn recent_files_in_menu(harness: &mut Harness<'static, App>) -> Vec<String> {
+    open_file_menu(harness);
+    harness
+        .get_all_by_role(Role::Button)
+        .filter_map(|node| node.accesskit_node().label())
+        .filter(|label| label.ends_with(".balanced"))
+        .collect()
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_whose_name_isnt_utf8_opens_but_isnt_listed() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let (_dir, dir) = temp_dir();
+    let household = testing::data_file(&dir, "Household.balanced", &["Everyday"]);
+    let made = testing::data_file(&dir, "Business.balanced", &["Payroll"]);
+    let business = dir.join(OsStr::from_bytes(b"Business \xff.balanced"));
+    std::fs::rename(&made, &business).expect("the temp dir takes any name");
+    recent_files(&dir, &[&household]);
+    let mut harness = app(&dir);
+
+    testing::open_data_file(&harness, &business);
+    harness.run();
+
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Payroll")
+            .is_some()
+    );
+    assert_eq!(
+        status(&harness),
+        ["This data file can't be listed in Recent files, because of the characters in its name."]
+    );
+    assert_eq!(listed_in(&dir), listing(&[&household]));
+    assert_eq!(recent_files_in_menu(&mut harness), ["1 Household.balanced"]);
+}
+
+#[test]
+fn a_failed_save_of_the_recent_files_shows_in_the_status_bar() {
+    let (_dir, dir) = temp_dir();
+    let household = testing::data_file(&dir, "Household.balanced", &["Everyday"]);
+    // A file where the config directory would be, so the recent files file can't be
+    // written.
+    let config = dir.join("config");
+    std::fs::write(&config, "").expect("the temp dir is writable");
+    let mut harness = app(&config);
+
+    testing::open_data_file(&harness, &household);
+    harness.run();
+
+    assert_eq!(
+        status(&harness),
+        ["Your Recent files couldn't be saved, so this change to them lasts only until you quit."]
+    );
+}

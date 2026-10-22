@@ -656,3 +656,5 @@ status-change-not-saved = That change couldn't be saved to the data file, so it 
 status-preferences-reset = Your preferences couldn't be read, so the defaults are in use. The old file is kept as preferences.toml.broken.
 status-preferences-unreadable = Your preferences couldn't be read, so the defaults are in use.
 status-preferences-not-saved = Your preferences couldn't be saved, so they last only until you quit.
+status-not-listed-in-recent-files = This data file can't be listed in Recent files, because of the characters in its name.
+status-recent-files-not-saved = Your Recent files couldn't be saved, so this change to them lasts only until you quit.
