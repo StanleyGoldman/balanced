@@ -714,6 +714,155 @@ fn one_undo_puts_a_deleted_category_back() {
     assert!(categories(&harness).contains(&"Pets".to_owned()));
 }
 
+/// Presses `key` with Ctrl (Cmd on macOS), then runs the App until it settles.
+fn press_command(harness: &mut Harness<'static, App>, key: Key) {
+    harness.key_press_modifiers(Modifiers::COMMAND, key);
+    harness.run();
+}
+
+/// The Category List on stub data with Pets added, after deleting Pets in it.
+fn category_list_after_deleting_pets() -> Harness<'static, App> {
+    let mut harness = category_list_with_pets();
+    delete_row(&mut harness, "Pets");
+    click(&mut harness, "Delete");
+    harness
+}
+
+#[test]
+fn undo_with_the_list_open_puts_a_deleted_category_back() {
+    let mut harness = category_list_after_deleting_pets();
+
+    press_command(&mut harness, Key::Z);
+
+    assert!(is_open(&harness));
+    assert!(categories(&harness).contains(&"Pets".to_owned()));
+}
+
+#[test]
+fn redo_with_the_list_open_deletes_the_category_again() {
+    let mut harness = category_list_after_deleting_pets();
+    press_command(&mut harness, Key::Z);
+
+    press_command(&mut harness, Key::Y);
+
+    assert!(is_open(&harness));
+    assert!(!categories(&harness).contains(&"Pets".to_owned()));
+}
+
+/// Presses Ctrl+Z with focus on the Cancel button of the Dialog open over the list, so
+/// no text field holds it back, then closes that Dialog.
+fn undo_over_the_list(harness: &mut Harness<'static, App>) {
+    harness
+        .get_by_role_and_label(Role::Button, "Cancel")
+        .focus();
+    harness.run();
+    press_command(harness, Key::Z);
+    click(harness, "Cancel");
+}
+
+#[test]
+fn undo_does_nothing_while_the_delete_confirm_is_open_over_the_list() {
+    let mut harness = category_list_after_deleting_pets();
+    delete_row(&mut harness, "Groceries");
+
+    undo_over_the_list(&mut harness);
+
+    assert!(!categories(&harness).contains(&"Pets".to_owned()));
+}
+
+#[test]
+fn undo_does_nothing_while_the_merge_dialog_is_open_over_the_list() {
+    let mut harness = category_list_after_deleting_pets();
+    merge_rows(&mut harness, &["Groceries", "Household"]);
+
+    undo_over_the_list(&mut harness);
+
+    assert!(!categories(&harness).contains(&"Pets".to_owned()));
+}
+
+#[test]
+fn undo_does_nothing_while_new_category_is_open_over_the_list() {
+    let mut harness = category_list_after_deleting_pets();
+    click(&mut harness, "New…");
+
+    undo_over_the_list(&mut harness);
+
+    assert!(!categories(&harness).contains(&"Pets".to_owned()));
+}
+
+#[test]
+fn undo_does_nothing_while_edit_category_is_open_over_the_list() {
+    let mut harness = category_list_after_deleting_pets();
+    click_row(&mut harness, "Groceries");
+    click(&mut harness, "Edit…");
+
+    undo_over_the_list(&mut harness);
+
+    assert!(!categories(&harness).contains(&"Pets".to_owned()));
+}
+
+#[test]
+fn undo_in_the_search_box_undoes_its_typing_not_the_ledger() {
+    let mut harness = category_list_after_deleting_pets();
+    search(&mut harness, "pet");
+
+    press_command(&mut harness, Key::Z);
+
+    // Pets matches the search, so the tree would show it had the ledger undone.
+    assert!(!categories(&harness).contains(&"Pets".to_owned()));
+    let search_box = harness
+        .get_by_role_and_label(Role::Window, "Category List")
+        .get_by_role_and_label(Role::TextInput, "Search")
+        .accesskit_node()
+        .value();
+    assert_eq!(search_box.as_deref(), Some(""));
+}
+
+/// The label of the Register cell under the cell cursor.
+fn cell_cursor(harness: &Harness<'static, App>) -> Option<String> {
+    harness
+        .query_all_by_role(Role::Cell)
+        .find(|cell| cell.accesskit_node().is_selected() == Some(true))
+        .and_then(|cell| cell.accesskit_node().label())
+}
+
+#[test]
+fn no_other_main_window_shortcut_acts_behind_the_list() {
+    let mut harness = app_on(Ledger::stub());
+    harness
+        .get_by_role_and_label(Role::Button, "Everyday Checking")
+        .click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Cell, "Auto & Transport:Fuel")
+        .click();
+    harness.run();
+    let before = cell_cursor(&harness);
+    open_category_list(&mut harness);
+
+    press_command(&mut harness, Key::N);
+    click(&mut harness, "Close");
+
+    assert_eq!(cell_cursor(&harness), before);
+}
+
+#[test]
+fn undoing_a_new_category_while_it_is_selected_leaves_no_selection() {
+    let mut harness = category_list();
+    click(&mut harness, "New…");
+    type_text(&mut harness, "Pets");
+    click(&mut harness, "OK");
+    click_row(&mut harness, "Pets");
+
+    press_command(&mut harness, Key::Z);
+    let buttons_after_undo = enabled_buttons(&harness);
+    // A redo brings the row back, so a selection the undo left behind would show.
+    press_command(&mut harness, Key::Y);
+
+    assert_eq!(buttons_after_undo, ONLY_NEW);
+    assert_eq!(selected(&harness), None);
+}
+
 #[test]
 fn new_creates_a_category_that_appears_in_the_list() {
     let mut harness = category_list();

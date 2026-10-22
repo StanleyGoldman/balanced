@@ -231,6 +231,28 @@ fn ok_moves_a_closed_account_to_the_account_bars_closed_group() {
 }
 
 #[test]
+fn undo_does_nothing_behind_manage_accounts() {
+    let mut harness = manage_accounts();
+    rename(&mut harness, "Joint Checking", "Joint");
+    click(&mut harness, "OK");
+    harness
+        .get_by_role_and_label(Role::Button, "Joint")
+        .click_secondary();
+    harness.run();
+    click(&mut harness, "Manage Accounts…");
+    harness
+        .get_by_role_and_label(Role::Button, "Cancel")
+        .focus();
+    harness.run();
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    click(&mut harness, "Cancel");
+
+    assert!(listed(&harness, "Joint"));
+}
+
+#[test]
 fn one_undo_reverts_everything_ok_applied() {
     let mut harness = manage_accounts();
     rename(&mut harness, "Joint Checking", "Joint");

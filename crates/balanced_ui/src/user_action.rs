@@ -104,6 +104,31 @@ impl UserAction {
         }
     }
 
+    /// Whether the action steps through the undo history: Undo and Redo.
+    pub(crate) fn steps_undo_history(self) -> bool {
+        match self {
+            Self::Undo | Self::Redo => true,
+            Self::NewTransaction
+            | Self::DeleteTransaction
+            | Self::GoToDate
+            | Self::SwitchPane
+            | Self::NewDataFile
+            | Self::OpenDataFile
+            | Self::NewAccount
+            | Self::ManageAccounts
+            | Self::CategoryList
+            | Self::Quit
+            | Self::Preferences
+            | Self::Calculator
+            | Self::About
+            | Self::Reconcile
+            | Self::EditAccountDetails
+            | Self::RegisterPreferences
+            | Self::PrintRegister
+            | Self::ExportToCsv => false,
+        }
+    }
+
     /// The Command that carries the action out.
     pub(crate) fn command(self) -> AppCommand {
         match self {
