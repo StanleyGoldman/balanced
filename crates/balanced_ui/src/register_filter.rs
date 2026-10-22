@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use balanced_core::TransactionId;
 use balanced_i18n::Localizer;
-use eframe::egui::{self, Button, ComboBox, Response, TextEdit};
+use eframe::egui::{self, Button, ComboBox, TextEdit};
 use icu_calendar::{Date, Iso};
 use jiff::ToSpan as _;
 
@@ -208,28 +208,33 @@ impl RegisterFilter {
     ) -> bool {
         let before = (self.search.clone(), self.dates, self.kind);
         ui.horizontal(|ui| {
-            let search = ui.add(
+            let label = ui.label(fl!(i18n, "register-filter-search"));
+            ui.add(
                 TextEdit::singleline(&mut self.search)
                     .hint_text(fl!(i18n, "register-filter-search", "placeholder"))
                     .desired_width(Theme::SEARCH_BOX_WIDTH),
-            );
-            name_for_screen_readers(&search, fl!(i18n, "register-filter-search"));
-            let dates = ComboBox::from_id_salt("register_filter_dates")
+            )
+            .labelled_by(label.id);
+            let label = ui.label(fl!(i18n, "register-filter-dates"));
+            ComboBox::from_id_salt("register_filter_dates")
                 .selected_text(self.dates.label(i18n))
                 .show_ui(ui, |ui| {
                     for range in DateRange::ALL {
                         ui.selectable_value(&mut self.dates, range, range.label(i18n));
                     }
-                });
-            name_for_screen_readers(&dates.response, fl!(i18n, "register-filter-dates"));
-            let kind = ComboBox::from_id_salt("register_filter_type")
+                })
+                .response
+                .labelled_by(label.id);
+            let label = ui.label(fl!(i18n, "register-filter-type"));
+            ComboBox::from_id_salt("register_filter_type")
                 .selected_text(self.kind.label(i18n))
                 .show_ui(ui, |ui| {
                     for kind in TransactionType::ALL {
                         ui.selectable_value(&mut self.kind, kind, kind.label(i18n));
                     }
-                });
-            name_for_screen_readers(&kind.response, fl!(i18n, "register-filter-type"));
+                })
+                .response
+                .labelled_by(label.id);
             let reset = Button::new(fl!(i18n, "register-filter-reset"));
             if ui.add_enabled(self.is_set(), reset).clicked() {
                 *self = Self::default();
@@ -249,12 +254,4 @@ impl RegisterFilter {
         }
         changed
     }
-}
-
-/// Gives `response`'s widget `label` as its name for screen readers, since the filter
-/// bar's controls show no label of their own.
-fn name_for_screen_readers(response: &Response, label: String) {
-    response
-        .ctx
-        .accesskit_node_builder(response.id, |node| node.set_label(label));
 }
