@@ -697,7 +697,7 @@ fn escape_cancels_the_edit_and_restores_the_saved_text() {
 }
 
 #[test]
-fn left_moves_the_caret_within_the_cell_being_edited() {
+fn left_moves_the_text_cursor_within_the_cell_being_edited() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "September rent");

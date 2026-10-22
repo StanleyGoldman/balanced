@@ -3804,7 +3804,7 @@ fn heading_id(register_id: Id, column: RegisterColumn) -> Id {
 
 /// The `TextEdit` over the cell being edited, filling `rect`. It keeps Esc, so the
 /// Register can cancel the edit before egui drops the field's focus, and ← and →, so
-/// they move the caret instead of moving focus out of the field. A field with a list
+/// they move the text cursor instead of moving focus out of the field. A field with a list
 /// keeps ↑ and ↓ too.
 fn editor(
     ui: &mut egui::Ui,
