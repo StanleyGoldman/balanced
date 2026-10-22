@@ -10,6 +10,7 @@ extend-ignore-re = [
 
 [default.extend-words]
 alikes = "alikes"        # "look-alikes"
+alle = "alle"            # German for All, in locale tests
 invokable = "invokable"  # quoted from Rerun's source
 jod = "jod"              # ISO 4217 Jordanian dinar
 oktober = "oktober"      # German for October, in locale tests

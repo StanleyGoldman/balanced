@@ -197,6 +197,18 @@ dialog-category-list-edit = Bearbeiten …
 dialog-category-list-merge = Zusammenführen …
 dialog-category-list-hide = Ausblenden
 dialog-category-list-delete = Löschen …
+# Show coined from GnuCash's "_Unbenutzte Konten anzeigen"; All, Unused and Search
+# from GnuCash's "Alle", "Unbenutzte" and "_Suchen"; Used coined from "Unbenutzte".
+# Income and Expense as the Type column has them. The placeholder is coined from
+# GnuCash's "Kontobezeichnung".
+dialog-category-list-show = Anzeigen
+dialog-category-list-show-all = Alle
+dialog-category-list-show-income = Einnahme
+dialog-category-list-show-expense = Ausgabe
+dialog-category-list-show-used = Benutzt
+dialog-category-list-show-unused = Unbenutzt
+dialog-category-list-search = Suchen
+    .placeholder = Kategoriebezeichnung
 # Coined.
 dialog-category-list-status = Änderungen gelten sofort nach der Bestätigung.
 # Coined from GnuCash's "Löschen" and "Buchung".
