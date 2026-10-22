@@ -142,7 +142,9 @@ mod tests {
     use super::*;
 
     fn localizer(locale: &Locale) -> Localizer {
-        Localizer::new(&locale.id, locale).unwrap()
+        Localizer::new(&locale.id, locale).expect(
+            "the embedded messages load, and ICU4X's compiled data covers the test's locale",
+        )
     }
 
     const CTRL_Q: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Q);

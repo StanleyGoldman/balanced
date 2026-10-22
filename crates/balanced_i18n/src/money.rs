@@ -575,7 +575,8 @@ mod tests {
     use super::*;
 
     fn currency(code: &str, decimal_places: u32) -> Currency {
-        Currency::new(code, decimal_places).unwrap()
+        Currency::new(code, decimal_places)
+            .expect("the test's code is three uppercase letters and its decimal places fit")
     }
 
     fn usd() -> Currency {
@@ -593,7 +594,8 @@ mod tests {
 
     fn symbols(locale: &Locale) -> NumberSymbols {
         let formatter =
-            DecimalFormatter::try_new(locale.into(), DecimalFormatterOptions::default()).unwrap();
+            DecimalFormatter::try_new(locale.into(), DecimalFormatterOptions::default())
+                .expect("ICU4X's compiled data covers the test's locale");
         NumberSymbols::new(&formatter)
     }
 
@@ -634,7 +636,8 @@ mod tests {
             let symbol = format_amount(locale, amount, currency, AmountStyle::Symbol);
             let bare = format_amount(locale, amount, currency, AmountStyle::Bare);
             let code = currency.code.iso_code();
-            writeln!(out, "{amount:>12} {code}  {symbol:?}  {bare:?}").unwrap();
+            writeln!(out, "{amount:>12} {code}  {symbol:?}  {bare:?}")
+                .expect("writing to a String can't fail");
         }
         out
     }

@@ -262,8 +262,13 @@ mod tests {
 
     /// A reader for `code` amounts typed in `locale`.
     fn reader(locale: &Locale, code: &str, decimal_places: u32) -> AmountReader {
-        let i18n = Localizer::new(&locale.id, locale).unwrap();
-        i18n.amount_reader(Currency::new(code, decimal_places).unwrap())
+        let i18n = Localizer::new(&locale.id, locale).expect(
+            "the embedded messages load, and ICU4X's compiled data covers the test's locale",
+        );
+        i18n.amount_reader(
+            Currency::new(code, decimal_places)
+                .expect("the test's code is three uppercase letters and its decimal places fit"),
+        )
     }
 
     fn usd() -> AmountReader {

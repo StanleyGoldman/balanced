@@ -3059,7 +3059,7 @@ mod tests {
                 account("Visa", AccountKind::CreditCard, usd(dec!(-50.00))),
             ],
         )
-        .unwrap()
+        .expect("the fixture's amounts are all in USD, far from overflow")
     }
 
     /// The id of the transaction with `payee` in the ledger's first account.
@@ -3069,7 +3069,7 @@ mod tests {
             .iter()
             .map(RegisterEntry::transaction)
             .find(|transaction| transaction.payee() == payee)
-            .unwrap()
+            .expect("the tests name a payee in the first account's register")
             .id()
     }
 
@@ -3460,7 +3460,7 @@ mod tests {
             .accounts()
             .iter()
             .find(|summary| summary.account().name() == name)
-            .unwrap();
+            .expect("the tests name an account the view holds");
         let transactions = summary
             .register()
             .iter()
@@ -3577,7 +3577,7 @@ mod tests {
                 ]),
             ],
         )
-        .unwrap()
+        .expect("the fixture's amounts are all in USD, far from overflow")
     }
 
     /// The id of the `index`th transaction in the first account's register.
@@ -4859,7 +4859,7 @@ mod tests {
                 account("Rainy Day", AccountKind::Savings, usd(dec!(40.00))),
             ],
         )
-        .unwrap()
+        .expect("the fixture's amounts are all in USD, far from overflow")
     }
 
     /// The id of the account named `name`.
@@ -4871,7 +4871,7 @@ mod tests {
             .map(|summary| summary.account())
             .find(|account| account.name() == name)
             .map(Account::id)
-            .unwrap()
+            .expect("the tests name an account the ledger holds")
     }
 
     fn rename(ledger: &Ledger, from: &str, to: &str) -> DomainCommand {

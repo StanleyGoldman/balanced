@@ -175,7 +175,7 @@ mod tests {
     use super::*;
 
     fn formatters(locale: &Locale) -> Formatters {
-        Formatters::new(locale).unwrap()
+        Formatters::new(locale).expect("ICU4X's compiled data covers the test's locale")
     }
 
     #[test]
