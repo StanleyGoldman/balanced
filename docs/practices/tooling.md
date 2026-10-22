@@ -31,6 +31,7 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 - `cargo xtask mutants-landed [--dry-run]` is the same kind of CI task, run by `.github/workflows/mutants.yml` on each push to `main` that changes more than prose or agent tooling. It asks GitHub which merged pull request left `HEAD` as its merge commit, then tests the mutants in the diff that pull request landed and updates the issues the same way. A push no pull request landed, or a diff with no mutants, tests nothing and stays green; a failed lookup is red. By hand it needs a clean checkout whose `HEAD` is a real merge commit on `main`.
 - The external tools need a one-time install: `cargo install --locked cargo-deny typos-cli cargo-mutants cargo-nextest cargo-insta cargo-llvm-cov`, and `rustup component add llvm-tools` for coverage. `.github/Dockerfile` installs the same tools for CI. When one is missing (`no such command`), tell the user straight away, with this install command, before working around it.
 - Warnings are allowed while you iterate. `cargo xtask clippy` denies them.
+- A test nextest reports as `SIGKILL` hit the memory cap in `.config/memory-cap.sh`. Look for a loop that allocates without end, such as a walk up parent links that meets a cycle. A test-first run before the guard exists, or a red-check that breaks the guard, triggers it on purpose. Raise the cap (`BALANCED_TEST_MEMORY_MAX=16G`) only for a test that needs the memory.
 - A new check is written as a new `xtask` task and added to `ci`, never as CI-provider config. Each task is its own module in `xtask/src/` with a `TASK` constant, listed once in `TASKS` in `main.rs`. Running programs goes through `process.rs`.
 - To dry-run a branch's change to a CI task that reads `HEAD` and refuses a dirty tree, such as `mutants-shard`, on a real commit of `main` before the change lands, commit it and run `.claude/scripts/xtask-at-commit.sh <commit> <task> --dry-run` from the branch's worktree (contract in its header).
 - To reproduce a CI failure locally, build the image with `docker build -t balanced-ci:latest -f .github/Dockerfile .`, then run the failing task in it with `.github/in-image.sh cargo xtask <task>`.
@@ -47,7 +48,8 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 | `rustfmt.toml` | Stable options only. Import grouping isn't enforced. |
 | `deny.toml` | Licences, advisories, duplicate versions and the egui layer ban |
 | `.cargo/mutants.toml` | Which crates cargo-mutants mutates, and its exclusions |
-| `.config/nextest.toml` | The one nextest profile, used by `test`, `snapshots`, `locales` and cargo-mutants: no fail-fast, no retries, a hung test killed after 3 minutes |
+| `.config/nextest.toml` | The one nextest profile, used by `test`, `snapshots`, `locales` and cargo-mutants: no fail-fast, no retries, a hung test killed after 3 minutes, and each test process run through `.config/memory-cap.sh` |
+| `.config/memory-cap.sh` | The memory cap on each test process (8G) and on every test process from every session together (24G, in `balanced-tests.slice`), so a runaway test is killed alone instead of the OOM killer taking every session down. The header names the overrides. Uncapped where there is no systemd user session, as in CI |
 | `.typos.toml` | Words typos accepts, each with a comment, and the translations it skips |
 
 - To add a lint or a ban, put it in config, not prose. A ban's `reason` names the replacement to use.
