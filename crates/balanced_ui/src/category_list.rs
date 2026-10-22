@@ -2,20 +2,23 @@
 
 //! The Category List: a heavy Dialog showing every category as a tree, with its type,
 //! how many transactions and split lines use each and their total, and every account a
-//! transaction can transfer to. Buttons beside the tree create, edit and delete categories;
-//! each change applies as soon as its confirm is accepted, as one undo step.
+//! transaction can transfer to. A filter row above the tree narrows it by type, by
+//! usage and by name. Buttons beside the tree create, edit and delete categories; each
+//! change applies as soon as its confirm is accepted, as one undo step.
 
 use std::collections::{BTreeMap, HashSet};
 
 use balanced_core::{
-    AccountId, Category, CategoryId, DomainCommand, DomainError, Generation, LedgerView, Usage,
+    AccountId, Category, CategoryId, CategoryType, DomainCommand, DomainError, Generation,
+    LedgerView, Usage,
 };
 use balanced_i18n::{AmountStyle, Localizer};
 use eframe::egui::accesskit::{self, Role};
 use eframe::egui::style::ScrollStyle;
 use eframe::egui::{
-    self, Align, Button, EventFilter, Id, Key, Layout, Modifiers, Rect, Response, RichText, Sense,
-    TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
+    self, Align, Button, ComboBox, EventFilter, Id, Key, Layout, Modifiers, Rect, Response,
+    RichText, Sense, TextEdit, TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2,
+    vec2,
 };
 use egui_extras::{Column, Size, StripBuilder, TableBuilder, TableRow};
 use icu_locale::{LanguageIdentifier, Locale};
@@ -37,9 +40,11 @@ pub(crate) struct CategoryListForm {
     model: Option<ListModel>,
     /// The categories whose subcategories are hidden.
     folded: HashSet<CategoryId>,
-    /// The index in the model of each row shown, top to bottom: every row but those
-    /// under a folded category. `None` once the model or the folds change, so each
-    /// index is in range of the model it was built from.
+    /// Which rows the filter row lets the tree show.
+    filter: Filter,
+    /// The index in the model of each row shown, top to bottom: every row the filter
+    /// keeps but those under a folded category. `None` once the model, the filter or
+    /// the folds change, so each index is in range of the model it was built from.
     shown: Option<Vec<usize>>,
     /// The selected row, which is the tree's one Tab stop.
     selected: Option<RowKey>,
@@ -65,6 +70,65 @@ pub(crate) struct CategoryListForm {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DeleteConfirm {
     category: CategoryId,
+}
+
+/// Which rows the filter row lets the tree show: those Show picks whose names hold the
+/// Search text, and every category above one of them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Filter {
+    show: Show,
+    /// The Search box's text, as typed.
+    search: String,
+}
+
+impl Filter {
+    /// Whether `row` is one the filter picks, before the categories above a pick are
+    /// added. `search` is the Search text, trimmed and lowercased.
+    fn picks(&self, row: &ListRow, search: &str) -> bool {
+        let shown = match self.show {
+            Show::All => true,
+            Show::Income => row.category_type == Some(CategoryType::Income),
+            Show::Expense => row.category_type == Some(CategoryType::Expense),
+            Show::Used => row.used,
+            Show::Unused => !row.used,
+        };
+        shown && row.name.to_lowercase().contains(search)
+    }
+}
+
+/// The rows the Show dropdown picks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Show {
+    #[default]
+    All,
+    /// Income categories, and no transfer rows.
+    Income,
+    /// Expense categories, and no transfer rows.
+    Expense,
+    /// Rows that a transaction or split line uses, counting those under a category.
+    Used,
+    /// Rows that nothing uses.
+    Unused,
+}
+
+impl Show {
+    const ALL: [Self; 5] = [
+        Self::All,
+        Self::Income,
+        Self::Expense,
+        Self::Used,
+        Self::Unused,
+    ];
+
+    fn label(self, i18n: &Localizer) -> String {
+        match self {
+            Self::All => fl!(i18n, "dialog-category-list-show-all"),
+            Self::Income => fl!(i18n, "dialog-category-list-show-income"),
+            Self::Expense => fl!(i18n, "dialog-category-list-show-expense"),
+            Self::Used => fl!(i18n, "dialog-category-list-show-used"),
+            Self::Unused => fl!(i18n, "dialog-category-list-show-unused"),
+        }
+    }
 }
 
 /// What a click in the button column asks for.
@@ -126,8 +190,10 @@ struct ListRow {
     name: String,
     /// Whether any category sits under it.
     has_children: bool,
-    /// The Type cell's text: a category's type, or `None` for an account.
-    category_type: Option<String>,
+    /// A category's type, or `None` for an account.
+    category_type: Option<CategoryType>,
+    /// The Type cell's text, or `None` for an account.
+    type_text: Option<String>,
     /// Whether any transaction or split line uses it, or a category under it.
     used: bool,
     /// The Txns cell's text.
@@ -193,7 +259,7 @@ impl ListModel {
             let under = children.get(&Some(category.id()));
             let name = category.name().to_owned();
             let has_children = under.is_some();
-            let category_type = Some(type_label(i18n, category.category_type()));
+            let category_type = Some(category.category_type());
             rows.push(ListRow::new(
                 i18n,
                 key,
@@ -224,12 +290,21 @@ impl ListModel {
         }
     }
 
-    /// The index of each row shown while the categories in `folded` are folded.
-    fn shown(&self, folded: &HashSet<CategoryId>) -> Vec<usize> {
+    /// The index of each row shown through `filter` while the categories in `folded`
+    /// are folded.
+    fn shown(&self, filter: &Filter, folded: &HashSet<CategoryId>) -> Vec<usize> {
+        let kept = self.kept(filter);
+        let kept: Vec<bool> = (0..self.rows.len())
+            .map(|index| kept.picked[index] || kept.above_pick[index])
+            .collect();
         let mut shown = Vec::with_capacity(self.rows.len());
         // The depth of the folded category whose subcategories are being passed over.
+        // A row the filter leaves out has none kept under it, so it never starts a fold.
         let mut passing: Option<usize> = None;
         for (index, row) in self.rows.iter().enumerate() {
+            if !kept[index] {
+                continue;
+            }
             let under_fold = matches!(row.key, RowKey::Category(_))
                 && passing.is_some_and(|depth| row.depth > depth);
             if under_fold {
@@ -243,6 +318,52 @@ impl ListModel {
         }
         shown
     }
+
+    /// Whether `filter` keeps each row: those it picks, and every category above one.
+    fn kept(&self, filter: &Filter) -> Kept {
+        let search = filter.search.trim().to_lowercase();
+        let mut kept = Kept {
+            picked: vec![false; self.rows.len()],
+            above_pick: vec![false; self.rows.len()],
+        };
+        // The index of each category above the row, by depth. Rows come depth first, so
+        // each row's parent is the last row seen one level up.
+        let mut above: Vec<usize> = Vec::new();
+        for (index, row) in self.rows.iter().enumerate() {
+            above.truncate(row.depth);
+            if filter.picks(row, &search) {
+                kept.picked[index] = true;
+                for &parent in &above {
+                    kept.above_pick[parent] = true;
+                }
+            }
+            match row.key {
+                RowKey::Category(_) => above.push(index),
+                RowKey::Transfer(_) => {}
+            }
+        }
+        kept
+    }
+
+    /// The categories above a row that `filter` picks.
+    fn above_picks(&self, filter: &Filter) -> impl Iterator<Item = CategoryId> {
+        let kept = self.kept(filter);
+        self.rows
+            .iter()
+            .zip(kept.above_pick)
+            .filter_map(|(row, above_pick)| match row.key {
+                RowKey::Category(id) if above_pick => Some(id),
+                RowKey::Category(_) | RowKey::Transfer(_) => None,
+            })
+    }
+}
+
+/// Which rows a filter keeps, by index in the model.
+struct Kept {
+    /// The rows the filter picks.
+    picked: Vec<bool>,
+    /// The categories above a row the filter picks.
+    above_pick: Vec<bool>,
 }
 
 impl ListRow {
@@ -252,9 +373,10 @@ impl ListRow {
         depth: usize,
         name: String,
         has_children: bool,
-        category_type: Option<String>,
+        category_type: Option<CategoryType>,
         usage: &Usage,
     ) -> Self {
+        let type_text = category_type.map(|category_type| type_label(i18n, category_type));
         let count = usage.count();
         let total = match usage.total() {
             Ok(total) if count > 0 => Some(FormattedAmount::new(i18n, total, AmountStyle::Symbol)),
@@ -274,7 +396,7 @@ impl ListRow {
         } else {
             fl!(i18n, "dialog-category-list-usage-count", count = count)
         };
-        let description = match &category_type {
+        let description = match &type_text {
             Some(category_type) => fl!(
                 i18n,
                 "dialog-category-list-typed-usage",
@@ -289,6 +411,7 @@ impl ListRow {
             name,
             has_children,
             category_type,
+            type_text,
             used: count > 0,
             count: i18n.format_number(
                 i64::try_from(count).expect("a ledger holds fewer than 2^63 transactions"),
@@ -339,18 +462,22 @@ impl CategoryListForm {
             }
         };
         let shown = self.shown.take().unwrap_or_else(|| {
-            let shown = model.shown(&self.folded);
-            // A row a fold hides is no longer selected.
+            let shown = model.shown(&self.filter, &self.folded);
+            // A row a fold or the filter hides is no longer selected.
             let still_shown = |key| shown.iter().any(|&index| model.rows[index].key == key);
             self.selected = self.selected.filter(|&key| still_shown(key));
             shown
         });
         let mut asked = None;
+        let filter = self.filter.clone();
         let status_height = ui.text_style_height(&TextStyle::Body);
+        let filter_height = ui.spacing().interact_size.y;
         StripBuilder::new(ui)
+            .size(Size::exact(filter_height))
             .size(Size::remainder())
             .size(Size::exact(status_height))
             .vertical(|mut strip| {
+                strip.cell(|ui| self.filter_row(ui, i18n));
                 strip.strip(|builder| {
                     builder
                         .size(Size::remainder())
@@ -362,6 +489,17 @@ impl CategoryListForm {
                 });
                 strip.cell(|ui| Self::status_line(ui, i18n));
             });
+        // The table has drawn the rows the old filter showed; the next frame shows the
+        // new filter's.
+        if self.filter != filter {
+            self.shown = None;
+            // A new search opens every fold above a match, so the match shows.
+            if self.filter.search != filter.search && !self.filter.search.trim().is_empty() {
+                for id in model.above_picks(&self.filter) {
+                    self.folded.remove(&id);
+                }
+            }
+        }
         match asked {
             None => {}
             Some(ButtonAction::New) => {
@@ -380,6 +518,29 @@ impl CategoryListForm {
             }
         }
         self.model = Some(model);
+    }
+
+    /// The filter row above the tree: the Show dropdown and the Search box.
+    fn filter_row(&mut self, ui: &mut egui::Ui, i18n: &Localizer) {
+        ui.horizontal(|ui| {
+            let label = ui.label(fl!(i18n, "dialog-category-list-show"));
+            ComboBox::from_id_salt("category_list_show")
+                .selected_text(self.filter.show.label(i18n))
+                .show_ui(ui, |ui| {
+                    for show in Show::ALL {
+                        ui.selectable_value(&mut self.filter.show, show, show.label(i18n));
+                    }
+                })
+                .response
+                .labelled_by(label.id);
+            let label = ui.label(fl!(i18n, "dialog-category-list-search"));
+            ui.add(
+                TextEdit::singleline(&mut self.filter.search)
+                    .hint_text(fl!(i18n, "dialog-category-list-search", "placeholder"))
+                    .desired_width(Theme::SEARCH_BOX_WIDTH),
+            )
+            .labelled_by(label.id);
+        });
     }
 
     /// Draws the rows of `model` at the indices `shown`, and does what a click or a key
@@ -439,8 +600,8 @@ impl CategoryListForm {
                         }
                     });
                     table_row.col(|ui| {
-                        if let Some(category_type) = &row.category_type {
-                            ui.label(category_type);
+                        if let Some(type_text) = &row.type_text {
+                            ui.label(type_text);
                         }
                     });
                     table_row.col(|ui| {

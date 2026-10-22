@@ -771,3 +771,229 @@ fn escape_closes_new_category_and_leaves_the_list_open() {
     assert!(!new_category_open(&harness));
     assert!(is_open(&harness));
 }
+
+/// Types `text` into the Category List's Search box.
+fn search(harness: &mut Harness<'static, App>, text: &str) {
+    harness
+        .get_by_role_and_label(Role::Window, "Category List")
+        .get_by_role_and_label(Role::TextInput, "Search")
+        .focus();
+    harness.run();
+    type_text(harness, text);
+}
+
+#[test]
+fn search_keeps_the_categories_whose_names_hold_the_text_in_any_case() {
+    let mut harness = category_list();
+
+    search(&mut harness, "INSUR");
+
+    assert_eq!(
+        tree(&harness),
+        [
+            (1, "Auto & Transport"),
+            (2, "Insurance"),
+            (1, "Home"),
+            (2, "Insurance"),
+        ]
+        .map(|(level, name)| (level, name.to_owned()))
+    );
+}
+
+/// Picks `option` from the Category List's Show dropdown.
+fn show(harness: &mut Harness<'static, App>, option: &str) {
+    harness
+        .get_by_role_and_label(Role::Window, "Category List")
+        .get_by_role_and_label(Role::ComboBox, "Show")
+        .click();
+    harness.run();
+    click(harness, option);
+}
+
+/// The names of the rows the Category List lays out, top to bottom.
+fn names(harness: &Harness<'static, App>) -> Vec<String> {
+    tree(harness).into_iter().map(|(_, name)| name).collect()
+}
+
+/// The App on stub data with an unused category, Pets, and one transfer from Joint
+/// Checking to Emergency Fund, with the Category List open.
+fn category_list_with_pets_and_a_transfer() -> Harness<'static, App> {
+    let mut ledger = Ledger::stub();
+    create_category(&mut ledger, "Pets", None);
+    let usd = CurrencyCode::new("USD").expect("USD is a currency code");
+    ledger
+        .apply(DomainCommand::PostTransaction {
+            account: account(&ledger, "Joint Checking"),
+            transaction: NewTransaction::transfer(
+                Date::try_new_iso(2026, 10, 1).expect("1 October 2026 is a date"),
+                "Monthly saving",
+                account(&ledger, "Emergency Fund"),
+                Money::new("-200.00".parse().expect("an amount"), usd).expect("in range"),
+            ),
+        })
+        .expect("the ledger posts the transfer");
+    let mut harness = app_on(ledger);
+    open_category_list(&mut harness);
+    harness
+}
+
+#[test]
+fn show_income_lists_only_income_categories() {
+    let mut harness = category_list();
+
+    show(&mut harness, "Income");
+
+    assert_eq!(names(&harness), ["Income", "Interest", "Salary"]);
+}
+
+#[test]
+fn show_expense_lists_only_expense_categories() {
+    let mut harness = category_list();
+
+    show(&mut harness, "Expense");
+
+    assert_eq!(
+        names(&harness),
+        [
+            "Auto & Transport",
+            "Fuel",
+            "Insurance",
+            "Food & Dining",
+            "Groceries",
+            "Restaurants",
+            "Coffee Shops",
+            "Home",
+            "Insurance",
+            "Utilities",
+            "Shopping",
+            "Household",
+        ]
+    );
+}
+
+#[test]
+fn show_used_lists_the_rows_something_uses_transfers_among_them() {
+    let mut harness = category_list_with_pets_and_a_transfer();
+
+    show(&mut harness, "Used");
+
+    assert_eq!(
+        names(&harness),
+        [
+            "Auto & Transport",
+            "Fuel",
+            "Insurance",
+            "Food & Dining",
+            "Groceries",
+            "Restaurants",
+            "Coffee Shops",
+            // Utilities uses Home, though nothing uses Home's Insurance.
+            "Home",
+            "Utilities",
+            "Income",
+            "Interest",
+            "Salary",
+            "Shopping",
+            "Household",
+            // The transfer is posted in Joint Checking and lands in Emergency Fund.
+            "[Joint Checking]",
+            "[Emergency Fund]",
+        ]
+    );
+}
+
+#[test]
+fn show_unused_lists_the_rows_nothing_uses_transfers_among_them() {
+    let mut harness = category_list_with_pets_and_a_transfer();
+
+    show(&mut harness, "Unused");
+
+    assert_eq!(
+        names(&harness),
+        [
+            // Nothing uses Home's Insurance, so Home shows above it.
+            "Home",
+            "Insurance",
+            "Pets",
+            "[Everyday Checking]",
+            "[Old Checking]",
+            "[Household Checking]",
+            "[Holiday Fund]",
+            "[Visa Rewards]",
+            "[Brokerage]",
+            "[401(k)]",
+            "[Roth IRA]",
+            "[House]",
+            "[Car]",
+            "[Mortgage]",
+        ]
+    );
+}
+
+#[test]
+fn show_all_lists_used_and_unused_rows_transfers_among_them() {
+    let mut harness = category_list_with_pets_and_a_transfer();
+    show(&mut harness, "Income");
+
+    show(&mut harness, "All");
+
+    // All lists more rows than the window lays out, so this checks for a few.
+    let names = names(&harness);
+    for name in [
+        "Pets",
+        "Groceries",
+        "[Everyday Checking]",
+        "[Emergency Fund]",
+    ] {
+        assert!(names.contains(&name.to_owned()), "{name} is missing");
+    }
+}
+
+#[test]
+fn show_and_search_combine() {
+    let mut harness = category_list();
+    show(&mut harness, "Income");
+
+    search(&mut harness, "in");
+
+    assert_eq!(names(&harness), ["Income", "Interest"]);
+}
+
+#[test]
+fn search_matches_a_transfer_row_by_its_account_name() {
+    let mut harness = category_list();
+
+    search(&mut harness, "fund");
+
+    assert_eq!(names(&harness), ["[Emergency Fund]", "[Holiday Fund]"]);
+}
+
+#[test]
+fn filtering_the_selected_row_out_drops_the_selection() {
+    let mut harness = category_list_with_pets();
+    click_row(&mut harness, "Pets");
+
+    show(&mut harness, "Used");
+
+    assert_eq!(enabled_buttons(&harness), ONLY_NEW);
+}
+
+#[test]
+fn search_unfolds_a_folded_parent_above_a_match() {
+    let mut harness = category_list();
+    click(&mut harness, "Collapse Home");
+
+    search(&mut harness, "insur");
+
+    assert_eq!(
+        tree(&harness),
+        [
+            (1, "Auto & Transport"),
+            (2, "Insurance"),
+            (1, "Home"),
+            (2, "Insurance"),
+        ]
+        .map(|(level, name)| (level, name.to_owned()))
+    );
+    assert_eq!(expanded(&harness, "Home"), Some(true));
+}
