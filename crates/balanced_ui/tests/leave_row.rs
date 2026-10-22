@@ -920,6 +920,18 @@ fn save_then_close_while_on_its_way(harness: &mut Harness<'static, App>) {
     root_events(harness).clear();
 }
 
+/// Clicks the open prompt's `answer`, then asks to close the window in the frame
+/// before the Register carries the answer out: the click's frame takes the answer,
+/// and the next one's start sees the close before it is carried out.
+fn answer_then_close_before_carried_out(harness: &mut Harness<'static, App>, answer: &str) {
+    dialog_button(harness, answer).click();
+    harness.step();
+    root_events(harness).push(ViewportEvent::Close);
+    harness.step();
+    // `egui_kittest` keeps a viewport's events from frame to frame; eframe doesn't.
+    root_events(harness).clear();
+}
+
 /// Renames Fresh Market, opens Visa Rewards, then answers Save to the prompt that asks
 /// and closes the window while the save is on its way.
 fn close_while_saving_on_the_way_to_visa_rewards(harness: &mut Harness<'static, App>) {
@@ -979,4 +991,62 @@ fn a_leave_while_the_save_is_on_its_way_keeps_the_cell_shift_tab_opened_closed()
     harness.run();
 
     assert_eq!(editor(&harness, "Deposit"), None);
+}
+
+#[test]
+fn closing_the_window_just_after_save_closes_it_once_saved() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    open(&mut harness, "Visa Rewards");
+
+    answer_then_close_before_carried_out(&mut harness, "Save");
+
+    assert!(viewport_commands(&mut harness).contains(&ViewportCommand::Close));
+    assert!(can_undo(&mut harness));
+}
+
+#[test]
+fn closing_the_window_just_after_discard_closes_it_without_the_changes() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    open(&mut harness, "Visa Rewards");
+
+    answer_then_close_before_carried_out(&mut harness, "Discard");
+
+    assert!(viewport_commands(&mut harness).contains(&ViewportCommand::Close));
+    assert!(!can_undo(&mut harness));
+}
+
+#[test]
+fn closing_the_window_just_after_add_is_dropped_when_the_ledger_refuses_the_row() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    // Too large for the account's balance to hold.
+    fill_draft(&mut harness, "792281625142643375935439503.35");
+    open(&mut harness, "Visa Rewards");
+
+    answer_then_close_before_carried_out(&mut harness, "Add");
+
+    assert!(!viewport_commands(&mut harness).contains(&ViewportCommand::Close));
+    harness.run();
+    assert!(
+        harness.query_all_by_role(Role::Label).any(|label| label
+            .accesskit_node()
+            .value()
+            .as_deref()
+            == Some("Can't save this transaction"))
+    );
+}
+
+#[test]
+fn a_leave_just_after_save_replaces_the_one_that_asked() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    open(&mut harness, "Visa Rewards");
+
+    answer_then_close_before_carried_out(&mut harness, "Save");
+    harness.run();
+
+    // Everyday Checking's Register, not Visa Rewards'.
+    assert!(current_balance_is(&harness, "$5,642.21"));
 }
