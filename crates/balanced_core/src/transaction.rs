@@ -805,3 +805,50 @@ impl NewTransaction {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rust_decimal_macros::dec;
+
+    use super::*;
+
+    /// The ledger hands each transaction only its own uses, so only a direct call
+    /// reaches this check.
+    #[test]
+    fn a_split_line_of_another_transaction_is_not_reassigned() {
+        let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
+        let food = Money::new(dec!(-40.00), usd).expect("-40.00 fits in Money");
+        let (groceries, dining) = (CategoryId::new(0), CategoryId::new(1));
+        let target = TransactionId::new(1);
+        let split = Transaction::from_parts(
+            target,
+            Date::try_new_iso(2026, 9, 6).expect("6 September 2026 is a real date"),
+            None,
+            "Target".to_owned(),
+            String::new(),
+            Allocation::Split(vec![SplitLine::new(
+                SplitTarget::Category(groceries),
+                "Food",
+                food,
+            )]),
+            food,
+        );
+
+        let result = split.reassigned(
+            groceries,
+            dining,
+            &[CategoryUse::SplitLine {
+                split: TransactionId::new(2),
+                line: 0,
+            }],
+        );
+
+        assert_eq!(
+            result,
+            Err(DomainError::NotInCategory {
+                transaction: target,
+                category: groceries
+            })
+        );
+    }
+}
