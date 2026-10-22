@@ -1387,9 +1387,9 @@ impl Register {
 
     /// Carries out the command picked this frame from the editing row's More actions
     /// menu, if any. Delete goes straight to its confirm, which throws the row's
-    /// changes away as it deletes. Flag and Cleared status read none of the row's
-    /// changes, so they act at once on the saved transaction and the row keeps its
-    /// changes. Go to leaves the row first, so a changed row asks about its changes and
+    /// changes away as it deletes. Flag and Cleared status, and Unreconcile's confirm,
+    /// read none of the row's changes, so they act at once on the saved transaction and
+    /// the row keeps its changes. Go to leaves the row first, so a changed row asks about its changes and
     /// Go to waits for the answer: Continue editing drops it.
     fn act_on_picked(
         &mut self,
@@ -1881,9 +1881,9 @@ impl Register {
                 .map(Edit::cell)
                 .or_else(|| self.unsaved.reopened_cell())
                 .is_some_and(|cell| cell.row != row.id());
-            let toggles =
+            let acts_in_place =
                 action.is_some() && matches!(column, RegisterColumn::Clr | RegisterColumn::Flag);
-            if !(leaves_row && toggles) {
+            if !(leaves_row && acts_in_place) {
                 self.place_cursor(row.id(), column);
             }
             if !leaves_row {

@@ -839,6 +839,7 @@ fn another_reconciled_rows_clr_cell_asks_its_own_confirm_not_the_prompt() {
             .query_by_role_and_label(Role::Button, "Mark Cleared")
             .is_some()
     );
+    assert_eq!(cursor(&harness), "Corner Shop");
 }
 
 #[test]
