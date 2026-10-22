@@ -228,6 +228,42 @@ fn the_box_s_calendar_button_opens_its_calendar() {
     assert!(shown);
 }
 
+/// Whether the box's calendar is open, showing September 2026's days.
+fn calendar_open(harness: &Harness<'static, App>) -> bool {
+    harness
+        .query_by_role_and_label(Role::Button, "9/24/2026")
+        .is_some()
+}
+
+#[test]
+fn esc_in_the_box_s_calendar_closes_only_the_calendar() {
+    let mut harness = everyday();
+    select(&mut harness, "Fresh Market");
+    press(&mut harness, Modifiers::COMMAND, Key::G);
+    press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+
+    press(&mut harness, Modifiers::NONE, Key::Escape);
+
+    assert!(!calendar_open(&harness));
+    assert_eq!(go_to_box(&harness).as_deref(), Some("9/5/2026"));
+}
+
+#[test]
+fn enter_in_the_box_s_calendar_picks_the_marked_day_and_keeps_the_box() {
+    let mut harness = everyday();
+    select(&mut harness, "Fresh Market");
+    press(&mut harness, Modifiers::COMMAND, Key::G);
+    press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert!(!calendar_open(&harness));
+    assert_eq!(go_to_box(&harness).as_deref(), Some("9/6/2026"));
+    assert_eq!(selected_date(&harness).as_deref(), Some("9/5/2026"));
+}
+
 #[test]
 fn go_to_date_in_the_edit_menu_opens_the_box() {
     let mut harness = everyday();
