@@ -73,14 +73,16 @@ permissions:
   issues: write
   pull-requests: read
 
-# One run at a time, so two runs never edit one issue at once. GitHub keeps
-# only the newest waiting run and cancels any older one, so a merge that lands
-# while two runs are queued loses its landed run; the weekly round of shards
-# still tests those mutants. While `mutants-all` runs, every run started after it
-# waits, and all but the newest of those are cancelled.
+# One run at a time, so two runs never edit one issue at once. `queue: max`
+# keeps every waiting run, up to GitHub's 100, and starts them in order, so each
+# merge in a burst gets its own landed run. The default, `single`, keeps only the
+# newest waiting run and cancels the older ones. A run that arrives when the
+# queue is full is cancelled; the weekly round of shards still tests its
+# mutants. `queue: max` requires `cancel-in-progress: false`.
 concurrency:
   group: mutants
   cancel-in-progress: false
+  queue: max
 
 env:
   CARGO_TERM_COLOR: always
