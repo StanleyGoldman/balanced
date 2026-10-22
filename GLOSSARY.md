@@ -123,8 +123,10 @@ The ⚙ menu at the right end of a register's context header that starts the ope
 _Avoid_: Account settings, gear menu
 
 **Filter bar**:
-The row above a register's column headings that narrows the rows it shows by search text, date range and transaction type; it never changes a row's running balance.
-_Avoid_: Search bar, filter panel
+The row above a list that narrows the rows it shows.
+In a register it sits above the column headings and narrows by search text, date range and transaction type; it never changes a row's running balance.
+In the Category List it sits above the tree and narrows by Show, Search and Show hidden categories.
+_Avoid_: Search bar, filter panel, filter row
 
 **Transfer**:
 Money moved between two of the household's accounts, recorded as a transaction in each account's register. It's picked by choosing `[Account]` in the Category field, of a transaction or of a split line.

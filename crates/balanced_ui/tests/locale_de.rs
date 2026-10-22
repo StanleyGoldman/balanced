@@ -529,7 +529,7 @@ fn the_edit_category_dialog_reads_german() {
 }
 
 #[test]
-fn the_category_lists_filter_row_reads_german() {
+fn the_category_lists_filter_bar_reads_german() {
     let mut harness = app();
     harness
         .get_by_role_and_label(Role::Button, "Extras")
