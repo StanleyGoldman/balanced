@@ -13,3 +13,12 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
 Edit the right-hand column to match whatever vocabulary you actually use.
+
+## Picking a ticket to triage
+
+Pick from the **unblocked** `needs-triage` tickets. `gh issue list` can't show which tickets are blocked, so list them with:
+
+```sh
+gh api "repos/StanleyGoldman/balanced/issues?labels=needs-triage&state=open&per_page=100" \
+  --jq '.[] | select(.issue_dependencies_summary.blocked_by == 0) | "\(.number) \(.title)"'
+```
