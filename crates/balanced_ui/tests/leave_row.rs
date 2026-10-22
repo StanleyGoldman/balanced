@@ -809,13 +809,10 @@ fn current_balance_is(harness: &Harness<'static, App>, balance: &str) -> bool {
         .any(|label| label.accesskit_node().value().as_deref() == Some(current.as_str()))
 }
 
-/// Answers Save to the prompt that opening Visa Rewards asked, then asks to close the
-/// window while the save is on its way: the click, the frame that carries out the
-/// answer and sends the save, then the one whose start sees the close before the
-/// ledger applies the save.
-fn close_while_saving_on_the_way_to_visa_rewards(harness: &mut Harness<'static, App>) {
-    rename_fresh_market(harness);
-    open(harness, "Visa Rewards");
+/// Answers Save to the open prompt, then asks to close the window while the save is
+/// on its way: the click, the frame that carries out the answer and sends the save,
+/// then the one whose start sees the close before the ledger applies the save.
+fn save_then_close_while_on_its_way(harness: &mut Harness<'static, App>) {
     dialog_button(harness, "Save").click();
     harness.step();
     harness.step();
@@ -823,6 +820,14 @@ fn close_while_saving_on_the_way_to_visa_rewards(harness: &mut Harness<'static, 
     harness.step();
     // `egui_kittest` keeps a viewport's events from frame to frame; eframe doesn't.
     root_events(harness).clear();
+}
+
+/// Renames Fresh Market, opens Visa Rewards, then answers Save to the prompt that asks
+/// and closes the window while the save is on its way.
+fn close_while_saving_on_the_way_to_visa_rewards(harness: &mut Harness<'static, App>) {
+    rename_fresh_market(harness);
+    open(harness, "Visa Rewards");
+    save_then_close_while_on_its_way(harness);
 }
 
 /// The commands the App sends the window over the next few frames. Each frame's
@@ -859,4 +864,21 @@ fn a_leave_while_the_save_is_on_its_way_replaces_the_one_that_asked() {
 
     // Everyday Checking's Register, not Visa Rewards'.
     assert!(current_balance_is(&harness, "$5,642.21"));
+}
+
+#[test]
+fn a_leave_while_the_save_is_on_its_way_keeps_the_cell_shift_tab_opened_closed() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    // Payee, Num, Date, then the row before, whose Deposit cell opens again once the
+    // row is saved.
+    for _ in 0..3 {
+        press(&mut harness, Modifiers::SHIFT, Key::Tab);
+    }
+    assert!(prompted(&harness));
+    save_then_close_while_on_its_way(&mut harness);
+
+    harness.run();
+
+    assert_eq!(editor(&harness, "Deposit"), None);
 }
