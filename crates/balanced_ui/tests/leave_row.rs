@@ -8,7 +8,7 @@ use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::App as _;
 use eframe::egui::accesskit::{Role, Toggled};
-use eframe::egui::{Event, Key, Modifiers, ViewportEvent, ViewportId, vec2};
+use eframe::egui::{Event, Key, Modifiers, ViewportCommand, ViewportEvent, ViewportId, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use icu_calendar::Date;
@@ -798,4 +798,65 @@ fn cancel_on_the_delete_confirm_from_more_keeps_the_changes() {
 
     assert!(shows(&harness, "Corner Shop"));
     assert!(!can_undo(&mut harness));
+}
+
+/// Whether the context header shows a Current balance of `balance`, as it does for
+/// the account open in the Register.
+fn current_balance_is(harness: &Harness<'static, App>, balance: &str) -> bool {
+    let current = format!("Current {balance}");
+    harness
+        .query_all_by_role(Role::Label)
+        .any(|label| label.accesskit_node().value().as_deref() == Some(current.as_str()))
+}
+
+/// Answers Save to the prompt that opening Visa Rewards asked, then asks to close the
+/// window while the save is on its way: the click, the frame that carries out the
+/// answer and sends the save, then the one whose start sees the close before the
+/// ledger applies the save.
+fn close_while_saving_on_the_way_to_visa_rewards(harness: &mut Harness<'static, App>) {
+    rename_fresh_market(harness);
+    open(harness, "Visa Rewards");
+    dialog_button(harness, "Save").click();
+    harness.step();
+    harness.step();
+    root_events(harness).push(ViewportEvent::Close);
+    harness.step();
+    // `egui_kittest` keeps a viewport's events from frame to frame; eframe doesn't.
+    root_events(harness).clear();
+}
+
+/// The commands the App sends the window over the next few frames. Each frame's
+/// output carries only the commands sent in that frame.
+fn viewport_commands(harness: &mut Harness<'static, App>) -> Vec<ViewportCommand> {
+    let mut commands = Vec::new();
+    for _ in 0..3 {
+        harness.step();
+        commands.extend(
+            harness.output().viewport_output[&ViewportId::ROOT]
+                .commands
+                .iter()
+                .cloned(),
+        );
+    }
+    commands
+}
+
+#[test]
+fn closing_the_window_while_the_save_is_on_its_way_closes_it_once_saved() {
+    let mut harness = app();
+    close_while_saving_on_the_way_to_visa_rewards(&mut harness);
+
+    assert!(viewport_commands(&mut harness).contains(&ViewportCommand::Close));
+    assert!(can_undo(&mut harness));
+}
+
+#[test]
+fn a_leave_while_the_save_is_on_its_way_replaces_the_one_that_asked() {
+    let mut harness = app();
+    close_while_saving_on_the_way_to_visa_rewards(&mut harness);
+
+    harness.run();
+
+    // Everyday Checking's Register, not Visa Rewards'.
+    assert!(current_balance_is(&harness, "$5,642.21"));
 }
