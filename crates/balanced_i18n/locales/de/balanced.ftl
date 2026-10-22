@@ -202,6 +202,9 @@ dialog-category-list-status = Änderungen gelten sofort nach der Bestätigung.
 # Coined from GnuCash's "Löschen" and "Buchung".
 dialog-delete-category-message = { $name } löschen? Keine Buchung verwendet diese Kategorie.
 dialog-delete-category-delete = Löschen
+# Coined from GnuCash's "Buchung" and "Kategorie".
+dialog-delete-category-move-to = Diese Buchungen verschieben nach:
+dialog-delete-category-choose = Kategorie auswählen
 # Coined from GnuCash's "Buchung" and "Unterkategorie".
 dialog-delete-category-used = { $subcategories ->
         [0] { $name } wird

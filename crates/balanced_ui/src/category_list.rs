@@ -14,7 +14,7 @@ use balanced_i18n::{AmountStyle, Localizer};
 use eframe::egui::accesskit::{self, Role};
 use eframe::egui::style::ScrollStyle;
 use eframe::egui::{
-    self, Align, Button, EventFilter, Id, Key, Layout, Modifiers, Rect, Response, RichText, Sense,
+    self, Align, Button, ComboBox, EventFilter, Id, Key, Layout, Modifiers, Rect, Response, RichText, Sense,
     TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, Size, StripBuilder, TableBuilder, TableRow};
@@ -61,10 +61,64 @@ pub(crate) struct CategoryListForm {
     focus_return: Option<FocusReturn>,
 }
 
-/// The delete confirm's form: which unused category, with none under it, it deletes.
+/// The delete confirm's form: which category it deletes, with every category under it,
+/// and where their transactions go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DeleteConfirm {
     category: CategoryId,
+    /// The category the transactions move to, once one is picked (Reassign).
+    target: Option<CategoryId>,
+    /// Whether the target list is open, or the press that closed it is still held.
+    targets_held: bool,
+}
+
+impl DeleteConfirm {
+    fn new(category: CategoryId) -> Self {
+        Self {
+            category,
+            target: None,
+            targets_held: false,
+        }
+    }
+
+    /// The target list, which leaves out the categories in `branch`: every other
+    /// category, by its path.
+    fn target_picker(
+        &mut self,
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        view: &LedgerView,
+        branch: &[CategoryId],
+    ) {
+        let mut paths: Vec<(CategoryId, String)> = view
+            .categories()
+            .iter()
+            .map(Category::id)
+            .filter(|id| !branch.contains(id))
+            .filter_map(|id| Some((id, category_text(view, id)?)))
+            .collect();
+        paths.sort_by(|(_, a), (_, b)| i18n.compare_text(a, b));
+        let chosen = match self.target {
+            Some(target) => category_text(view, target).unwrap_or_default(),
+            None => fl!(i18n, "dialog-delete-category-choose"),
+        };
+        let picker = ui.horizontal(|ui| {
+            let label = ui.label(fl!(i18n, "dialog-delete-category-move-to"));
+            ComboBox::from_id_salt("category_list_delete_target")
+                .selected_text(chosen)
+                .width(ui.available_width())
+                .show_ui(ui, |ui| {
+                    for (id, path) in paths {
+                        ui.selectable_value(&mut self.target, Some(id), path);
+                    }
+                })
+                .response
+                .labelled_by(label.id)
+        });
+        let open = ComboBox::is_open(ui.ctx(), picker.inner.id);
+        let held = self.targets_held && ui.input(|input| input.pointer.any_down());
+        self.targets_held = open || held;
+    }
 }
 
 /// What a click in the button column asks for.
@@ -373,7 +427,7 @@ impl CategoryListForm {
                 }
             }
             Some(ButtonAction::Delete(category)) => {
-                self.delete = Some(OpenDialog::new(ui.ctx(), DeleteConfirm { category }));
+                self.delete = Some(OpenDialog::new(ui.ctx(), DeleteConfirm::new(category)));
             }
         }
         self.model = Some(model);
@@ -814,14 +868,21 @@ fn show_delete(
     let category = dialog.form.category;
     // The ledger can't change while the confirm blocks the list.
     let name = category_text(view, category).expect("the confirm asks about a category");
+    let branch = deepest_first(view, category);
+    let used = view.category_usage(category).count() > 0;
     let outcome = LightDialog::new(
         Id::new("category_list_delete"),
         fl!(i18n, "dialog-delete-category-delete"),
         fl!(i18n, "dialog-cancel"),
         theme,
     )
-    .show(ctx, dialog, |ui, _confirm| {
+    .with_accept_enabled(!used || dialog.form.target.is_some())
+    .with_body_popup(dialog.form.targets_held)
+    .show(ctx, dialog, |ui, confirm| {
         ui.label(delete_message(i18n, view, category, name));
+        if used {
+            confirm.target_picker(ui, i18n, view, &branch);
+        }
     });
     match outcome {
         DialogOutcome::Open => return,
@@ -835,6 +896,24 @@ fn show_delete(
         }
     }
     form.focus_return = form.delete.take().map(|dialog| dialog.close(ctx));
+}
+
+/// `category` and every category under it, each after every category under it.
+fn deepest_first(view: &LedgerView, category: CategoryId) -> Vec<CategoryId> {
+    // Top down, a level at a time, then reversed.
+    let mut branch = vec![category];
+    let mut next = 0;
+    while let Some(&parent) = branch.get(next) {
+        let children = view
+            .categories()
+            .iter()
+            .filter(|child| child.parent() == Some(parent))
+            .map(Category::id);
+        branch.extend(children);
+        next += 1;
+    }
+    branch.reverse();
+    branch
 }
 
 /// What the delete confirm says about `category`, whose full path is `name`: how many

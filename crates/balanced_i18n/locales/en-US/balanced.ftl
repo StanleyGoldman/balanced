@@ -418,6 +418,10 @@ dialog-category-list-status = Changes apply as soon as you confirm them.
 # The confirm for deleting a category nothing uses. $name is its full path, as Food:Coffee.
 dialog-delete-category-message = Delete { $name }? No transaction uses it.
 dialog-delete-category-delete = Delete
+# The list of categories that take a deleted category's transactions, and what it
+# shows until one is picked.
+dialog-delete-category-move-to = Move those transactions to:
+dialog-delete-category-choose = Choose a category
 # The prompt for deleting a category that transactions use. $name is its full path, as
 # Food:Coffee, $subcategories how many categories under it are deleted with it, and
 # $total an amount.
