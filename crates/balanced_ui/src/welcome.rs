@@ -62,7 +62,6 @@ impl Welcome {
             fl!(i18n, "dialog-welcome-quit"),
             theme,
         )
-        // A stray click shouldn't quit; Quit, Esc and the window's close still do.
         .ignoring_backdrop()
         .show(ctx, &mut self.dialog, |ui, picker| {
             ui.label(fl!(i18n, "dialog-welcome-message"));

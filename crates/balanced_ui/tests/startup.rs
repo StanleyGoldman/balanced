@@ -151,9 +151,11 @@ fn a_click_on_the_window_behind_the_welcome_dialog_does_nothing() {
 
     // The dimmed backdrop has no AccessKit node, so the click goes to a position: the
     // top-left corner, outside the Dialog, which sits in the middle.
+    let corner = pos2(5.0, 5.0);
+    assert!(corner.y < harness.get_by_label(WELCOME).rect().top());
     for pressed in [true, false] {
         harness.event(Event::PointerButton {
-            pos: pos2(5.0, 5.0),
+            pos: corner,
             button: PointerButton::Primary,
             pressed,
             modifiers: Modifiers::NONE,
