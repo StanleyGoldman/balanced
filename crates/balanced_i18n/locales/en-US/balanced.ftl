@@ -392,6 +392,8 @@ dialog-category-list-show-used = Used
 dialog-category-list-show-unused = Unused
 dialog-category-list-search = Search
     .placeholder = Category name
+# Ticked, the tree also lists the hidden categories, which the Category field leaves out.
+dialog-category-list-show-hidden = Show hidden categories
 dialog-category-list-close = Close
 dialog-category-list-category = Category
 # Whether a category is Income or Expense.
@@ -411,6 +413,11 @@ dialog-category-list-usage = { $count ->
 # A category's row as a screen reader reads it after its name: $category_type is Income
 # or Expense, and $usage the row's usage, as above or below.
 dialog-category-list-typed-usage = { $category_type }: { $usage }
+# A hidden category's row as a screen reader reads it after its name: $usage is the
+# row's type and usage, as above.
+dialog-category-list-hidden-usage = Hidden, { $usage }
+# Beside a hidden category's name in the tree.
+dialog-category-list-hidden = hidden
 # The usage of a row nothing uses, or whose total is too large to add up.
 dialog-category-list-usage-count = { $count ->
         [0] No transactions
@@ -422,6 +429,8 @@ dialog-category-list-new = New…
 dialog-category-list-edit = Edit…
 dialog-category-list-merge = Merge…
 dialog-category-list-hide = Hide
+# Hide's text while the selected category is hidden.
+dialog-category-list-unhide = Unhide
 dialog-category-list-delete = Delete…
 # Below the tree: no OK button saves the changes made in the Category List.
 dialog-category-list-status = Changes apply as soon as you confirm them.

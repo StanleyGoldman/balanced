@@ -576,12 +576,12 @@ const ONLY_NEW: [(&str, bool); 5] = [
 ];
 
 /// The button column with a category selected that is used or has categories under
-/// it: New… and Edit… enabled.
-const NEW_AND_EDIT: [(&str, bool); 5] = [
+/// it: New…, Edit… and Hide enabled.
+const NEW_EDIT_AND_HIDE: [(&str, bool); 5] = [
     ("New…", true),
     ("Edit…", true),
     ("Merge…", false),
-    ("Hide", false),
+    ("Hide", true),
     ("Delete…", false),
 ];
 
@@ -614,7 +614,7 @@ fn selecting_an_unused_category_with_none_under_it_enables_delete() {
             ("New…", true),
             ("Edit…", true),
             ("Merge…", false),
-            ("Hide", false),
+            ("Hide", true),
             ("Delete…", true),
         ]
     );
@@ -626,7 +626,7 @@ fn delete_is_not_offered_for_a_used_category() {
 
     click_row(&mut harness, "Groceries");
 
-    assert_eq!(enabled_buttons(&harness), NEW_AND_EDIT);
+    assert_eq!(enabled_buttons(&harness), NEW_EDIT_AND_HIDE);
 }
 
 #[test]
@@ -639,7 +639,7 @@ fn delete_is_not_offered_for_a_parent() {
 
     click_row(&mut harness, "Pets");
 
-    assert_eq!(enabled_buttons(&harness), NEW_AND_EDIT);
+    assert_eq!(enabled_buttons(&harness), NEW_EDIT_AND_HIDE);
 }
 
 #[test]

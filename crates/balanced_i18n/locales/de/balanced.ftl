@@ -197,6 +197,12 @@ dialog-category-list-edit = Bearbeiten …
 dialog-category-list-merge = Zusammenführen …
 dialog-category-list-hide = Ausblenden
 dialog-category-list-delete = Löschen …
+# Coined from GnuCash's "Ausblenden": Unhide, the mark beside a hidden category, its
+# screen-reader text and the checkbox that lists hidden categories.
+dialog-category-list-unhide = Einblenden
+dialog-category-list-hidden = ausgeblendet
+dialog-category-list-hidden-usage = Ausgeblendet, { $usage }
+dialog-category-list-show-hidden = Ausgeblendete Kategorien anzeigen
 # Show coined from GnuCash's "_Unbenutzte Konten anzeigen"; All, Unused and Search
 # from GnuCash's "Alle", "Unbenutzte" and "_Suchen"; Used coined from "Unbenutzte".
 # Income and Expense as the Type column has them. The placeholder is coined from
