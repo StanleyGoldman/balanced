@@ -593,35 +593,34 @@ fn with_no_row_selected_only_new_is_enabled() {
 }
 
 #[test]
-fn selecting_an_unused_category_with_none_under_it_enables_merge_and_delete() {
+fn selecting_an_unused_category_with_none_under_it_enables_every_button() {
     let mut harness = category_list_with_pets();
 
     click_row(&mut harness, "Pets");
 
-    assert_eq!(enabled_buttons(&harness), NEW_EDIT_MERGE_AND_DELETE);
+    assert_eq!(enabled_buttons(&harness), EVERY_BUTTON);
 }
 
-/// The button column with a category selected: New…, Edit…, Merge… and Delete…
-/// enabled.
-const NEW_EDIT_MERGE_AND_DELETE: [(&str, bool); 5] = [
+/// The button column with one category selected: every button enabled.
+const EVERY_BUTTON: [(&str, bool); 5] = [
     ("New…", true),
     ("Edit…", true),
     ("Merge…", true),
-    ("Hide", false),
+    ("Hide", true),
     ("Delete…", true),
 ];
 
 #[test]
-fn selecting_a_used_category_enables_merge_and_delete() {
+fn selecting_a_used_category_enables_every_button() {
     let mut harness = category_list();
 
     click_row(&mut harness, "Groceries");
 
-    assert_eq!(enabled_buttons(&harness), NEW_EDIT_MERGE_AND_DELETE);
+    assert_eq!(enabled_buttons(&harness), EVERY_BUTTON);
 }
 
 #[test]
-fn selecting_a_parent_enables_merge_and_delete() {
+fn selecting_a_parent_enables_every_button() {
     let mut ledger = Ledger::stub();
     let pets = create_category(&mut ledger, "Pets", None);
     create_category(&mut ledger, "Vet", Some(pets));
@@ -630,7 +629,7 @@ fn selecting_a_parent_enables_merge_and_delete() {
 
     click_row(&mut harness, "Pets");
 
-    assert_eq!(enabled_buttons(&harness), NEW_EDIT_MERGE_AND_DELETE);
+    assert_eq!(enabled_buttons(&harness), EVERY_BUTTON);
 }
 
 #[test]

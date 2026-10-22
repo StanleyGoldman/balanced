@@ -118,6 +118,7 @@ fn a_category_written_after_the_migration_keeps_its_type() {
             parent_id: None,
             name: "Salary".to_owned(),
             category_type: "income".to_owned(),
+            hidden: false,
         })
         .expect("the file takes a category");
     drop(store);
@@ -125,4 +126,71 @@ fn a_category_written_after_the_migration_keeps_its_type() {
     let types = category_types(&path);
 
     assert_eq!(types, [("Salary".to_owned(), "income".to_owned())]);
+}
+
+/// Whether each category in the file at `path` is hidden, once Balanced has opened it,
+/// by id.
+fn hidden_flags(path: &Path) -> Vec<(String, bool)> {
+    Store::open(path)
+        .expect("the upgrade succeeds")
+        .read()
+        .expect("the upgraded file reads")
+        .categories
+        .into_iter()
+        .map(|row| (row.name, row.hidden))
+        .collect()
+}
+
+#[test]
+fn the_category_hidden_migration_leaves_every_category_shown() {
+    let (_dir, path) = file_at(
+        2,
+        "INSERT INTO category (id, parent_id, name, type) VALUES
+            (0, NULL, 'Food', 'expense'), (1, 0, 'Groceries', 'expense');",
+    );
+
+    let flags = hidden_flags(&path);
+
+    assert_eq!(
+        flags,
+        [("Food".to_owned(), false), ("Groceries".to_owned(), false)]
+    );
+}
+
+#[test]
+fn the_category_hidden_migration_keeps_the_undo_log() {
+    let entry = r#"{"delete_category":{"category":1}}"#;
+    let (_dir, path) = file_at(
+        2,
+        &format!(
+            "INSERT INTO undo_entry (stack, position, command) VALUES ('undo', 0, '{entry}');"
+        ),
+    );
+
+    let contents = Store::open(&path)
+        .expect("the upgrade succeeds")
+        .read()
+        .expect("the upgraded file reads");
+
+    assert_eq!(contents.undo, [entry]);
+}
+
+#[test]
+fn a_category_written_after_the_migration_keeps_its_hidden_flag() {
+    let (_dir, path) = file_at(3, "");
+    let store = Store::open(&path).expect("the file opens");
+    store
+        .insert_category(&CategoryRow {
+            id: 0,
+            parent_id: None,
+            name: "Old Job".to_owned(),
+            category_type: "income".to_owned(),
+            hidden: true,
+        })
+        .expect("the file takes a category");
+    drop(store);
+
+    let flags = hidden_flags(&path);
+
+    assert_eq!(flags, [("Old Job".to_owned(), true)]);
 }

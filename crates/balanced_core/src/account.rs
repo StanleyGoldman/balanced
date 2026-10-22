@@ -73,11 +73,12 @@ impl AccountKind {
     }
 }
 
-/// Whether the Account bar shows an account.
+/// Whether the Account bar shows an account, or the Category field offers a category.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Visibility {
     Shown,
-    /// Left out of the Account bar, but still counted in Net Worth.
+    /// An account left out of the Account bar, but still counted in Net Worth; a
+    /// category left out of the Category field's list, but still shown where it is used.
     Hidden,
 }
 

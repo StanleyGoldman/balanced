@@ -59,7 +59,8 @@ CREATE TABLE category (
         CONSTRAINT category_name_not_blank CHECK (trim(name) <> '')
         CONSTRAINT category_name_trimmed CHECK (name = trim(name))
 , type TEXT NOT NULL DEFAULT 'expense'
-    CONSTRAINT category_type_known CHECK (type IN ('income', 'expense'))) STRICT
+    CONSTRAINT category_type_known CHECK (type IN ('income', 'expense')), hidden INTEGER NOT NULL DEFAULT 0
+    CONSTRAINT category_hidden_flag CHECK (hidden IN (0, 1))) STRICT
 
 table data_file on data_file
 CREATE TABLE data_file (

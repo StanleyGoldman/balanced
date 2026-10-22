@@ -115,28 +115,33 @@ impl Store {
     pub fn insert_category(&self, category: &CategoryRow) -> Result<(), StoreError> {
         self.connection
             .prepare_cached(
-                "INSERT INTO category (id, parent_id, name, type) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO category (id, parent_id, name, type, hidden)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
             )?
             .execute(params![
                 category.id,
                 category.parent_id,
                 category.name,
-                category.category_type
+                category.category_type,
+                category.hidden
             ])?;
         Ok(())
     }
 
-    /// Replaces category `category.id`'s name, parent and type by `category`'s.
+    /// Replaces category `category.id`'s name, parent, type and hidden flag by
+    /// `category`'s.
     pub fn update_category(&self, category: &CategoryRow) -> Result<(), StoreError> {
         self.connection
             .prepare_cached(
-                "UPDATE category SET parent_id = ?2, name = ?3, type = ?4 WHERE id = ?1",
+                "UPDATE category SET parent_id = ?2, name = ?3, type = ?4, hidden = ?5
+                 WHERE id = ?1",
             )?
             .execute(params![
                 category.id,
                 category.parent_id,
                 category.name,
-                category.category_type
+                category.category_type,
+                category.hidden
             ])?;
         Ok(())
     }

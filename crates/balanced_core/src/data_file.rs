@@ -212,6 +212,7 @@ impl Ledger {
                     row.name,
                     row.parent_id.map(CategoryId::new),
                     category_type(&row.category_type)?,
+                    visibility(row.hidden),
                 ))
             })
             .collect::<Result<_, OpenError>>()?;
@@ -236,11 +237,7 @@ impl Ledger {
                     row.name,
                     kind,
                     currency,
-                    if row.hidden {
-                        Visibility::Hidden
-                    } else {
-                        Visibility::Shown
-                    },
+                    visibility(row.hidden),
                     if row.closed {
                         AccountStatus::Closed
                     } else {
@@ -401,6 +398,15 @@ fn cleared_status(name: &str) -> Result<ClearedStatus, OpenError> {
         })
 }
 
+/// The visibility of a row the store marks `hidden` or not.
+fn visibility(hidden: bool) -> Visibility {
+    if hidden {
+        Visibility::Hidden
+    } else {
+        Visibility::Shown
+    }
+}
+
 /// The store's name for `category_type`.
 fn category_type_name(category_type: CategoryType) -> &'static str {
     match category_type {
@@ -512,6 +518,7 @@ pub(crate) fn category_row(category: &Category) -> CategoryRow {
         parent_id: category.parent().map(CategoryId::raw),
         name: category.name().to_owned(),
         category_type: category_type_name(category.category_type()).to_owned(),
+        hidden: category.visibility() == Visibility::Hidden,
     }
 }
 

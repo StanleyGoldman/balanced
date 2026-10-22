@@ -7,7 +7,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use balanced_core::{
     Account, AccountId, Allocation, CategoryId, Generation, LedgerView, Money, RegisterEntry,
-    Transaction, TransactionId,
+    Transaction, TransactionId, Visibility,
 };
 use balanced_i18n::Localizer;
 use icu_locale::Locale;
@@ -22,6 +22,9 @@ pub(crate) struct Choice<T> {
     /// The text in lower case, which typed text is matched against.
     folded: String,
     value: T,
+    /// Whether the list and Inline completion offer it. One left out is still taken
+    /// when its whole text is typed.
+    listed: bool,
 }
 
 impl<T> Choice<T> {
@@ -49,19 +52,20 @@ impl<T> Choices<T> {
                 folded: text.to_lowercase(),
                 text,
                 value,
+                listed: true,
             })
             .collect();
         choices.sort_by(|a, b| i18n.compare_text(&a.text, &b.text));
         Self { choices }
     }
 
-    /// The choices whose text holds `text`, trimmed, anywhere, ignoring case, in
-    /// alphabetical order. Blank text matches every choice.
+    /// The listed choices whose text holds `text`, trimmed, anywhere, ignoring case, in
+    /// alphabetical order. Blank text matches every listed choice.
     pub(crate) fn matching(&self, text: &str) -> Vec<&Choice<T>> {
         let text = text.trim().to_lowercase();
         self.choices
             .iter()
-            .filter(|choice| choice.folded.contains(&text))
+            .filter(|choice| choice.listed && choice.folded.contains(&text))
             .collect()
     }
 
@@ -72,7 +76,17 @@ impl<T> Choices<T> {
         self
     }
 
-    /// The choice named `text`, trimmed, ignoring case.
+    /// The same choices, left out of the list and Inline completion, but still found
+    /// by name.
+    #[must_use]
+    pub(crate) fn unlisted(mut self) -> Self {
+        for choice in &mut self.choices {
+            choice.listed = false;
+        }
+        self
+    }
+
+    /// The choice named `text`, trimmed, ignoring case, listed or not.
     pub(crate) fn named(&self, text: &str) -> Option<&Choice<T>> {
         let text = text.trim().to_lowercase();
         self.choices.iter().find(|choice| choice.folded == text)
@@ -171,10 +185,10 @@ pub(crate) struct FieldChoices {
 }
 
 impl FieldChoices {
-    /// The payees of every transaction in `view`, each once, its categories by their
-    /// paths, and then, as `[Name]`, every open account but `account`, hidden ones
+    /// The payees of every transaction in `view`, each once, its shown categories by
+    /// their paths, and then, as `[Name]`, every open account but `account`, hidden ones
     /// included. Each part is sorted as `i18n` sorts text. Opening balances have no
-    /// payee to offer.
+    /// payee to offer. Hidden categories are found by their paths, but never listed.
     pub(crate) fn new(view: &LedgerView, account: AccountId, i18n: &Localizer) -> Self {
         let transactions = || {
             view.accounts()
@@ -185,11 +199,16 @@ impl FieldChoices {
                 .filter(|transaction| !transaction.payee().is_empty())
         };
         let payees: BTreeSet<&str> = transactions().map(Transaction::payee).collect();
-        let categories = view.categories().iter().map(|category| {
-            let text = category_text(view, category.id())
-                .expect("every category of a snapshot has a path in it");
-            (text, CategoryTarget::Category(category.id()))
-        });
+        let categories = |visibility| {
+            view.categories()
+                .iter()
+                .filter(move |category| category.visibility() == visibility)
+                .map(|category| {
+                    let text = category_text(view, category.id())
+                        .expect("every category of a snapshot has a path in it");
+                    (text, CategoryTarget::Category(category.id()))
+                })
+        };
         let accounts = view
             .accounts()
             .iter()
@@ -206,7 +225,9 @@ impl FieldChoices {
             account,
             formatting_locale: i18n.formatting_locale().clone(),
             payees: Choices::new(i18n, payees.into_iter().map(|payee| (payee.to_owned(), ()))),
-            categories: Choices::new(i18n, categories).followed_by(Choices::new(i18n, accounts)),
+            categories: Choices::new(i18n, categories(Visibility::Shown))
+                .followed_by(Choices::new(i18n, accounts))
+                .followed_by(Choices::new(i18n, categories(Visibility::Hidden)).unlisted()),
             recalls: Recalled::by_payee(transactions(), view, account),
         }
     }
