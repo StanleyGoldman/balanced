@@ -493,7 +493,7 @@ impl LedgerView {
 
     /// Category `id` and every category under it, at every depth: the category first,
     /// then the ones under it, level by level.
-    fn branch(&self, id: CategoryId) -> Vec<CategoryId> {
+    pub fn branch(&self, id: CategoryId) -> Vec<CategoryId> {
         let mut branch = vec![id];
         let mut next = 0;
         while let Some(&parent) = branch.get(next) {
@@ -1944,9 +1944,8 @@ impl Ledger {
         self.reassign_uses(from, to, &uses)
     }
 
-    /// Moves each of `uses`, in category `from`, to category `to`. A category's
-    /// transactions move even in a closed account, since the category, not the
-    /// account's history, is what changes.
+    /// Moves each of `uses`, in category `from`, to category `to`, in open and closed
+    /// accounts alike.
     fn reassign_uses(
         &mut self,
         from: CategoryId,
@@ -1986,11 +1985,12 @@ impl Ledger {
             if let Some(rewritten) = rewritten {
                 let summary = Arc::make_mut(summary);
                 for (entry, reassigned) in rewritten {
+                    // `entry` came from enumerating these transactions above.
                     summary.transactions[entry] = Arc::new(reassigned);
                 }
             }
         }
-        if let Some(&transaction) = by_transaction.keys().next() {
+        if let Some(&transaction) = by_transaction.keys().min() {
             return Err(DomainError::UnknownTransaction { transaction });
         }
         view.accounts_changed();

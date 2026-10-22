@@ -1005,3 +1005,16 @@ fn deleting_an_unused_parent_says_its_subcategory_goes_with_it() {
     assert!(!categories(&harness).contains(&"Pets".to_owned()));
     assert!(!categories(&harness).contains(&"Vet".to_owned()));
 }
+
+#[test]
+fn the_target_list_has_first_focus_while_delete_waits_for_it() {
+    let mut harness = category_list();
+
+    delete_row(&mut harness, "Groceries");
+
+    assert!(
+        harness
+            .get_by_role_and_label(Role::ComboBox, MOVE_TO)
+            .is_focused()
+    );
+}

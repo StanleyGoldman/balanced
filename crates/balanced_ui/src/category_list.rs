@@ -70,6 +70,9 @@ struct DeleteConfirm {
     target: Option<CategoryId>,
     /// Whether the target list is open, or the press that closed it is still held.
     targets_held: bool,
+    /// Whether the target list takes keyboard focus when next drawn, as it does when
+    /// the confirm opens with Delete disabled.
+    focus_targets: bool,
 }
 
 impl DeleteConfirm {
@@ -78,11 +81,12 @@ impl DeleteConfirm {
             category,
             target: None,
             targets_held: false,
+            focus_targets: true,
         }
     }
 
     /// The target list, which leaves out the categories in `branch`: every other
-    /// category, by its path.
+    /// category, by its path. It takes keyboard focus the first time it is drawn.
     fn target_picker(
         &mut self,
         ui: &mut egui::Ui,
@@ -115,6 +119,9 @@ impl DeleteConfirm {
                 .response
                 .labelled_by(label.id)
         });
+        if std::mem::take(&mut self.focus_targets) {
+            picker.inner.request_focus();
+        }
         let open = ComboBox::is_open(ui.ctx(), picker.inner.id);
         let held = self.targets_held && ui.input(|input| input.pointer.any_down());
         self.targets_held = open || held;
@@ -868,7 +875,7 @@ fn show_delete(
     let category = dialog.form.category;
     // The ledger can't change while the confirm blocks the list.
     let name = category_text(view, category).expect("the confirm asks about a category");
-    let branch = deepest_first(view, category);
+    let branch = view.branch(category);
     let used = view.category_usage(category).count() > 0;
     let outcome = LightDialog::new(
         Id::new("category_list_delete"),
@@ -887,7 +894,7 @@ fn show_delete(
     match outcome {
         DialogOutcome::Open => return,
         DialogOutcome::Accepted => {
-            let command = delete_command(&branch, dialog.form.target);
+            let command = delete_command(view, &branch, dialog.form.target);
             commands.send(AppCommand::Domain(command));
         }
         DialogOutcome::Cancelled => {}
@@ -898,41 +905,26 @@ fn show_delete(
     form.focus_return = form.delete.take().map(|dialog| dialog.close(ctx));
 }
 
-/// `category` and every category under it, each after every category under it.
-fn deepest_first(view: &LedgerView, category: CategoryId) -> Vec<CategoryId> {
-    // Top down, a level at a time, then reversed.
-    let mut branch = vec![category];
-    let mut next = 0;
-    while let Some(&parent) = branch.get(next) {
-        let children = view
-            .categories()
-            .iter()
-            .filter(|child| child.parent() == Some(parent))
-            .map(Category::id);
-        branch.extend(children);
-        next += 1;
-    }
-    branch.reverse();
-    branch
-}
-
-/// The Command that deletes the categories in `branch`, each after every category under
-/// it, first moving their transactions to `target` when there is one. It is one undo
-/// step.
-fn delete_command(branch: &[CategoryId], target: Option<CategoryId>) -> DomainCommand {
-    let deletes = branch
-        .iter()
-        .map(|&category| DomainCommand::DeleteCategory { category });
+/// The Command that deletes the categories in `branch`, a category followed by those
+/// under it level by level, each after every category under it. It first moves the
+/// transactions of each used one to `target`, when there is one. It is one undo step.
+fn delete_command(
+    view: &LedgerView,
+    branch: &[CategoryId],
+    target: Option<CategoryId>,
+) -> DomainCommand {
+    let deepest_first = || branch.iter().rev().copied();
+    let deletes = deepest_first().map(|category| DomainCommand::DeleteCategory { category });
     let Some(to) = target else {
         return DomainCommand::Compound(deletes.collect());
     };
-    let reassigns = branch
-        .iter()
-        .map(|&from| DomainCommand::ReassignCategory { from, to });
+    let reassigns = deepest_first()
+        .filter(|&from| view.category_usage(from).count() > 0)
+        .map(|from| DomainCommand::ReassignCategory { from, to });
     DomainCommand::Compound(reassigns.chain(deletes).collect())
 }
 
-/// What the delete confirm says about the categories in `branch`, the last of them the
+/// What the delete confirm says about the categories in `branch`, the first of them the
 /// one deleted, whose full path is `name`: how many transactions use them and their
 /// total, or that none does, and how many go with it.
 fn delete_message(
@@ -941,7 +933,7 @@ fn delete_message(
     branch: &[CategoryId],
     name: String,
 ) -> String {
-    let (&category, under) = branch.split_last().expect("a branch holds its category");
+    let (&category, under) = branch.split_first().expect("a branch holds its category");
     let subcategories = under.len();
     let usage = view.category_usage(category);
     let count = usage.count();

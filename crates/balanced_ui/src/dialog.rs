@@ -109,7 +109,8 @@ impl FocusReturn {
 /// A light Dialog: no title bar, a fixed width, its body above a row with its default
 /// button and Cancel, and Back before them in a Dialog with steps. A notice has its
 /// default button alone. A Dialog asking whether to keep changes has Discard at the
-/// far left, which no key presses. The default button has first focus.
+/// far left, which no key presses. The default button has first focus, unless it is
+/// disabled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LightDialog {
     id: Id,
@@ -226,7 +227,8 @@ impl LightDialog {
                 ui.set_width(width);
                 body_area(ui, inner.y, |ui| body(ui, &mut dialog.form));
                 let buttons = buttons(ui, accept, accept_enabled, cancel, back, discard);
-                if first_frame {
+                // A disabled button can't hold focus, so the body gives it to a field.
+                if first_frame && accept_enabled {
                     buttons.accept.request_focus();
                 }
                 buttons
