@@ -153,6 +153,21 @@ fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
         DomainCommand::RestoreCategory { category } => v1::Command::RestoreCategory {
             category: category_to_wire(category),
         },
+        DomainCommand::RenameCategory { category, name } => v1::Command::RenameCategory {
+            category: category.raw(),
+            name: name.clone(),
+        },
+        DomainCommand::MoveCategory { category, parent } => v1::Command::MoveCategory {
+            category: category.raw(),
+            parent: parent.map(CategoryId::raw),
+        },
+        DomainCommand::SetCategoryType {
+            category,
+            category_type,
+        } => v1::Command::SetCategoryType {
+            category: category.raw(),
+            category_type: category_type_to_wire(*category_type),
+        },
     })
 }
 
@@ -476,6 +491,21 @@ fn from_wire(
         },
         v1::Command::RestoreCategory { category } => DomainCommand::RestoreCategory {
             category: category_from_wire(category),
+        },
+        v1::Command::RenameCategory { category, name } => DomainCommand::RenameCategory {
+            category: CategoryId::new(category),
+            name,
+        },
+        v1::Command::MoveCategory { category, parent } => DomainCommand::MoveCategory {
+            category: CategoryId::new(category),
+            parent: parent.map(CategoryId::new),
+        },
+        v1::Command::SetCategoryType {
+            category,
+            category_type,
+        } => DomainCommand::SetCategoryType {
+            category: CategoryId::new(category),
+            category_type: category_type_from_wire(category_type),
         },
     })
 }
@@ -1006,7 +1036,7 @@ mod tests {
     }
 
     /// One of every category Command, every field set and unset.
-    fn category_commands() -> [DomainCommand; 5] {
+    fn category_commands() -> [DomainCommand; 10] {
         [
             DomainCommand::CreateCategory {
                 name: "Fuel".to_owned(),
@@ -1037,6 +1067,26 @@ mod tests {
                     CategoryType::Income,
                 ),
             },
+            DomainCommand::RenameCategory {
+                category: CategoryId::new(6),
+                name: "Petrol".to_owned(),
+            },
+            DomainCommand::MoveCategory {
+                category: CategoryId::new(6),
+                parent: Some(CategoryId::new(5)),
+            },
+            DomainCommand::MoveCategory {
+                category: CategoryId::new(6),
+                parent: None,
+            },
+            DomainCommand::SetCategoryType {
+                category: CategoryId::new(5),
+                category_type: CategoryType::Income,
+            },
+            DomainCommand::SetCategoryType {
+                category: CategoryId::new(5),
+                category_type: CategoryType::Expense,
+            },
         ]
     }
 
@@ -1061,6 +1111,9 @@ mod tests {
             DomainCommand::CreateCategory { .. } => 13,
             DomainCommand::DeleteCategory { .. } => 14,
             DomainCommand::RestoreCategory { .. } => 15,
+            DomainCommand::RenameCategory { .. } => 16,
+            DomainCommand::MoveCategory { .. } => 17,
+            DomainCommand::SetCategoryType { .. } => 18,
         }
     }
 
@@ -1069,7 +1122,7 @@ mod tests {
         let mut seen: Vec<usize> = every_command().iter().map(variant).collect();
         seen.dedup();
 
-        assert_eq!(seen, (0..16).collect::<Vec<_>>());
+        assert_eq!(seen, (0..19).collect::<Vec<_>>());
     }
 
     #[test]

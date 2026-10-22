@@ -79,6 +79,21 @@ impl Category {
     pub fn category_type(&self) -> CategoryType {
         self.category_type
     }
+
+    /// Puts the category under `parent`, or at the top of the tree.
+    pub(crate) fn set_parent(&mut self, parent: Option<CategoryId>) {
+        self.parent = parent;
+    }
+
+    /// Makes the category Income or Expense.
+    pub(crate) fn set_category_type(&mut self, category_type: CategoryType) {
+        self.category_type = category_type;
+    }
+
+    /// Gives the category `name`, returning its old name.
+    pub(crate) fn rename(&mut self, name: String) -> String {
+        std::mem::replace(&mut self.name, name)
+    }
 }
 
 /// A category to add to a new [`Ledger`](crate::Ledger). Its id is its position in the

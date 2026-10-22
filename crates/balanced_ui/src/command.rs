@@ -227,6 +227,10 @@ impl StatusMessage {
                 }
                 DomainError::CategoryInUse { .. } => fl!(i18n, "status-category-in-use"),
                 DomainError::BlankCategoryName => fl!(i18n, "status-blank-category-name"),
+                DomainError::CategoryUnderItself { .. } => {
+                    fl!(i18n, "status-category-under-itself")
+                }
+                DomainError::SubcategoryType { .. } => fl!(i18n, "status-subcategory-type"),
                 DomainError::Store(WriteError::AmountOutOfRange(_)) => {
                     fl!(i18n, "status-amount-too-large")
                 }

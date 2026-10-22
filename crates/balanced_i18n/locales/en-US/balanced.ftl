@@ -298,6 +298,14 @@ dialog-new-category-hint = Use “:” to put it under another category, as in H
 dialog-new-category-no-parent = No category is named “{ $parent }”.
 # The label before the Income and Expense choice, shown for a top-level category only.
 dialog-new-category-type = Type
+dialog-edit-category-title = Edit Category
+dialog-edit-category-name = Name
+# The picker of the category this one goes under.
+dialog-edit-category-parent = Parent
+# The Parent picker's choice that puts the category at the top of the tree.
+dialog-edit-category-top-level = (Top level)
+# The label before the Income and Expense choice, which only a top-level category takes.
+dialog-edit-category-type = Type
 dialog-go-to-date-title = Go to Date
 # The label of Go to date's date field.
 dialog-go-to-date-date = Date
@@ -563,6 +571,9 @@ status-duplicate-category = A category named “{ $name }” is already there.
 # Deleting a category that a transaction or another category still uses.
 status-category-in-use = That category is still in use, so it can't be deleted.
 status-blank-category-name = Enter a name for the category.
+status-category-under-itself = A category can't go under itself or one of its own subcategories.
+# Giving a type to a subcategory, which takes its top-level category's type instead.
+status-subcategory-type = A subcategory takes the type of the category at the top of its tree.
 # The data file refused a change, so Balanced didn't make it.
 status-change-not-saved = That change couldn't be saved to the data file, so it wasn't made.
 status-preferences-reset = Your preferences couldn't be read, so the defaults are in use. The old file is kept as preferences.toml.broken.

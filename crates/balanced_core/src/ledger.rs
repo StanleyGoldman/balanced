@@ -432,7 +432,7 @@ impl LedgerView {
             .find(|summary| summary.account.id() == id)
     }
 
-    /// Every category, each after the category it sits under.
+    /// Every category, in the order they were created.
     pub fn categories(&self) -> &[Category] {
         &self.categories
     }
@@ -466,9 +466,13 @@ impl LedgerView {
     pub fn category_path(&self, id: CategoryId) -> Option<Vec<&str>> {
         let mut category = self.category(id)?;
         let mut names = vec![category.name()];
+        // The ledger refuses a move that would make a loop, so the walk reaches the top
+        // before it has named every category.
         while let Some(parent) = category.parent() {
-            // A parent comes before its children, so each step moves to a smaller id.
-            assert!(parent < category.id(), "a parent comes before its children");
+            assert!(
+                names.len() < self.categories.len(),
+                "the category tree has a loop"
+            );
             category = self
                 .category(parent)
                 .expect("a category's parent is in the same snapshot");
@@ -476,6 +480,37 @@ impl LedgerView {
         }
         names.reverse();
         Some(names)
+    }
+
+    /// Whether category `id` is `ancestor` or sits under it, at any depth.
+    fn is_within(&self, id: CategoryId, ancestor: CategoryId) -> bool {
+        std::iter::successors(Some(id), |&child| {
+            self.category(child).and_then(Category::parent)
+        })
+        .any(|above| above == ancestor)
+    }
+
+    /// Category `id` and every category under it, at every depth: the category first,
+    /// then the ones under it, level by level.
+    fn branch(&self, id: CategoryId) -> Vec<CategoryId> {
+        let mut branch = vec![id];
+        let mut next = 0;
+        while let Some(&parent) = branch.get(next) {
+            branch.extend(
+                self.categories
+                    .iter()
+                    .filter(|category| category.parent() == Some(parent))
+                    .map(Category::id),
+            );
+            // The ledger refuses a move that would make a loop, so no category is in the
+            // branch twice.
+            assert!(
+                branch.len() <= self.categories.len(),
+                "the category tree has a loop"
+            );
+            next += 1;
+        }
+        branch
     }
 
     /// Where transaction `id` is, or `None` when no account holds it.
@@ -969,6 +1004,16 @@ impl Ledger {
             } => self.create_category(&name, parent, category_type)?,
             DomainCommand::DeleteCategory { category } => self.delete_category(category)?,
             DomainCommand::RestoreCategory { category } => self.restore_category(category)?,
+            DomainCommand::RenameCategory { category, name } => {
+                self.rename_category(category, &name)?
+            }
+            DomainCommand::MoveCategory { category, parent } => {
+                self.move_category(category, parent)?
+            }
+            DomainCommand::SetCategoryType {
+                category,
+                category_type,
+            } => self.set_category_type(category, category_type)?,
         };
         Ok(Applied { inverse })
     }
@@ -1667,17 +1712,7 @@ impl Ledger {
                     .ok_or(DomainError::UnknownCategory { category: parent })
             })
             .transpose()?;
-        let folded = name.to_lowercase();
-        if self
-            .view
-            .categories
-            .iter()
-            .any(|sibling| sibling.parent() == parent && sibling.name().to_lowercase() == folded)
-        {
-            return Err(DomainError::DuplicateCategory {
-                name: name.to_owned(),
-            });
-        }
+        self.check_unique_name(name, parent, None)?;
         let id = self.next_category;
         let category = Category::new(
             id,
@@ -1692,6 +1727,152 @@ impl Ledger {
         view.categories.push(category);
         view.generation = view.generation.next();
         Ok(DomainCommand::DeleteCategory { category: id })
+    }
+
+    /// Refuses `name` when a category under `parent` other than `except` has it,
+    /// ignoring case.
+    fn check_unique_name(
+        &self,
+        name: &str,
+        parent: Option<CategoryId>,
+        except: Option<CategoryId>,
+    ) -> Result<(), DomainError> {
+        let folded = name.to_lowercase();
+        let taken = self.view.categories.iter().any(|sibling| {
+            sibling.parent() == parent
+                && Some(sibling.id()) != except
+                && sibling.name().to_lowercase() == folded
+        });
+        if taken {
+            return Err(DomainError::DuplicateCategory {
+                name: name.to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    /// The index of category `id` in the snapshot's categories.
+    fn category_index(&self, id: CategoryId) -> Result<usize, DomainError> {
+        self.view
+            .categories
+            .iter()
+            .position(|category| category.id() == id)
+            .ok_or(DomainError::UnknownCategory { category: id })
+    }
+
+    /// Changes the category at `index` with `change`, writes it to the data file, and
+    /// moves to the next generation. Returns what `change` returned.
+    fn change_category<T>(
+        &mut self,
+        index: usize,
+        change: impl FnOnce(&mut Category) -> T,
+    ) -> Result<T, DomainError> {
+        let view = Arc::make_mut(&mut self.view);
+        // Callers take `index` from a lookup in this same list of categories.
+        let category = &mut view.categories[index];
+        let changed = change(category);
+        self.store.update_category(&category_row(category))?;
+        view.generation = view.generation.next();
+        Ok(changed)
+    }
+
+    fn rename_category(
+        &mut self,
+        id: CategoryId,
+        name: &str,
+    ) -> Result<DomainCommand, DomainError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(DomainError::BlankCategoryName);
+        }
+        let index = self.category_index(id)?;
+        let parent = self.view.categories[index].parent();
+        self.check_unique_name(name, parent, Some(id))?;
+        let old = self.change_category(index, |category| category.rename(name.to_owned()))?;
+        Ok(DomainCommand::RenameCategory {
+            category: id,
+            name: old,
+        })
+    }
+
+    fn move_category(
+        &mut self,
+        id: CategoryId,
+        parent: Option<CategoryId>,
+    ) -> Result<DomainCommand, DomainError> {
+        let index = self.category_index(id)?;
+        let parent_type = match parent {
+            Some(parent) => {
+                let parent_type = self
+                    .view
+                    .category(parent)
+                    .ok_or(DomainError::UnknownCategory { category: parent })?
+                    .category_type();
+                if self.view.is_within(parent, id) {
+                    return Err(DomainError::CategoryUnderItself { category: id });
+                }
+                Some(parent_type)
+            }
+            None => None,
+        };
+        let moved = &self.view.categories[index];
+        let (old_parent, old_type) = (moved.parent(), moved.category_type());
+        self.check_unique_name(moved.name(), parent, Some(id))?;
+        self.change_category(index, |category| category.set_parent(parent))?;
+        let move_back = DomainCommand::MoveCategory {
+            category: id,
+            parent: old_parent,
+        };
+        match parent_type {
+            Some(parent_type) if parent_type != old_type => {
+                self.set_branch_type(id, parent_type)?;
+                // Moved back under a parent, the branch takes that parent's type again;
+                // moved back to the top, it keeps the new type until it is given its old one.
+                Ok(match old_parent {
+                    Some(_) => move_back,
+                    None => DomainCommand::Compound(vec![
+                        move_back,
+                        DomainCommand::SetCategoryType {
+                            category: id,
+                            category_type: old_type,
+                        },
+                    ]),
+                })
+            }
+            Some(_) | None => Ok(move_back),
+        }
+    }
+
+    fn set_category_type(
+        &mut self,
+        id: CategoryId,
+        category_type: CategoryType,
+    ) -> Result<DomainCommand, DomainError> {
+        let category = &self.view.categories[self.category_index(id)?];
+        if category.parent().is_some() {
+            return Err(DomainError::SubcategoryType { category: id });
+        }
+        let old_type = category.category_type();
+        self.set_branch_type(id, category_type)?;
+        Ok(DomainCommand::SetCategoryType {
+            category: id,
+            category_type: old_type,
+        })
+    }
+
+    /// Makes category `id` and every category under it `category_type`.
+    fn set_branch_type(
+        &mut self,
+        id: CategoryId,
+        category_type: CategoryType,
+    ) -> Result<(), DomainError> {
+        for branch in self.view.branch(id) {
+            let index = self.category_index(branch)?;
+            if self.view.categories[index].category_type() != category_type {
+                self.change_category(index, |category| category.set_category_type(category_type))?;
+            }
+        }
+        Ok(())
     }
 
     fn delete_category(&mut self, id: CategoryId) -> Result<DomainCommand, DomainError> {

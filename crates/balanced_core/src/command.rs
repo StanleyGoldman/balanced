@@ -98,6 +98,22 @@ pub enum DomainCommand {
     /// Put a deleted category back, with its id: the inverse of
     /// [`DomainCommand::DeleteCategory`].
     RestoreCategory { category: Category },
+    /// Give a category a new name, which no other category under its parent has,
+    /// ignoring case. Every transaction in it shows the new name at once.
+    RenameCategory { category: CategoryId, name: String },
+    /// Move a category, with every category under it, under `parent`, or to the top of
+    /// the tree. Under a parent, the category and those under it take its top-level
+    /// category's type; at the top, the category keeps the type it had.
+    MoveCategory {
+        category: CategoryId,
+        parent: Option<CategoryId>,
+    },
+    /// Make a top-level category, with every category under it, Income or Expense. A
+    /// subcategory takes its top-level category's type, so it can't be given one.
+    SetCategoryType {
+        category: CategoryId,
+        category_type: CategoryType,
+    },
 }
 
 /// A transfer's other side, or a split line's, in the account that holds it.
@@ -276,6 +292,12 @@ pub enum DomainError {
     /// A transaction or another category uses the category, so it can't be deleted.
     #[error("the category is in use: {category:?}")]
     CategoryInUse { category: CategoryId },
+    /// The move would put the category under itself or one of its own subcategories.
+    #[error("a category can't move under itself or its subcategories: {category:?}")]
+    CategoryUnderItself { category: CategoryId },
+    /// The category is a subcategory, which takes its top-level category's type.
+    #[error("a subcategory takes its top-level category's type: {category:?}")]
+    SubcategoryType { category: CategoryId },
     /// The category's name is empty or only spaces.
     #[error("a category needs a name")]
     BlankCategoryName,
