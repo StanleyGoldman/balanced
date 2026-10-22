@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
 
 //! The undo log's entries: each a [`DomainCommand`] as JSON, through the wire types in
-//! [`v1`], which `DomainCommand` itself doesn't depend on (ADR 0007).
+//! [`wire`], which `DomainCommand` itself doesn't depend on (ADR 0007).
 
-mod v1;
+mod wire;
 
 use icu_calendar::{Date, Iso};
 
@@ -52,27 +52,27 @@ pub(crate) fn decode(entry: &str, currency: CurrencyCode) -> Result<DomainComman
     clippy::too_many_lines,
     reason = "one arm per Command, each mapping its fields one by one"
 )]
-fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
+fn to_wire(command: &DomainCommand) -> Result<wire::Command, WriteError> {
     Ok(match command {
         DomainCommand::CreateAccount {
             name,
             kind,
             opened,
             opening_balance,
-        } => v1::Command::CreateAccount {
+        } => wire::Command::CreateAccount {
             name: name.clone(),
             kind: kind_to_wire(*kind),
             opened: date_text(*opened),
             opening_balance: minor_units(*opening_balance)?,
         },
-        DomainCommand::DeleteAccount { account } => v1::Command::DeleteAccount {
+        DomainCommand::DeleteAccount { account } => wire::Command::DeleteAccount {
             account: account.raw(),
         },
         DomainCommand::RestoreAccount {
             account,
             transactions,
             place,
-        } => v1::Command::RestoreAccount {
+        } => wire::Command::RestoreAccount {
             account: account_to_wire(account),
             transactions: transactions
                 .iter()
@@ -80,57 +80,57 @@ fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
                 .collect::<Result<_, _>>()?,
             place: u32::try_from(*place).expect("a sub-group holds fewer than 2^32 accounts"),
         },
-        DomainCommand::RenameAccount { account, name } => v1::Command::RenameAccount {
+        DomainCommand::RenameAccount { account, name } => wire::Command::RenameAccount {
             account: account.raw(),
             name: name.clone(),
         },
         DomainCommand::SetAccountVisibility {
             account,
             visibility,
-        } => v1::Command::SetAccountVisibility {
+        } => wire::Command::SetAccountVisibility {
             account: account.raw(),
             visibility: visibility_to_wire(*visibility),
         },
-        DomainCommand::SetAccountStatus { account, status } => v1::Command::SetAccountStatus {
+        DomainCommand::SetAccountStatus { account, status } => wire::Command::SetAccountStatus {
             account: account.raw(),
             status: status_to_wire(*status),
         },
-        DomainCommand::MoveAccount { account, direction } => v1::Command::MoveAccount {
+        DomainCommand::MoveAccount { account, direction } => wire::Command::MoveAccount {
             account: account.raw(),
             direction: match direction {
-                MoveDirection::Up => v1::MoveDirection::Up,
-                MoveDirection::Down => v1::MoveDirection::Down,
+                MoveDirection::Up => wire::MoveDirection::Up,
+                MoveDirection::Down => wire::MoveDirection::Down,
             },
         },
         DomainCommand::Compound(commands) => {
-            v1::Command::Compound(commands.iter().map(to_wire).collect::<Result<_, _>>()?)
+            wire::Command::Compound(commands.iter().map(to_wire).collect::<Result<_, _>>()?)
         }
         DomainCommand::PostTransaction {
             account,
             transaction,
-        } => v1::Command::PostTransaction {
+        } => wire::Command::PostTransaction {
             account: account.raw(),
             transaction: new_transaction_to_wire(transaction)?,
         },
-        DomainCommand::EditTransaction { transaction, edit } => v1::Command::EditTransaction {
+        DomainCommand::EditTransaction { transaction, edit } => wire::Command::EditTransaction {
             transaction: transaction.raw(),
             edit: edit_to_wire(edit)?,
         },
         DomainCommand::SetFlagged {
             transaction,
             flagged,
-        } => v1::Command::SetFlagged {
+        } => wire::Command::SetFlagged {
             transaction: transaction.raw(),
             flagged: *flagged,
         },
-        DomainCommand::DeleteTransaction { transaction } => v1::Command::DeleteTransaction {
+        DomainCommand::DeleteTransaction { transaction } => wire::Command::DeleteTransaction {
             transaction: transaction.raw(),
         },
         DomainCommand::RestoreTransaction {
             account,
             transaction,
             other_sides,
-        } => v1::Command::RestoreTransaction {
+        } => wire::Command::RestoreTransaction {
             account: account.raw(),
             transaction: transaction_to_wire(transaction)?,
             other_sides: other_sides
@@ -142,22 +142,22 @@ fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
             name,
             parent,
             category_type,
-        } => v1::Command::CreateCategory {
+        } => wire::Command::CreateCategory {
             name: name.clone(),
             parent: parent.map(CategoryId::raw),
             category_type: category_type_to_wire(*category_type),
         },
-        DomainCommand::DeleteCategory { category } => v1::Command::DeleteCategory {
+        DomainCommand::DeleteCategory { category } => wire::Command::DeleteCategory {
             category: category.raw(),
         },
-        DomainCommand::RestoreCategory { category } => v1::Command::RestoreCategory {
+        DomainCommand::RestoreCategory { category } => wire::Command::RestoreCategory {
             category: category_to_wire(category),
         },
-        DomainCommand::RenameCategory { category, name } => v1::Command::RenameCategory {
+        DomainCommand::RenameCategory { category, name } => wire::Command::RenameCategory {
             category: category.raw(),
             name: name.clone(),
         },
-        DomainCommand::MoveCategory { category, parent } => v1::Command::MoveCategory {
+        DomainCommand::MoveCategory { category, parent } => wire::Command::MoveCategory {
             category: category.raw(),
             parent: parent.map(CategoryId::raw),
         },
@@ -165,7 +165,7 @@ fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
             category,
             name,
             parent,
-        } => v1::Command::EditCategory {
+        } => wire::Command::EditCategory {
             category: category.raw(),
             name: name.clone(),
             parent: parent.map(CategoryId::raw),
@@ -173,22 +173,22 @@ fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
         DomainCommand::SetCategoryType {
             category,
             category_type,
-        } => v1::Command::SetCategoryType {
+        } => wire::Command::SetCategoryType {
             category: category.raw(),
             category_type: category_type_to_wire(*category_type),
         },
         DomainCommand::SetCategoryVisibility {
             category,
             visibility,
-        } => v1::Command::SetCategoryVisibility {
+        } => wire::Command::SetCategoryVisibility {
             category: category.raw(),
             visibility: visibility_to_wire(*visibility),
         },
-        DomainCommand::ReassignCategory { from, to } => v1::Command::ReassignCategory {
+        DomainCommand::ReassignCategory { from, to } => wire::Command::ReassignCategory {
             from: from.raw(),
             to: to.raw(),
         },
-        DomainCommand::ReassignUses { from, to, uses } => v1::Command::ReassignUses {
+        DomainCommand::ReassignUses { from, to, uses } => wire::Command::ReassignUses {
             from: from.raw(),
             to: to.raw(),
             uses: uses.iter().copied().map(category_use_to_wire).collect(),
@@ -196,18 +196,18 @@ fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
     })
 }
 
-fn category_use_to_wire(category_use: CategoryUse) -> v1::CategoryUse {
+fn category_use_to_wire(category_use: CategoryUse) -> wire::CategoryUse {
     match category_use {
-        CategoryUse::Transaction(transaction) => v1::CategoryUse::Transaction(transaction.raw()),
-        CategoryUse::SplitLine { split, line } => v1::CategoryUse::SplitLine {
+        CategoryUse::Transaction(transaction) => wire::CategoryUse::Transaction(transaction.raw()),
+        CategoryUse::SplitLine { split, line } => wire::CategoryUse::SplitLine {
             split: split.raw(),
             line: u32::try_from(line).expect("a split holds fewer than 2^32 lines"),
         },
     }
 }
 
-fn account_to_wire(account: &Account) -> v1::Account {
-    v1::Account {
+fn account_to_wire(account: &Account) -> wire::Account {
+    wire::Account {
         id: account.id().raw(),
         name: account.name().to_owned(),
         kind: kind_to_wire(account.kind()),
@@ -216,7 +216,9 @@ fn account_to_wire(account: &Account) -> v1::Account {
     }
 }
 
-fn new_transaction_to_wire(transaction: &NewTransaction) -> Result<v1::NewTransaction, WriteError> {
+fn new_transaction_to_wire(
+    transaction: &NewTransaction,
+) -> Result<wire::NewTransaction, WriteError> {
     let NewTransactionParts {
         date,
         number,
@@ -224,29 +226,29 @@ fn new_transaction_to_wire(transaction: &NewTransaction) -> Result<v1::NewTransa
         memo,
         allocation,
     } = transaction.parts();
-    Ok(v1::NewTransaction {
+    Ok(wire::NewTransaction {
         date: date_text(date),
         number: number.map(str::to_owned),
         payee: payee.to_owned(),
         memo: memo.to_owned(),
         allocation: match allocation {
-            NewAllocation::OpeningBalance(amount) => v1::Allocation::OpeningBalance {
+            NewAllocation::OpeningBalance(amount) => wire::Allocation::OpeningBalance {
                 amount: minor_units(*amount)?,
             },
-            NewAllocation::Category(category, amount) => v1::Allocation::Category {
+            NewAllocation::Category(category, amount) => wire::Allocation::Category {
                 category: category.raw(),
                 amount: minor_units(*amount)?,
             },
-            NewAllocation::Split(lines) => v1::Allocation::Split(
+            NewAllocation::Split(lines) => wire::Allocation::Split(
                 lines
                     .iter()
                     .map(|line| {
                         let target = match line.target() {
                             NewSplitTarget::Category(category) => {
-                                v1::SplitTarget::Category(category.raw())
+                                wire::SplitTarget::Category(category.raw())
                             }
                             NewSplitTarget::Transfer(account) => {
-                                v1::SplitTarget::Transfer(v1::LineTo {
+                                wire::SplitTarget::Transfer(wire::LineTo {
                                     account: account.raw(),
                                 })
                             }
@@ -255,45 +257,47 @@ fn new_transaction_to_wire(transaction: &NewTransaction) -> Result<v1::NewTransa
                     })
                     .collect::<Result<_, _>>()?,
             ),
-            NewAllocation::Transfer(account, amount) => v1::Allocation::Transfer(v1::TransferTo {
-                account: account.raw(),
-                amount: minor_units(*amount)?,
-            }),
+            NewAllocation::Transfer(account, amount) => {
+                wire::Allocation::Transfer(wire::TransferTo {
+                    account: account.raw(),
+                    amount: minor_units(*amount)?,
+                })
+            }
         },
     })
 }
 
-fn edit_to_wire(edit: &TransactionEdit) -> Result<v1::TransactionEdit, WriteError> {
+fn edit_to_wire(edit: &TransactionEdit) -> Result<wire::TransactionEdit, WriteError> {
     Ok(match edit {
-        TransactionEdit::Date(date) => v1::TransactionEdit::Date(date_text(*date)),
-        TransactionEdit::Number(number) => v1::TransactionEdit::Number(number.clone()),
-        TransactionEdit::Payee(payee) => v1::TransactionEdit::Payee(payee.clone()),
-        TransactionEdit::Memo(memo) => v1::TransactionEdit::Memo(memo.clone()),
-        TransactionEdit::Category(category) => v1::TransactionEdit::Category(category.raw()),
-        TransactionEdit::Transfer(account) => v1::TransactionEdit::Transfer(account.raw()),
-        TransactionEdit::Amount(amount) => v1::TransactionEdit::Amount(minor_units(*amount)?),
+        TransactionEdit::Date(date) => wire::TransactionEdit::Date(date_text(*date)),
+        TransactionEdit::Number(number) => wire::TransactionEdit::Number(number.clone()),
+        TransactionEdit::Payee(payee) => wire::TransactionEdit::Payee(payee.clone()),
+        TransactionEdit::Memo(memo) => wire::TransactionEdit::Memo(memo.clone()),
+        TransactionEdit::Category(category) => wire::TransactionEdit::Category(category.raw()),
+        TransactionEdit::Transfer(account) => wire::TransactionEdit::Transfer(account.raw()),
+        TransactionEdit::Amount(amount) => wire::TransactionEdit::Amount(minor_units(*amount)?),
         TransactionEdit::ClearedStatus(status) => {
-            v1::TransactionEdit::ClearedStatus(cleared_status_to_wire(*status))
+            wire::TransactionEdit::ClearedStatus(cleared_status_to_wire(*status))
         }
-        TransactionEdit::Lines { amount, lines } => v1::TransactionEdit::Lines {
+        TransactionEdit::Lines { amount, lines } => wire::TransactionEdit::Lines {
             amount: minor_units(*amount)?,
             lines: lines
                 .iter()
                 .map(|line| {
                     let target = match line.target() {
                         EditedSplitTarget::Category(category) => {
-                            v1::SplitTarget::Category(category.raw())
+                            wire::SplitTarget::Category(category.raw())
                         }
-                        EditedSplitTarget::Transfer(account) => {
-                            v1::SplitTarget::Transfer(v1::EditedLineTransfer::New(v1::LineTo {
+                        EditedSplitTarget::Transfer(account) => wire::SplitTarget::Transfer(
+                            wire::EditedLineTransfer::New(wire::LineTo {
                                 account: account.raw(),
-                            }))
-                        }
-                        EditedSplitTarget::Kept(other_side) => {
-                            v1::SplitTarget::Transfer(v1::EditedLineTransfer::Kept(v1::LineSide {
+                            }),
+                        ),
+                        EditedSplitTarget::Kept(other_side) => wire::SplitTarget::Transfer(
+                            wire::EditedLineTransfer::Kept(wire::LineSide {
                                 other_side: other_side.raw(),
-                            }))
-                        }
+                            }),
+                        ),
                     };
                     line_to_wire(target, line.memo(), line.amount())
                 })
@@ -302,39 +306,41 @@ fn edit_to_wire(edit: &TransactionEdit) -> Result<v1::TransactionEdit, WriteErro
     })
 }
 
-fn cleared_status_to_wire(status: ClearedStatus) -> v1::ClearedStatus {
+fn cleared_status_to_wire(status: ClearedStatus) -> wire::ClearedStatus {
     match status {
-        ClearedStatus::Uncleared => v1::ClearedStatus::Uncleared,
-        ClearedStatus::Cleared => v1::ClearedStatus::Cleared,
-        ClearedStatus::Reconciled => v1::ClearedStatus::Reconciled,
+        ClearedStatus::Uncleared => wire::ClearedStatus::Uncleared,
+        ClearedStatus::Cleared => wire::ClearedStatus::Cleared,
+        ClearedStatus::Reconciled => wire::ClearedStatus::Reconciled,
     }
 }
 
-fn transaction_to_wire(transaction: &Transaction) -> Result<v1::Transaction, WriteError> {
+fn transaction_to_wire(transaction: &Transaction) -> Result<wire::Transaction, WriteError> {
     let amount = || minor_units(transaction.amount());
-    Ok(v1::Transaction {
+    Ok(wire::Transaction {
         id: transaction.id().raw(),
-        fields: v1::NewTransaction {
+        fields: wire::NewTransaction {
             date: date_text(transaction.date()),
             number: transaction.number().map(str::to_owned),
             payee: transaction.payee().to_owned(),
             memo: transaction.memo().to_owned(),
             allocation: match transaction.allocation() {
-                Allocation::OpeningBalance => v1::Allocation::OpeningBalance { amount: amount()? },
-                Allocation::Category(category) => v1::Allocation::Category {
+                Allocation::OpeningBalance => {
+                    wire::Allocation::OpeningBalance { amount: amount()? }
+                }
+                Allocation::Category(category) => wire::Allocation::Category {
                     category: category.raw(),
                     amount: amount()?,
                 },
-                Allocation::Split(lines) => v1::Allocation::Split(
+                Allocation::Split(lines) => wire::Allocation::Split(
                     lines
                         .iter()
                         .map(|line| {
                             let target = match line.target() {
                                 SplitTarget::Category(category) => {
-                                    v1::SplitTarget::Category(category.raw())
+                                    wire::SplitTarget::Category(category.raw())
                                 }
                                 SplitTarget::Transfer(other_side) => {
-                                    v1::SplitTarget::Transfer(v1::LineSide {
+                                    wire::SplitTarget::Transfer(wire::LineSide {
                                         other_side: other_side.raw(),
                                     })
                                 }
@@ -343,10 +349,12 @@ fn transaction_to_wire(transaction: &Transaction) -> Result<v1::Transaction, Wri
                         })
                         .collect::<Result<_, _>>()?,
                 ),
-                Allocation::Transfer(other_side) => v1::Allocation::Transfer(v1::TransferSide {
-                    other_side: other_side.raw(),
-                    amount: amount()?,
-                }),
+                Allocation::Transfer(other_side) => {
+                    wire::Allocation::Transfer(wire::TransferSide {
+                        other_side: other_side.raw(),
+                        amount: amount()?,
+                    })
+                }
             },
         },
         flagged: transaction.is_flagged(),
@@ -354,8 +362,8 @@ fn transaction_to_wire(transaction: &Transaction) -> Result<v1::Transaction, Wri
     })
 }
 
-fn other_side_to_wire(other_side: &OtherSide) -> Result<v1::OtherSide, WriteError> {
-    Ok(v1::OtherSide {
+fn other_side_to_wire(other_side: &OtherSide) -> Result<wire::OtherSide, WriteError> {
+    Ok(wire::OtherSide {
         account: other_side.account().raw(),
         transaction: transaction_to_wire(other_side.transaction())?,
     })
@@ -363,38 +371,38 @@ fn other_side_to_wire(other_side: &OtherSide) -> Result<v1::OtherSide, WriteErro
 
 /// A split line going to `target`, on the wire.
 fn line_to_wire<L>(
-    target: v1::SplitTarget<L>,
+    target: wire::SplitTarget<L>,
     memo: &str,
     amount: Money,
-) -> Result<v1::SplitLine<L>, WriteError> {
-    Ok(v1::SplitLine {
+) -> Result<wire::SplitLine<L>, WriteError> {
+    Ok(wire::SplitLine {
         target,
         memo: memo.to_owned(),
         amount: minor_units(amount)?,
     })
 }
 
-fn kind_to_wire(kind: AccountKind) -> v1::AccountKind {
+fn kind_to_wire(kind: AccountKind) -> wire::AccountKind {
     match kind {
-        AccountKind::Checking => v1::AccountKind::Checking,
-        AccountKind::Savings => v1::AccountKind::Savings,
-        AccountKind::CreditCard => v1::AccountKind::CreditCard,
-        AccountKind::Investment => v1::AccountKind::Investment,
-        AccountKind::Retirement => v1::AccountKind::Retirement,
-        AccountKind::Asset => v1::AccountKind::Asset,
-        AccountKind::Liability => v1::AccountKind::Liability,
+        AccountKind::Checking => wire::AccountKind::Checking,
+        AccountKind::Savings => wire::AccountKind::Savings,
+        AccountKind::CreditCard => wire::AccountKind::CreditCard,
+        AccountKind::Investment => wire::AccountKind::Investment,
+        AccountKind::Retirement => wire::AccountKind::Retirement,
+        AccountKind::Asset => wire::AccountKind::Asset,
+        AccountKind::Liability => wire::AccountKind::Liability,
     }
 }
 
-fn visibility_to_wire(visibility: Visibility) -> v1::Visibility {
+fn visibility_to_wire(visibility: Visibility) -> wire::Visibility {
     match visibility {
-        Visibility::Shown => v1::Visibility::Shown,
-        Visibility::Hidden => v1::Visibility::Hidden,
+        Visibility::Shown => wire::Visibility::Shown,
+        Visibility::Hidden => wire::Visibility::Hidden,
     }
 }
 
-fn category_to_wire(category: &Category) -> v1::Category {
-    v1::Category {
+fn category_to_wire(category: &Category) -> wire::Category {
+    wire::Category {
         id: category.id().raw(),
         name: category.name().to_owned(),
         parent: category.parent().map(CategoryId::raw),
@@ -403,17 +411,17 @@ fn category_to_wire(category: &Category) -> v1::Category {
     }
 }
 
-fn category_type_to_wire(category_type: CategoryType) -> v1::CategoryType {
+fn category_type_to_wire(category_type: CategoryType) -> wire::CategoryType {
     match category_type {
-        CategoryType::Income => v1::CategoryType::Income,
-        CategoryType::Expense => v1::CategoryType::Expense,
+        CategoryType::Income => wire::CategoryType::Income,
+        CategoryType::Expense => wire::CategoryType::Expense,
     }
 }
 
-fn status_to_wire(status: AccountStatus) -> v1::AccountStatus {
+fn status_to_wire(status: AccountStatus) -> wire::AccountStatus {
     match status {
-        AccountStatus::Open => v1::AccountStatus::Open,
-        AccountStatus::Closed => v1::AccountStatus::Closed,
+        AccountStatus::Open => wire::AccountStatus::Open,
+        AccountStatus::Closed => wire::AccountStatus::Closed,
     }
 }
 
@@ -422,11 +430,11 @@ fn status_to_wire(status: AccountStatus) -> v1::AccountStatus {
     reason = "one arm per Command, each mapping its fields one by one"
 )]
 fn from_wire(
-    command: v1::Command,
+    command: wire::Command,
     currency: CurrencyCode,
 ) -> Result<DomainCommand, UndoEntryError> {
     Ok(match command {
-        v1::Command::CreateAccount {
+        wire::Command::CreateAccount {
             name,
             kind,
             opened,
@@ -437,10 +445,10 @@ fn from_wire(
             opened: date(&opened)?,
             opening_balance: money(opening_balance, currency),
         },
-        v1::Command::DeleteAccount { account } => DomainCommand::DeleteAccount {
+        wire::Command::DeleteAccount { account } => DomainCommand::DeleteAccount {
             account: AccountId::new(account),
         },
-        v1::Command::RestoreAccount {
+        wire::Command::RestoreAccount {
             account,
             transactions,
             place,
@@ -452,56 +460,56 @@ fn from_wire(
                 .collect::<Result<_, _>>()?,
             place: usize::try_from(place).expect("a usize holds any u32"),
         },
-        v1::Command::RenameAccount { account, name } => DomainCommand::RenameAccount {
+        wire::Command::RenameAccount { account, name } => DomainCommand::RenameAccount {
             account: AccountId::new(account),
             name,
         },
-        v1::Command::SetAccountVisibility {
+        wire::Command::SetAccountVisibility {
             account,
             visibility,
         } => DomainCommand::SetAccountVisibility {
             account: AccountId::new(account),
             visibility: visibility_from_wire(visibility),
         },
-        v1::Command::SetAccountStatus { account, status } => DomainCommand::SetAccountStatus {
+        wire::Command::SetAccountStatus { account, status } => DomainCommand::SetAccountStatus {
             account: AccountId::new(account),
             status: status_from_wire(status),
         },
-        v1::Command::MoveAccount { account, direction } => DomainCommand::MoveAccount {
+        wire::Command::MoveAccount { account, direction } => DomainCommand::MoveAccount {
             account: AccountId::new(account),
             direction: match direction {
-                v1::MoveDirection::Up => MoveDirection::Up,
-                v1::MoveDirection::Down => MoveDirection::Down,
+                wire::MoveDirection::Up => MoveDirection::Up,
+                wire::MoveDirection::Down => MoveDirection::Down,
             },
         },
-        v1::Command::Compound(commands) => DomainCommand::Compound(
+        wire::Command::Compound(commands) => DomainCommand::Compound(
             commands
                 .into_iter()
                 .map(|command| from_wire(command, currency))
                 .collect::<Result<_, _>>()?,
         ),
-        v1::Command::PostTransaction {
+        wire::Command::PostTransaction {
             account,
             transaction,
         } => DomainCommand::PostTransaction {
             account: AccountId::new(account),
             transaction: new_transaction_from_wire(transaction, currency)?,
         },
-        v1::Command::EditTransaction { transaction, edit } => DomainCommand::EditTransaction {
+        wire::Command::EditTransaction { transaction, edit } => DomainCommand::EditTransaction {
             transaction: TransactionId::new(transaction),
             edit: edit_from_wire(edit, currency)?,
         },
-        v1::Command::SetFlagged {
+        wire::Command::SetFlagged {
             transaction,
             flagged,
         } => DomainCommand::SetFlagged {
             transaction: TransactionId::new(transaction),
             flagged,
         },
-        v1::Command::DeleteTransaction { transaction } => DomainCommand::DeleteTransaction {
+        wire::Command::DeleteTransaction { transaction } => DomainCommand::DeleteTransaction {
             transaction: TransactionId::new(transaction),
         },
-        v1::Command::RestoreTransaction {
+        wire::Command::RestoreTransaction {
             account,
             transaction,
             other_sides,
@@ -513,7 +521,7 @@ fn from_wire(
                 .map(|other_side| other_side_from_wire(other_side, currency))
                 .collect::<Result<_, _>>()?,
         },
-        v1::Command::CreateCategory {
+        wire::Command::CreateCategory {
             name,
             parent,
             category_type,
@@ -522,21 +530,21 @@ fn from_wire(
             parent: parent.map(CategoryId::new),
             category_type: category_type_from_wire(category_type),
         },
-        v1::Command::DeleteCategory { category } => DomainCommand::DeleteCategory {
+        wire::Command::DeleteCategory { category } => DomainCommand::DeleteCategory {
             category: CategoryId::new(category),
         },
-        v1::Command::RestoreCategory { category } => DomainCommand::RestoreCategory {
+        wire::Command::RestoreCategory { category } => DomainCommand::RestoreCategory {
             category: category_from_wire(category),
         },
-        v1::Command::RenameCategory { category, name } => DomainCommand::RenameCategory {
+        wire::Command::RenameCategory { category, name } => DomainCommand::RenameCategory {
             category: CategoryId::new(category),
             name,
         },
-        v1::Command::MoveCategory { category, parent } => DomainCommand::MoveCategory {
+        wire::Command::MoveCategory { category, parent } => DomainCommand::MoveCategory {
             category: CategoryId::new(category),
             parent: parent.map(CategoryId::new),
         },
-        v1::Command::EditCategory {
+        wire::Command::EditCategory {
             category,
             name,
             parent,
@@ -545,25 +553,25 @@ fn from_wire(
             name,
             parent: parent.map(CategoryId::new),
         },
-        v1::Command::SetCategoryType {
+        wire::Command::SetCategoryType {
             category,
             category_type,
         } => DomainCommand::SetCategoryType {
             category: CategoryId::new(category),
             category_type: category_type_from_wire(category_type),
         },
-        v1::Command::SetCategoryVisibility {
+        wire::Command::SetCategoryVisibility {
             category,
             visibility,
         } => DomainCommand::SetCategoryVisibility {
             category: CategoryId::new(category),
             visibility: visibility_from_wire(visibility),
         },
-        v1::Command::ReassignCategory { from, to } => DomainCommand::ReassignCategory {
+        wire::Command::ReassignCategory { from, to } => DomainCommand::ReassignCategory {
             from: CategoryId::new(from),
             to: CategoryId::new(to),
         },
-        v1::Command::ReassignUses { from, to, uses } => DomainCommand::ReassignUses {
+        wire::Command::ReassignUses { from, to, uses } => DomainCommand::ReassignUses {
             from: CategoryId::new(from),
             to: CategoryId::new(to),
             uses: uses.into_iter().map(category_use_from_wire).collect(),
@@ -571,19 +579,19 @@ fn from_wire(
     })
 }
 
-fn category_use_from_wire(category_use: v1::CategoryUse) -> CategoryUse {
+fn category_use_from_wire(category_use: wire::CategoryUse) -> CategoryUse {
     match category_use {
-        v1::CategoryUse::Transaction(transaction) => {
+        wire::CategoryUse::Transaction(transaction) => {
             CategoryUse::Transaction(TransactionId::new(transaction))
         }
-        v1::CategoryUse::SplitLine { split, line } => CategoryUse::SplitLine {
+        wire::CategoryUse::SplitLine { split, line } => CategoryUse::SplitLine {
             split: TransactionId::new(split),
             line: usize::try_from(line).expect("a usize holds every u32 Balanced runs on"),
         },
     }
 }
 
-fn category_from_wire(category: v1::Category) -> Category {
+fn category_from_wire(category: wire::Category) -> Category {
     Category::new(
         CategoryId::new(category.id),
         category.name,
@@ -593,14 +601,14 @@ fn category_from_wire(category: v1::Category) -> Category {
     )
 }
 
-fn category_type_from_wire(category_type: v1::CategoryType) -> CategoryType {
+fn category_type_from_wire(category_type: wire::CategoryType) -> CategoryType {
     match category_type {
-        v1::CategoryType::Income => CategoryType::Income,
-        v1::CategoryType::Expense => CategoryType::Expense,
+        wire::CategoryType::Income => CategoryType::Income,
+        wire::CategoryType::Expense => CategoryType::Expense,
     }
 }
 
-fn account_from_wire(account: v1::Account, currency: CurrencyCode) -> Account {
+fn account_from_wire(account: wire::Account, currency: CurrencyCode) -> Account {
     Account::new(
         AccountId::new(account.id),
         account.name,
@@ -612,25 +620,25 @@ fn account_from_wire(account: v1::Account, currency: CurrencyCode) -> Account {
 }
 
 fn new_transaction_from_wire(
-    transaction: v1::NewTransaction,
+    transaction: wire::NewTransaction,
     currency: CurrencyCode,
 ) -> Result<NewTransaction, UndoEntryError> {
     let allocation = match transaction.allocation {
-        v1::Allocation::OpeningBalance { amount } => {
+        wire::Allocation::OpeningBalance { amount } => {
             NewAllocation::OpeningBalance(money(amount, currency))
         }
-        v1::Allocation::Category { category, amount } => {
+        wire::Allocation::Category { category, amount } => {
             NewAllocation::Category(CategoryId::new(category), money(amount, currency))
         }
-        v1::Allocation::Split(lines) => NewAllocation::Split(
+        wire::Allocation::Split(lines) => NewAllocation::Split(
             lines
                 .into_iter()
                 .map(|line| {
                     let target = match line.target {
-                        v1::SplitTarget::Category(category) => {
+                        wire::SplitTarget::Category(category) => {
                             NewSplitTarget::Category(CategoryId::new(category))
                         }
-                        v1::SplitTarget::Transfer(to) => {
+                        wire::SplitTarget::Transfer(to) => {
                             NewSplitTarget::Transfer(AccountId::new(to.account))
                         }
                     };
@@ -638,7 +646,7 @@ fn new_transaction_from_wire(
                 })
                 .collect(),
         ),
-        v1::Allocation::Transfer(to) => {
+        wire::Allocation::Transfer(to) => {
             NewAllocation::Transfer(AccountId::new(to.account), money(to.amount, currency))
         }
     };
@@ -652,37 +660,37 @@ fn new_transaction_from_wire(
 }
 
 fn edit_from_wire(
-    edit: v1::TransactionEdit,
+    edit: wire::TransactionEdit,
     currency: CurrencyCode,
 ) -> Result<TransactionEdit, UndoEntryError> {
     Ok(match edit {
-        v1::TransactionEdit::Date(text) => TransactionEdit::Date(date(&text)?),
-        v1::TransactionEdit::Number(number) => TransactionEdit::Number(number),
-        v1::TransactionEdit::Payee(payee) => TransactionEdit::Payee(payee),
-        v1::TransactionEdit::Memo(memo) => TransactionEdit::Memo(memo),
-        v1::TransactionEdit::Category(category) => {
+        wire::TransactionEdit::Date(text) => TransactionEdit::Date(date(&text)?),
+        wire::TransactionEdit::Number(number) => TransactionEdit::Number(number),
+        wire::TransactionEdit::Payee(payee) => TransactionEdit::Payee(payee),
+        wire::TransactionEdit::Memo(memo) => TransactionEdit::Memo(memo),
+        wire::TransactionEdit::Category(category) => {
             TransactionEdit::Category(CategoryId::new(category))
         }
-        v1::TransactionEdit::Transfer(account) => {
+        wire::TransactionEdit::Transfer(account) => {
             TransactionEdit::Transfer(AccountId::new(account))
         }
-        v1::TransactionEdit::Amount(amount) => TransactionEdit::Amount(money(amount, currency)),
-        v1::TransactionEdit::ClearedStatus(status) => {
+        wire::TransactionEdit::Amount(amount) => TransactionEdit::Amount(money(amount, currency)),
+        wire::TransactionEdit::ClearedStatus(status) => {
             TransactionEdit::ClearedStatus(cleared_status_from_wire(status))
         }
-        v1::TransactionEdit::Lines { amount, lines } => TransactionEdit::Lines {
+        wire::TransactionEdit::Lines { amount, lines } => TransactionEdit::Lines {
             amount: money(amount, currency),
             lines: lines
                 .into_iter()
                 .map(|line| {
                     let target = match line.target {
-                        v1::SplitTarget::Category(category) => {
+                        wire::SplitTarget::Category(category) => {
                             EditedSplitTarget::Category(CategoryId::new(category))
                         }
-                        v1::SplitTarget::Transfer(v1::EditedLineTransfer::New(to)) => {
+                        wire::SplitTarget::Transfer(wire::EditedLineTransfer::New(to)) => {
                             EditedSplitTarget::Transfer(AccountId::new(to.account))
                         }
-                        v1::SplitTarget::Transfer(v1::EditedLineTransfer::Kept(side)) => {
+                        wire::SplitTarget::Transfer(wire::EditedLineTransfer::Kept(side)) => {
                             EditedSplitTarget::Kept(TransactionId::new(side.other_side))
                         }
                     };
@@ -693,20 +701,20 @@ fn edit_from_wire(
     })
 }
 
-fn cleared_status_from_wire(status: v1::ClearedStatus) -> ClearedStatus {
+fn cleared_status_from_wire(status: wire::ClearedStatus) -> ClearedStatus {
     match status {
-        v1::ClearedStatus::Uncleared => ClearedStatus::Uncleared,
-        v1::ClearedStatus::Cleared => ClearedStatus::Cleared,
-        v1::ClearedStatus::Reconciled => ClearedStatus::Reconciled,
+        wire::ClearedStatus::Uncleared => ClearedStatus::Uncleared,
+        wire::ClearedStatus::Cleared => ClearedStatus::Cleared,
+        wire::ClearedStatus::Reconciled => ClearedStatus::Reconciled,
     }
 }
 
 /// The transaction `transaction` holds. A split's amount is the sum of its lines.
 fn transaction_from_wire(
-    transaction: v1::Transaction,
+    transaction: wire::Transaction,
     currency: CurrencyCode,
 ) -> Result<Transaction, UndoEntryError> {
-    let v1::NewTransaction {
+    let wire::NewTransaction {
         date: date_text,
         number,
         payee,
@@ -714,22 +722,22 @@ fn transaction_from_wire(
         allocation,
     } = transaction.fields;
     let (allocation, amount) = match allocation {
-        v1::Allocation::OpeningBalance { amount } => {
+        wire::Allocation::OpeningBalance { amount } => {
             (Allocation::OpeningBalance, money(amount, currency))
         }
-        v1::Allocation::Category { category, amount } => (
+        wire::Allocation::Category { category, amount } => (
             Allocation::Category(CategoryId::new(category)),
             money(amount, currency),
         ),
-        v1::Allocation::Split(lines) => {
+        wire::Allocation::Split(lines) => {
             let lines: Vec<SplitLine> = lines
                 .into_iter()
                 .map(|line| {
                     let target = match line.target {
-                        v1::SplitTarget::Category(category) => {
+                        wire::SplitTarget::Category(category) => {
                             SplitTarget::Category(CategoryId::new(category))
                         }
-                        v1::SplitTarget::Transfer(side) => {
+                        wire::SplitTarget::Transfer(side) => {
                             SplitTarget::Transfer(TransactionId::new(side.other_side))
                         }
                     };
@@ -739,7 +747,7 @@ fn transaction_from_wire(
             let amount = SplitLine::sum(&lines, currency)?;
             (Allocation::Split(lines), amount)
         }
-        v1::Allocation::Transfer(side) => (
+        wire::Allocation::Transfer(side) => (
             Allocation::Transfer(TransactionId::new(side.other_side)),
             money(side.amount, currency),
         ),
@@ -758,7 +766,7 @@ fn transaction_from_wire(
 }
 
 fn other_side_from_wire(
-    other_side: v1::OtherSide,
+    other_side: wire::OtherSide,
     currency: CurrencyCode,
 ) -> Result<OtherSide, UndoEntryError> {
     Ok(OtherSide::new(
@@ -767,29 +775,29 @@ fn other_side_from_wire(
     ))
 }
 
-fn kind_from_wire(kind: v1::AccountKind) -> AccountKind {
+fn kind_from_wire(kind: wire::AccountKind) -> AccountKind {
     match kind {
-        v1::AccountKind::Checking => AccountKind::Checking,
-        v1::AccountKind::Savings => AccountKind::Savings,
-        v1::AccountKind::CreditCard => AccountKind::CreditCard,
-        v1::AccountKind::Investment => AccountKind::Investment,
-        v1::AccountKind::Retirement => AccountKind::Retirement,
-        v1::AccountKind::Asset => AccountKind::Asset,
-        v1::AccountKind::Liability => AccountKind::Liability,
+        wire::AccountKind::Checking => AccountKind::Checking,
+        wire::AccountKind::Savings => AccountKind::Savings,
+        wire::AccountKind::CreditCard => AccountKind::CreditCard,
+        wire::AccountKind::Investment => AccountKind::Investment,
+        wire::AccountKind::Retirement => AccountKind::Retirement,
+        wire::AccountKind::Asset => AccountKind::Asset,
+        wire::AccountKind::Liability => AccountKind::Liability,
     }
 }
 
-fn visibility_from_wire(visibility: v1::Visibility) -> Visibility {
+fn visibility_from_wire(visibility: wire::Visibility) -> Visibility {
     match visibility {
-        v1::Visibility::Shown => Visibility::Shown,
-        v1::Visibility::Hidden => Visibility::Hidden,
+        wire::Visibility::Shown => Visibility::Shown,
+        wire::Visibility::Hidden => Visibility::Hidden,
     }
 }
 
-fn status_from_wire(status: v1::AccountStatus) -> AccountStatus {
+fn status_from_wire(status: wire::AccountStatus) -> AccountStatus {
     match status {
-        v1::AccountStatus::Open => AccountStatus::Open,
-        v1::AccountStatus::Closed => AccountStatus::Closed,
+        wire::AccountStatus::Open => AccountStatus::Open,
+        wire::AccountStatus::Closed => AccountStatus::Closed,
     }
 }
 
