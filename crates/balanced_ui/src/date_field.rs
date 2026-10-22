@@ -329,14 +329,26 @@ impl DateEdit {
     /// Reads the field's date for saving. A refused date shows the format message. An
     /// empty field left untouched saves nothing.
     pub(crate) fn commit(&mut self, i18n: &Localizer) -> Commit {
+        let commit = self.reading(i18n);
+        if commit == Commit::Rejected {
+            self.rejected = true;
+        }
+        commit
+    }
+
+    /// Whether a commit would find anything other than the saved date: a new date, or
+    /// text that holds no date.
+    pub(crate) fn is_changed(&self, i18n: &Localizer) -> bool {
+        self.reading(i18n) != Commit::Unchanged
+    }
+
+    /// How a commit of the field would end now.
+    fn reading(&self, i18n: &Localizer) -> Commit {
         match self.value(i18n) {
             Ok(date) if date == self.saved => Commit::Unchanged,
             Ok(Some(date)) => Commit::Changed(date),
             Ok(None) => Commit::Unchanged,
-            Err(_) => {
-                self.rejected = true;
-                Commit::Rejected
-            }
+            Err(_) => Commit::Rejected,
         }
     }
 
