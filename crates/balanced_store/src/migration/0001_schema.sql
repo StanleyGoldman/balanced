@@ -1,4 +1,5 @@
--- Version 1: the whole schema. Edited in place until the first release.
+-- Version 1: the whole schema. A schema change is a new migration, never an edit here:
+-- a file already past version 1 would never run it (ADR 0008, #507).
 --
 -- Built-in SQL only, so any SQLite tool can read the file. Every foreign key but a
 -- transfer's link to its other side is ON DELETE RESTRICT: the store deletes child rows
