@@ -18,8 +18,9 @@ use crate::undo_log;
 use crate::usage::{LazyUsage, UsageCounts};
 use crate::{
     Account, AccountGroup, AccountId, AccountKind, AccountStatus, Allocation, Applied, Category,
-    CategoryId, CategoryType, CurrencyCode, DomainCommand, DomainError, Money, MoneyError,
-    MoveDirection, OtherSide, Transaction, TransactionEdit, Usage, Visibility, WriteError,
+    CategoryId, CategoryType, CategoryUse, CurrencyCode, DomainCommand, DomainError, Money,
+    MoneyError, MoveDirection, OtherSide, Transaction, TransactionEdit, Usage, Visibility,
+    WriteError,
 };
 
 /// Where [`TransactionEdit::Category`] or [`TransactionEdit::Transfer`] moves a
@@ -492,7 +493,7 @@ impl LedgerView {
 
     /// Category `id` and every category under it, at every depth: the category first,
     /// then the ones under it, level by level.
-    fn branch(&self, id: CategoryId) -> Vec<CategoryId> {
+    pub fn branch(&self, id: CategoryId) -> Vec<CategoryId> {
         let mut branch = vec![id];
         let mut next = 0;
         while let Some(&parent) = branch.get(next) {
@@ -1018,6 +1019,10 @@ impl Ledger {
                 category,
                 visibility,
             } => self.set_category_visibility(category, visibility)?,
+            DomainCommand::ReassignCategory { from, to } => self.reassign_category(from, to)?,
+            DomainCommand::ReassignUses { from, to, uses } => {
+                self.reassign_uses(from, to, &uses)?
+            }
         };
         Ok(Applied { inverse })
     }
@@ -1958,6 +1963,86 @@ impl Ledger {
         view.categories.insert(position, category);
         view.generation = view.generation.next();
         Ok(DomainCommand::DeleteCategory { category: id })
+    }
+
+    fn reassign_category(
+        &mut self,
+        from: CategoryId,
+        to: CategoryId,
+    ) -> Result<DomainCommand, DomainError> {
+        for category in [from, to] {
+            if self.view.category(category).is_none() {
+                return Err(DomainError::UnknownCategory { category });
+            }
+        }
+        if self.view.is_within(to, from) {
+            return Err(DomainError::ReassignIntoItself { category: from });
+        }
+        let uses: Vec<CategoryUse> = self
+            .view
+            .accounts
+            .iter()
+            .flat_map(|summary| &summary.transactions)
+            .flat_map(|transaction| transaction.category_uses(from))
+            .collect();
+        self.reassign_uses(from, to, &uses)
+    }
+
+    /// Moves each of `uses`, in category `from`, to category `to`, in open and closed
+    /// accounts alike.
+    fn reassign_uses(
+        &mut self,
+        from: CategoryId,
+        to: CategoryId,
+        uses: &[CategoryUse],
+    ) -> Result<DomainCommand, DomainError> {
+        if self.view.category(to).is_none() {
+            return Err(DomainError::UnknownCategory { category: to });
+        }
+        let mut by_transaction: HashMap<TransactionId, Vec<CategoryUse>> = HashMap::new();
+        for &category_use in uses {
+            let transaction = match category_use {
+                CategoryUse::Transaction(id) | CategoryUse::SplitLine { split: id, .. } => id,
+            };
+            by_transaction
+                .entry(transaction)
+                .or_default()
+                .push(category_use);
+        }
+        let view = Arc::make_mut(&mut self.view);
+        for summary in &mut view.accounts {
+            let account = summary.account.id();
+            // A new category moves no balance, so the register keeps its entries and
+            // balances.
+            let mut rewritten = None;
+            for (entry, transaction) in summary.transactions.iter().enumerate() {
+                let Some(uses) = by_transaction.remove(&transaction.id()) else {
+                    continue;
+                };
+                let reassigned = transaction.reassigned(from, to, &uses)?;
+                self.store
+                    .update_transaction(&transaction_row(account, &reassigned)?)?;
+                rewritten
+                    .get_or_insert_with(Vec::new)
+                    .push((entry, reassigned));
+            }
+            if let Some(rewritten) = rewritten {
+                let summary = Arc::make_mut(summary);
+                for (entry, reassigned) in rewritten {
+                    // `entry` came from enumerating these transactions above.
+                    summary.transactions[entry] = Arc::new(reassigned);
+                }
+            }
+        }
+        if let Some(&transaction) = by_transaction.keys().min() {
+            return Err(DomainError::UnknownTransaction { transaction });
+        }
+        view.accounts_changed();
+        Ok(DomainCommand::ReassignUses {
+            from: to,
+            to: from,
+            uses: uses.to_vec(),
+        })
     }
 
     /// Puts `summary` in place of the account at `index`, recounting Net Worth, and

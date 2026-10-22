@@ -220,6 +220,32 @@ dialog-category-list-status = Änderungen gelten sofort nach der Bestätigung.
 # Coined from GnuCash's "Löschen" and "Buchung".
 dialog-delete-category-message = { $name } löschen? Keine Buchung verwendet diese Kategorie.
 dialog-delete-category-delete = Löschen
+# Coined from GnuCash's "Löschen", "Buchung" and "Unterkategorie".
+dialog-delete-category-unused-parent = { $name } und { $subcategories ->
+        [one] ihre Unterkategorie
+       *[other] ihre { $subcategories } Unterkategorien
+    } löschen? Keine Buchung verwendet sie.
+# Coined from GnuCash's "Buchung" and "Kategorie".
+dialog-delete-category-move-to = Diese Buchungen verschieben nach:
+dialog-delete-category-choose = Kategorie auswählen
+# Coined from GnuCash's "Buchung" and "Unterkategorie".
+dialog-delete-category-used = { $subcategories ->
+        [0] { $name } wird
+        [one] { $name } und ihre Unterkategorie werden
+       *[other] { $name } und ihre { $subcategories } Unterkategorien werden
+    } von { $count ->
+        [one] 1 Buchung
+       *[other] { $count } Buchungen
+    } mit insgesamt { $total } verwendet.
+# Coined.
+dialog-delete-category-used-count = { $subcategories ->
+        [0] { $name } wird
+        [one] { $name } und ihre Unterkategorie werden
+       *[other] { $name } und ihre { $subcategories } Unterkategorien werden
+    } von { $count ->
+        [one] 1 Buchung
+       *[other] { $count } Buchungen
+    } verwendet.
 dialog-new-account-back = Zurück
 dialog-new-account-next = Weiter
 dialog-new-account-finish = Fertigstellen
@@ -290,6 +316,10 @@ status-no-paste-target = Klicken Sie zuerst auf eine Zelle für Zahlung oder Ein
 status-category-under-itself = Eine Kategorie kann nicht unter sich selbst oder eine ihrer Unterkategorien verschoben werden.
 # Coined.
 status-subcategory-type = Eine Unterkategorie hat den Typ der Kategorie an der Spitze ihres Baums.
+# Coined.
+status-reassign-into-itself = Die Buchungen einer Kategorie können nicht in sie selbst oder eine ihrer Unterkategorien verschoben werden.
+# Coined.
+status-not-in-category = Diese Buchung ist nicht mehr in der Kategorie, in die sie verschoben wurde.
 status-paste-not-an-amount = Die Rechnung im Taschenrechner ist kein Betrag, daher gibt es nichts einzufügen.
 
 ## Date field

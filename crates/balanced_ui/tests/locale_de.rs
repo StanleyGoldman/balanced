@@ -473,6 +473,37 @@ fn the_category_lists_buttons_and_delete_confirm_read_german() {
 }
 
 #[test]
+fn the_reassign_prompt_reads_german() {
+    let mut harness = app();
+    harness
+        .get_by_role_and_label(Role::Button, "Extras")
+        .click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Category List…")
+        .click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::TreeItem, "Food & Dining")
+        .click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Löschen …")
+        .click();
+    harness.run();
+
+    harness.get_by_label(
+        "Food & Dining und ihre 3 Unterkategorien werden von 8.005 Buchungen mit insgesamt \
+         -660.303,59\u{a0}$ verwendet.",
+    );
+    let target = harness.get_by_role_and_label(Role::ComboBox, "Diese Buchungen verschieben nach:");
+    assert_eq!(
+        target.accesskit_node().value().as_deref(),
+        Some("Kategorie auswählen")
+    );
+}
+
+#[test]
 fn the_edit_category_dialog_reads_german() {
     let mut harness = app();
     harness

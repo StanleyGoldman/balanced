@@ -109,7 +109,8 @@ impl FocusReturn {
 /// A light Dialog: no title bar, a fixed width, its body above a row with its default
 /// button and Cancel, and Back before them in a Dialog with steps. A notice has its
 /// default button alone. A Dialog asking whether to keep changes has Discard at the
-/// far left, which no key presses. The default button has first focus.
+/// far left, which no key presses. The default button has first focus, unless it is
+/// disabled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LightDialog {
     id: Id,
@@ -122,6 +123,8 @@ pub(crate) struct LightDialog {
     /// Whether the body has a popup of its own open, or the press that closed one is
     /// still held, so that a click on the dimmed window closes only the popup.
     body_popup: bool,
+    /// Whether the default button takes clicks and Enter.
+    accept_enabled: bool,
 }
 
 impl LightDialog {
@@ -136,6 +139,7 @@ impl LightDialog {
             discard: None,
             backdrop: theme.backdrop(),
             body_popup: false,
+            accept_enabled: true,
         }
     }
 
@@ -150,6 +154,7 @@ impl LightDialog {
             discard: None,
             backdrop: theme.backdrop(),
             body_popup: false,
+            accept_enabled: true,
         }
     }
 
@@ -180,6 +185,15 @@ impl LightDialog {
         }
     }
 
+    /// The same Dialog, whose default button takes no click and no Enter unless
+    /// `enabled`.
+    pub(crate) fn with_accept_enabled(self, enabled: bool) -> Self {
+        Self {
+            accept_enabled: enabled,
+            ..self
+        }
+    }
+
     /// Draws the Dialog over the dimmed Main window, with `body` drawn by the caller.
     /// The Dialog is never bigger than the window minus [`Theme::DIALOG_MARGIN`] on
     /// each side; a body too tall for that scrolls.
@@ -197,6 +211,7 @@ impl LightDialog {
             discard,
             backdrop,
             body_popup,
+            accept_enabled,
         } = self;
         let room =
             (ctx.content_rect().size() - Vec2::splat(2.0 * Theme::DIALOG_MARGIN)).max(Vec2::ZERO);
@@ -211,8 +226,9 @@ impl LightDialog {
                 let width = Theme::LIGHT_DIALOG_WIDTH.min(inner.x);
                 ui.set_width(width);
                 body_area(ui, inner.y, |ui| body(ui, &mut dialog.form));
-                let buttons = buttons(ui, accept, cancel, back, discard);
-                if first_frame {
+                let buttons = buttons(ui, accept, accept_enabled, cancel, back, discard);
+                // A disabled button can't hold focus, so the body gives it to a field.
+                if first_frame && accept_enabled {
                     buttons.accept.request_focus();
                 }
                 buttons
@@ -224,7 +240,8 @@ impl LightDialog {
             discard,
         } = &modal.inner;
         let others = [cancel.as_ref(), back.as_ref(), discard.as_ref()];
-        if accept.clicked() || (modal.is_top_modal && enter_pressed(ctx, others)) {
+        if accept.clicked() || (accept_enabled && modal.is_top_modal && enter_pressed(ctx, others))
+        {
             DialogOutcome::Accepted
         } else if back.as_ref().is_some_and(Response::clicked) {
             DialogOutcome::Back
@@ -578,7 +595,7 @@ fn heavy_contents(
             // An auto-sized window offers all the room it may grow to, which the
             // buttons' row would centre itself in.
             let row = Vec2::new(ui.available_width(), button_height(ui));
-            ui.allocate_ui(row, |ui| buttons(ui, accept, cancel, None, None))
+            ui.allocate_ui(row, |ui| buttons(ui, accept, true, cancel, None, None))
                 .inner
         }
         BodyLayout::Fills => {
@@ -587,12 +604,12 @@ fn heavy_contents(
                 (ui.available_height() - button_height(ui) - ui.spacing().item_spacing.y).max(0.0),
             );
             ui.allocate_ui(room, body);
-            buttons(ui, accept, cancel, None, None)
+            buttons(ui, accept, true, cancel, None, None)
         }
         BodyLayout::Scrolls => {
             let height = ui.available_height();
             body_area(ui, height, body);
-            buttons(ui, accept, cancel, None, None)
+            buttons(ui, accept, true, cancel, None, None)
         }
     }
 }
@@ -630,12 +647,13 @@ struct Buttons {
     discard: Option<Response>,
 }
 
-/// A Dialog's default button reading `accept`, any Cancel button reading `cancel` and
-/// any Back button reading `back`, at the right edge of `ui`, and any Discard button
-/// reading `discard` at its left edge.
+/// A Dialog's default button reading `accept`, taking clicks while `accept_enabled`,
+/// any Cancel button reading `cancel` and any Back button reading `back`, at the right
+/// edge of `ui`, and any Discard button reading `discard` at its left edge.
 fn buttons(
     ui: &mut egui::Ui,
     accept: String,
+    accept_enabled: bool,
     cancel: Option<String>,
     back: Option<String>,
     discard: Option<String>,
@@ -644,7 +662,7 @@ fn buttons(
     // Back left of the default button.
     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
         let cancel = cancel.map(|cancel| ui.add(Button::new(cancel)));
-        let accept = ui.add(Button::new(accept));
+        let accept = ui.add_enabled(accept_enabled, Button::new(accept));
         let back = back.map(|back| ui.add(Button::new(back)));
         // Left to right in the room the others leave, so it sits at the left edge.
         let discard = discard.map(|discard| {

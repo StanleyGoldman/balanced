@@ -12,7 +12,7 @@ use eframe::App as _;
 use eframe::egui::accesskit::Action;
 use eframe::egui::accesskit::Role;
 use eframe::egui::style::ScrollStyle;
-use eframe::egui::{Event, Key, Modifiers, Vec2, vec2};
+use eframe::egui::{Event, Key, Modifiers, PointerButton, Vec2, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use icu_calendar::Date;
@@ -575,16 +575,6 @@ const ONLY_NEW: [(&str, bool); 5] = [
     ("Delete…", false),
 ];
 
-/// The button column with a category selected that is used or has categories under
-/// it: New…, Edit… and Hide enabled.
-const NEW_EDIT_AND_HIDE: [(&str, bool); 5] = [
-    ("New…", true),
-    ("Edit…", true),
-    ("Merge…", false),
-    ("Hide", true),
-    ("Delete…", false),
-];
-
 /// Which of the button column's buttons are enabled, in order.
 fn enabled_buttons(harness: &Harness<'static, App>) -> Vec<(&'static str, bool)> {
     ["New…", "Edit…", "Merge…", "Hide", "Delete…"]
@@ -608,29 +598,30 @@ fn selecting_an_unused_category_with_none_under_it_enables_delete() {
 
     click_row(&mut harness, "Pets");
 
-    assert_eq!(
-        enabled_buttons(&harness),
-        [
-            ("New…", true),
-            ("Edit…", true),
-            ("Merge…", false),
-            ("Hide", true),
-            ("Delete…", true),
-        ]
-    );
+    assert_eq!(enabled_buttons(&harness), NEW_EDIT_HIDE_AND_DELETE);
 }
 
+/// The button column with a category selected: New…, Edit…, Hide and Delete…
+/// enabled.
+const NEW_EDIT_HIDE_AND_DELETE: [(&str, bool); 5] = [
+    ("New…", true),
+    ("Edit…", true),
+    ("Merge…", false),
+    ("Hide", true),
+    ("Delete…", true),
+];
+
 #[test]
-fn delete_is_not_offered_for_a_used_category() {
+fn selecting_a_used_category_enables_delete() {
     let mut harness = category_list();
 
     click_row(&mut harness, "Groceries");
 
-    assert_eq!(enabled_buttons(&harness), NEW_EDIT_AND_HIDE);
+    assert_eq!(enabled_buttons(&harness), NEW_EDIT_HIDE_AND_DELETE);
 }
 
 #[test]
-fn delete_is_not_offered_for_a_parent() {
+fn selecting_a_parent_enables_delete() {
     let mut ledger = Ledger::stub();
     let pets = create_category(&mut ledger, "Pets", None);
     create_category(&mut ledger, "Vet", Some(pets));
@@ -639,7 +630,7 @@ fn delete_is_not_offered_for_a_parent() {
 
     click_row(&mut harness, "Pets");
 
-    assert_eq!(enabled_buttons(&harness), NEW_EDIT_AND_HIDE);
+    assert_eq!(enabled_buttons(&harness), NEW_EDIT_HIDE_AND_DELETE);
 }
 
 #[test]
@@ -770,6 +761,263 @@ fn escape_closes_new_category_and_leaves_the_list_open() {
 
     assert!(!new_category_open(&harness));
     assert!(is_open(&harness));
+}
+
+/// Opens the Delete confirm for the row named `name`.
+fn delete_row(harness: &mut Harness<'static, App>, name: &str) {
+    click_row(harness, name);
+    click(harness, "Delete…");
+}
+
+#[test]
+fn deleting_a_used_category_says_how_many_transactions_it_moves() {
+    let mut harness = category_list();
+
+    delete_row(&mut harness, "Groceries");
+
+    assert!(shows(
+        &harness,
+        "Food & Dining:Groceries is used by 4,002 transactions totalling -$500,228.79."
+    ));
+}
+
+/// Whether the button labelled `label` takes clicks.
+fn enabled(harness: &Harness<'static, App>, label: &str) -> bool {
+    !harness
+        .get_by_role_and_label(Role::Button, label)
+        .accesskit_node()
+        .is_disabled()
+}
+
+/// The Reassign target list's label.
+const MOVE_TO: &str = "Move those transactions to:";
+
+/// What the Reassign target list shows as picked.
+fn target(harness: &Harness<'static, App>) -> Option<String> {
+    harness
+        .get_by_role_and_label(Role::ComboBox, MOVE_TO)
+        .accesskit_node()
+        .value()
+}
+
+/// Opens the Reassign target list.
+fn open_targets(harness: &mut Harness<'static, App>) {
+    harness
+        .get_by_role_and_label(Role::ComboBox, MOVE_TO)
+        .click();
+    harness.run();
+}
+
+/// Picks `path` from the Reassign target list.
+fn choose_target(harness: &mut Harness<'static, App>, path: &str) {
+    open_targets(harness);
+    harness
+        .get_by_role_and_label(Role::Button, path)
+        .scroll_to_me();
+    harness.run();
+    click(harness, path);
+}
+
+/// Whether the open Reassign target list offers `path`.
+fn offers(harness: &Harness<'static, App>, path: &str) -> bool {
+    harness
+        .query_by_role_and_label(Role::Button, path)
+        .is_some()
+}
+
+#[test]
+fn delete_waits_for_a_category_to_move_the_transactions_to() {
+    let mut harness = category_list();
+    delete_row(&mut harness, "Groceries");
+    assert_eq!(target(&harness).as_deref(), Some("Choose a category"));
+    assert!(!enabled(&harness, "Delete"));
+
+    choose_target(&mut harness, "Shopping:Household");
+
+    assert_eq!(target(&harness).as_deref(), Some("Shopping:Household"));
+    assert!(enabled(&harness, "Delete"));
+}
+
+#[test]
+fn the_targets_leave_out_the_category_and_those_under_it() {
+    let mut harness = category_list();
+    delete_row(&mut harness, "Food & Dining");
+
+    open_targets(&mut harness);
+
+    assert!(!offers(&harness, "Food & Dining"));
+    assert!(!offers(&harness, "Food & Dining:Groceries"));
+    assert!(!offers(&harness, "Food & Dining:Restaurants:Coffee Shops"));
+    assert!(offers(&harness, "Shopping"));
+}
+
+#[test]
+fn a_click_on_the_dimmed_window_closes_only_the_target_list() {
+    let mut harness = category_list();
+    delete_row(&mut harness, "Groceries");
+    open_targets(&mut harness);
+    // The window's top left corner, which the dimmed window covers.
+    let behind = pos2(4.0, 4.0);
+
+    harness.event(Event::PointerMoved(behind));
+    for pressed in [true, false] {
+        harness.event(Event::PointerButton {
+            pos: behind,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    harness.run();
+
+    assert!(!offers(&harness, "Shopping"));
+    assert!(
+        harness
+            .query_by_role_and_label(Role::ComboBox, MOVE_TO)
+            .is_some()
+    );
+}
+
+#[test]
+fn enter_deletes_nothing_until_a_target_is_picked() {
+    let mut harness = category_list();
+    delete_row(&mut harness, "Groceries");
+
+    press(&mut harness, Key::Enter);
+
+    assert!(
+        harness
+            .query_by_role_and_label(Role::ComboBox, MOVE_TO)
+            .is_some()
+    );
+    assert!(categories(&harness).contains(&"Groceries".to_owned()));
+}
+
+/// Deletes the row named `name`, moving its transactions to `path`, then closes the
+/// Category List.
+fn delete_moving_to(harness: &mut Harness<'static, App>, name: &str, path: &str) {
+    delete_row(harness, name);
+    choose_target(harness, path);
+    click(harness, "Delete");
+    click(harness, "Close");
+}
+
+#[test]
+fn deleting_a_used_category_moves_its_transactions_to_the_target() {
+    let mut harness = category_list();
+
+    delete_moving_to(&mut harness, "Groceries", "Shopping:Household");
+    open_category_list(&mut harness);
+
+    assert!(!categories(&harness).contains(&"Groceries".to_owned()));
+    // Its 2,001 transactions totalling -$400,063.90, and Groceries' 4,002 totalling
+    // -$500,228.79.
+    assert_eq!(
+        usage(&harness, "Household"),
+        "Expense: 6,003 transactions, totalling -$900,292.69"
+    );
+}
+
+#[test]
+fn one_undo_puts_back_a_reassigned_category_and_its_transactions() {
+    let mut harness = category_list();
+    delete_moving_to(&mut harness, "Groceries", "Shopping:Household");
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    open_category_list(&mut harness);
+
+    assert_eq!(
+        usage(&harness, "Groceries"),
+        "Expense: 4,002 transactions, totalling -$500,228.79"
+    );
+    assert_eq!(
+        usage(&harness, "Household"),
+        "Expense: 2,001 transactions, totalling -$400,063.90"
+    );
+}
+
+#[test]
+fn deleting_a_parent_says_how_many_subcategories_go_with_it() {
+    let mut harness = category_list();
+
+    delete_row(&mut harness, "Food & Dining");
+
+    assert!(shows(
+        &harness,
+        "Food & Dining and its 3 subcategories are used by 8,005 transactions totalling \
+         -$660,303.59."
+    ));
+}
+
+#[test]
+fn deleting_a_parent_deletes_every_category_under_it_in_one_undo_step() {
+    let food = ["Food & Dining", "Groceries", "Restaurants", "Coffee Shops"];
+    let mut harness = category_list();
+    delete_moving_to(&mut harness, "Food & Dining", "Shopping:Household");
+    open_category_list(&mut harness);
+    for name in food {
+        assert!(
+            !categories(&harness).contains(&name.to_owned()),
+            "{name} is gone"
+        );
+    }
+    assert_eq!(
+        usage(&harness, "Household"),
+        "Expense: 10,006 transactions, totalling -$1,060,367.49"
+    );
+    click(&mut harness, "Close");
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    open_category_list(&mut harness);
+
+    for name in food {
+        assert!(
+            categories(&harness).contains(&name.to_owned()),
+            "{name} is back"
+        );
+    }
+    assert_eq!(
+        usage(&harness, "Food & Dining"),
+        "Expense: 8,005 transactions, totalling -$660,303.59"
+    );
+    assert_eq!(
+        usage(&harness, "Household"),
+        "Expense: 2,001 transactions, totalling -$400,063.90"
+    );
+}
+
+#[test]
+fn deleting_an_unused_parent_says_its_subcategory_goes_with_it() {
+    let mut ledger = Ledger::stub();
+    let pets = create_category(&mut ledger, "Pets", None);
+    create_category(&mut ledger, "Vet", Some(pets));
+    let mut harness = app_on(ledger);
+    open_category_list(&mut harness);
+
+    delete_row(&mut harness, "Pets");
+    assert!(shows(
+        &harness,
+        "Delete Pets and its subcategory? No transaction uses them."
+    ));
+    click(&mut harness, "Delete");
+
+    assert!(!categories(&harness).contains(&"Pets".to_owned()));
+    assert!(!categories(&harness).contains(&"Vet".to_owned()));
+}
+
+#[test]
+fn the_target_list_has_first_focus_while_delete_waits_for_it() {
+    let mut harness = category_list();
+
+    delete_row(&mut harness, "Groceries");
+
+    assert!(
+        harness
+            .get_by_role_and_label(Role::ComboBox, MOVE_TO)
+            .is_focused()
+    );
 }
 
 /// Types `text` into the Category List's Search box.
