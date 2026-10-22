@@ -198,8 +198,7 @@ register-today-divider = Today · { $date }
 # Beside a closed account's name, above its Register.
 register-closed-read-only = Closed — read-only
 
-# The filter bar above the Register. Its controls show no label, so screen readers
-# read these names.
+# The filter bar above the Register. Each control shows its name as a label before it.
 register-filter-search = Search
     .placeholder = Search payee, category, memo
 register-filter-dates = Dates

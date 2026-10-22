@@ -484,3 +484,22 @@ fn a_search_of_only_spaces_sets_no_filter() {
             .is_disabled()
     );
 }
+
+#[test]
+fn the_search_box_and_the_filter_combos_have_visible_labels() {
+    let harness = app_showing("Everyday Checking");
+
+    for (role, name) in [
+        (Role::TextInput, "Search"),
+        (Role::ComboBox, "Dates"),
+        (Role::ComboBox, "Transaction type"),
+    ] {
+        let control = harness.get_by_role_and_label(role, name);
+        let labels: Vec<_> = control
+            .accesskit_node()
+            .labelled_by()
+            .map(|label| (label.role(), label.value()))
+            .collect();
+        assert_eq!(labels, [(Role::Label, Some(name.to_owned()))], "{name}");
+    }
+}
