@@ -331,6 +331,21 @@ fn undo_moves_a_top_level_category_back_to_the_top_with_its_type() {
     assert_eq!(household.type_of(household.coffee), CategoryType::Expense);
 }
 
+#[test]
+fn a_top_level_category_moved_under_a_parent_of_its_own_type_is_undone_by_a_move_alone() {
+    // The category keeps its type, so an Undo that also set it back would leave the
+    // same categories; only the Command that undoes the move shows the extra step.
+    let mut household = Household::new();
+    household.apply(move_to(household.groceries, None)).unwrap();
+
+    let applied = household
+        .ledger
+        .apply(move_to(household.groceries, Some(household.food)))
+        .unwrap();
+
+    assert_eq!(applied.inverse(), &move_to(household.groceries, None));
+}
+
 fn set_type(category: CategoryId, category_type: CategoryType) -> DomainCommand {
     DomainCommand::SetCategoryType {
         category,
