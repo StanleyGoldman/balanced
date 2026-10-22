@@ -313,6 +313,23 @@ fn deposits_shows_only_money_in() {
 }
 
 #[test]
+fn a_zero_amount_is_neither_a_payment_nor_a_deposit() {
+    let mut harness = app_showing("Everyday Checking");
+    click(&mut harness, Role::Button, "+ Transaction");
+    add_transaction(&mut harness, "10/15/2026", "Corner Cafe", "0");
+
+    choose(&mut harness, "Transaction type", "Deposits");
+    assert_eq!(
+        column(&harness, "Payee"),
+        ["Opening Balance", "Acme Corp", "Acme Corp", ""]
+    );
+    choose(&mut harness, "Transaction type", "Payments");
+    assert!(!column(&harness, "Payee").contains(&"Corner Cafe".to_owned()));
+    choose(&mut harness, "Transaction type", "All transactions");
+    assert!(column(&harness, "Payee").contains(&"Corner Cafe".to_owned()));
+}
+
+#[test]
 fn flagged_shows_only_flagged_transactions() {
     let mut harness = app_showing("Everyday Checking");
 
