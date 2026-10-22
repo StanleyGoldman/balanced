@@ -206,25 +206,22 @@ impl App {
     /// closes it, or of the welcome screen. The closed file's Recent files entry keeps
     /// the view it closed on, and the new file goes to the top of the Recent files and
     /// opens on the view it last closed on, or else from scratch on the tab shown. A
-    /// path that isn't valid UTF-8 can't be kept in the recent files file, so that file
-    /// opens unlisted, and the Status bar says so.
+    /// file the Recent files can't list opens unlisted, and the Status bar says so.
     fn switch_data_file(&mut self, ledger: Ledger, path: PathBuf) {
         self.note_closed();
         let listed = listed(path);
-        let listable = listed.to_str().is_some();
-        if listable {
-            self.recent_files.note_opened(listed.clone());
-        }
+        let listing = self.recent_files.note_opened(listed.clone());
         self.session = Session::Open {
             ledger,
             path: Some(listed),
         };
         self.main_window.data_file_switched();
-        if !listable {
+        self.save_recent_files();
+        // Why the file isn't listed tells more than a failed save, so it shows last.
+        if listing.is_err() {
             self.main_window
                 .show_status(StatusMessage::NotListedInRecentFiles);
         }
-        self.save_recent_files();
         self.reopen_last_view();
     }
 

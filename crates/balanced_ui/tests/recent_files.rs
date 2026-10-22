@@ -437,18 +437,27 @@ fn recent_files_in_menu(harness: &mut Harness<'static, App>) -> Vec<String> {
         .collect()
 }
 
+/// A data file in `dir` holding the account Payroll, whose name isn't valid UTF-8.
 #[cfg(unix)]
-#[test]
-fn a_file_whose_name_isnt_utf8_opens_but_isnt_listed() {
+fn data_file_named_in_bytes(dir: &Path) -> PathBuf {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt as _;
 
+    let made = testing::data_file(dir, "Business.balanced", &["Payroll"]);
+    let path = dir.join(OsStr::from_bytes(b"Business \xff.balanced"));
+    std::fs::rename(&made, &path).expect("the temp dir takes any name");
+    path
+}
+
+/// What the Status bar says when a data file can't be listed in Recent files.
+const NOT_LISTED: &str =
+    "This data file can't be listed in Recent files, because of the characters in its name.";
+
+#[cfg(unix)]
+#[test]
+fn a_file_whose_name_isnt_utf8_opens_and_says_it_cant_be_listed() {
     let (_dir, dir) = temp_dir();
-    let household = testing::data_file(&dir, "Household.balanced", &["Everyday"]);
-    let made = testing::data_file(&dir, "Business.balanced", &["Payroll"]);
-    let business = dir.join(OsStr::from_bytes(b"Business \xff.balanced"));
-    std::fs::rename(&made, &business).expect("the temp dir takes any name");
-    recent_files(&dir, &[&household]);
+    let business = data_file_named_in_bytes(&dir);
     let mut harness = app(&dir);
 
     testing::open_data_file(&harness, &business);
@@ -459,29 +468,56 @@ fn a_file_whose_name_isnt_utf8_opens_but_isnt_listed() {
             .query_by_role_and_label(Role::Button, "Payroll")
             .is_some()
     );
-    assert_eq!(
-        status(&harness),
-        ["This data file can't be listed in Recent files, because of the characters in its name."]
-    );
+    assert_eq!(status(&harness), [NOT_LISTED]);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_whose_name_isnt_utf8_isnt_listed() {
+    let (_dir, dir) = temp_dir();
+    let household = testing::data_file(&dir, "Household.balanced", &["Everyday"]);
+    let business = data_file_named_in_bytes(&dir);
+    recent_files(&dir, &[&household]);
+    let mut harness = app(&dir);
+
+    testing::open_data_file(&harness, &business);
+    harness.run();
+
     assert_eq!(listed_in(&dir), listing(&[&household]));
     assert_eq!(recent_files_in_menu(&mut harness), ["1 Household.balanced"]);
+}
+
+/// Makes a file where the config directory `config` would be, so the recent files
+/// file can't be written.
+fn block_config_dir(config: &Path) {
+    std::fs::write(config, "").expect("the temp dir is writable");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_that_cant_be_listed_says_so_even_when_saving_fails() {
+    let (_dir, dir) = temp_dir();
+    let business = data_file_named_in_bytes(&dir);
+    let config = dir.join("config");
+    block_config_dir(&config);
+    let mut harness = app(&config);
+
+    testing::open_data_file(&harness, &business);
+    harness.run();
+
+    assert_eq!(status(&harness), [NOT_LISTED]);
 }
 
 #[test]
 fn a_failed_save_of_the_recent_files_shows_in_the_status_bar() {
     let (_dir, dir) = temp_dir();
     let household = testing::data_file(&dir, "Household.balanced", &["Everyday"]);
-    // A file where the config directory would be, so the recent files file can't be
-    // written.
     let config = dir.join("config");
-    std::fs::write(&config, "").expect("the temp dir is writable");
+    block_config_dir(&config);
     let mut harness = app(&config);
 
     testing::open_data_file(&harness, &household);
     harness.run();
 
-    assert_eq!(
-        status(&harness),
-        ["Your Recent files couldn't be saved, so this change to them lasts only until you quit."]
-    );
+    assert_eq!(status(&harness), ["Your Recent files couldn't be saved."]);
 }

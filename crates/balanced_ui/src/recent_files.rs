@@ -27,12 +27,17 @@ impl RecentFiles {
     const MAX: usize = 4;
 
     /// Puts `path` at the top, as the file just opened, and drops the oldest file past
-    /// [`RecentFiles::MAX`]. A file already listed keeps its saved view.
-    pub(crate) fn note_opened(&mut self, path: PathBuf) {
+    /// [`RecentFiles::MAX`]. A file already listed keeps its saved view. A path that
+    /// isn't valid UTF-8 is refused, since the recent files file can't keep it.
+    pub(crate) fn note_opened(&mut self, path: PathBuf) -> Result<(), NotListable> {
+        if path.to_str().is_none() {
+            return Err(NotListable);
+        }
         let last_view = self.last_view(&path);
         self.0.retain(|listed| listed.path != path);
         self.0.insert(0, RecentFile { path, last_view });
         self.0.truncate(Self::MAX);
+        Ok(())
     }
 
     /// Saves `route` as the view the listed file at `path` closed on. A file not
@@ -257,10 +262,16 @@ pub(crate) enum LoadError {
     UnknownVersion(i64),
 }
 
+/// Why a data file can't be listed in Recent files.
+#[derive(Debug, thiserror::Error)]
+#[error("a path that isn't valid UTF-8 can't be kept in the recent files file")]
+pub(crate) struct NotListable;
+
 /// Why the recent files file couldn't be written.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum SaveError {
-    /// A path that isn't valid UTF-8 can't be written as TOML.
+    /// The Recent files can't be written as TOML. [`RecentFiles::note_opened`] refuses
+    /// the one cause known, a path that isn't valid UTF-8.
     #[error("the recent files can't be written as TOML")]
     Serialize(#[from] toml::ser::Error),
     #[error("writing the recent files file failed")]
@@ -288,7 +299,9 @@ mod tests {
     fn recent(paths: &[&str]) -> RecentFiles {
         let mut recent = RecentFiles::default();
         for path in paths.iter().rev() {
-            recent.note_opened(PathBuf::from(path));
+            recent
+                .note_opened(PathBuf::from(path))
+                .expect("a test path is valid UTF-8");
         }
         recent
     }
@@ -297,7 +310,7 @@ mod tests {
     fn an_opened_file_goes_to_the_top() {
         let mut recent = recent(&["/a.balanced", "/b.balanced"]);
 
-        recent.note_opened(PathBuf::from("/c.balanced"));
+        recent.note_opened(PathBuf::from("/c.balanced")).unwrap();
 
         assert_eq!(
             paths(&recent),
@@ -314,7 +327,7 @@ mod tests {
     fn a_listed_file_opened_again_moves_to_the_top_once() {
         let mut recent = recent(&["/a.balanced", "/b.balanced", "/c.balanced"]);
 
-        recent.note_opened(PathBuf::from("/b.balanced"));
+        recent.note_opened(PathBuf::from("/b.balanced")).unwrap();
 
         assert_eq!(
             paths(&recent),
@@ -330,7 +343,7 @@ mod tests {
     fn a_fifth_file_drops_the_oldest() {
         let mut recent = recent(&["/a.balanced", "/b.balanced", "/c.balanced", "/d.balanced"]);
 
-        recent.note_opened(PathBuf::from("/e.balanced"));
+        recent.note_opened(PathBuf::from("/e.balanced")).unwrap();
 
         assert_eq!(
             paths(&recent),
@@ -349,7 +362,7 @@ mod tests {
         let account = Route::Account(AccountId::from(3));
         recent.note_closed(Path::new("/b.balanced"), account);
 
-        recent.note_opened(PathBuf::from("/b.balanced"));
+        recent.note_opened(PathBuf::from("/b.balanced")).unwrap();
 
         assert_eq!(recent.last_view(Path::new("/b.balanced")), Some(account));
         assert_eq!(recent.last_view(Path::new("/a.balanced")), None);
