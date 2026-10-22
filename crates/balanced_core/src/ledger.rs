@@ -485,10 +485,15 @@ impl LedgerView {
 
     /// Whether category `id` is `ancestor` or sits under it, at any depth.
     fn is_within(&self, id: CategoryId, ancestor: CategoryId) -> bool {
-        std::iter::successors(Some(id), |&child| {
+        id == ancestor || self.above(id).any(|above| above == ancestor)
+    }
+
+    /// Each category above category `id`: its parent first, up to its top-level
+    /// category.
+    fn above(&self, id: CategoryId) -> impl Iterator<Item = CategoryId> + '_ {
+        std::iter::successors(self.category(id).and_then(Category::parent), |&child| {
             self.category(child).and_then(Category::parent)
         })
-        .any(|above| above == ancestor)
     }
 
     /// Category `id` and every category under it, at every depth: the category first,
@@ -1713,23 +1718,19 @@ impl Ledger {
         if name.is_empty() {
             return Err(DomainError::BlankCategoryName);
         }
-        let parent_type = parent
-            .map(|parent| {
-                self.view
+        let (category_type, visibility) = match parent {
+            Some(parent) => {
+                let above = self
+                    .view
                     .category(parent)
-                    .map(Category::category_type)
-                    .ok_or(DomainError::UnknownCategory { category: parent })
-            })
-            .transpose()?;
+                    .ok_or(DomainError::UnknownCategory { category: parent })?;
+                (above.category_type(), above.visibility())
+            }
+            None => (category_type, Visibility::Shown),
+        };
         self.check_unique_name(name, parent, None)?;
         let id = self.next_category;
-        let category = Category::new(
-            id,
-            name.to_owned(),
-            parent,
-            parent_type.unwrap_or(category_type),
-            Visibility::Shown,
-        );
+        let category = Category::new(id, name.to_owned(), parent, category_type, visibility);
         self.store.insert_category(&category_row(&category))?;
         self.next_category = id.next();
         let view = Arc::make_mut(&mut self.view);
@@ -1811,46 +1812,45 @@ impl Ledger {
         parent: Option<CategoryId>,
     ) -> Result<DomainCommand, DomainError> {
         let index = self.category_index(id)?;
-        let parent_type = match parent {
-            Some(parent) => {
-                let parent_type = self
-                    .view
+        let new_parent = parent
+            .map(|parent| {
+                self.view
                     .category(parent)
-                    .ok_or(DomainError::UnknownCategory { category: parent })?
-                    .category_type();
-                if self.view.is_within(parent, id) {
-                    return Err(DomainError::CategoryUnderItself { category: id });
-                }
-                Some(parent_type)
-            }
-            None => None,
-        };
+                    .ok_or(DomainError::UnknownCategory { category: parent })
+            })
+            .transpose()?;
+        let parent_type = new_parent.map(Category::category_type);
+        let parent_hidden =
+            new_parent.is_some_and(|parent| parent.visibility() == Visibility::Hidden);
+        if parent.is_some_and(|parent| self.view.is_within(parent, id)) {
+            return Err(DomainError::CategoryUnderItself { category: id });
+        }
         let moved = &self.view.categories[index];
-        let (old_parent, old_type) = (moved.parent(), moved.category_type());
+        let (old_parent, old_type, old_visibility) =
+            (moved.parent(), moved.category_type(), moved.visibility());
         self.check_unique_name(moved.name(), parent, Some(id))?;
         self.change_category(index, |category| category.set_parent(parent))?;
-        let move_back = DomainCommand::MoveCategory {
+        // Undo moves the branch back first, so showing it again never shows its new
+        // parent too.
+        let mut inverse = vec![DomainCommand::MoveCategory {
             category: id,
             parent: old_parent,
-        };
-        match parent_type {
-            Some(parent_type) if parent_type != old_type => {
-                self.set_branch_type(id, parent_type)?;
-                // Moved back under a parent, the branch takes that parent's type again;
-                // moved back to the top, it keeps the new type until it is given its old one.
-                Ok(match old_parent {
-                    Some(_) => move_back,
-                    None => DomainCommand::Compound(vec![
-                        move_back,
-                        DomainCommand::SetCategoryType {
-                            category: id,
-                            category_type: old_type,
-                        },
-                    ]),
-                })
+        }];
+        if let Some(parent_type) = parent_type.filter(|&parent_type| parent_type != old_type) {
+            self.set_branch_type(id, parent_type)?;
+            // Moved back under a parent, the branch takes that parent's type again;
+            // moved back to the top, it keeps the new type until it is given its old one.
+            if old_parent.is_none() {
+                inverse.push(DomainCommand::SetCategoryType {
+                    category: id,
+                    category_type: old_type,
+                });
             }
-            Some(_) | None => Ok(move_back),
         }
+        if parent_hidden && old_visibility == Visibility::Shown {
+            inverse.push(self.set_category_visibility(id, Visibility::Hidden)?);
+        }
+        Ok(one_or_compound(inverse))
     }
 
     fn set_category_type(
@@ -1885,8 +1885,10 @@ impl Ledger {
         Ok(())
     }
 
-    /// Shows or hides category `id` and every category under it. The inverse sets the
-    /// branch to `id`'s old visibility, then each category whose old visibility differed
+    /// Shows or hides category `id` and every category under it. Showing it also shows
+    /// each hidden category above it, but not the others under those. The inverse
+    /// covers the branch of the highest category this changes: it sets that branch to
+    /// the category's old visibility, then each category whose old visibility differed
     /// from its parent's back to its own, from the top of the branch down, so a setting
     /// under another comes after it. It depends only on the old visibilities, so undoing
     /// and redoing it again and again never makes it longer.
@@ -1895,16 +1897,48 @@ impl Ledger {
         id: CategoryId,
         visibility: Visibility,
     ) -> Result<DomainCommand, DomainError> {
-        let mut old: HashMap<CategoryId, Visibility> = HashMap::new();
-        let mut inverse = Vec::new();
+        let hidden_above: Vec<CategoryId> = match visibility {
+            Visibility::Shown => self
+                .view
+                .above(id)
+                .filter(|&above| {
+                    self.view
+                        .category(above)
+                        .is_some_and(|category| category.visibility() == Visibility::Hidden)
+                })
+                .collect(),
+            Visibility::Hidden => Vec::new(),
+        };
+        // An unknown `id` has nothing above it, so building the inverse refuses it
+        // before any change.
+        let top = hidden_above.last().copied().unwrap_or(id);
+        let inverse = self.visibility_inverse(top)?;
         for branch in self.view.branch(id) {
             let index = self.category_index(branch)?;
-            let category = &self.view.categories[index];
+            if self.view.categories[index].visibility() != visibility {
+                self.change_category(index, |category| category.set_visibility(visibility))?;
+            }
+        }
+        for parent in hidden_above {
+            let index = self.category_index(parent)?;
+            self.change_category(index, |category| category.set_visibility(Visibility::Shown))?;
+        }
+        Ok(one_or_compound(inverse))
+    }
+
+    /// The Commands that give every category in `top`'s branch its visibility back as it
+    /// is now: `top`'s own, then one for each category whose visibility differs from its
+    /// parent's, from the top of the branch down.
+    fn visibility_inverse(&self, top: CategoryId) -> Result<Vec<DomainCommand>, DomainError> {
+        let mut old: HashMap<CategoryId, Visibility> = HashMap::new();
+        let mut inverse = Vec::new();
+        for branch in self.view.branch(top) {
+            let category = &self.view.categories[self.category_index(branch)?];
             let was = category.visibility();
             let parent_was = category
                 .parent()
                 .and_then(|parent| old.get(&parent).copied());
-            // `id` has no parent in `old`, so it always starts the inverse.
+            // `top` has no parent in `old`, so it always starts the inverse.
             if parent_was != Some(was) {
                 inverse.push(DomainCommand::SetCategoryVisibility {
                     category: branch,
@@ -1912,16 +1946,8 @@ impl Ledger {
                 });
             }
             old.insert(branch, was);
-            // The branch starts at `id`, so an unknown category is refused before any
-            // change.
-            if was != visibility {
-                self.change_category(index, |category| category.set_visibility(visibility))?;
-            }
         }
-        Ok(match <[DomainCommand; 1]>::try_from(inverse) {
-            Ok([one]) => one,
-            Err(several) => DomainCommand::Compound(several),
-        })
+        Ok(inverse)
     }
 
     fn delete_category(&mut self, id: CategoryId) -> Result<DomainCommand, DomainError> {
@@ -2071,6 +2097,14 @@ impl Ledger {
         view.net_worth = net_worth;
         view.accounts_changed();
         Ok(())
+    }
+}
+
+/// The one command in `commands`, or a Compound of them all in order.
+fn one_or_compound(commands: Vec<DomainCommand>) -> DomainCommand {
+    match <[DomainCommand; 1]>::try_from(commands) {
+        Ok([one]) => one,
+        Err(several) => DomainCommand::Compound(several),
     }
 }
 

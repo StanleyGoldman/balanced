@@ -151,7 +151,7 @@ Whether a top-level category, and every subcategory under it, is Income or Expen
 _Avoid_: Category kind, category class
 
 **Hidden category**:
-A category left out of the Category field's choices while it stays on its transactions and in reports. Hiding a parent hides its subcategories.
+A category left out of the Category field's choices while it stays on its transactions and in reports. Hiding a parent hides its subcategories, and showing a subcategory shows each hidden category above it, so no shown category sits under a hidden one.
 _Avoid_: Archived category, inactive category
 
 **Category List**:

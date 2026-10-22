@@ -86,8 +86,8 @@ pub enum DomainCommand {
         other_sides: Vec<OtherSide>,
     },
     /// Add a category named `name` under `parent`, or at the top of the tree. It takes
-    /// the next category id. A top-level category is of `category_type`; a subcategory
-    /// takes its parent's type instead.
+    /// the next category id. A top-level category is of `category_type` and starts
+    /// shown; a subcategory takes its parent's type and visibility instead.
     CreateCategory {
         name: String,
         parent: Option<CategoryId>,
@@ -103,7 +103,8 @@ pub enum DomainCommand {
     RenameCategory { category: CategoryId, name: String },
     /// Move a category, with every category under it, under `parent`, or to the top of
     /// the tree. Under a parent, the category and those under it take its top-level
-    /// category's type; at the top, the category keeps the type it had.
+    /// category's type; at the top, the category keeps the type it had. Under a hidden
+    /// parent, the category and those under it are hidden.
     MoveCategory {
         category: CategoryId,
         parent: Option<CategoryId>,
@@ -114,8 +115,9 @@ pub enum DomainCommand {
         category: CategoryId,
         category_type: CategoryType,
     },
-    /// Show or hide a category, with every category under it. A hidden category leaves
-    /// the Category field's list, but keeps its transactions.
+    /// Show or hide a category, with every category under it. Showing a category also
+    /// shows each hidden category above it, but not the others under those. A hidden
+    /// category leaves the Category field's list, but keeps its transactions.
     SetCategoryVisibility {
         category: CategoryId,
         visibility: Visibility,

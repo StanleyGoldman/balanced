@@ -134,17 +134,50 @@ fn hiding_a_category_hides_every_category_under_it() {
 }
 
 #[test]
-fn showing_a_subcategory_leaves_the_category_above_it_hidden() {
+fn showing_a_subcategory_shows_the_categories_above_it_but_not_their_others() {
     let mut household = Household::new();
     household.hide(household.food);
 
     household
-        .apply(set_visibility(household.restaurants, Shown))
+        .apply(set_visibility(household.coffee, Shown))
         .unwrap();
 
     assert_eq!(
         household.visibilities(),
-        [Hidden, Hidden, Shown, Shown, Shown, Shown]
+        [Shown, Hidden, Shown, Shown, Shown, Shown]
+    );
+}
+
+#[test]
+fn one_undo_hides_again_a_subcategory_and_the_categories_shown_above_it() {
+    let mut household = Household::new();
+    household.hide(household.food);
+    household
+        .apply(set_visibility(household.coffee, Shown))
+        .unwrap();
+
+    household.ledger.undo().unwrap();
+
+    assert_eq!(
+        household.visibilities(),
+        [Hidden, Hidden, Hidden, Hidden, Shown, Shown]
+    );
+}
+
+#[test]
+fn redo_shows_a_subcategory_and_the_categories_above_it_again() {
+    let mut household = Household::new();
+    household.hide(household.food);
+    household
+        .apply(set_visibility(household.coffee, Shown))
+        .unwrap();
+    household.ledger.undo().unwrap();
+
+    household.ledger.redo().unwrap();
+
+    assert_eq!(
+        household.visibilities(),
+        [Shown, Hidden, Shown, Shown, Shown, Shown]
     );
 }
 
@@ -165,10 +198,7 @@ fn undo_gives_each_category_under_a_hidden_one_its_old_visibility_back() {
 #[test]
 fn undo_hides_again_the_hidden_categories_under_one_shown() {
     let mut household = Household::new();
-    household.hide(household.food);
-    household
-        .apply(set_visibility(household.restaurants, Shown))
-        .unwrap();
+    household.hide(household.groceries);
 
     household
         .apply(set_visibility(household.food, Shown))
@@ -177,7 +207,7 @@ fn undo_hides_again_the_hidden_categories_under_one_shown() {
 
     assert_eq!(
         household.visibilities(),
-        [Hidden, Hidden, Shown, Shown, Shown, Shown]
+        [Shown, Hidden, Shown, Shown, Shown, Shown]
     );
 }
 
@@ -271,10 +301,8 @@ fn hiding_a_branch_that_was_all_shown_is_undone_by_one_command() {
 #[test]
 fn hiding_a_branch_is_undone_by_a_command_for_each_category_shown_otherwise_than_its_parent() {
     let mut household = Household::new();
+    household.hide(household.groceries);
     household.hide(household.restaurants);
-    household
-        .apply(set_visibility(household.coffee, Shown))
-        .unwrap();
 
     let food = household.food;
     let inverse = hiding_inverse(&mut household, food);
@@ -283,8 +311,8 @@ fn hiding_a_branch_is_undone_by_a_command_for_each_category_shown_otherwise_than
         inverse,
         DomainCommand::Compound(vec![
             set_visibility(household.food, Shown),
+            set_visibility(household.groceries, Hidden),
             set_visibility(household.restaurants, Hidden),
-            set_visibility(household.coffee, Shown),
         ])
     );
 }
@@ -302,5 +330,83 @@ fn undo_and_redo_again_and_again_restore_each_category_the_same_way() {
     assert_eq!(
         household.visibilities(),
         [Shown, Hidden, Shown, Shown, Shown, Shown]
+    );
+}
+
+#[test]
+fn a_category_created_under_a_hidden_one_starts_hidden() {
+    let mut household = Household::new();
+    household.hide(household.restaurants);
+
+    household
+        .apply(DomainCommand::CreateCategory {
+            name: "Takeout".to_owned(),
+            parent: Some(household.restaurants),
+            category_type: CategoryType::Expense,
+        })
+        .unwrap();
+
+    let takeout = id(&household.ledger, "Takeout");
+    assert_eq!(visibilities(&household.ledger, [takeout]), [Hidden]);
+}
+
+#[test]
+fn a_category_moved_under_a_hidden_one_is_hidden_with_those_under_it() {
+    let mut household = Household::new();
+    household.hide(household.income);
+
+    household
+        .apply(DomainCommand::MoveCategory {
+            category: household.restaurants,
+            parent: Some(household.income),
+        })
+        .unwrap();
+
+    assert_eq!(
+        household.visibilities(),
+        [Shown, Shown, Hidden, Hidden, Hidden, Hidden]
+    );
+}
+
+#[test]
+fn undo_moves_a_category_back_from_under_a_hidden_one_and_shows_it_again() {
+    let mut household = Household::new();
+    household.hide(household.coffee);
+    household.hide(household.income);
+    household
+        .apply(DomainCommand::MoveCategory {
+            category: household.restaurants,
+            parent: Some(household.income),
+        })
+        .unwrap();
+
+    household.ledger.undo().unwrap();
+
+    let view = household.ledger.snapshot();
+    let restaurants = view.category(household.restaurants).unwrap();
+    assert_eq!(restaurants.parent(), Some(household.food));
+    assert_eq!(
+        household.visibilities(),
+        [Shown, Shown, Shown, Hidden, Hidden, Hidden]
+    );
+}
+
+#[test]
+fn redo_moves_a_category_under_a_hidden_one_again_and_hides_it() {
+    let mut household = Household::new();
+    household.hide(household.income);
+    household
+        .apply(DomainCommand::MoveCategory {
+            category: household.restaurants,
+            parent: Some(household.income),
+        })
+        .unwrap();
+    household.ledger.undo().unwrap();
+
+    household.ledger.redo().unwrap();
+
+    assert_eq!(
+        household.visibilities(),
+        [Shown, Shown, Hidden, Hidden, Hidden, Hidden]
     );
 }
