@@ -288,15 +288,18 @@ impl App {
         }
     }
 
-    /// Applies `command`, a save of the Register's editing row, to the open ledger. A
-    /// refused save goes back to the Register to say why.
+    /// Applies `command`, a save of the Register's editing row, to the open ledger, and
+    /// tells the Register the ledger's answer: applied, or refused saying why.
     fn save_row(&mut self, command: DomainCommand) {
         let Session::Open { ledger, .. } = &mut self.session else {
             return;
         };
-        if let Err(error) = ledger.apply(command) {
-            let message = StatusMessage::refusal(error, &ledger.snapshot());
-            self.main_window.save_refused(message);
+        match ledger.apply(command) {
+            Ok(_) => self.main_window.save_applied(),
+            Err(error) => {
+                let message = StatusMessage::refusal(error, &ledger.snapshot());
+                self.main_window.save_refused(message);
+            }
         }
     }
 

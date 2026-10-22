@@ -7,6 +7,7 @@ use balanced_core::{
     AccountId, AccountStatus, CurrencyCode, DomainCommand, Ledger, Money, NewTransaction,
 };
 use balanced_i18n::Localizer;
+use balanced_ui::testing;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::App as _;
 use eframe::egui::accesskit::Role;
@@ -448,6 +449,75 @@ fn continue_editing_after_the_ledger_refuses_a_save_opens_the_cell_saved_from() 
     click_button(&mut harness, "Continue editing");
 
     assert_eq!(editor(&harness, "Payment").as_deref(), Some("250.00"));
+}
+
+/// Presses Enter, then sends `other` before the App applies the save Enter sent, so
+/// the ledger takes both in the same frame.
+fn press_enter_with(harness: &mut Harness<'static, App>, other: DomainCommand) {
+    send(
+        harness,
+        Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        },
+    );
+    testing::send_domain(harness, other);
+    harness.run();
+}
+
+/// The Command that renames the account named `name` in `ledger`, which the ledger
+/// applies.
+fn rename(ledger: &Ledger, name: &str) -> DomainCommand {
+    DomainCommand::RenameAccount {
+        account: account(ledger, name),
+        name: "Daily Checking".to_owned(),
+    }
+}
+
+#[test]
+fn a_save_refused_as_another_change_is_applied_keeps_the_rows_changes() {
+    let ledger = with_closed_transfer();
+    let other = rename(&ledger, "Everyday Checking");
+    let mut harness = app_on(ledger);
+    change_closed_transfer(&mut harness);
+
+    press_enter_with(&mut harness, other);
+
+    assert!(shows_text(
+        &harness,
+        "The other account of this transfer is closed, so the transfer can't be made, changed or deleted."
+    ));
+    click_button(&mut harness, "Continue editing");
+    assert_eq!(editor(&harness, "Payment").as_deref(), Some("250.00"));
+}
+
+#[test]
+fn a_post_refused_as_another_change_is_applied_keeps_the_draft() {
+    let ledger = Ledger::stub();
+    let other = rename(&ledger, "Everyday Checking");
+    let mut harness = app_on(ledger);
+    open(&mut harness, "Everyday Checking");
+    // Too large for the account's balance to hold.
+    fill_draft(
+        &mut harness,
+        Some("Food & Dining:Groceries"),
+        "792281625142643375935439503.35",
+    );
+
+    press_enter_with(&mut harness, other);
+
+    assert!(shows_text(
+        &harness,
+        "That change would make a balance too large to hold."
+    ));
+    click_button(&mut harness, "Continue editing");
+    assert_eq!(
+        editor(&harness, "Payment").as_deref(),
+        Some("792,281,625,142,643,375,935,439,503.35")
+    );
 }
 
 /// The label of the cell under the cell cursor.
