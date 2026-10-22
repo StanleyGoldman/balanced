@@ -32,6 +32,7 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 - The external tools need a one-time install: `cargo install --locked cargo-deny typos-cli cargo-mutants cargo-nextest cargo-insta cargo-llvm-cov`, and `rustup component add llvm-tools` for coverage. `.github/Dockerfile` installs the same tools for CI. When one is missing (`no such command`), tell the user straight away, with this install command, before working around it.
 - Warnings are allowed while you iterate. `cargo xtask clippy` denies them.
 - A test nextest reports as `SIGKILL` hit the memory cap in `.config/memory-cap.sh`. Look for a loop that allocates without end, such as a walk up parent links that meets a cycle. A test-first run before the guard exists, or a red-check that breaks the guard, triggers it on purpose. Raise the cap (`BALANCED_TEST_MEMORY_MAX=16G`) only for a test that needs the memory.
+- A build that fails with `rustc-memory-cap.sh ... (signal: 9, SIGKILL: kill)` hit the build cap: every agent session's rustc together went over `balanced-builds.slice`'s 20G. Other sessions were building at the same time, so rerun the build once they finish. If one build alone needs more, raise the cap for the rest of the login with `systemctl --user set-property --runtime balanced-builds.slice MemoryMax=<size>`.
 - A new check is written as a new `xtask` task and added to `ci`, never as CI-provider config. Each task is its own module in `xtask/src/` with a `TASK` constant, listed once in `TASKS` in `main.rs`. Running programs goes through `process.rs`.
 - To dry-run a branch's change to a CI task that reads `HEAD` and refuses a dirty tree, such as `mutants-shard`, on a real commit of `main` before the change lands, commit it and run `.claude/scripts/xtask-at-commit.sh <commit> <task> --dry-run` from the branch's worktree (contract in its header).
 - To reproduce a CI failure locally, build the image with `docker build -t balanced-ci:latest -f .github/Dockerfile .`, then run the failing task in it with `.github/in-image.sh cargo xtask <task>`.
@@ -50,6 +51,8 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 | `.cargo/mutants.toml` | Which crates cargo-mutants mutates, and its exclusions |
 | `.config/nextest.toml` | The one nextest profile, used by `test`, `snapshots`, `locales` and cargo-mutants: no fail-fast, no retries, a hung test killed after 3 minutes, and each test process run through `.config/memory-cap.sh` |
 | `.config/memory-cap.sh` | The memory cap on each test process (8G) and on every test process from every session together (24G, in `balanced-tests.slice`), so a runaway test is killed alone instead of the OOM killer taking every session down. The header names the overrides. Uncapped where there is no systemd user session, as in CI |
+| `.config/rustc-memory-cap.sh` | The `RUSTC_WRAPPER` that caps every rustc and linker from every agent session together (20G, in `balanced-builds.slice`). The header names the override. Uncapped where there is no systemd user session |
+| `.claude/hooks/build-memory-cap.sh` | The SessionStart hook that exports `RUSTC_WRAPPER` to the build cap, by absolute path, for agent sessions only. A session that already has a wrapper (sccache in `~/.cargo/config.toml`) keeps it and builds uncapped |
 | `.typos.toml` | Words typos accepts, each with a comment, and the translations it skips |
 
 - To add a lint or a ban, put it in config, not prose. A ban's `reason` names the replacement to use.
@@ -62,7 +65,7 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 
 - In CI, every run builds into an empty `target/`, and sccache caches the library crates in the GitHub Actions cache (see [ADR 0003](../adr/0003-ci-caches-with-sccache-not-a-persistent-target.md) and [ADR 0010](../adr/0010-ci-runs-on-github-actions.md)).
 - Locally, sccache is optional and set up per developer, in `~/.cargo/config.toml` (`[build] rustc-wrapper = "sccache"`). The repo's `.cargo/config.toml` holds only aliases.
-- Agents leave `RUSTC_WRAPPER`, `CARGO_HOME` and `CARGO_TARGET_DIR` as they find them, and add no repo-level `rustc-wrapper`. Each worktree builds into its own `target/`.
+- Agents leave `RUSTC_WRAPPER`, `CARGO_HOME` and `CARGO_TARGET_DIR` as they find them, and add no repo-level `rustc-wrapper`. Each worktree builds into its own `target/`. The one exception is the build memory cap: when no wrapper is configured, the SessionStart hook sets `RUSTC_WRAPPER` for agent sessions (`.claude/hooks/build-memory-cap.sh`).
 - **Verified 2026-10-13 (sccache 0.18.0, Rust 1.99.0), with egui 0.36.2 + eframe + tracing as a test dependency set:**
   - sccache works under the Claude Code sandbox. The client reaches the server on `127.0.0.1:4226`, and `sccache --show-stats` counts rise during a worktree build.
   - With the default setup, the cache key includes absolute paths. A first worktree build missed all 266 cacheable crates. Building the same tree again with a different `CARGO_TARGET_DIR` also got 0 hits.
