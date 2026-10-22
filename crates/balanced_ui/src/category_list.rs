@@ -879,7 +879,7 @@ fn show_delete(
     .with_accept_enabled(!used || dialog.form.target.is_some())
     .with_body_popup(dialog.form.targets_held)
     .show(ctx, dialog, |ui, confirm| {
-        ui.label(delete_message(i18n, view, category, name));
+        ui.label(delete_message(i18n, view, &branch, name));
         if used {
             confirm.target_picker(ui, i18n, view, &branch);
         }
@@ -932,25 +932,36 @@ fn delete_command(branch: &[CategoryId], target: Option<CategoryId>) -> DomainCo
     DomainCommand::Compound(reassigns.chain(deletes).collect())
 }
 
-/// What the delete confirm says about `category`, whose full path is `name`: how many
-/// transactions use it and their total, or that none does.
+/// What the delete confirm says about the categories in `branch`, the last of them the
+/// one deleted, whose full path is `name`: how many transactions use them and their
+/// total, or that none does, and how many go with it.
 fn delete_message(
     i18n: &Localizer,
     view: &LedgerView,
-    category: CategoryId,
+    branch: &[CategoryId],
     name: String,
 ) -> String {
+    let (&category, under) = branch.split_last().expect("a branch holds its category");
+    let subcategories = under.len();
     let usage = view.category_usage(category);
     let count = usage.count();
-    if count == 0 {
+    if count == 0 && subcategories == 0 {
         return fl!(i18n, "dialog-delete-category-message", name = name);
+    }
+    if count == 0 {
+        return fl!(
+            i18n,
+            "dialog-delete-category-unused-parent",
+            name = name,
+            subcategories = subcategories
+        );
     }
     match usage.total() {
         Ok(total) => fl!(
             i18n,
             "dialog-delete-category-used",
             name = name,
-            subcategories = 0,
+            subcategories = subcategories,
             count = count,
             total = FormattedAmount::new(i18n, total, AmountStyle::Symbol)
                 .text()
@@ -962,7 +973,7 @@ fn delete_message(
                 i18n,
                 "dialog-delete-category-used-count",
                 name = name,
-                subcategories = 0,
+                subcategories = subcategories,
                 count = count
             )
         }

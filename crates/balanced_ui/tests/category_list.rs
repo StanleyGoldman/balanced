@@ -925,3 +925,67 @@ fn one_undo_puts_back_a_reassigned_category_and_its_transactions() {
         "Expense: 2,001 transactions, totalling -$400,063.90"
     );
 }
+
+#[test]
+fn deleting_a_parent_says_how_many_subcategories_go_with_it() {
+    let mut harness = category_list();
+
+    delete_row(&mut harness, "Food & Dining");
+
+    assert!(shows(
+        &harness,
+        "Food & Dining and its 3 subcategories are used by 8,005 transactions totalling \
+         -$660,303.59."
+    ));
+}
+
+#[test]
+fn deleting_a_parent_deletes_every_category_under_it_in_one_undo_step() {
+    let food = ["Food & Dining", "Groceries", "Restaurants", "Coffee Shops"];
+    let mut harness = category_list();
+    delete_moving_to(&mut harness, "Food & Dining", "Shopping:Household");
+    open_category_list(&mut harness);
+    for name in food {
+        assert!(!categories(&harness).contains(&name.to_owned()), "{name} is gone");
+    }
+    assert_eq!(
+        usage(&harness, "Household"),
+        "Expense: 10,006 transactions, totalling -$1,060,367.49"
+    );
+    click(&mut harness, "Close");
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    open_category_list(&mut harness);
+
+    for name in food {
+        assert!(categories(&harness).contains(&name.to_owned()), "{name} is back");
+    }
+    assert_eq!(
+        usage(&harness, "Food & Dining"),
+        "Expense: 8,005 transactions, totalling -$660,303.59"
+    );
+    assert_eq!(
+        usage(&harness, "Household"),
+        "Expense: 2,001 transactions, totalling -$400,063.90"
+    );
+}
+
+#[test]
+fn deleting_an_unused_parent_says_its_subcategory_goes_with_it() {
+    let mut ledger = Ledger::stub();
+    let pets = create_category(&mut ledger, "Pets", None);
+    create_category(&mut ledger, "Vet", Some(pets));
+    let mut harness = app_on(ledger);
+    open_category_list(&mut harness);
+
+    delete_row(&mut harness, "Pets");
+    assert!(shows(
+        &harness,
+        "Delete Pets and its subcategory? No transaction uses them."
+    ));
+    click(&mut harness, "Delete");
+
+    assert!(!categories(&harness).contains(&"Pets".to_owned()));
+    assert!(!categories(&harness).contains(&"Vet".to_owned()));
+}
