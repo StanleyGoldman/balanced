@@ -68,15 +68,21 @@ pub enum AmountStyle {
     Bare,
 }
 
-/// The amount formatters of one formatting locale, each built the first time it is
-/// needed and kept: building one costs about six times as much as formatting with it,
-/// and a Register formats three amounts a row.
+/// The amount formatters of one formatting locale, each built the first time an
+/// amount needs it and kept for every later one.
 #[derive(Debug)]
 pub(crate) struct AmountFormatters {
     locale: Locale,
-    /// Each formatter by what it was built for: the currency, the decimal places it
-    /// shows and the style.
-    built: RefCell<HashMap<(CurrencyType, u8, AmountStyle), CurrencyFormatter<DecimalFormatter>>>,
+    built: RefCell<HashMap<FormatterKey, CurrencyFormatter<DecimalFormatter>>>,
+}
+
+/// What an amount formatter is built for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct FormatterKey {
+    code: CurrencyType,
+    /// The decimal places it shows: the currency's, or the amount's when it has more.
+    decimal_places: u8,
+    style: AmountStyle,
 }
 
 impl AmountFormatters {
@@ -99,8 +105,12 @@ impl AmountFormatters {
         let decimal_places = currency.decimal_places.max(significant_places);
         let mut built = self.built.borrow_mut();
         let formatter = built
-            .entry((currency.code, decimal_places, style))
-            .or_insert_with(|| self.build(currency.code, decimal_places, style));
+            .entry(FormatterKey {
+                code: currency.code,
+                decimal_places,
+                style,
+            })
+            .or_insert_with_key(|key| self.build(*key));
         // The mantissa is an integer, so a negative zero amount loses its sign here.
         let mut value = FixedDecimal::from(amount.mantissa());
         value.multiply_pow10(
@@ -109,13 +119,13 @@ impl AmountFormatters {
         formatter.format_fixed_decimal(&value).to_string()
     }
 
-    /// A formatter for `code` in `style`, showing `decimal_places` decimal places.
-    fn build(
-        &self,
-        code: CurrencyType,
-        decimal_places: u8,
-        style: AmountStyle,
-    ) -> CurrencyFormatter<DecimalFormatter> {
+    /// A formatter for `key`'s currency in its style, showing its decimal places.
+    fn build(&self, key: FormatterKey) -> CurrencyFormatter<DecimalFormatter> {
+        let FormatterKey {
+            code,
+            decimal_places,
+            style,
+        } = key;
         let provider = IsoDigits { decimal_places };
         let prefs = (&self.locale).into();
         let options = CurrencyFormatterOptions::default();

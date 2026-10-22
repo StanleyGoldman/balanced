@@ -35,7 +35,8 @@ egui_kittest = { workspace = true, optional = true, features = ["snapshot", "wgp
 # project thresholds; sending the Commands that create and open a data file, which the
 # native file picker sends in the app; and sending a domain Command beside the App's own. `App::on_ledger`, the App on a ledger with no data
 # file. `PreferencesFile::for_tests` and `RecentFilesFile::for_tests`, the files in a
-# temporary directory, and the check of the Preferences the App saved.
+# temporary directory, and the check of the Preferences the App saved. For the
+# benchmarks, building a Register's rows and its comboboxes' choices.
 test-support = ["dep:egui-wgpu", "dep:egui_kittest", "dep:tempfile", "balanced_i18n/test-support"]
 
 [dev-dependencies]

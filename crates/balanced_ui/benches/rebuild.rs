@@ -50,8 +50,6 @@ struct Household {
 
 impl Household {
     fn new(scale: u32) -> Self {
-        // Under the build's own directory, as the Commands benchmark does, though no
-        // run here is timed with a commit in it.
         let directory =
             TempDir::new_in(env!("CARGO_TARGET_TMPDIR")).expect("a temporary directory");
         let path = directory.path().join("household.balanced");

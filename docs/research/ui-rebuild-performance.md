@@ -7,7 +7,7 @@ Measured 2026-10-22 on the branch for #504, cut from `main` at `ef01571`.
 ## Answer in brief
 
 - **The UI's rebuild, not the core, sets how long a Command takes.** Before this work, the frame that applied a flag took 52 ms at the stub's size (20,000 transactions) and 499 ms at 10×. The Command itself was 3–5 ms of that.
-- **The Register's rows were 85–95% of the frame.** `RegisterModel::new` took 44.5 ms at 1× and 475 ms at 10×. About 90% of that went to building a new ICU4X `CurrencyFormatter` for each of the three amounts on every row.
+- **The Register's rows were 85–95% of the frame.** `RegisterModel::new` took 44.5 ms at 1× and 475 ms at 10×. About three quarters of that went to building a new ICU4X `CurrencyFormatter` for each of the three amounts on every row.
 - **Fixed here: each formatting locale keeps the amount formatters it builds.** The Register now takes 12.4 ms at 1× and 154 ms at 10×, and the frame after a Command 19 ms and 182 ms.
 - **10× still needs the Register to rebuild less than every row.** 154 ms is about ten frames. [#580](https://github.com/StanleyGoldman/balanced/issues/580) tracks it.
 - **The comboboxes' choices and the usage count are small beside it.** `FieldChoices::new` takes 1.2 ms at 1× and 15.5 ms at 10×, and the usage count 1.3 ms and 13.4 ms. Only an open Category List pays for the usage count. [#581](https://github.com/StanleyGoldman/balanced/issues/581) and [#582](https://github.com/StanleyGoldman/balanced/issues/582) track them.
@@ -26,11 +26,11 @@ All times are medians of 30 runs, in milliseconds. "Before" is the branch's firs
 | After a Command | 52.3 | 19.3 | 499 | 182 |
 
 - **An idle frame doesn't grow with the file.** The Register lays out only the rows on screen, and nothing is rebuilt.
-- **The frame after a Command is the sum of its parts.** At 10× after: the Command (about 4.6 ms, from the [Commands benchmark](data-file-performance.md#after-442)), the Register's rows (154), the comboboxes' choices (15.5), and an idle frame's work. The Account bar's model and the rest add about 2 ms at 1×.
+- **The frame after a Command is the sum of its parts.** At 10× after: the Command (about 4.6 ms, from the [Commands benchmark](data-file-performance.md#after-442)), the Register's rows (154), the comboboxes' choices (15.5), and an idle frame's work. The Account bar's model and the rest add about 2 ms at 1× and 7 ms at 10×.
 
 ### Each rebuild alone
 
-`benches/rebuild.rs` times each rebuild on a snapshot no earlier run has read, taken after an untimed flag. Each run includes dropping what it built, as a window drops the old model when it builds a new one.
+`benches/rebuild.rs` times each rebuild on a snapshot no earlier run has read, taken after an untimed flag. The Register's rows and the choices are dropped inside each run, as a window drops the old model when it builds a new one. The usage count is kept on the snapshot, so its drop falls outside the run.
 
 | Rebuild | 1× before | 1× after | 10× before | 10× after |
 |---|---|---|---|---|
@@ -51,7 +51,7 @@ Throwaway probes, not kept, timed each formatting call on its own, as divan benc
 | The same with a `CurrencyFormatter` built once and reused | 96 |
 | `Localizer::format_date` (its formatter is built with the locale) | 124 |
 
-Each row formats three amounts: the signed amount, the unsigned one its column shows, and the running balance. Before the cache that was about 1.95 µs of the 2.2 µs a row took; after it, a row takes about 0.62 µs. The rest is the date, the payee, memo and category text the row copies, and the filter's check.
+Each row formats three amounts: the signed amount, the unsigned one its column shows, and the running balance. Before the cache that was about 1.95 µs of the 2.2 µs a row took, 1.6 µs of it building formatters; after it, a row takes about 0.62 µs. The rest is the date, the payee, memo and category text the row copies, and the filter's check.
 
 ## What changed
 

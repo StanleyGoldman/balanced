@@ -25,7 +25,7 @@ Amounts are built from text or integers. `clippy.toml` bans `Decimal`'s float co
 - **Style:** `AmountStyle::Bare` in Register cells, `AmountStyle::Symbol` in the Account bar, totals, and anywhere currencies mix.
 - **`balanced_i18n` doesn't know `Money`.** `balanced_ui` converts at the call: `Currency::new(code.as_str(), code.decimal_places())` and `money.amount()`.
 - **In messages**, pass the formatted string as a Fluent argument (see [i18n](i18n.md)).
-- **Cache formatted strings** in the window's view model, rebuilt when the snapshot or the formatting locale changes (ADR 0001). Each call builds an ICU4X formatter.
+- **Cache formatted strings** in the window's view model, rebuilt when the snapshot or the formatting locale changes (ADR 0001). `Localizer` keeps the ICU4X formatter for each currency, decimal places and style, but formatting still costs about 0.1 µs an amount, which a Register of 200,000 rows pays three times a row (`docs/research/ui-rebuild-performance.md`).
 - Negative amounts in parentheses (accounting style) are deferred. Red negatives belong to the theme.
 
 ## Reading typed amounts
