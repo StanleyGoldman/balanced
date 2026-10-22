@@ -1245,6 +1245,39 @@ fn search_unfolds_a_folded_parent_above_a_match() {
     assert_eq!(expanded(&harness, "Home"), Some(true));
 }
 
+#[test]
+fn a_parent_the_filter_keeps_nothing_under_has_no_fold() {
+    let mut harness = category_list();
+
+    search(&mut harness, "auto");
+
+    assert_eq!(expanded(&harness, "Auto & Transport"), None);
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Collapse Auto & Transport")
+            .is_none()
+    );
+}
+
+#[test]
+fn left_folds_nothing_on_a_parent_the_filter_keeps_nothing_under() {
+    let mut harness = category_list();
+    search(&mut harness, "auto");
+    click_row(&mut harness, "Auto & Transport");
+
+    press(&mut harness, Key::ArrowLeft);
+    // Cleared at once: each shorter search would unfold the rows above its matches.
+    search(&mut harness, "");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    press(&mut harness, Key::Backspace);
+
+    assert_eq!(expanded(&harness, "Auto & Transport"), Some(true));
+    assert_eq!(
+        categories(&harness)[..3],
+        ["Auto & Transport", "Fuel", "Insurance"]
+    );
+}
+
 /// Clicks the row named `name` while `modifiers` are held, then runs the App until it
 /// settles.
 fn click_row_holding(harness: &mut Harness<'static, App>, modifiers: Modifiers, name: &str) {
