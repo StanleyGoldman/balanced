@@ -72,6 +72,7 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 ## Measuring performance
 
 - Time in the `release` profile, on a quiet machine. Other agent sessions build in parallel on this machine, and a probe run at load average 18 gave medians up to 4× too high, with a wide spread (#258). Wait until `/proc/loadavg` reads below 3 (a background `until` loop), then pin the run to one core with `taskset -c 0`.
+- A Command's cost has a committed benchmark: `taskset -c 0 cargo bench -p balanced_core --features test-support` times a post, a reordering date edit, a delete and a flag at 1× and 10× the stub (`crates/balanced_core/benches/commands.rs`). For before-and-after numbers, build the base commit's bench in a throwaway worktree and run both binaries in the same quiet window. Its data file goes under `target/tmp`, on disk: `/tmp` here is tmpfs, where a commit skips the fsync that is about 3 ms of a real one.
 - `perf record` is refused here (`perf_event_paranoid` is 4). Break a cost down by timing its parts in the probe itself. A counting `#[global_allocator]` in a `#[cfg(test)]` module measures heap held.
 - For a cold page cache without root, evict the file first: `os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)` from `python3`.
 - `docs/research/data-file-performance.md` is a worked example: probes, method and machine.

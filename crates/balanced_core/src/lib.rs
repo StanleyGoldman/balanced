@@ -18,7 +18,9 @@ pub use account::{Account, AccountGroup, AccountId, AccountKind, AccountStatus, 
 pub use category::{Category, CategoryId, CategoryType};
 pub use command::{Applied, DomainCommand, DomainError, MoveDirection, OtherSide, TransactionEdit};
 pub use data_file::{Damage, OpenError, WriteError};
-pub use ledger::{AccountSummary, Generation, Ledger, LedgerView, RegisterEntry};
+pub use ledger::{
+    AccountSummary, Entries, Generation, Ledger, LedgerView, Register, RegisterEntry,
+};
 pub use money::{CurrencyCode, Money, MoneyError, RoundingPolicy};
 pub use transaction::{
     Allocation, ClearedStatus, EditedSplitLine, EditedSplitTarget, NewSplitLine, NewTransaction,

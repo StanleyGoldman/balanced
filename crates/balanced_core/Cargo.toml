@@ -17,18 +17,26 @@ thiserror.workspace = true
 
 [dev-dependencies]
 balanced_store = { workspace = true, features = ["test-support"] }
+divan.workspace = true
 insta.workspace = true
 rust_decimal_macros.workspace = true
 tempfile.workspace = true
 
 [features]
 # `NewTransaction::split_for_tests`, `NewSplitLine::for_tests`, `EditedSplitLine::for_tests` and
-# `Ledger::open_with_migrations`, for tests outside the crate's own code.
+# `Ledger::open_with_migrations`, for tests outside the crate's own code, and
+# `Ledger::create_stub`, for the benchmarks.
 test-support = ["balanced_store/test-support"]
 
 # Upgrades files through migrations of its own, which need `test-support`.
 [[test]]
 name = "upgrade"
+required-features = ["test-support"]
+
+# Times Commands on a large data file, which `Ledger::create_stub` builds.
+[[bench]]
+name = "commands"
+harness = false
 required-features = ["test-support"]
 
 [lints]

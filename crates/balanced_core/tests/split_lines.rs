@@ -208,7 +208,7 @@ fn account_id(ledger: &Ledger, name: &str) -> AccountId {
         .snapshot()
         .accounts()
         .iter()
-        .map(AccountSummary::account)
+        .map(|summary| summary.account())
         .find(|account| account.name() == name)
         .expect("the test created the account")
         .id()
@@ -594,7 +594,11 @@ fn a_line_in_an_unknown_category_is_refused() {
 #[test]
 fn lines_on_the_opening_balance_are_refused() {
     let mut household = Household::new();
-    let opening = household.summary(household.checking).register()[0]
+    let opening = household
+        .summary(household.checking)
+        .register()
+        .get(0)
+        .unwrap()
         .transaction()
         .id();
     let groceries = household.groceries;

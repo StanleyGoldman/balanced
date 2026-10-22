@@ -399,6 +399,17 @@ dialog-category-list-usage-count = { $count ->
         [one] 1 transaction
        *[other] { $count } transactions
     }
+# The buttons beside the tree, each acting on the selected categories.
+dialog-category-list-new = New…
+dialog-category-list-edit = Edit…
+dialog-category-list-merge = Merge…
+dialog-category-list-hide = Hide
+dialog-category-list-delete = Delete…
+# Below the tree: no OK button saves the changes made in the Category List.
+dialog-category-list-status = Changes apply as soon as you confirm them.
+# The confirm for deleting a category nothing uses. $name is its full path, as Food:Coffee.
+dialog-delete-category-message = Delete { $name }? No transaction uses it.
+dialog-delete-category-delete = Delete
 
 # The New Account wizard. Each step's heading says how far through it is.
 dialog-new-account-step-type = Step 1 of 4: Type

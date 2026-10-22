@@ -4,11 +4,11 @@
 //! AccessKit tree the way a user drives it.
 
 use balanced_core::{
-    AccountId, AccountSummary, CategoryType, CurrencyCode, DomainCommand, Ledger, Money,
-    NewTransaction,
+    AccountId, CategoryId, CategoryType, CurrencyCode, DomainCommand, Ledger, Money, NewTransaction,
 };
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
+use eframe::App as _;
 use eframe::egui::accesskit::Action;
 use eframe::egui::accesskit::Role;
 use eframe::egui::style::ScrollStyle;
@@ -60,7 +60,7 @@ fn account(ledger: &Ledger, name: &str) -> AccountId {
         .snapshot()
         .accounts()
         .iter()
-        .map(AccountSummary::account)
+        .map(|summary| summary.account())
         .find(|account| account.name() == name)
         .expect("the stub has the account")
         .id()
@@ -529,4 +529,235 @@ fn deleting_a_transaction_in_the_register_takes_it_out_of_the_usage() {
         usage(&harness, "Household"),
         "Expense: 2,000 transactions, totalling -$400,000.00"
     );
+}
+
+/// Adds a category nothing uses, named `name`, under `parent` or at the top of the
+/// tree as an Expense category, returning its id.
+fn create_category(ledger: &mut Ledger, name: &str, parent: Option<CategoryId>) -> CategoryId {
+    ledger
+        .apply(DomainCommand::CreateCategory {
+            name: name.to_owned(),
+            parent,
+            category_type: CategoryType::Expense,
+        })
+        .expect("the ledger creates the category");
+    ledger
+        .snapshot()
+        .categories()
+        .last()
+        .expect("the ledger holds the new category")
+        .id()
+}
+
+/// The App on stub data with an unused top-level category, Pets, added, and the
+/// Category List open.
+fn category_list_with_pets() -> Harness<'static, App> {
+    let mut ledger = Ledger::stub();
+    create_category(&mut ledger, "Pets", None);
+    let mut harness = app_on(ledger);
+    open_category_list(&mut harness);
+    harness
+}
+
+/// Whether the New Category Dialog is open.
+fn new_category_open(harness: &Harness<'static, App>) -> bool {
+    harness
+        .query_by_role_and_label(Role::Window, "New Category")
+        .is_some()
+}
+
+/// The button column with only New… enabled.
+const ONLY_NEW: [(&str, bool); 5] = [
+    ("New…", true),
+    ("Edit…", false),
+    ("Merge…", false),
+    ("Hide", false),
+    ("Delete…", false),
+];
+
+/// Which of the button column's buttons are enabled, in order.
+fn enabled_buttons(harness: &Harness<'static, App>) -> Vec<(&'static str, bool)> {
+    ["New…", "Edit…", "Merge…", "Hide", "Delete…"]
+        .map(|label| {
+            let button = harness.get_by_role_and_label(Role::Button, label);
+            (label, !button.accesskit_node().is_disabled())
+        })
+        .to_vec()
+}
+
+#[test]
+fn with_no_row_selected_only_new_is_enabled() {
+    let harness = category_list();
+
+    assert_eq!(enabled_buttons(&harness), ONLY_NEW);
+}
+
+#[test]
+fn selecting_an_unused_category_with_none_under_it_enables_delete() {
+    let mut harness = category_list_with_pets();
+
+    click_row(&mut harness, "Pets");
+
+    assert_eq!(
+        enabled_buttons(&harness),
+        [
+            ("New…", true),
+            ("Edit…", false),
+            ("Merge…", false),
+            ("Hide", false),
+            ("Delete…", true),
+        ]
+    );
+}
+
+#[test]
+fn delete_is_not_offered_for_a_used_category() {
+    let mut harness = category_list();
+
+    click_row(&mut harness, "Groceries");
+
+    assert_eq!(enabled_buttons(&harness), ONLY_NEW);
+}
+
+#[test]
+fn delete_is_not_offered_for_a_parent() {
+    let mut ledger = Ledger::stub();
+    let pets = create_category(&mut ledger, "Pets", None);
+    create_category(&mut ledger, "Vet", Some(pets));
+    let mut harness = app_on(ledger);
+    open_category_list(&mut harness);
+
+    click_row(&mut harness, "Pets");
+
+    assert_eq!(enabled_buttons(&harness), ONLY_NEW);
+}
+
+#[test]
+fn a_transfer_row_disables_every_button_but_new() {
+    let mut harness = category_list();
+
+    click_row(&mut harness, "[Emergency Fund]");
+
+    assert_eq!(enabled_buttons(&harness), ONLY_NEW);
+}
+
+#[test]
+fn the_status_line_says_changes_apply_at_once() {
+    let harness = category_list();
+
+    assert!(shows(
+        &harness,
+        "Changes apply as soon as you confirm them."
+    ));
+}
+
+/// Types `text` into whatever has the keyboard, first passing it through the App's
+/// `raw_input_hook` as eframe does, then runs the App until it settles.
+fn type_text(harness: &mut Harness<'static, App>, text: &str) {
+    let ctx = harness.ctx.clone();
+    let mut input = std::mem::take(harness.input_mut());
+    input.events.push(Event::Text(text.to_owned()));
+    harness.state_mut().raw_input_hook(&ctx, &mut input);
+    *harness.input_mut() = input;
+    harness.step();
+    harness.run();
+}
+
+#[test]
+fn delete_asks_before_deleting_an_unused_category() {
+    let mut harness = category_list_with_pets();
+    click_row(&mut harness, "Pets");
+
+    click(&mut harness, "Delete…");
+
+    assert!(shows(&harness, "Delete Pets? No transaction uses it."));
+    assert!(categories(&harness).contains(&"Pets".to_owned()));
+}
+
+#[test]
+fn confirming_the_delete_takes_the_category_out_of_the_list() {
+    let mut harness = category_list_with_pets();
+    click_row(&mut harness, "Pets");
+    click(&mut harness, "Delete…");
+
+    click(&mut harness, "Delete");
+
+    assert!(is_open(&harness));
+    assert!(!categories(&harness).contains(&"Pets".to_owned()));
+}
+
+#[test]
+fn cancelling_the_delete_keeps_the_category() {
+    let mut harness = category_list_with_pets();
+    click_row(&mut harness, "Pets");
+    click(&mut harness, "Delete…");
+
+    click(&mut harness, "Cancel");
+
+    assert!(is_open(&harness));
+    assert!(!shows(&harness, "Delete Pets? No transaction uses it."));
+    assert!(categories(&harness).contains(&"Pets".to_owned()));
+}
+
+#[test]
+fn one_undo_puts_a_deleted_category_back() {
+    let mut harness = category_list_with_pets();
+    click_row(&mut harness, "Pets");
+    click(&mut harness, "Delete…");
+    click(&mut harness, "Delete");
+    click(&mut harness, "Close");
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    open_category_list(&mut harness);
+
+    assert!(categories(&harness).contains(&"Pets".to_owned()));
+}
+
+#[test]
+fn new_creates_a_category_that_appears_in_the_list() {
+    let mut harness = category_list();
+    click(&mut harness, "New…");
+
+    type_text(&mut harness, "Pets");
+    click(&mut harness, "OK");
+
+    assert!(!new_category_open(&harness));
+    assert!(categories(&harness).contains(&"Pets".to_owned()));
+}
+
+#[test]
+fn a_category_made_with_new_is_offered_in_the_category_field() {
+    let mut harness = category_list();
+    click(&mut harness, "New…");
+    type_text(&mut harness, "Pets");
+    click(&mut harness, "OK");
+    click(&mut harness, "Close");
+
+    harness
+        .get_by_role_and_label(Role::Button, "Everyday Checking")
+        .click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Cell, "Auto & Transport:Fuel")
+        .click();
+    harness.run();
+    type_text(&mut harness, "pet");
+
+    let rows: Vec<String> = harness
+        .query_all_by_role(Role::ListBoxOption)
+        .map(|row| row.accesskit_node().label().unwrap_or_default())
+        .collect();
+    assert_eq!(rows, ["Pets", "Create \"pet\"…"]);
+}
+
+#[test]
+fn escape_closes_new_category_and_leaves_the_list_open() {
+    let mut harness = category_list();
+    click(&mut harness, "New…");
+
+    press(&mut harness, Key::Escape);
+
+    assert!(!new_category_open(&harness));
+    assert!(is_open(&harness));
 }

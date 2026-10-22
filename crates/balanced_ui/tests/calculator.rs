@@ -4,8 +4,7 @@
 //! Register's amount cells, driven through the AccessKit tree the way a user drives it.
 
 use balanced_core::{
-    AccountId, AccountSummary, CategoryId, CurrencyCode, DomainCommand, Ledger, Money,
-    NewSplitLine, NewTransaction,
+    AccountId, CategoryId, CurrencyCode, DomainCommand, Ledger, Money, NewSplitLine, NewTransaction,
 };
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
@@ -481,7 +480,7 @@ fn account(ledger: &Ledger, name: &str) -> AccountId {
         .snapshot()
         .accounts()
         .iter()
-        .map(AccountSummary::account)
+        .map(|summary| summary.account())
         .find(|account| account.name() == name)
         .expect("the stub has the account")
         .id()
