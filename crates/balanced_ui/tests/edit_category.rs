@@ -237,3 +237,29 @@ fn one_undo_takes_back_a_rename_and_a_move_made_together() {
             .is_some()
     );
 }
+
+#[test]
+fn a_renamed_category_is_offered_by_its_new_name_in_the_category_field() {
+    let mut harness = category_list();
+    edit(&mut harness, "Groceries");
+    retype(&mut harness, "Supermarket");
+    click(&mut harness, Role::Button, "OK");
+    click(&mut harness, Role::Button, "Close");
+    click(&mut harness, Role::Button, "Everyday Checking");
+    click(&mut harness, Role::Cell, "Auto & Transport:Fuel");
+
+    retype(&mut harness, "Food");
+
+    let offered: Vec<String> = harness
+        .query_all_by_role(Role::ListBoxOption)
+        .map(|row| row.accesskit_node().label().unwrap_or_default())
+        .collect();
+    assert!(
+        offered.contains(&"Food & Dining:Supermarket".to_owned()),
+        "{offered:?}"
+    );
+    assert!(
+        !offered.contains(&"Food & Dining:Groceries".to_owned()),
+        "{offered:?}"
+    );
+}
