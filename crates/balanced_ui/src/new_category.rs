@@ -5,11 +5,13 @@
 
 use balanced_core::{Category, CategoryId, DomainCommand, DomainError, LedgerView};
 use balanced_i18n::Localizer;
-use eframe::egui::{self, Label, RichText, TextEdit};
+use eframe::egui::{self, Id, Label, RichText, TextEdit};
 
-use crate::command::StatusMessage;
+use crate::command::{AppCommand, CommandSender, StatusMessage};
+use crate::dialog::{DialogOutcome, HeavyDialog, OpenDialog};
 use crate::i18n::fl;
 use crate::register_model::{CATEGORY_SEPARATOR, category_text};
+use crate::theme::Theme;
 
 /// What the New Category Dialog holds while it is open.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,4 +136,46 @@ fn named_category(view: &LedgerView, path: &str) -> Option<CategoryId> {
         .iter()
         .map(Category::id)
         .find(|&id| category_text(view, id).is_some_and(|text| text.to_lowercase() == path))
+}
+
+/// What became of the New Category Dialog this frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NewCategoryOutcome {
+    /// It stays open, waiting on the ledger after OK.
+    Open,
+    Cancelled,
+}
+
+/// Draws the New Category Dialog over whatever is open, from `view`. OK sends the
+/// Command creating the category, and the Dialog stays open until the ledger answers.
+pub(crate) fn show(
+    ctx: &egui::Context,
+    i18n: &Localizer,
+    theme: &Theme,
+    commands: &CommandSender,
+    dialog: &mut OpenDialog<NewCategoryForm>,
+    view: &LedgerView,
+) -> NewCategoryOutcome {
+    let outcome = HeavyDialog::new(
+        Id::new("new_category_dialog"),
+        fl!(i18n, "dialog-new-category-title"),
+        fl!(i18n, "dialog-ok"),
+        fl!(i18n, "dialog-cancel"),
+        fl!(i18n, "dialog-close"),
+        theme,
+    )
+    .show(ctx, dialog, |ui, form| form.show(ui, i18n));
+    match outcome {
+        DialogOutcome::Open => {}
+        DialogOutcome::Accepted => {
+            if let Some(command) = dialog.form.submit(view) {
+                commands.send(AppCommand::SubmitDialog(command));
+            }
+        }
+        DialogOutcome::Back | DialogOutcome::Discarded => {
+            unreachable!("a heavy Dialog has no Back or Discard button")
+        }
+        DialogOutcome::Cancelled => return NewCategoryOutcome::Cancelled,
+    }
+    NewCategoryOutcome::Open
 }

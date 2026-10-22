@@ -173,6 +173,18 @@ dialog-split-no-lines = Geben Sie mindestens einer Zeile eine Kategorie.
 dialog-preferences-save-without-asking = Geänderte Buchung ohne Nachfrage speichern
 dialog-close-account-close = Schließen
 dialog-delete-account-delete = Löschen
+# Coined from GnuCash's "Neu", "Bearbeiten", "Zusammenführen", "Ausblenden" and
+# "Löschen".
+dialog-category-list-new = Neu …
+dialog-category-list-edit = Bearbeiten …
+dialog-category-list-merge = Zusammenführen …
+dialog-category-list-hide = Ausblenden
+dialog-category-list-delete = Löschen …
+# Coined.
+dialog-category-list-status = Änderungen gelten sofort nach der Bestätigung.
+# Coined from GnuCash's "Löschen" and "Buchung".
+dialog-delete-category-message = { $name } löschen? Keine Buchung verwendet diese Kategorie.
+dialog-delete-category-delete = Löschen
 dialog-new-account-back = Zurück
 dialog-new-account-next = Weiter
 dialog-new-account-finish = Fertigstellen
