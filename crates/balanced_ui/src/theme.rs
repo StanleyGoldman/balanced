@@ -560,7 +560,9 @@ mod tests {
     }
 
     fn usd(amount: Decimal) -> Money {
-        Money::new(amount, CurrencyCode::new("USD").unwrap()).unwrap()
+        let code = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency with minor units");
+        Money::new(amount, code)
+            .expect("the test's amount fits in Money with at most two significant decimal places")
     }
 
     #[test]

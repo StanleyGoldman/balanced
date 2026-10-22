@@ -339,7 +339,9 @@ mod tests {
 
     /// A localizer whose strings compare equal to plain literals.
     fn localizer(text_language: &LanguageIdentifier, formatting_locale: &Locale) -> Localizer {
-        Localizer::with_isolation(text_language, formatting_locale, Isolation::Off).unwrap()
+        Localizer::with_isolation(text_language, formatting_locale, Isolation::Off).expect(
+            "the embedded messages load, and ICU4X's compiled data covers the test's locale",
+        )
     }
 
     #[test]

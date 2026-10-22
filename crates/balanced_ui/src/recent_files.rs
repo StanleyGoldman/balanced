@@ -287,7 +287,7 @@ mod tests {
     /// A recent files file in a new, empty directory, which lasts as long as the
     /// returned `TempDir`.
     fn file() -> (TempDir, RecentFilesFile) {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("the system's temporary directory is writable");
         let file = RecentFilesFile::in_dir(dir.path());
         (dir, file)
     }

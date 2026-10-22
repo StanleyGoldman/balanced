@@ -198,11 +198,13 @@ mod tests {
     use crate::Localizer;
 
     fn localizer(formatting_locale: &Locale) -> Localizer {
-        Localizer::new(&langid!("en-US"), formatting_locale).unwrap()
+        Localizer::new(&langid!("en-US"), formatting_locale).expect(
+            "the embedded messages load, and ICU4X's compiled data covers the test's locale",
+        )
     }
 
     fn date(year: i32, month: u8, day: u8) -> Date<Iso> {
-        Date::try_new_iso(year, month, day).unwrap()
+        Date::try_new_iso(year, month, day).expect("the test's date is a real calendar date")
     }
 
     #[test]

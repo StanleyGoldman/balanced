@@ -302,7 +302,7 @@ mod tests {
     /// A preferences file in a new, empty directory, which lasts as long as the
     /// returned `TempDir`.
     fn file() -> (TempDir, PreferencesFile) {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("the system's temporary directory is writable");
         let file = PreferencesFile::in_dir(dir.path());
         (dir, file)
     }
