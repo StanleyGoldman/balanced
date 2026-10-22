@@ -7,7 +7,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use balanced_core::{AccountId, AccountKind, CurrencyCode, DomainCommand, Ledger, LedgerView, Money};
+use balanced_core::{
+    AccountId, AccountKind, CurrencyCode, DomainCommand, Ledger, LedgerView, Money,
+};
 use balanced_i18n::Localizer;
 use eframe::egui::{self, vec2};
 use egui_kittest::{Harness, SnapshotOptions};
