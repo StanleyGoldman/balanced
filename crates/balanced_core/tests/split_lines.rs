@@ -420,6 +420,30 @@ fn a_new_line_to_an_account_gains_an_other_side_there_taking_the_lines_memo() {
 }
 
 #[test]
+fn a_new_lines_other_side_takes_a_later_id_than_the_transfers_other_side_it_splits() {
+    let mut household = Household::new();
+    let (groceries, checking, savings) =
+        (household.groceries, household.checking, household.savings);
+    household.apply(DomainCommand::PostTransaction {
+        account: checking,
+        transaction: NewTransaction::transfer(date(6), "Saving up", savings, usd("-300.00")),
+    });
+    let received = only(household.posted(savings)).id();
+
+    household.split(
+        received,
+        "300.00",
+        vec![
+            EditedSplitLine::transfer(checking, "Saving up", usd("250.00")),
+            EditedSplitLine::category(groceries, "Refund", usd("50.00")),
+        ],
+    );
+
+    let new_side = only(household.posted(checking)).id();
+    assert!(new_side > received, "{new_side:?} after {received:?}");
+}
+
+#[test]
 fn a_replaced_split_has_exactly_one_other_side_for_each_line_to_an_account() {
     let mut household = Household::new();
     let payday = household.save_from_a_split();

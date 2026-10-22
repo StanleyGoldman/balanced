@@ -210,6 +210,16 @@ fn a_transfer_records_its_other_side_in_the_other_account() {
 }
 
 #[test]
+fn a_posted_transfers_other_side_takes_a_later_id() {
+    let mut household = Household::new();
+
+    let sent = household.save_200();
+
+    let received = only(household.posted(household.savings));
+    assert!(received.id() > sent, "{:?} after {sent:?}", received.id());
+}
+
+#[test]
 fn a_transfer_moves_both_balances_and_leaves_net_worth_as_it_was() {
     let mut household = Household::new();
     let net_worth = household.ledger.snapshot().net_worth();
@@ -733,6 +743,22 @@ fn changing_a_transfers_account_moves_its_other_side_there() {
     assert_eq!((received.number(), received.is_flagged()), (None, false));
     assert_eq!(household.balance(household.savings), usd("1000.00"));
     assert_eq!(household.balance(visa), usd("1200.00"));
+}
+
+#[test]
+fn changing_the_account_of_a_transfers_other_side_gives_its_new_other_side_a_later_id() {
+    let mut household = Household::new();
+    household.save_200();
+    let received = only(household.posted(household.savings)).id();
+    let visa = household.visa;
+
+    household.apply(DomainCommand::EditTransaction {
+        transaction: received,
+        edit: TransactionEdit::Transfer(visa),
+    });
+
+    let new_side = only(household.posted(visa)).id();
+    assert!(new_side > received, "{new_side:?} after {received:?}");
 }
 
 #[test]
