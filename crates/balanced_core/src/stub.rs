@@ -2,6 +2,7 @@
 
 //! The in-memory data Balanced runs on until it reads data files.
 
+use balanced_store::Store;
 use icu_calendar::{Date, Iso};
 
 use crate::account::NewAccount;
@@ -10,7 +11,7 @@ use crate::transaction::{NewSplitLine, NewSplitTarget, NewTransaction};
 use crate::{AccountKind, CategoryId, ClearedStatus, CurrencyCode, Ledger, Money};
 
 /// How many transactions the generated account holds, after its opening balance.
-const GENERATED_TRANSACTIONS: u16 = 20_000;
+const GENERATED_TRANSACTIONS: u32 = 20_000;
 
 /// The generated account's payments, each with its category and amount. With
 /// one salary of 1,000.00 they repeat in a cycle that sums to zero, so the account's
@@ -112,6 +113,22 @@ impl Ledger {
     /// a split transaction, transactions scheduled after mid-October 2026, a mix of
     /// Cleared statuses, and one generated account with 20,000 transactions.
     pub fn stub() -> Self {
+        let store = Store::create_in_memory("USD").expect("SQLite makes an in-memory file");
+        Self::stub_in(store, GENERATED_TRANSACTIONS)
+    }
+
+    /// [`Self::stub`] with `generated` transactions in its generated account, written to
+    /// a new data file at `path`, for benchmarks that time a large file. Refuses a path
+    /// that already holds a file.
+    #[cfg(feature = "test-support")]
+    pub fn create_stub(path: &std::path::Path, generated: u32) -> Result<Self, crate::OpenError> {
+        let store = Store::create(path, "USD")?;
+        Ok(Self::stub_in(store, generated))
+    }
+
+    /// The stub, with `generated` transactions in its generated account, written to
+    /// `store`, which is a new, empty data file in USD.
+    fn stub_in(store: Store, generated: u32) -> Self {
         let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
         let money = |amount: &str| {
             let amount = amount.parse().expect("stub amounts are decimal numbers");
@@ -146,14 +163,15 @@ impl Ledger {
             ],
         )
         .closed();
-        Self::with_accounts(
+        Self::with_accounts_in(
+            store,
             usd,
             StubCategory::ALL.map(StubCategory::new_category),
             [
                 everyday,
                 account("Joint Checking", AccountKind::Checking, "1032.00"),
                 old_checking,
-                generated_account(money),
+                generated_account(generated, money),
                 account("Emergency Fund", AccountKind::Savings, "12000.00"),
                 account("Holiday Fund", AccountKind::Savings, "800.00").hidden(),
                 account("Visa Rewards", AccountKind::CreditCard, "-412.30"),
@@ -263,14 +281,15 @@ fn with_october_transactions(account: NewAccount, money: impl Fn(&str) -> Money)
         .memo("November rent")])
 }
 
-/// An account with [`GENERATED_TRANSACTIONS`] transactions, four a day, so the
-/// Register has years of history to scroll. It opens with 500.00 and ends there.
-fn generated_account(money: impl Fn(&str) -> Money) -> NewAccount {
+/// An account with `generated` transactions, four a day, so the Register has years of
+/// history to scroll. It opens with 500.00 and ends there.
+fn generated_account(generated: u32, money: impl Fn(&str) -> Money) -> NewAccount {
     let opened = date(2013, 1, 1);
     let first_day = opened.to_rata_die();
-    let transactions = (0..GENERATED_TRANSACTIONS).map(|i| {
+    let payments = u32::try_from(GENERATED_PAYMENTS.len()).expect("the payments are few");
+    let transactions = (0..generated).map(|i| {
         let day = Date::from_rata_die(first_day + i64::from(i / 4), Iso);
-        let step = usize::from(i) % (GENERATED_PAYMENTS.len() + 1);
+        let step = usize::try_from(i % (payments + 1)).expect("a step fits in usize");
         match GENERATED_PAYMENTS.get(step) {
             Some(&(payee, category, amount)) => {
                 NewTransaction::new(day, payee, category.id(), money(amount))
@@ -295,7 +314,7 @@ fn generated_account(money: impl Fn(&str) -> Money) -> NewAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AccountSummary, RegisterEntry, Transaction};
+    use crate::{RegisterEntry, Transaction};
 
     #[test]
     fn the_generated_account_has_four_transactions_a_day_and_ends_where_it_opened() {
@@ -309,7 +328,7 @@ mod tests {
             .find(|summary| summary.account().name() == "Household Checking")
             .unwrap();
         let register = generated.register();
-        let dates = |index: usize| register[index].transaction().date();
+        let dates = |index: usize| register.get(index).unwrap().transaction().date();
         // The opening balance, then 20,000 transactions over 5,000 days.
         assert_eq!(register.len(), 20_001);
         assert_eq!((dates(0), dates(4)), (date(2013, 1, 1), date(2013, 1, 1)));
@@ -329,7 +348,7 @@ mod tests {
         let flagged: Vec<&str> = view
             .accounts()
             .iter()
-            .flat_map(AccountSummary::register)
+            .flat_map(|summary| summary.register())
             .map(RegisterEntry::transaction)
             .filter(|transaction| transaction.is_flagged())
             .map(Transaction::payee)

@@ -154,7 +154,7 @@ fn account_id(ledger: &Ledger, name: &str) -> AccountId {
         .snapshot()
         .accounts()
         .iter()
-        .map(AccountSummary::account)
+        .map(|summary| summary.account())
         .find(|account| account.name() == name)
         .expect("the test created the account")
         .id()
@@ -943,7 +943,11 @@ fn changing_a_transfer_away_from_a_closed_account_is_refused_naming_it() {
 #[test]
 fn the_opening_balance_can_not_become_a_transfer() {
     let mut household = Household::new();
-    let opening_balance = household.summary(household.checking).register()[0]
+    let opening_balance = household
+        .summary(household.checking)
+        .register()
+        .get(0)
+        .unwrap()
         .transaction()
         .id();
     let savings = household.savings;
