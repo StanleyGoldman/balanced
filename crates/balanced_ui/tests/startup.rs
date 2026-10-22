@@ -10,7 +10,7 @@ use balanced_i18n::Localizer;
 use balanced_ui::testing;
 use balanced_ui::{App, Clock, PreferencesFile, RecentFilesFile};
 use eframe::egui::accesskit::Role;
-use eframe::egui::{Key, ViewportCommand, ViewportId};
+use eframe::egui::{Event, Key, Modifiers, PointerButton, ViewportCommand, ViewportId, pos2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 use icu_calendar::Date;
@@ -142,6 +142,28 @@ fn esc_on_the_welcome_dialog_closes_the_window() {
     harness.key_press(Key::Escape);
 
     assert_eq!(viewport_commands(&mut harness), [ViewportCommand::Close]);
+}
+
+#[test]
+fn a_click_on_the_window_behind_the_welcome_dialog_does_nothing() {
+    let dir = tempfile::tempdir().expect("the temp dir is writable");
+    let mut harness = app(dir.path());
+
+    // The dimmed backdrop has no AccessKit node, so the click goes to a position: the
+    // top-left corner, outside the Dialog, which sits in the middle.
+    let corner = pos2(5.0, 5.0);
+    assert!(corner.y < harness.get_by_label(WELCOME).rect().top());
+    for pressed in [true, false] {
+        harness.event(Event::PointerButton {
+            pos: corner,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+    }
+
+    assert_eq!(viewport_commands(&mut harness), []);
+    assert!(welcome_shown(&harness));
 }
 
 #[test]

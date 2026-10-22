@@ -39,7 +39,8 @@ impl Welcome {
 
     /// Draws the empty window and the Dialog on top. Continue shows the chosen picker,
     /// which leaves the welcome Dialog open, so cancelling the picker comes back to it.
-    /// Quit, or closing the Dialog, quits.
+    /// Quit, Esc or the window's close quits; a click on the window behind the Dialog
+    /// does nothing.
     pub(crate) fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -61,6 +62,7 @@ impl Welcome {
             fl!(i18n, "dialog-welcome-quit"),
             theme,
         )
+        .ignoring_backdrop()
         .show(ctx, &mut self.dialog, |ui, picker| {
             ui.label(fl!(i18n, "dialog-welcome-message"));
             ui.radio_value(
