@@ -170,6 +170,13 @@ impl DoubleEndedIterator for Entries<'_> {
 
 impl ExactSizeIterator for Entries<'_> {}
 
+/// A transaction read from the data file, with the running balance its views counted.
+#[derive(Debug)]
+pub(crate) struct LoadedEntry {
+    pub(crate) transaction: Transaction,
+    pub(crate) balance: Money,
+}
+
 /// An account in a [`LedgerView`], with its transactions and its balances.
 ///
 /// Snapshots share the transactions a change leaves alone, so a change copies pointers
@@ -209,18 +216,18 @@ impl AccountSummary {
         Ok(summary)
     }
 
-    /// `account` holding `register`, its transactions in register order each with its
-    /// running balance, whose last running balance is `balance` and whose Cleared
-    /// balance is `cleared_balance`, as the data file's views counted them.
+    /// `account` holding `register`, in register order, whose last running balance is
+    /// `balance` and whose Cleared balance is `cleared_balance`, as the data file's views
+    /// counted them.
     pub(crate) fn loaded(
         account: Account,
-        register: Vec<(Transaction, Money)>,
+        register: Vec<LoadedEntry>,
         balance: Money,
         cleared_balance: Money,
     ) -> Self {
         let (transactions, balances) = register
             .into_iter()
-            .map(|(transaction, balance)| (Arc::new(transaction), balance))
+            .map(|entry| (Arc::new(entry.transaction), entry.balance))
             .unzip();
         Self {
             account,
@@ -239,7 +246,8 @@ impl AccountSummary {
             .collect()
     }
 
-    /// The transaction at `entry` in the register.
+    /// The transaction at `entry` in the register. Callers take `entry` from a lookup in
+    /// this same register.
     fn transaction(&self, entry: usize) -> &Transaction {
         &self.transactions[entry]
     }
@@ -278,7 +286,13 @@ impl AccountSummary {
         let counted = self
             .transactions
             .partition_point(|transaction| transaction.date() <= date);
-        match counted.checked_sub(1) {
+        self.balance_before(counted)
+    }
+
+    /// The running balance before the entry at `entry`, which is at most the number of
+    /// entries counted: 0 before the first.
+    fn balance_before(&self, entry: usize) -> Money {
+        match entry.checked_sub(1) {
             Some(last) => self.balances[last],
             None => Money::zero(self.balance.currency()),
         }
@@ -293,13 +307,7 @@ impl AccountSummary {
     /// The account with `transaction`, which it doesn't hold, added in register order.
     /// Fails when a balance overflows.
     fn inserted(&self, transaction: Transaction) -> Result<Self, MoneyError> {
-        let key = transaction.register_order();
-        let Err(entry) = self
-            .transactions
-            .binary_search_by_key(&key, |held| held.register_order())
-        else {
-            panic!("added {:?}, which its account holds", transaction.id());
-        };
+        let entry = place_for(&self.transactions, &transaction);
         let mut summary = self.clone();
         summary.cleared_balance = summary
             .cleared_balance
@@ -331,13 +339,7 @@ impl AccountSummary {
             .cleared_balance
             .checked_sub(cleared_amount(&old))?
             .checked_add(cleared_amount(&edited))?;
-        let key = edited.register_order();
-        let Err(place) = summary
-            .transactions
-            .binary_search_by_key(&key, |held| held.register_order())
-        else {
-            panic!("{:?} is in its account twice", edited.id());
-        };
+        let place = place_for(&summary.transactions, &edited);
         // An edit that keeps the amount and the place moves no balance.
         let from = if place == entry && edited.amount() == old.amount() {
             summary.transactions.len()
@@ -351,20 +353,39 @@ impl AccountSummary {
 
     /// Counts the running balances again from the entry at `from` on, keeping the ones
     /// before it, and the balance after the last. Fails when a balance overflows.
+    ///
+    /// The balances before `from` must still match the transactions before it, and
+    /// `from` is at most the number of transactions.
     fn count_balances_from(&mut self, from: usize) -> Result<(), MoneyError> {
         self.balances.truncate(from);
-        let mut balance = match from.checked_sub(1) {
-            Some(last) => self.balances[last],
-            None => Money::zero(self.balance.currency()),
-        };
-        self.balances.reserve(self.transactions.len() - from);
-        for transaction in &self.transactions[from..] {
+        let mut balance = self.balance_before(from);
+        let counted = self
+            .transactions
+            .get(from..)
+            .expect("`from` is within the register");
+        self.balances.reserve(counted.len());
+        for transaction in counted {
             balance = balance.checked_add(transaction.amount())?;
             self.balances.push(balance);
         }
+        debug_assert_eq!(
+            self.balances.len(),
+            self.transactions.len(),
+            "every transaction has its running balance"
+        );
         self.balance = balance;
         Ok(())
     }
+}
+
+/// Where `transaction`, which `transactions` doesn't hold, goes among them in register
+/// order: a new one, whose id is the largest yet, after the rest of its date.
+fn place_for(transactions: &[Arc<Transaction>], transaction: &Transaction) -> usize {
+    let key = transaction.register_order();
+    let Err(place) = transactions.binary_search_by_key(&key, |held| held.register_order()) else {
+        panic!("added {:?}, which its account holds", transaction.id());
+    };
+    place
 }
 
 /// What `transaction` adds to its account's Cleared balance: its amount once Cleared or
@@ -3044,7 +3065,7 @@ mod tests {
         ledger.snapshot().accounts()[0]
             .register()
             .get(index)
-            .unwrap()
+            .expect("the tests ask for an entry the register holds")
             .transaction()
             .id()
     }
@@ -3699,7 +3720,7 @@ mod tests {
         ledger.snapshot().accounts()[0]
             .register()
             .get(index)
-            .unwrap()
+            .expect("the tests ask for an entry the register holds")
             .transaction()
             .clone()
     }
@@ -4680,7 +4701,7 @@ mod tests {
                 account("Savings", AccountKind::Savings, usd(dec!(500.00))),
             ],
         )
-        .unwrap()
+        .expect("the amounts are in USD, far from overflow")
     }
 
     /// The names of the accounts in `after` that it doesn't share with `before`.
@@ -4813,14 +4834,31 @@ mod tests {
             ledger.apply(command.clone()).unwrap();
 
             let view = ledger.snapshot();
-            let summary = &view.accounts()[0];
-            let rebuilt = AccountSummary::new(
-                summary.account().clone(),
-                summary.transactions(),
-                usd_code(),
-            )
-            .unwrap();
-            assert_eq!(**summary, rebuilt, "{command:?}");
+            let register = view.accounts()[0].register();
+            let mut running = Decimal::ZERO;
+            let summed: Vec<Money> = register
+                .iter()
+                .map(|entry| {
+                    running += entry.transaction().amount().amount();
+                    usd(running)
+                })
+                .collect();
+            let cleared: Decimal = register
+                .iter()
+                .map(RegisterEntry::transaction)
+                .filter(|transaction| transaction.cleared_status() != ClearedStatus::Uncleared)
+                .map(|transaction| transaction.amount().amount())
+                .sum();
+            let counted: Vec<Money> = register.iter().map(RegisterEntry::balance).collect();
+            assert_eq!(counted, summed, "{command:?}");
+            assert_eq!(
+                (
+                    view.accounts()[0].balance(),
+                    view.accounts()[0].cleared_balance()
+                ),
+                (usd(running), usd(cleared)),
+                "{command:?}"
+            );
         }
     }
 }

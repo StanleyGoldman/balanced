@@ -16,7 +16,7 @@ use balanced_store::{
 use icu_calendar::{Date, Iso};
 use rust_decimal::Decimal;
 
-use crate::ledger::{AccountSummary, History, NextIds, Totals};
+use crate::ledger::{AccountSummary, History, LoadedEntry, NextIds, Totals};
 use crate::transaction::{SplitLine, SplitTarget};
 use crate::undo_log::{self, UndoEntryError};
 use crate::{
@@ -215,14 +215,14 @@ impl Ledger {
             })
             .collect();
         // Transactions come by account, in register order.
-        let mut registers: HashMap<u32, Vec<(Transaction, Money)>> = HashMap::new();
+        let mut registers: HashMap<u32, Vec<LoadedEntry>> = HashMap::new();
         for stored in contents.transactions {
             let account = stored.row.account_id;
             let transaction = transaction(stored.row, money(stored.amount), currency)?;
-            registers
-                .entry(account)
-                .or_default()
-                .push((transaction, money(stored.balance)));
+            registers.entry(account).or_default().push(LoadedEntry {
+                transaction,
+                balance: money(stored.balance),
+            });
         }
         let mut accounts = contents
             .accounts
