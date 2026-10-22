@@ -575,16 +575,6 @@ const ONLY_NEW: [(&str, bool); 5] = [
     ("Delete…", false),
 ];
 
-/// The button column with a category selected that is used or has categories under
-/// it: New… and Edit… enabled.
-const NEW_AND_EDIT: [(&str, bool); 5] = [
-    ("New…", true),
-    ("Edit…", true),
-    ("Merge…", false),
-    ("Hide", false),
-    ("Delete…", false),
-];
-
 /// Which of the button column's buttons are enabled, in order.
 fn enabled_buttons(harness: &Harness<'static, App>) -> Vec<(&'static str, bool)> {
     ["New…", "Edit…", "Merge…", "Hide", "Delete…"]
@@ -608,29 +598,29 @@ fn selecting_an_unused_category_with_none_under_it_enables_delete() {
 
     click_row(&mut harness, "Pets");
 
-    assert_eq!(
-        enabled_buttons(&harness),
-        [
-            ("New…", true),
-            ("Edit…", true),
-            ("Merge…", false),
-            ("Hide", false),
-            ("Delete…", true),
-        ]
-    );
+    assert_eq!(enabled_buttons(&harness), NEW_EDIT_AND_DELETE);
 }
 
+/// The button column with a category selected: New…, Edit… and Delete… enabled.
+const NEW_EDIT_AND_DELETE: [(&str, bool); 5] = [
+    ("New…", true),
+    ("Edit…", true),
+    ("Merge…", false),
+    ("Hide", false),
+    ("Delete…", true),
+];
+
 #[test]
-fn delete_is_not_offered_for_a_used_category() {
+fn selecting_a_used_category_enables_delete() {
     let mut harness = category_list();
 
     click_row(&mut harness, "Groceries");
 
-    assert_eq!(enabled_buttons(&harness), NEW_AND_EDIT);
+    assert_eq!(enabled_buttons(&harness), NEW_EDIT_AND_DELETE);
 }
 
 #[test]
-fn delete_is_not_offered_for_a_parent() {
+fn selecting_a_parent_enables_delete() {
     let mut ledger = Ledger::stub();
     let pets = create_category(&mut ledger, "Pets", None);
     create_category(&mut ledger, "Vet", Some(pets));
@@ -639,7 +629,7 @@ fn delete_is_not_offered_for_a_parent() {
 
     click_row(&mut harness, "Pets");
 
-    assert_eq!(enabled_buttons(&harness), NEW_AND_EDIT);
+    assert_eq!(enabled_buttons(&harness), NEW_EDIT_AND_DELETE);
 }
 
 #[test]
@@ -770,4 +760,22 @@ fn escape_closes_new_category_and_leaves_the_list_open() {
 
     assert!(!new_category_open(&harness));
     assert!(is_open(&harness));
+}
+
+/// Opens the Delete confirm for the row named `name`.
+fn delete_row(harness: &mut Harness<'static, App>, name: &str) {
+    click_row(harness, name);
+    click(harness, "Delete…");
+}
+
+#[test]
+fn deleting_a_used_category_says_how_many_transactions_it_moves() {
+    let mut harness = category_list();
+
+    delete_row(&mut harness, "Groceries");
+
+    assert!(shows(
+        &harness,
+        "Food & Dining:Groceries is used by 4,002 transactions totalling -$500,228.79."
+    ));
 }

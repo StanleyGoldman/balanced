@@ -418,6 +418,26 @@ dialog-category-list-status = Changes apply as soon as you confirm them.
 # The confirm for deleting a category nothing uses. $name is its full path, as Food:Coffee.
 dialog-delete-category-message = Delete { $name }? No transaction uses it.
 dialog-delete-category-delete = Delete
+# The prompt for deleting a category that transactions use. $name is its full path, as
+# Food:Coffee, $subcategories how many categories under it are deleted with it, and
+# $total an amount.
+dialog-delete-category-used = { $subcategories ->
+        [0] { $name } is
+        [one] { $name } and its subcategory are
+       *[other] { $name } and its { $subcategories } subcategories are
+    } used by { $count ->
+        [one] 1 transaction
+       *[other] { $count } transactions
+    } totalling { $total }.
+# As above, for transactions whose total is too large to add up.
+dialog-delete-category-used-count = { $subcategories ->
+        [0] { $name } is
+        [one] { $name } and its subcategory are
+       *[other] { $name } and its { $subcategories } subcategories are
+    } used by { $count ->
+        [one] 1 transaction
+       *[other] { $count } transactions
+    }.
 
 # The New Account wizard. Each step's heading says how far through it is.
 dialog-new-account-step-type = Step 1 of 4: Type
@@ -574,6 +594,10 @@ status-blank-category-name = Enter a name for the category.
 status-category-under-itself = A category can't go under itself or one of its own subcategories.
 # Giving a type to a subcategory, which takes its top-level category's type instead.
 status-subcategory-type = A subcategory takes the type of the category at the top of its tree.
+# Moving a deleted category's transactions to it or a category under it, which go with it.
+status-reassign-into-itself = A category's transactions can't move to it or one of its own subcategories.
+# Undoing a move of transactions to another category, after one of them left it.
+status-not-in-category = That transaction is no longer in the category it was moved to.
 # The data file refused a change, so Balanced didn't make it.
 status-change-not-saved = That change couldn't be saved to the data file, so it wasn't made.
 status-preferences-reset = Your preferences couldn't be read, so the defaults are in use. The old file is kept as preferences.toml.broken.

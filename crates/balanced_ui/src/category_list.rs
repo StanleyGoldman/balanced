@@ -128,8 +128,6 @@ struct ListRow {
     has_children: bool,
     /// The Type cell's text: a category's type, or `None` for an account.
     category_type: Option<String>,
-    /// Whether any transaction or split line uses it, or a category under it.
-    used: bool,
     /// The Txns cell's text.
     count: String,
     /// The Total cell's amount, or `None` when nothing uses the row or the total
@@ -289,7 +287,6 @@ impl ListRow {
             name,
             has_children,
             category_type,
-            used: count > 0,
             count: i18n.format_number(
                 i64::try_from(count).expect("a ledger holds fewer than 2^63 transactions"),
             ),
@@ -473,9 +470,8 @@ impl CategoryListForm {
         }
     }
 
-    /// The button column: New… always, Edit… for a selected category, and Delete… for a
-    /// selected category nothing uses, with none under it. Merge… and Hide wait on their
-    /// own Dialogs. Returns what a click asked for.
+    /// The button column: New… always, and Edit… and Delete… for a selected category.
+    /// Merge… and Hide wait on their own Dialogs. Returns what a click asked for.
     fn buttons(
         &self,
         ui: &mut egui::Ui,
@@ -488,11 +484,6 @@ impl CategoryListForm {
         let editable = selected.and_then(|row| match row.key {
             RowKey::Category(id) => Some(id),
             RowKey::Transfer(_) => None,
-        });
-        // TODO(#488): Delete… a used category or a parent, with Reassign.
-        let deletable = selected.and_then(|row| match row.key {
-            RowKey::Category(id) if !row.used && !row.has_children => Some(id),
-            RowKey::Category(_) | RowKey::Transfer(_) => None,
         });
         let mut asked = None;
         ui.vertical(|ui| {
@@ -511,11 +502,8 @@ impl CategoryListForm {
             button(fl!(i18n, "dialog-category-list-merge"), false);
             // TODO(#491): Hide and Unhide a category.
             button(fl!(i18n, "dialog-category-list-hide"), false);
-            if button(
-                fl!(i18n, "dialog-category-list-delete"),
-                deletable.is_some(),
-            ) {
-                asked = deletable.map(ButtonAction::Delete);
+            if button(fl!(i18n, "dialog-category-list-delete"), editable.is_some()) {
+                asked = editable.map(ButtonAction::Delete);
             }
         });
         asked
@@ -833,7 +821,7 @@ fn show_delete(
         theme,
     )
     .show(ctx, dialog, |ui, _confirm| {
-        ui.label(fl!(i18n, "dialog-delete-category-message", name = name));
+        ui.label(delete_message(i18n, view, category, name));
     });
     match outcome {
         DialogOutcome::Open => return,
@@ -847,6 +835,43 @@ fn show_delete(
         }
     }
     form.focus_return = form.delete.take().map(|dialog| dialog.close(ctx));
+}
+
+/// What the delete confirm says about `category`, whose full path is `name`: how many
+/// transactions use it and their total, or that none does.
+fn delete_message(
+    i18n: &Localizer,
+    view: &LedgerView,
+    category: CategoryId,
+    name: String,
+) -> String {
+    let usage = view.category_usage(category);
+    let count = usage.count();
+    if count == 0 {
+        return fl!(i18n, "dialog-delete-category-message", name = name);
+    }
+    match usage.total() {
+        Ok(total) => fl!(
+            i18n,
+            "dialog-delete-category-used",
+            name = name,
+            subcategories = 0,
+            count = count,
+            total = FormattedAmount::new(i18n, total, AmountStyle::Symbol)
+                .text()
+                .to_owned()
+        ),
+        Err(error) => {
+            tracing::warn!(?error, ?category, "a deleted category's total can't be summed");
+            fl!(
+                i18n,
+                "dialog-delete-category-used-count",
+                name = name,
+                subcategories = 0,
+                count = count
+            )
+        }
+    }
 }
 
 /// The New Category Dialog, while it is open over the list.
