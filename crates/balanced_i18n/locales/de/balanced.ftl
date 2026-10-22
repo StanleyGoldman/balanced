@@ -240,6 +240,26 @@ dialog-delete-category-used-count = { $subcategories ->
         [one] 1 Buchung
        *[other] { $count } Buchungen
     } verwendet.
+# Coined from GnuCash's "zusammenführen" and "Kategorie".
+dialog-merge-categories-message = { $categories ->
+        [one] Diese Kategorie
+       *[other] Diese { $categories } Kategorien
+    } mit einer anderen zusammenführen:
+dialog-merge-categories-merge = Zusammenführen
+# Coined from GnuCash's "Buchung", as dialog-delete-category-move-to is.
+dialog-merge-categories-count = { $count ->
+        [0] Keine Buchung wird verschoben.
+        [one] 1 Buchung wird verschoben.
+       *[other] { $count } Buchungen werden verschoben.
+    }
+# Coined from GnuCash's "Buchung" and "zusammenführen".
+dialog-merge-categories-into = Buchungen zusammenführen in:
+# Coined.
+dialog-merge-categories-type-warning = Dies führt { $source_type } mit { $target_type } zusammen.
+# From GnuCash's "_Unbenutzte Konten anzeigen", "ausgewählte Unterkonten" and "Löschen".
+dialog-merge-categories-delete-sources = Unbenutzte ausgewählte Kategorien löschen
+# Coined from GnuCash's "Unterkonten" and "zusammenführen".
+dialog-merge-categories-has-subcategories = { $name } hat Unterkategorien und kann nicht zusammengeführt werden.
 dialog-new-account-back = Zurück
 dialog-new-account-next = Weiter
 dialog-new-account-finish = Fertigstellen

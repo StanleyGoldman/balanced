@@ -458,6 +458,27 @@ dialog-delete-category-used-count = { $subcategories ->
         [one] 1 transaction
        *[other] { $count } transactions
     }.
+# The merge Dialog, which moves the transactions of the $categories categories it lists
+# below this line to another category.
+dialog-merge-categories-message = Merge { $categories ->
+        [one] this category
+       *[other] these { $categories } categories
+    } into another:
+dialog-merge-categories-merge = Merge
+# How many transactions and split lines the merge moves.
+dialog-merge-categories-count = { $count ->
+        [0] No transaction moves.
+        [one] 1 transaction moves.
+       *[other] { $count } transactions move.
+    }
+# The list of categories that take the merged transactions.
+dialog-merge-categories-into = Merge transactions into:
+# Shown when the category picked has another type than a merged one. $source_type and
+# $target_type are each Income or Expense.
+dialog-merge-categories-type-warning = This merges { $source_type } into { $target_type }.
+dialog-merge-categories-delete-sources = Delete unused selected categories
+# Why a merge is refused. $name is the full path of a category it lists, as Food:Coffee.
+dialog-merge-categories-has-subcategories = { $name } has subcategories, so it can't be merged.
 
 # The New Account wizard. Each step's heading says how far through it is.
 dialog-new-account-step-type = Step 1 of 4: Type

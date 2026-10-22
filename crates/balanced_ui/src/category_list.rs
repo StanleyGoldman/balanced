@@ -3,8 +3,9 @@
 //! The Category List: a heavy Dialog showing every category as a tree, with its type,
 //! how many transactions and split lines use each and their total, and every account a
 //! transaction can transfer to. A filter row above the tree narrows it by type, by
-//! usage and by name. Buttons beside the tree create, edit and delete categories; each
-//! change applies as soon as its confirm is accepted, as one undo step.
+//! usage and by name. Ctrl+click and Shift+click select several rows. Buttons beside
+//! the tree create, edit, merge and delete categories; each change applies as soon as
+//! its confirm is accepted, as one undo step.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -46,10 +47,15 @@ pub(crate) struct CategoryListForm {
     /// keeps but those under a folded category. `None` once the model, the filter or
     /// the folds change, so each index is in range of the model it was built from.
     shown: Option<Vec<usize>>,
-    /// The selected row, which is the tree's one Tab stop.
-    selected: Option<RowKey>,
-    /// Whether the selected row takes keyboard focus once it is drawn.
-    focus_selected: bool,
+    /// The selected rows.
+    selection: HashSet<RowKey>,
+    /// The row last clicked or stepped to, which is the tree's one Tab stop.
+    cursor: Option<RowKey>,
+    /// The row a Shift+click or a Shift+arrow selects from: the row last clicked or
+    /// stepped to without Shift.
+    anchor: Option<RowKey>,
+    /// Whether the cursor's row takes keyboard focus once it is drawn.
+    focus_cursor: bool,
     /// The offset the table scrolls to on the next frame, to show the selected row.
     scroll_to: Option<f32>,
     /// How far the table was scrolled on the last frame, and how tall its rows' view
@@ -61,6 +67,8 @@ pub(crate) struct CategoryListForm {
     edit: Option<OpenDialog<EditCategoryForm>>,
     /// The delete confirm, while it is open over the list.
     delete: Option<OpenDialog<DeleteConfirm>>,
+    /// The merge Dialog, while it is open over the list.
+    merge: Option<OpenDialog<MergeConfirm>>,
     /// Where focus goes now that a Dialog over the list has closed, until a frame
     /// restores it.
     focus_return: Option<FocusReturn>,
@@ -71,39 +79,67 @@ pub(crate) struct CategoryListForm {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DeleteConfirm {
     category: CategoryId,
-    /// The category the transactions move to, once one is picked (Reassign).
-    target: Option<CategoryId>,
-    /// Whether the target list is open, or the press that closed it is still held.
-    targets_held: bool,
-    /// Whether the target list takes keyboard focus when next drawn, as it does when
-    /// the confirm opens with Delete disabled.
-    focus_targets: bool,
+    targets: TargetPicker,
 }
 
-impl DeleteConfirm {
-    fn new(category: CategoryId) -> Self {
+/// The merge Dialog's form: which categories it merges, where their transactions go,
+/// and whether the emptied categories are deleted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MergeConfirm {
+    /// The categories merged, in tree order.
+    sources: Vec<CategoryId>,
+    targets: TargetPicker,
+    /// Whether the merge deletes the categories it empties.
+    delete_sources: bool,
+}
+
+impl MergeConfirm {
+    fn new(sources: Vec<CategoryId>) -> Self {
         Self {
-            category,
+            sources,
+            targets: TargetPicker::new(),
+            delete_sources: true,
+        }
+    }
+}
+
+/// The list of categories that take moved transactions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TargetPicker {
+    /// The category the transactions move to, once one is picked.
+    target: Option<CategoryId>,
+    /// Whether the target list is open, or the press that closed it is still held.
+    held: bool,
+    /// Whether the target list takes keyboard focus when next drawn, as it does when
+    /// its Dialog opens with the default button disabled.
+    take_focus: bool,
+}
+
+impl TargetPicker {
+    fn new() -> Self {
+        Self {
             target: None,
-            targets_held: false,
-            focus_targets: true,
+            held: false,
+            take_focus: true,
         }
     }
 
-    /// The target list, which leaves out the categories in `branch`: every other
-    /// category, by its path. It takes keyboard focus the first time it is drawn.
-    fn target_picker(
+    /// The target list, labelled `label`, which leaves out the categories in
+    /// `excluded`: every other category, by its path. It takes keyboard focus the first
+    /// time it is drawn.
+    fn show(
         &mut self,
         ui: &mut egui::Ui,
         i18n: &Localizer,
         view: &LedgerView,
-        branch: &[CategoryId],
+        label: String,
+        excluded: &[CategoryId],
     ) {
         let mut paths: Vec<(CategoryId, String)> = view
             .categories()
             .iter()
             .map(Category::id)
-            .filter(|id| !branch.contains(id))
+            .filter(|id| !excluded.contains(id))
             .filter_map(|id| Some((id, category_text(view, id)?)))
             .collect();
         paths.sort_by(|(_, a), (_, b)| i18n.compare_text(a, b));
@@ -112,8 +148,8 @@ impl DeleteConfirm {
             .and_then(|target| category_text(view, target))
             .unwrap_or_else(|| fl!(i18n, "dialog-delete-category-choose"));
         let picker = ui.horizontal(|ui| {
-            let label = ui.label(fl!(i18n, "dialog-delete-category-move-to"));
-            ComboBox::from_id_salt("category_list_delete_target")
+            let label = ui.label(label);
+            ComboBox::from_id_salt("category_list_target")
                 .selected_text(chosen)
                 .width(ui.available_width())
                 .show_ui(ui, |ui| {
@@ -124,12 +160,12 @@ impl DeleteConfirm {
                 .response
                 .labelled_by(label.id)
         });
-        if std::mem::take(&mut self.focus_targets) {
+        if std::mem::take(&mut self.take_focus) {
             picker.inner.request_focus();
         }
         let open = ComboBox::is_open(ui.ctx(), picker.inner.id);
-        let held = self.targets_held && ui.input(|input| input.pointer.any_down());
-        self.targets_held = open || held;
+        let held = self.held && ui.input(|input| input.pointer.any_down());
+        self.held = open || held;
     }
 }
 
@@ -193,10 +229,11 @@ impl Show {
 }
 
 /// What a click in the button column asks for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ButtonAction {
     New,
     Edit(CategoryId),
+    Merge(Vec<CategoryId>),
     Delete(CategoryId),
 }
 
@@ -210,16 +247,44 @@ struct Scrolled {
 /// What a click or a key in the table asks for, done once the table is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TableAction {
-    /// Select the row, and give it focus.
-    Select(RowKey),
+    /// Pick the row, and give it focus.
+    Pick(RowKey, Pick),
+    /// The row took focus, as Tab gives it: select it alone, unless it is the cursor.
+    Focused(RowKey),
     /// Fold the category, or unfold it, and select it.
     Toggle(CategoryId),
     /// Fold or unfold the category, as ← and → do.
     SetFold(CategoryId, Fold),
-    /// Select the row shown below the selected one, as ↓ does.
-    Down,
-    /// Select the row shown above the selected one, as ↑ does.
-    Up,
+    /// Pick the row shown below the cursor, as ↓ does.
+    Down(Pick),
+    /// Pick the row shown above the cursor, as ↑ does.
+    Up(Pick),
+}
+
+/// How picking a row changes the selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pick {
+    /// Select the row alone, as a click or an arrow key does.
+    Only,
+    /// Select the row, or take it out of the selection, keeping the rest, as Ctrl+click
+    /// does.
+    Toggle,
+    /// Select every row shown from the anchor to the row, as Shift+click and Shift with
+    /// an arrow do.
+    Range,
+}
+
+impl Pick {
+    /// How a click with `modifiers` held picks its row.
+    fn of_click(modifiers: Modifiers) -> Self {
+        if modifiers.shift {
+            Self::Range
+        } else if modifiers.command {
+            Self::Toggle
+        } else {
+            Self::Only
+        }
+    }
 }
 
 /// How a row is drawn this frame.
@@ -525,8 +590,11 @@ impl CategoryListForm {
         let shown = self.shown.take().unwrap_or_else(|| {
             let shown = model.shown(&self.filter, &self.folded);
             // A row a fold or the filter hides is no longer selected.
-            let still_shown = |key| shown.iter().any(|&index| model.rows[index].key == key);
-            self.selected = self.selected.filter(|&key| still_shown(key));
+            let still_shown =
+                |key: &RowKey| shown.iter().any(|&index| model.rows[index].key == *key);
+            self.selection.retain(still_shown);
+            self.cursor = self.cursor.filter(still_shown);
+            self.anchor = self.anchor.filter(still_shown);
             shown
         });
         let mut asked = None;
@@ -574,8 +642,15 @@ impl CategoryListForm {
                     self.edit = Some(OpenDialog::new(ui.ctx(), form));
                 }
             }
+            Some(ButtonAction::Merge(sources)) => {
+                self.merge = Some(OpenDialog::new(ui.ctx(), MergeConfirm::new(sources)));
+            }
             Some(ButtonAction::Delete(category)) => {
-                self.delete = Some(OpenDialog::new(ui.ctx(), DeleteConfirm::new(category)));
+                let confirm = DeleteConfirm {
+                    category,
+                    targets: TargetPicker::new(),
+                };
+                self.delete = Some(OpenDialog::new(ui.ctx(), confirm));
             }
         }
         self.model = Some(model);
@@ -615,7 +690,7 @@ impl CategoryListForm {
         shown: Vec<usize>,
     ) {
         let tab_stop = self
-            .selected
+            .cursor
             .or_else(|| shown.first().map(|&index| model.rows[index].key));
         let mut action = None;
         // A solid scroll bar takes its own width beside the columns, so it never covers
@@ -644,7 +719,8 @@ impl CategoryListForm {
                 body.rows(row_height, shown.len(), |mut table_row| {
                     // egui asks only for rows below `shown.len()`.
                     let row = &model.rows[shown[table_row.index()]];
-                    let selected = self.selected == Some(row.key);
+                    let selected = self.selection.contains(&row.key);
+                    let cursor = self.cursor == Some(row.key);
                     let state = RowState {
                         fold: match row.key {
                             RowKey::Category(id) if self.folded.contains(&id) => Fold::Folded,
@@ -652,7 +728,7 @@ impl CategoryListForm {
                         },
                         selected,
                         tab_stop: tab_stop == Some(row.key),
-                        take_focus: selected && self.focus_selected,
+                        take_focus: cursor && self.focus_cursor,
                     };
                     table_row.set_selected(selected);
                     table_row.col(|ui| {
@@ -678,10 +754,12 @@ impl CategoryListForm {
                         });
                     });
                     if state.take_focus {
-                        self.focus_selected = false;
+                        self.focus_cursor = false;
                     }
                     if action.is_none() && table_row.response().clicked() {
-                        action = Some(TableAction::Select(row.key));
+                        let response = table_row.response();
+                        let pick = Pick::of_click(response.ctx.input(|input| input.modifiers));
+                        action = Some(TableAction::Pick(row.key, pick));
                     }
                 });
             });
@@ -695,21 +773,31 @@ impl CategoryListForm {
         }
     }
 
-    /// The button column: New… always, and Edit… and Delete… for a selected category.
-    /// Merge… and Hide wait on their own Dialogs. Returns what a click asked for.
+    /// The button column: New… always, Edit… and Delete… for one selected category, and
+    /// Merge… for selected categories with no transfer row among them. Hide waits on its
+    /// own Dialog. Returns what a click asked for.
     fn buttons(
         &self,
         ui: &mut egui::Ui,
         i18n: &Localizer,
         model: &ListModel,
     ) -> Option<ButtonAction> {
-        let selected = self
-            .selected
-            .and_then(|key| model.rows.iter().find(|row| row.key == key));
-        let editable = selected.and_then(|row| match row.key {
-            RowKey::Category(id) => Some(id),
-            RowKey::Transfer(_) => None,
-        });
+        // The selected categories in tree order, or `None` when a transfer row is
+        // selected.
+        let categories: Option<Vec<CategoryId>> = model
+            .rows
+            .iter()
+            .filter(|row| self.selection.contains(&row.key))
+            .map(|row| match row.key {
+                RowKey::Category(id) => Some(id),
+                RowKey::Transfer(_) => None,
+            })
+            .collect();
+        let editable = match categories.as_deref() {
+            Some(&[category]) => Some(category),
+            _ => None,
+        };
+        let mergeable = categories.filter(|categories| !categories.is_empty());
         let mut asked = None;
         ui.vertical(|ui| {
             let width = ui.available_width() - ui.spacing().item_spacing.x;
@@ -723,8 +811,9 @@ impl CategoryListForm {
             if button(fl!(i18n, "dialog-category-list-edit"), editable.is_some()) {
                 asked = editable.map(ButtonAction::Edit);
             }
-            // TODO(#489): Merge… the selected categories.
-            button(fl!(i18n, "dialog-category-list-merge"), false);
+            if button(fl!(i18n, "dialog-category-list-merge"), mergeable.is_some()) {
+                asked = mergeable.map(ButtonAction::Merge);
+            }
             // TODO(#491): Hide and Unhide a category.
             button(fl!(i18n, "dialog-category-list-hide"), false);
             if button(fl!(i18n, "dialog-category-list-delete"), editable.is_some()) {
@@ -745,13 +834,18 @@ impl CategoryListForm {
         let shown = self.shown.as_deref().unwrap_or_default();
         let place = |key| shown.iter().position(|&index| model.rows[index].key == key);
         match action {
-            TableAction::Select(key) => self.select(key),
+            TableAction::Pick(key, pick) => self.pick(model, key, pick),
+            TableAction::Focused(key) => {
+                if self.cursor != Some(key) {
+                    self.pick(model, key, Pick::Only);
+                }
+            }
             TableAction::Toggle(id) => {
                 if !self.folded.remove(&id) {
                     self.folded.insert(id);
                 }
+                self.pick(model, RowKey::Category(id), Pick::Only);
                 self.shown = None;
-                self.select(RowKey::Category(id));
             }
             TableAction::SetFold(id, fold) => {
                 let changed = match fold {
@@ -762,38 +856,66 @@ impl CategoryListForm {
                     self.shown = None;
                 }
             }
-            // The selected row is one of `shown`, so `shown` has a row at `at` and its
+            // The cursor's row is one of `shown`, so `shown` has a row at `at` and its
             // neighbours are in range.
-            TableAction::Down => {
-                if let Some(at) = self.selected.and_then(place) {
-                    self.step_to(model, (at + 1).min(shown.len() - 1), pitch);
+            TableAction::Down(pick) => {
+                if let Some(at) = self.cursor.and_then(place) {
+                    self.step_to(model, (at + 1).min(shown.len() - 1), pick, pitch);
                 }
             }
-            TableAction::Up => {
-                if let Some(at) = self.selected.and_then(place) {
-                    self.step_to(model, at.saturating_sub(1), pitch);
+            TableAction::Up(pick) => {
+                if let Some(at) = self.cursor.and_then(place) {
+                    self.step_to(model, at.saturating_sub(1), pick, pitch);
                 }
             }
         }
     }
 
-    /// Selects the row shown at `place`, scrolling it into view, in `model`, whose
-    /// rows are `pitch` apart.
-    fn step_to(&mut self, model: &ListModel, place: usize, pitch: f32) {
+    /// Picks the row shown at `place`, scrolling it into view, in `model`, whose rows
+    /// are `pitch` apart.
+    fn step_to(&mut self, model: &ListModel, place: usize, pick: Pick, pitch: f32) {
         let Some(&index) = self.shown.as_deref().and_then(|shown| shown.get(place)) else {
             return;
         };
         // `shown` holds indices into the model it was built from.
-        self.select(model.rows[index].key);
+        self.pick(model, model.rows[index].key, pick);
         self.scroll_to = self
             .scrolled
             .and_then(|view| row_in_view(view, place, pitch));
     }
 
-    /// Selects the row `key`, which takes keyboard focus once it is drawn.
-    fn select(&mut self, key: RowKey) {
-        self.selected = Some(key);
-        self.focus_selected = true;
+    /// Picks the row `key` of `model` as `pick` says, and makes it the cursor, which
+    /// takes keyboard focus once it is drawn.
+    fn pick(&mut self, model: &ListModel, key: RowKey, pick: Pick) {
+        match pick {
+            Pick::Only => {
+                self.selection = HashSet::from([key]);
+                self.anchor = Some(key);
+            }
+            Pick::Toggle => {
+                if !self.selection.remove(&key) {
+                    self.selection.insert(key);
+                }
+                self.anchor = Some(key);
+            }
+            Pick::Range => {
+                let shown = self.shown.as_deref().unwrap_or_default();
+                let place = |key| shown.iter().position(|&index| model.rows[index].key == key);
+                if let Some((from, to)) = self.anchor.and_then(place).zip(place(key)) {
+                    let range = from.min(to)..=from.max(to);
+                    self.selection = shown[range]
+                        .iter()
+                        .map(|&index| model.rows[index].key)
+                        .collect();
+                } else {
+                    // With no anchor shown, Shift picks the row alone.
+                    self.selection = HashSet::from([key]);
+                    self.anchor = Some(key);
+                }
+            }
+        }
+        self.cursor = Some(key);
+        self.focus_cursor = true;
     }
 }
 
@@ -905,8 +1027,11 @@ fn name_cell(
         .galley(pos2(name_rect.left(), top), galley, color);
     ui.advance_cursor_after_rect(cell);
     let mut action = None;
-    if response.clicked() || response.gained_focus() {
-        action = Some(TableAction::Select(row.key));
+    if response.clicked() {
+        let pick = Pick::of_click(ui.input(|input| input.modifiers));
+        action = Some(TableAction::Pick(row.key, pick));
+    } else if response.gained_focus() {
+        action = Some(TableAction::Focused(row.key));
     }
     if response.has_focus() {
         action = row_keys(ui, response.id, row).or(action);
@@ -921,8 +1046,8 @@ fn name_cell(
 }
 
 /// The keys the focused name of `row`, widget `id`, takes from egui's focus moves: ↑
-/// and ↓ move the selection, and ← and → fold and unfold a row with categories under
-/// it.
+/// and ↓ move the selection, Shift+↑ and Shift+↓ extend it, and ← and → fold and
+/// unfold a row with categories under it.
 fn row_keys(ui: &egui::Ui, id: Id, row: &ListRow) -> Option<TableAction> {
     ui.memory_mut(|memory| {
         memory.set_focus_lock_filter(
@@ -939,10 +1064,16 @@ fn row_keys(ui: &egui::Ui, id: Id, row: &ListRow) -> Option<TableAction> {
         RowKey::Category(id) if row.has_children => Some(id),
         RowKey::Category(_) | RowKey::Transfer(_) => None,
     };
-    if pressed(Key::ArrowDown) {
-        Some(TableAction::Down)
+    let shifted = |key| ui.input_mut(|input| input.consume_key(Modifiers::SHIFT, key));
+    // Without Shift in its pattern, `consume_key` takes Shift+↓ too, so Shift goes first.
+    if shifted(Key::ArrowDown) {
+        Some(TableAction::Down(Pick::Range))
+    } else if shifted(Key::ArrowUp) {
+        Some(TableAction::Up(Pick::Range))
+    } else if pressed(Key::ArrowDown) {
+        Some(TableAction::Down(Pick::Only))
     } else if pressed(Key::ArrowUp) {
-        Some(TableAction::Up)
+        Some(TableAction::Up(Pick::Only))
     } else if pressed(Key::ArrowLeft) {
         folding.map(|id| TableAction::SetFold(id, Fold::Folded))
     } else if pressed(Key::ArrowRight) {
@@ -1011,6 +1142,7 @@ pub(crate) fn show(
     .show(ctx, dialog, |ui, form| form.show(ui, i18n, theme, view));
     // Drawn after the list, so they are raised above it.
     show_delete(ctx, i18n, theme, commands, &mut dialog.form, view);
+    show_merge(ctx, i18n, theme, commands, &mut dialog.form, view);
     show_new_category(ctx, i18n, theme, commands, &mut dialog.form, view);
     show_edit(ctx, i18n, theme, commands, &mut dialog.form, view);
     match outcome {
@@ -1047,18 +1179,19 @@ fn show_delete(
         fl!(i18n, "dialog-cancel"),
         theme,
     )
-    .with_accept_enabled(!used || dialog.form.target.is_some())
-    .with_body_popup(dialog.form.targets_held)
+    .with_accept_enabled(!used || dialog.form.targets.target.is_some())
+    .with_body_popup(dialog.form.targets.held)
     .show(ctx, dialog, |ui, confirm| {
         ui.label(delete_message(i18n, view, &branch, name));
         if used {
-            confirm.target_picker(ui, i18n, view, &branch);
+            let label = fl!(i18n, "dialog-delete-category-move-to");
+            confirm.targets.show(ui, i18n, view, label, &branch);
         }
     });
     match outcome {
         DialogOutcome::Open => return,
         DialogOutcome::Accepted => {
-            let command = delete_command(view, &branch, dialog.form.target);
+            let command = delete_command(view, &branch, dialog.form.targets.target);
             commands.send(AppCommand::Domain(command));
         }
         DialogOutcome::Cancelled => {}
@@ -1138,6 +1271,145 @@ fn delete_message(
             )
         }
     }
+}
+
+/// The merge Dialog, while it is open over the list. It names the categories merged and
+/// how many transactions move, and asks where they go; Merge stays disabled until a
+/// target is picked. A target of another type than a merged category draws a warning.
+/// A category with subcategories can't be merged, so it is named and Merge stays
+/// disabled. It closes as its Command is sent, so a refusal goes to the Status bar.
+fn show_merge(
+    ctx: &egui::Context,
+    i18n: &Localizer,
+    theme: &Theme,
+    commands: &CommandSender,
+    form: &mut CategoryListForm,
+    view: &LedgerView,
+) {
+    let Some(dialog) = &mut form.merge else {
+        return;
+    };
+    // The ledger can't change while the Dialog blocks the list.
+    let sources = dialog.form.sources.clone();
+    let parents: Vec<CategoryId> = sources
+        .iter()
+        .copied()
+        .filter(|&source| view.branch(source).len() > 1)
+        .collect();
+    let outcome = LightDialog::new(
+        Id::new("category_list_merge"),
+        fl!(i18n, "dialog-merge-categories-merge"),
+        fl!(i18n, "dialog-cancel"),
+        theme,
+    )
+    // A refused merge shows no target list, so Merge stays disabled.
+    .with_accept_enabled(dialog.form.targets.target.is_some())
+    .with_body_popup(dialog.form.targets.held)
+    .show(ctx, dialog, |ui, confirm| {
+        ui.label(fl!(
+            i18n,
+            "dialog-merge-categories-message",
+            categories = sources.len()
+        ));
+        for &source in &sources {
+            if let Some(path) = category_text(view, source) {
+                ui.label(path);
+            }
+        }
+        if !parents.is_empty() {
+            for &parent in &parents {
+                let name = category_text(view, parent).unwrap_or_default();
+                let text = fl!(
+                    i18n,
+                    "dialog-merge-categories-has-subcategories",
+                    name = name
+                );
+                ui.label(RichText::new(text).color(ui.visuals().error_fg_color));
+            }
+            return;
+        }
+        let count: usize = sources
+            .iter()
+            .map(|&source| view.category_usage(source).count())
+            .sum();
+        ui.label(fl!(i18n, "dialog-merge-categories-count", count = count));
+        let label = fl!(i18n, "dialog-merge-categories-into");
+        let branches: Vec<CategoryId> = sources
+            .iter()
+            .flat_map(|&source| view.branch(source))
+            .collect();
+        confirm.targets.show(ui, i18n, view, label, &branches);
+        if let Some(warning) = type_warning(i18n, view, &sources, confirm.targets.target) {
+            ui.label(RichText::new(warning).color(ui.visuals().warn_fg_color));
+        }
+        ui.checkbox(
+            &mut confirm.delete_sources,
+            fl!(i18n, "dialog-merge-categories-delete-sources"),
+        );
+    });
+    match outcome {
+        DialogOutcome::Open => return,
+        DialogOutcome::Accepted => {
+            let form = &dialog.form;
+            // Merge takes no click and no Enter until a target is picked.
+            if let Some(target) = form.targets.target
+                && let Some(command) =
+                    merge_command(view, &form.sources, target, form.delete_sources)
+            {
+                commands.send(AppCommand::Domain(command));
+            }
+        }
+        DialogOutcome::Cancelled => {}
+        DialogOutcome::Back | DialogOutcome::Discarded => {
+            unreachable!("a confirm has no Back or Discard button")
+        }
+    }
+    form.focus_return = form.merge.take().map(|dialog| dialog.close(ctx));
+}
+
+/// The warning the merge Dialog shows when `target` is of another type than one of
+/// `sources`, naming both types, or `None` when they all share its type.
+fn type_warning(
+    i18n: &Localizer,
+    view: &LedgerView,
+    sources: &[CategoryId],
+    target: Option<CategoryId>,
+) -> Option<String> {
+    let target_type = view.category(target?)?.category_type();
+    let source_type = sources
+        .iter()
+        .filter_map(|&source| view.category(source))
+        .map(Category::category_type)
+        .find(|&source_type| source_type != target_type)?;
+    Some(fl!(
+        i18n,
+        "dialog-merge-categories-type-warning",
+        source_type = type_label(i18n, source_type),
+        target_type = type_label(i18n, target_type)
+    ))
+}
+
+/// The Command that moves the transactions and split lines of each of `sources` to
+/// `target`, then deletes each source when `delete_sources` says so, as one undo step;
+/// or `None` when it would change nothing.
+fn merge_command(
+    view: &LedgerView,
+    sources: &[CategoryId],
+    target: CategoryId,
+    delete_sources: bool,
+) -> Option<DomainCommand> {
+    let reassigns = sources
+        .iter()
+        .copied()
+        .filter(|&from| view.category_usage(from).count() > 0)
+        .map(|from| DomainCommand::ReassignCategory { from, to: target });
+    let deletes = sources
+        .iter()
+        .copied()
+        .filter(|_| delete_sources)
+        .map(|category| DomainCommand::DeleteCategory { category });
+    let commands: Vec<DomainCommand> = reassigns.chain(deletes).collect();
+    (!commands.is_empty()).then_some(DomainCommand::Compound(commands))
 }
 
 /// The New Category Dialog, while it is open over the list.

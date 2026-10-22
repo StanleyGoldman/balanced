@@ -10,7 +10,7 @@ use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::App as _;
 use eframe::egui::accesskit::Action;
-use eframe::egui::accesskit::Role;
+use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::style::ScrollStyle;
 use eframe::egui::{Event, Key, Modifiers, PointerButton, Vec2, pos2, vec2};
 use egui_kittest::Harness;
@@ -593,34 +593,35 @@ fn with_no_row_selected_only_new_is_enabled() {
 }
 
 #[test]
-fn selecting_an_unused_category_with_none_under_it_enables_delete() {
+fn selecting_an_unused_category_with_none_under_it_enables_merge_and_delete() {
     let mut harness = category_list_with_pets();
 
     click_row(&mut harness, "Pets");
 
-    assert_eq!(enabled_buttons(&harness), NEW_EDIT_AND_DELETE);
+    assert_eq!(enabled_buttons(&harness), NEW_EDIT_MERGE_AND_DELETE);
 }
 
-/// The button column with a category selected: New…, Edit… and Delete… enabled.
-const NEW_EDIT_AND_DELETE: [(&str, bool); 5] = [
+/// The button column with a category selected: New…, Edit…, Merge… and Delete…
+/// enabled.
+const NEW_EDIT_MERGE_AND_DELETE: [(&str, bool); 5] = [
     ("New…", true),
     ("Edit…", true),
-    ("Merge…", false),
+    ("Merge…", true),
     ("Hide", false),
     ("Delete…", true),
 ];
 
 #[test]
-fn selecting_a_used_category_enables_delete() {
+fn selecting_a_used_category_enables_merge_and_delete() {
     let mut harness = category_list();
 
     click_row(&mut harness, "Groceries");
 
-    assert_eq!(enabled_buttons(&harness), NEW_EDIT_AND_DELETE);
+    assert_eq!(enabled_buttons(&harness), NEW_EDIT_MERGE_AND_DELETE);
 }
 
 #[test]
-fn selecting_a_parent_enables_delete() {
+fn selecting_a_parent_enables_merge_and_delete() {
     let mut ledger = Ledger::stub();
     let pets = create_category(&mut ledger, "Pets", None);
     create_category(&mut ledger, "Vet", Some(pets));
@@ -629,7 +630,7 @@ fn selecting_a_parent_enables_delete() {
 
     click_row(&mut harness, "Pets");
 
-    assert_eq!(enabled_buttons(&harness), NEW_EDIT_AND_DELETE);
+    assert_eq!(enabled_buttons(&harness), NEW_EDIT_MERGE_AND_DELETE);
 }
 
 #[test]
@@ -1243,4 +1244,334 @@ fn search_unfolds_a_folded_parent_above_a_match() {
         .map(|(level, name)| (level, name.to_owned()))
     );
     assert_eq!(expanded(&harness, "Home"), Some(true));
+}
+
+/// Clicks the row named `name` while `modifiers` are held, pressed before the click and
+/// released after it as a user holds Ctrl or Shift, then runs the App until it settles.
+fn click_row_holding(harness: &mut Harness<'static, App>, modifiers: Modifiers, name: &str) {
+    harness.event(Event::ModifiersChanged(modifiers));
+    harness.run();
+    click_row(harness, name);
+    harness.event(Event::ModifiersChanged(Modifiers::NONE));
+    harness.run();
+}
+
+/// The names of the selected rows, top to bottom.
+fn selected_rows(harness: &Harness<'static, App>) -> Vec<String> {
+    harness
+        .query_all_by_role(Role::TreeItem)
+        .filter(|row| row.accesskit_node().is_selected() == Some(true))
+        .map(|row| row.accesskit_node().label().unwrap_or_default())
+        .collect()
+}
+
+#[test]
+fn ctrl_click_adds_a_row_to_the_selection() {
+    let mut harness = category_list();
+    click_row(&mut harness, "Groceries");
+
+    click_row_holding(&mut harness, Modifiers::COMMAND, "Fuel");
+
+    assert_eq!(selected_rows(&harness), ["Fuel", "Groceries"]);
+}
+
+#[test]
+fn ctrl_click_on_a_selected_row_takes_it_out_of_the_selection() {
+    let mut harness = category_list();
+    click_row(&mut harness, "Groceries");
+    click_row_holding(&mut harness, Modifiers::COMMAND, "Fuel");
+
+    click_row_holding(&mut harness, Modifiers::COMMAND, "Groceries");
+
+    assert_eq!(selected_rows(&harness), ["Fuel"]);
+}
+
+#[test]
+fn shift_click_selects_every_row_shown_between() {
+    let mut harness = category_list();
+    click_row(&mut harness, "Groceries");
+
+    click_row_holding(&mut harness, Modifiers::SHIFT, "Coffee Shops");
+
+    assert_eq!(
+        selected_rows(&harness),
+        ["Groceries", "Restaurants", "Coffee Shops"]
+    );
+}
+
+#[test]
+fn shift_down_extends_the_selection() {
+    let mut harness = category_list();
+    click_row(&mut harness, "Groceries");
+
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::ArrowDown);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::ArrowDown);
+    harness.run();
+
+    assert_eq!(
+        selected_rows(&harness),
+        ["Groceries", "Restaurants", "Coffee Shops"]
+    );
+}
+
+#[test]
+fn a_click_selects_one_row_again() {
+    let mut harness = category_list();
+    click_row(&mut harness, "Groceries");
+    click_row_holding(&mut harness, Modifiers::COMMAND, "Fuel");
+
+    click_row(&mut harness, "Household");
+
+    assert_eq!(selected_rows(&harness), ["Household"]);
+}
+
+/// The button column with several categories selected: New… and Merge… enabled.
+const NEW_AND_MERGE: [(&str, bool); 5] = [
+    ("New…", true),
+    ("Edit…", false),
+    ("Merge…", true),
+    ("Hide", false),
+    ("Delete…", false),
+];
+
+#[test]
+fn selecting_several_categories_enables_only_new_and_merge() {
+    let mut harness = category_list();
+    click_row(&mut harness, "Groceries");
+
+    click_row_holding(&mut harness, Modifiers::COMMAND, "Fuel");
+
+    assert_eq!(enabled_buttons(&harness), NEW_AND_MERGE);
+}
+
+#[test]
+fn merge_is_disabled_with_a_transfer_row_selected() {
+    let mut harness = category_list();
+    click_row(&mut harness, "Groceries");
+
+    click_row_holding(&mut harness, Modifiers::COMMAND, "[Emergency Fund]");
+
+    assert_eq!(enabled_buttons(&harness), ONLY_NEW);
+}
+
+/// The merge Dialog's target list's label.
+const MERGE_INTO: &str = "Merge transactions into:";
+
+/// Selects the rows named `names`, the first with a click and the rest with
+/// Ctrl+click, then opens the merge Dialog.
+fn merge_rows(harness: &mut Harness<'static, App>, names: &[&str]) {
+    let (first, rest) = names.split_first().expect("a merge has a category");
+    click_row(harness, first);
+    for name in rest {
+        click_row_holding(harness, Modifiers::COMMAND, name);
+    }
+    click(harness, "Merge…");
+}
+
+/// Picks `path` from the merge Dialog's target list.
+fn choose_merge_target(harness: &mut Harness<'static, App>, path: &str) {
+    harness
+        .get_by_role_and_label(Role::ComboBox, MERGE_INTO)
+        .click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, path)
+        .scroll_to_me();
+    harness.run();
+    click(harness, path);
+}
+
+/// What the merge Dialog's target list shows as picked.
+fn merge_target(harness: &Harness<'static, App>) -> Option<String> {
+    harness
+        .get_by_role_and_label(Role::ComboBox, MERGE_INTO)
+        .accesskit_node()
+        .value()
+}
+
+#[test]
+fn merge_names_the_categories_and_how_many_transactions_move() {
+    let mut harness = category_list();
+
+    merge_rows(&mut harness, &["Groceries", "Household"]);
+
+    assert!(shows(&harness, "Merge these 2 categories into another:"));
+    assert!(shows(&harness, "Food & Dining:Groceries"));
+    assert!(shows(&harness, "Shopping:Household"));
+    assert!(shows(&harness, "6,003 transactions move."));
+}
+
+#[test]
+fn merge_waits_for_a_category_to_merge_into() {
+    let mut harness = category_list();
+    merge_rows(&mut harness, &["Groceries", "Household"]);
+    assert_eq!(merge_target(&harness).as_deref(), Some("Choose a category"));
+    assert!(!enabled(&harness, "Merge"));
+
+    choose_merge_target(&mut harness, "Auto & Transport:Fuel");
+
+    assert_eq!(
+        merge_target(&harness).as_deref(),
+        Some("Auto & Transport:Fuel")
+    );
+    assert!(enabled(&harness, "Merge"));
+}
+
+#[test]
+fn the_merge_targets_leave_out_the_merged_categories() {
+    let mut harness = category_list();
+    merge_rows(&mut harness, &["Groceries", "Household"]);
+
+    harness
+        .get_by_role_and_label(Role::ComboBox, MERGE_INTO)
+        .click();
+    harness.run();
+
+    assert!(!offers(&harness, "Food & Dining:Groceries"));
+    assert!(!offers(&harness, "Shopping:Household"));
+    assert!(offers(&harness, "Shopping"));
+}
+
+#[test]
+fn delete_unused_selected_categories_starts_ticked() {
+    let mut harness = category_list();
+
+    merge_rows(&mut harness, &["Groceries", "Household"]);
+
+    let checkbox =
+        harness.get_by_role_and_label(Role::CheckBox, "Delete unused selected categories");
+    assert_eq!(checkbox.accesskit_node().toggled(), Some(Toggled::True));
+}
+
+/// Merges the rows named `names` into the category at `path`, ticking or unticking
+/// "Delete unused selected categories" to match `delete_sources`, then closes the
+/// Category List.
+fn merge_into(
+    harness: &mut Harness<'static, App>,
+    names: &[&str],
+    path: &str,
+    delete_sources: bool,
+) {
+    merge_rows(harness, names);
+    choose_merge_target(harness, path);
+    if !delete_sources {
+        harness
+            .get_by_role_and_label(Role::CheckBox, "Delete unused selected categories")
+            .click();
+        harness.run();
+    }
+    click(harness, "Merge");
+    click(harness, "Close");
+}
+
+#[test]
+fn merging_moves_every_transaction_and_split_line_and_deletes_the_sources() {
+    let mut harness = category_list_with_pets();
+
+    merge_into(&mut harness, &["Groceries", "Household"], "Pets", true);
+    open_category_list(&mut harness);
+
+    assert!(!categories(&harness).contains(&"Groceries".to_owned()));
+    assert!(!categories(&harness).contains(&"Household".to_owned()));
+    // Groceries' 4,002 transactions and split lines totalling -$500,228.79, and
+    // Household's 2,001 totalling -$400,063.90.
+    assert_eq!(
+        usage(&harness, "Pets"),
+        "Expense: 6,003 transactions, totalling -$900,292.69"
+    );
+}
+
+#[test]
+fn merging_with_the_box_unticked_keeps_the_sources_empty() {
+    let mut harness = category_list_with_pets();
+
+    merge_into(&mut harness, &["Groceries", "Household"], "Pets", false);
+    open_category_list(&mut harness);
+
+    assert!(categories(&harness).contains(&"Groceries".to_owned()));
+    assert!(categories(&harness).contains(&"Household".to_owned()));
+    assert_eq!(usage(&harness, "Groceries"), "Expense: No transactions");
+    assert_eq!(usage(&harness, "Household"), "Expense: No transactions");
+    assert_eq!(
+        usage(&harness, "Pets"),
+        "Expense: 6,003 transactions, totalling -$900,292.69"
+    );
+}
+
+#[test]
+fn one_undo_puts_back_every_merged_category_and_its_transactions() {
+    let mut harness = category_list_with_pets();
+    merge_into(&mut harness, &["Groceries", "Household"], "Pets", true);
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    open_category_list(&mut harness);
+
+    assert!(categories(&harness).contains(&"Groceries".to_owned()));
+    assert!(categories(&harness).contains(&"Household".to_owned()));
+    assert_eq!(
+        usage(&harness, "Groceries"),
+        "Expense: 4,002 transactions, totalling -$500,228.79"
+    );
+    assert_eq!(
+        usage(&harness, "Household"),
+        "Expense: 2,001 transactions, totalling -$400,063.90"
+    );
+    assert_eq!(usage(&harness, "Pets"), "Expense: No transactions");
+}
+
+#[test]
+fn a_merge_into_another_type_warns_naming_both_types() {
+    let mut harness = category_list();
+    merge_rows(&mut harness, &["Household"]);
+
+    choose_merge_target(&mut harness, "Income:Salary");
+
+    assert!(shows(&harness, "This merges Expense into Income."));
+    assert!(enabled(&harness, "Merge"));
+}
+
+#[test]
+fn a_merge_into_the_same_type_has_no_warning() {
+    let mut harness = category_list();
+    merge_rows(&mut harness, &["Household"]);
+
+    choose_merge_target(&mut harness, "Auto & Transport:Fuel");
+
+    assert!(!shows(&harness, "This merges Expense into Expense."));
+    assert!(!shows(&harness, "This merges Expense into Income."));
+}
+
+#[test]
+fn a_merge_into_another_type_goes_ahead() {
+    let mut harness = category_list();
+
+    merge_into(&mut harness, &["Household"], "Income:Salary", true);
+    open_category_list(&mut harness);
+
+    assert!(!categories(&harness).contains(&"Household".to_owned()));
+    // Salary's 2,002 totalling $2,006,400.00, and Household's 2,001 totalling
+    // -$400,063.90.
+    assert_eq!(
+        usage(&harness, "Salary"),
+        "Income: 4,003 transactions, totalling $1,606,336.10"
+    );
+}
+
+#[test]
+fn merging_a_category_with_subcategories_is_refused_naming_it() {
+    let mut harness = category_list();
+
+    merge_rows(&mut harness, &["Food & Dining", "Household"]);
+
+    assert!(shows(
+        &harness,
+        "Food & Dining has subcategories, so it can't be merged."
+    ));
+    assert!(!shows(
+        &harness,
+        "Shopping:Household has subcategories, so it can't be merged."
+    ));
+    assert!(!enabled(&harness, "Merge"));
 }
