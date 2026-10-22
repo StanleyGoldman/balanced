@@ -408,3 +408,29 @@ fn a_parent_reassigned_and_deleted_with_its_subcategory_comes_back_in_one_undo()
         ])
     );
 }
+
+#[test]
+fn a_split_line_not_in_the_category_is_not_reassigned() {
+    let mut household = Household::new();
+    let (groceries, dining) = (household.groceries, household.dining);
+    let target = household.transaction("Target");
+    let before = household.ledger.snapshot();
+
+    let result = household.ledger.apply(DomainCommand::ReassignUses {
+        from: groceries,
+        to: dining,
+        uses: vec![CategoryUse::SplitLine {
+            split: target,
+            line: 1,
+        }],
+    });
+
+    assert_eq!(
+        result,
+        Err(DomainError::NotInCategory {
+            transaction: target,
+            category: groceries
+        })
+    );
+    assert_eq!(household.ledger.snapshot(), before);
+}
