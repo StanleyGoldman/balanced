@@ -18,7 +18,7 @@ use egui_wgpu::{WgpuSetup, WgpuSetupCreateNew, wgpu};
 use icu_calendar::{Date, Iso};
 
 use crate::combobox::FieldChoices;
-use crate::command::AppCommand;
+use crate::command::{AnswerTo, AppCommand, RowSave};
 use crate::preferences::{Preferences, Scheme};
 use crate::register_filter::RegisterFilter;
 use crate::register_model::{RegisterModel, RegisterSort, Showing, TodayDivider};
@@ -80,6 +80,16 @@ pub fn open_data_file(harness: &Harness<'_, App>, path: &Path) {
 /// frame as the Commands the App sent before it.
 pub fn send_domain(harness: &Harness<'_, App>, command: DomainCommand) {
     harness.state().send(AppCommand::Domain(command));
+}
+
+/// Sends `command` as the save of a Register row whose answer nothing waits on, as a
+/// row's save sent as another row's changes start is, so it is applied in the same
+/// frame as the Commands the App sent before it.
+pub fn send_silent_save(harness: &Harness<'_, App>, command: DomainCommand) {
+    harness.state().send(AppCommand::SaveRow(RowSave {
+        command,
+        answer: AnswerTo::StatusBar,
+    }));
 }
 
 /// A closed data file named `name` in `dir`, in US dollars, holding checking accounts

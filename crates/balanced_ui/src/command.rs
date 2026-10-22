@@ -27,10 +27,9 @@ use crate::split_dialog::SplitStart;
 pub(crate) enum AppCommand {
     /// Apply a change to the ledger. A rejected change shows in the Status bar.
     Domain(DomainCommand),
-    /// Apply the save of the Register's editing row, or the post of its draft row. A
-    /// rejected save goes back to the Register, which says why in the "Can't save this
-    /// transaction" Dialog, or else shows in the Status bar.
-    SaveRow(DomainCommand),
+    /// Apply the save of a Register row, or the post of its draft row, and hand the
+    /// ledger's answer to what the save names.
+    SaveRow(RowSave),
     /// Apply the change the open Dialog's form asks for. The Dialog closes once it is
     /// applied, and shows a rejected change inline, staying open.
     SubmitForm(DomainCommand),
@@ -87,6 +86,26 @@ pub(crate) enum AppCommand {
     Quit,
 }
 
+/// The save of a Register row, or the post of its draft row, with what the ledger's
+/// answer to it goes to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RowSave {
+    pub(crate) command: DomainCommand,
+    pub(crate) answer: AnswerTo,
+}
+
+/// What the ledger's answer to the save of a Register row goes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AnswerTo {
+    /// The Register, which waits on it: an applied save moves on, and a refused one
+    /// says why in the "Can't save this transaction" Dialog.
+    Register,
+    /// The Status bar, as nothing waits on it: a refused save shows there, and an
+    /// applied one changes nothing more. A row's save sent as another row's changes
+    /// start, or as the window closes, goes here.
+    StatusBar,
+}
+
 /// A Dialog the Main window can open, with what it opens prefilled with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DialogKind {
@@ -98,7 +117,7 @@ pub(crate) enum DialogKind {
     ChangeReconciledAmount {
         transaction: TransactionId,
         amount: Money,
-        save: DomainCommand,
+        save: RowSave,
     },
     /// The confirm for setting a Reconciled transaction back to Cleared. Nothing opens
     /// unless the open Register shows the transaction as Reconciled, or while its

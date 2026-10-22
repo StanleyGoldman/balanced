@@ -19,7 +19,7 @@ use crate::account_bar::{AccountBar, BarFrame};
 use crate::accounts_model::AccountsModel;
 use crate::calculator::{self, Calculator};
 use crate::category_list::{self, CategoryListForm, CategoryListOutcome};
-use crate::command::{AppCommand, CommandSender, DialogKind, StatusMessage};
+use crate::command::{AppCommand, CommandSender, DialogKind, RowSave, StatusMessage};
 use crate::data_file::{self, DataFileRefusal};
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
 use crate::formatted_amount::FormattedAmount;
@@ -125,7 +125,7 @@ struct DeleteTransactionForm {
 struct ReconciledAmountForm {
     transaction: TransactionId,
     amount: FormattedAmount,
-    save: DomainCommand,
+    save: RowSave,
 }
 
 /// The leave-row prompt's form: which kind of row is being left, and whether "Always

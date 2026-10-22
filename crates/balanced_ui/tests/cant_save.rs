@@ -5,6 +5,7 @@
 
 use balanced_core::{
     AccountId, AccountStatus, CurrencyCode, DomainCommand, Ledger, Money, NewTransaction,
+    TransactionEdit, TransactionId,
 };
 use balanced_i18n::Localizer;
 use balanced_ui::testing;
@@ -388,6 +389,9 @@ fn account(ledger: &Ledger, name: &str) -> AccountId {
         .id()
 }
 
+/// Why the ledger refuses any change to the closed transfer of [`with_closed_transfer`].
+const TRANSFER_CLOSED: &str = "The other account of this transfer is closed, so the transfer can't be made, changed or deleted.";
+
 /// The stub ledger with a transfer of 200 from Everyday Checking to Emergency Fund on
 /// 1 October 2026, paid to "Saving up", and Emergency Fund closed since, so the ledger
 /// refuses any change to the transfer.
@@ -433,10 +437,7 @@ fn a_save_the_ledger_refuses_says_why() {
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
     assert!(refused(&harness));
-    assert!(shows_text(
-        &harness,
-        "The other account of this transfer is closed, so the transfer can't be made, changed or deleted."
-    ));
+    assert!(shows_text(&harness, TRANSFER_CLOSED));
     assert_eq!(status(&harness), Vec::<String>::new());
 }
 
@@ -454,6 +455,22 @@ fn continue_editing_after_the_ledger_refuses_a_save_opens_the_cell_saved_from() 
 /// Presses Enter, then sends `other` before the App applies the save Enter sent, so
 /// the ledger takes both in the same frame.
 fn press_enter_with(harness: &mut Harness<'static, App>, other: DomainCommand) {
+    send_enter(harness);
+    testing::send_domain(harness, other);
+    harness.run();
+}
+
+/// Presses Enter, then sends `save` as a row's save nothing waits on, as one sent as
+/// another row's changes start, before the App applies the save Enter sent, so the
+/// ledger takes both in the same frame.
+fn press_enter_with_silent_save(harness: &mut Harness<'static, App>, save: DomainCommand) {
+    send_enter(harness);
+    testing::send_silent_save(harness, save);
+    harness.run();
+}
+
+/// Plays an Enter press in one frame, sending what it sends without applying it.
+fn send_enter(harness: &mut Harness<'static, App>) {
     send(
         harness,
         Event::Key {
@@ -464,8 +481,6 @@ fn press_enter_with(harness: &mut Harness<'static, App>, other: DomainCommand) {
             modifiers: Modifiers::NONE,
         },
     );
-    testing::send_domain(harness, other);
-    harness.run();
 }
 
 /// The Command that renames the account named `name` in `ledger` to `to`, which the
@@ -486,10 +501,7 @@ fn a_save_refused_as_another_change_is_applied_keeps_the_rows_changes() {
 
     press_enter_with(&mut harness, other);
 
-    assert!(shows_text(
-        &harness,
-        "The other account of this transfer is closed, so the transfer can't be made, changed or deleted."
-    ));
+    assert!(shows_text(&harness, TRANSFER_CLOSED));
     click_button(&mut harness, "Continue editing");
     assert_eq!(editor(&harness, "Payment").as_deref(), Some("250.00"));
 }
@@ -518,6 +530,78 @@ fn a_post_refused_as_another_change_is_applied_keeps_the_draft() {
         editor(&harness, "Payment").as_deref(),
         Some("792,281,625,142,643,375,935,439,503.35")
     );
+}
+
+/// The id of the transaction paid to `payee` in the account named `account`.
+fn transaction(ledger: &Ledger, account: &str, payee: &str) -> TransactionId {
+    ledger
+        .snapshot()
+        .accounts()
+        .iter()
+        .find(|summary| summary.account().name() == account)
+        .expect("the ledger has the account")
+        .register()
+        .iter()
+        .find(|entry| entry.transaction().payee() == payee)
+        .expect("the account has a transaction paid to the payee")
+        .transaction()
+        .id()
+}
+
+/// The save of a row that changes the payment of transaction `transaction` to
+/// `payment` US dollars.
+fn change_payment(transaction: TransactionId, payment: &str) -> DomainCommand {
+    let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
+    let amount = format!("-{payment}").parse().expect("a decimal");
+    DomainCommand::Compound(vec![DomainCommand::EditTransaction {
+        transaction,
+        edit: TransactionEdit::Amount(Money::new(amount, usd).expect("an amount")),
+    }])
+}
+
+#[test]
+fn a_silent_save_refused_as_a_post_is_applied_says_why_in_the_status_bar() {
+    let ledger = with_closed_transfer();
+    let transfer = transaction(&ledger, "Everyday Checking", "Saving up");
+    let mut harness = app_on(ledger);
+    open(&mut harness, "Everyday Checking");
+    fill_draft(&mut harness, Some("Food & Dining:Groceries"), "12");
+
+    press_enter_with_silent_save(&mut harness, change_payment(transfer, "250.00"));
+
+    assert!(!refused(&harness));
+    assert_eq!(status(&harness), [TRANSFER_CLOSED]);
+    // The post went through, the one change the ledger applied, and the draft row is
+    // empty, with the cell cursor on it.
+    assert_eq!(cursor(&harness), "");
+    assert!(can_undo(&mut harness));
+}
+
+#[test]
+fn a_save_refused_as_a_silent_save_is_applied_keeps_the_rows_changes() {
+    let ledger = with_closed_transfer();
+    let fresh_market = transaction(&ledger, "Everyday Checking", "Fresh Market");
+    let mut harness = app_on(ledger);
+    change_closed_transfer(&mut harness);
+
+    press_enter_with_silent_save(&mut harness, change_payment(fresh_market, "90.00"));
+
+    assert!(refused(&harness));
+    assert!(shows_text(&harness, TRANSFER_CLOSED));
+    click_button(&mut harness, "Continue editing");
+    assert_eq!(editor(&harness, "Payment").as_deref(), Some("250.00"));
+}
+
+/// Whether the Edit menu's Undo item is enabled, opening the menu to look and closing
+/// it again.
+fn can_undo(harness: &mut Harness<'static, App>) -> bool {
+    click_button(harness, "Edit");
+    let enabled = !harness
+        .get_by_role_and_label(Role::Button, "Undo Ctrl+Z")
+        .accesskit_node()
+        .is_disabled();
+    click_button(harness, "Edit");
+    enabled
 }
 
 /// The label of the cell under the cell cursor.
