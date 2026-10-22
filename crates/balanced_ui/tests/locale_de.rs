@@ -471,3 +471,28 @@ fn the_category_lists_buttons_and_delete_confirm_read_german() {
     harness.get_by_label("Home:Insurance löschen? Keine Buchung verwendet diese Kategorie.");
     harness.get_by_role_and_label(Role::Button, "Löschen");
 }
+
+#[test]
+fn the_edit_category_dialog_reads_german() {
+    let mut harness = app();
+    harness
+        .get_by_role_and_label(Role::Button, "Extras")
+        .click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Category List…")
+        .click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::TreeItem, "Groceries")
+        .click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Bearbeiten …")
+        .click();
+    harness.run();
+
+    harness.get_by_role_and_label(Role::Window, "Kategorie bearbeiten");
+    harness.get_by_role_and_label(Role::ComboBox, "Übergeordnete Kategorie");
+    harness.get_by_role_and_label(Role::RadioButton, "Ausgabe");
+}

@@ -17,6 +17,7 @@ mod data_file;
 mod date_field;
 mod dialog;
 mod draft_row;
+mod edit_category;
 mod formatted_amount;
 mod go_to_date;
 mod i18n;

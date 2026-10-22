@@ -575,6 +575,16 @@ const ONLY_NEW: [(&str, bool); 5] = [
     ("Delete…", false),
 ];
 
+/// The button column with a category selected that is used or has categories under
+/// it: New… and Edit… enabled.
+const NEW_AND_EDIT: [(&str, bool); 5] = [
+    ("New…", true),
+    ("Edit…", true),
+    ("Merge…", false),
+    ("Hide", false),
+    ("Delete…", false),
+];
+
 /// Which of the button column's buttons are enabled, in order.
 fn enabled_buttons(harness: &Harness<'static, App>) -> Vec<(&'static str, bool)> {
     ["New…", "Edit…", "Merge…", "Hide", "Delete…"]
@@ -602,7 +612,7 @@ fn selecting_an_unused_category_with_none_under_it_enables_delete() {
         enabled_buttons(&harness),
         [
             ("New…", true),
-            ("Edit…", false),
+            ("Edit…", true),
             ("Merge…", false),
             ("Hide", false),
             ("Delete…", true),
@@ -616,7 +626,7 @@ fn delete_is_not_offered_for_a_used_category() {
 
     click_row(&mut harness, "Groceries");
 
-    assert_eq!(enabled_buttons(&harness), ONLY_NEW);
+    assert_eq!(enabled_buttons(&harness), NEW_AND_EDIT);
 }
 
 #[test]
@@ -629,7 +639,7 @@ fn delete_is_not_offered_for_a_parent() {
 
     click_row(&mut harness, "Pets");
 
-    assert_eq!(enabled_buttons(&harness), ONLY_NEW);
+    assert_eq!(enabled_buttons(&harness), NEW_AND_EDIT);
 }
 
 #[test]

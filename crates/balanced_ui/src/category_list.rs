@@ -2,7 +2,7 @@
 
 //! The Category List: a heavy Dialog showing every category as a tree, with its type,
 //! how many transactions and split lines use each and their total, and every account a
-//! transaction can transfer to. Buttons beside the tree create and delete categories;
+//! transaction can transfer to. Buttons beside the tree create, edit and delete categories;
 //! each change applies as soon as its confirm is accepted, as one undo step.
 
 use std::collections::{BTreeMap, HashSet};
@@ -22,6 +22,7 @@ use icu_locale::{LanguageIdentifier, Locale};
 
 use crate::command::{AppCommand, CommandSender};
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
+use crate::edit_category::{self, EditCategoryForm, EditCategoryOutcome};
 use crate::formatted_amount::FormattedAmount;
 use crate::i18n::fl;
 use crate::new_category::{self, NewCategoryForm, NewCategoryOutcome};
@@ -51,6 +52,8 @@ pub(crate) struct CategoryListForm {
     scrolled: Option<Scrolled>,
     /// The New Category Dialog, while it is open over the list.
     new_category: Option<OpenDialog<NewCategoryForm>>,
+    /// The Edit Category Dialog, while it is open over the list.
+    edit: Option<OpenDialog<EditCategoryForm>>,
     /// The delete confirm, while it is open over the list.
     delete: Option<OpenDialog<DeleteConfirm>>,
     /// Where focus goes now that a Dialog over the list has closed, until a frame
@@ -68,6 +71,7 @@ struct DeleteConfirm {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ButtonAction {
     New,
+    Edit(CategoryId),
     Delete(CategoryId),
 }
 
@@ -296,14 +300,21 @@ impl ListRow {
 }
 
 impl CategoryListForm {
-    /// Hands the New Category Dialog open over the list the ledger's answer to the
-    /// category it asked for: it closes once the category is created, and shows a
+    /// Hands the New Category or Edit Category Dialog open over the list the ledger's
+    /// answer to the change it asked for: it closes once the change is made, and shows a
     /// refusal itself. Returns the answer when no Dialog over the list waits on it.
     pub(crate) fn applied(
         &mut self,
         ctx: &egui::Context,
         applied: Result<(), DomainError>,
     ) -> Option<Result<(), DomainError>> {
+        if let Some(dialog) = &mut self.edit {
+            match applied {
+                Ok(()) => self.focus_return = self.edit.take().map(|dialog| dialog.close(ctx)),
+                Err(error) => dialog.form.rejected(error),
+            }
+            return None;
+        }
         let Some(dialog) = &mut self.new_category else {
             return Some(applied);
         };
@@ -356,6 +367,13 @@ impl CategoryListForm {
             Some(ButtonAction::New) => {
                 let form = NewCategoryForm::new(String::new());
                 self.new_category = Some(OpenDialog::new(ui.ctx(), form));
+            }
+            Some(ButtonAction::Edit(category)) => {
+                // The list is drawn from `view`, so its categories are in it.
+                if let Some(category) = view.category(category) {
+                    let form = EditCategoryForm::new(category);
+                    self.edit = Some(OpenDialog::new(ui.ctx(), form));
+                }
             }
             Some(ButtonAction::Delete(category)) => {
                 self.delete = Some(OpenDialog::new(ui.ctx(), DeleteConfirm { category }));
@@ -455,23 +473,27 @@ impl CategoryListForm {
         }
     }
 
-    /// The button column: New… always, and Delete… for a selected category nothing
-    /// uses, with none under it. Edit…, Merge… and Hide wait on their own Dialogs.
-    /// Returns what a click asked for.
+    /// The button column: New… always, Edit… for a selected category, and Delete… for a
+    /// selected category nothing uses, with none under it. Merge… and Hide wait on their
+    /// own Dialogs. Returns what a click asked for.
     fn buttons(
         &self,
         ui: &mut egui::Ui,
         i18n: &Localizer,
         model: &ListModel,
     ) -> Option<ButtonAction> {
-        // TODO(#488): Delete… a used category or a parent, with Reassign.
-        let deletable = self
+        let selected = self
             .selected
-            .and_then(|key| model.rows.iter().find(|row| row.key == key))
-            .and_then(|row| match row.key {
-                RowKey::Category(id) if !row.used && !row.has_children => Some(id),
-                RowKey::Category(_) | RowKey::Transfer(_) => None,
-            });
+            .and_then(|key| model.rows.iter().find(|row| row.key == key));
+        let editable = selected.and_then(|row| match row.key {
+            RowKey::Category(id) => Some(id),
+            RowKey::Transfer(_) => None,
+        });
+        // TODO(#488): Delete… a used category or a parent, with Reassign.
+        let deletable = selected.and_then(|row| match row.key {
+            RowKey::Category(id) if !row.used && !row.has_children => Some(id),
+            RowKey::Category(_) | RowKey::Transfer(_) => None,
+        });
         let mut asked = None;
         ui.vertical(|ui| {
             let width = ui.available_width() - ui.spacing().item_spacing.x;
@@ -482,8 +504,9 @@ impl CategoryListForm {
             if button(fl!(i18n, "dialog-category-list-new"), true) {
                 asked = Some(ButtonAction::New);
             }
-            // TODO(#490): Edit… a category.
-            button(fl!(i18n, "dialog-category-list-edit"), false);
+            if button(fl!(i18n, "dialog-category-list-edit"), editable.is_some()) {
+                asked = editable.map(ButtonAction::Edit);
+            }
             // TODO(#489): Merge… the selected categories.
             button(fl!(i18n, "dialog-category-list-merge"), false);
             // TODO(#491): Hide and Unhide a category.
@@ -776,6 +799,7 @@ pub(crate) fn show(
     // Drawn after the list, so they are raised above it.
     show_delete(ctx, i18n, theme, commands, &mut dialog.form, view);
     show_new_category(ctx, i18n, theme, commands, &mut dialog.form, view);
+    show_edit(ctx, i18n, theme, commands, &mut dialog.form, view);
     match outcome {
         DialogOutcome::Open => CategoryListOutcome::Open,
         DialogOutcome::Accepted | DialogOutcome::Cancelled => CategoryListOutcome::Closed,
@@ -841,6 +865,26 @@ fn show_new_category(
         NewCategoryOutcome::Open => {}
         NewCategoryOutcome::Cancelled => {
             form.focus_return = form.new_category.take().map(|dialog| dialog.close(ctx));
+        }
+    }
+}
+
+/// The Edit Category Dialog, while it is open over the list.
+fn show_edit(
+    ctx: &egui::Context,
+    i18n: &Localizer,
+    theme: &Theme,
+    commands: &CommandSender,
+    form: &mut CategoryListForm,
+    view: &LedgerView,
+) {
+    let Some(dialog) = &mut form.edit else {
+        return;
+    };
+    match edit_category::show(ctx, i18n, theme, commands, dialog, view) {
+        EditCategoryOutcome::Open => {}
+        EditCategoryOutcome::Closed => {
+            form.focus_return = form.edit.take().map(|dialog| dialog.close(ctx));
         }
     }
 }

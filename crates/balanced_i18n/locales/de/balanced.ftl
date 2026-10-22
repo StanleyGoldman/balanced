@@ -124,6 +124,14 @@ dialog-cancel = Abbrechen
 dialog-close = Dialog schließen
 dialog-ok = OK
 dialog-new-category-type = Typ
+# Coined from GnuCash's "Konto bearbeiten".
+dialog-edit-category-title = Kategorie bearbeiten
+dialog-edit-category-name = Name
+# Coined from GnuCash's "Übergeordnetes Konto".
+dialog-edit-category-parent = Übergeordnete Kategorie
+# Coined.
+dialog-edit-category-top-level = (Oberste Ebene)
+dialog-edit-category-type = Typ
 dialog-category-list-type = Typ
 dialog-category-list-typed-usage = { $category_type }: { $usage }
 dialog-go-to-date-title = Zu Datum gehen
@@ -260,6 +268,10 @@ calculator = Taschenrechner
 calculator-paste = Einfügen
 calculator-close = Taschenrechner schließen
 status-no-paste-target = Klicken Sie zuerst auf eine Zelle für Zahlung oder Einzahlung, dann fügt Einfügen das Ergebnis dort ein.
+# Coined.
+status-category-under-itself = Eine Kategorie kann nicht unter sich selbst oder eine ihrer Unterkategorien verschoben werden.
+# Coined.
+status-subcategory-type = Eine Unterkategorie hat den Typ der Kategorie an der Spitze ihres Baums.
 status-paste-not-an-amount = Die Rechnung im Taschenrechner ist kein Betrag, daher gibt es nichts einzufügen.
 
 ## Date field
