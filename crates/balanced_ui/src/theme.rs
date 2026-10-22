@@ -218,6 +218,9 @@ impl Theme {
     /// The width of the Category List's Total column: room for a seven-figure total.
     pub(crate) const CATEGORY_LIST_TOTAL_WIDTH: f32 = 120.0;
 
+    /// The width of the Category List's button column: room for its longest label.
+    pub(crate) const CATEGORY_LIST_BUTTONS_WIDTH: f32 = 132.0;
+
     /// The width of each Name field in Manage Accounts.
     pub(crate) const MANAGE_ACCOUNTS_NAME_WIDTH: f32 = 200.0;
 

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
 
-//! Support for tests: the App drawn by the lavapipe software rasterizer, and the
-//! snapshot check with the project thresholds (see `docs/practices/testing.md`).
+//! Support for tests: the App drawn by the lavapipe software rasterizer, the snapshot
+//! check with the project thresholds (see `docs/practices/testing.md`), and the check of
+//! the Preferences the App saved.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -119,6 +120,27 @@ pub fn check_snapshot(harness: &mut Harness<'_, App>, name: &str) {
     if let Err(err) = result {
         panic!("{err}");
     }
+}
+
+/// Checks that the preferences file in `config_dir` holds each key of `expected`, a
+/// `preferences.toml` fragment, with its value. Keys the fragment leaves out aren't
+/// checked.
+///
+/// # Panics
+///
+/// If the file is missing or isn't TOML, if `expected` isn't TOML, or if a key of
+/// `expected` is missing from the file or holds another value.
+#[track_caller]
+pub fn check_saved_preferences(config_dir: &Path, expected: &str) {
+    let text = std::fs::read_to_string(config_dir.join("preferences.toml"))
+        .expect("the App wrote the preferences file");
+    let saved: toml::Table = toml::from_str(&text).expect("the preferences file is TOML");
+    let expected: toml::Table = toml::from_str(expected).expect("the expected keys are TOML");
+    let checked: toml::Table = saved
+        .into_iter()
+        .filter(|(key, _)| expected.contains_key(key))
+        .collect();
+    assert_eq!(checked, expected);
 }
 
 /// A wgpu setup that only accepts lavapipe, Mesa's Vulkan software rasterizer, so every
