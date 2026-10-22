@@ -553,6 +553,29 @@ fn ctrl_z_outside_a_text_field_asks_before_undoing() {
 }
 
 #[test]
+fn ctrl_z_behind_the_category_list_asks_before_undoing() {
+    let mut harness = app();
+    save_a_rename(&mut harness);
+    change_bean_there(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "Tools").click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Category List…")
+        .click();
+    harness.run();
+
+    press(&mut harness, Modifiers::COMMAND, Key::Z);
+
+    assert!(prompted(&harness));
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Window, "Category List")
+            .is_some()
+    );
+    assert!(shows(&harness, "Corner Shop"));
+}
+
+#[test]
 fn discard_before_an_undo_throws_the_changes_away_then_undoes() {
     let mut harness = app();
     save_a_rename(&mut harness);

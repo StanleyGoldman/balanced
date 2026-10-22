@@ -25,7 +25,7 @@ use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDi
 use crate::formatted_amount::FormattedAmount;
 use crate::go_to_date::GoToDateForm;
 use crate::i18n::fl;
-use crate::keymap::{self, KEYMAP};
+use crate::keymap::{self, Binding, KEYMAP};
 use crate::layout::Layout;
 use crate::manage_accounts::{self, ManageAccountsForm, ManageAccountsOutcome};
 use crate::menu_nav::{DrawnMenus, MenuNav};
@@ -661,15 +661,40 @@ impl MainWindow {
         }
     }
 
+    /// The Main window Shortcuts that act now. No Shortcut acts behind a Dialog, except
+    /// Undo and Redo behind a Dialog whose changes apply as soon as they're confirmed,
+    /// while nothing is open over it. The Category List is the one such Dialog.
+    fn shortcuts(&self) -> Vec<Binding> {
+        let applies_at_once = self
+            .category_list
+            .as_ref()
+            .is_some_and(|dialog| !dialog.form.covered());
+        if applies_at_once && !self.dialog_open_besides_category_list() {
+            KEYMAP
+                .iter()
+                .copied()
+                .filter(|binding| binding.action.steps_undo_history())
+                .collect()
+        } else if self.dialog_open() {
+            Vec::new()
+        } else {
+            KEYMAP.to_vec()
+        }
+    }
+
     /// Whether a Dialog is open over the Main window.
     fn dialog_open(&self) -> bool {
+        self.category_list.is_some() || self.dialog_open_besides_category_list()
+    }
+
+    /// Whether a Dialog other than the Category List is open over the Main window.
+    fn dialog_open_besides_category_list(&self) -> bool {
         self.delete_transaction.is_some()
             || self.reconciled_amount.is_some()
             || self.unreconcile.is_some()
             || self.new_account.is_some()
             || self.new_category.is_some()
             || self.manage_accounts.is_some()
-            || self.category_list.is_some()
             || self.preferences.is_some()
             || self.data_file_refusal.is_some()
             || self.go_to_date.is_some()
@@ -707,22 +732,21 @@ impl MainWindow {
             .focus_return
             .take()
             .and_then(|focus| focus.restore(ui.ctx()));
-        // No Main window Shortcut acts behind a Dialog.
         if !self.dialog_open() {
             self.menu_nav.keys(ui.ctx());
-            let actions = keymap::dispatch(ui.ctx(), KEYMAP);
-            // A Shortcut closes the open menu, and one pressed mid-edit saves the edit
-            // before it acts.
-            // TODO(#90): a refused commit stops the Shortcut and shows the error bubble.
-            if !actions.is_empty() {
-                self.menu_nav.close(ui.ctx());
-                if let Some(register) = self.register_mut() {
-                    register.commit_edit(ui.ctx(), i18n, preferences, commands);
-                }
+        }
+        let actions = keymap::dispatch(ui.ctx(), &self.shortcuts());
+        // A Shortcut closes the open menu, and one pressed mid-edit saves the edit
+        // before it acts.
+        // TODO(#90): a refused commit stops the Shortcut and shows the error bubble.
+        if !actions.is_empty() {
+            self.menu_nav.close(ui.ctx());
+            if let Some(register) = self.register_mut() {
+                register.commit_edit(ui.ctx(), i18n, preferences, commands);
             }
-            for action in actions {
-                commands.send(action.command());
-            }
+        }
+        for action in actions {
+            commands.send(action.command());
         }
         let accounts = match self.accounts.take() {
             Some(model) if model.is_current(view, i18n, today) => model,

@@ -577,6 +577,15 @@ impl ListRow {
 }
 
 impl CategoryListForm {
+    /// Whether a Dialog is open over the list: New Category, Edit Category, or the
+    /// delete or merge confirm.
+    pub(crate) fn covered(&self) -> bool {
+        self.new_category.is_some()
+            || self.edit.is_some()
+            || self.delete.is_some()
+            || self.merge.is_some()
+    }
+
     /// Hands the New Category or Edit Category Dialog open over the list the ledger's
     /// answer to the change it asked for: it closes once the change is made, and shows a
     /// refusal itself. Returns the answer when no Dialog over the list waits on it.
