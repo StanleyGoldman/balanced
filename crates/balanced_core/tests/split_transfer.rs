@@ -229,6 +229,24 @@ fn a_split_records_an_other_side_for_each_line_to_an_account() {
 }
 
 #[test]
+fn every_lines_other_side_takes_a_later_id_than_the_posted_split() {
+    let mut household = Household::new();
+
+    let split = household.save_from_a_split();
+
+    let other_sides: Vec<_> = household
+        .posted(household.savings)
+        .iter()
+        .map(Transaction::id)
+        .collect();
+    assert_eq!(other_sides.len(), 2);
+    assert!(
+        other_sides.iter().all(|&side| side > split),
+        "{other_sides:?} after {split:?}"
+    );
+}
+
+#[test]
 fn a_split_and_its_lines_other_sides_survive_a_reopen() {
     let mut household = Household::new();
     household.save_from_a_split();

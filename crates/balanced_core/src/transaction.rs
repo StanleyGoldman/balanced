@@ -36,7 +36,8 @@ pub enum SplitTarget {
     /// The line's part of the amount is in this category.
     Category(CategoryId),
     /// The line's part of the amount moved to or from another account, where the
-    /// transaction with this id is its other side.
+    /// transaction with this id is its other side. An other side the ledger makes for
+    /// the line takes a later id than the split's.
     Transfer(TransactionId),
 }
 
@@ -219,7 +220,8 @@ pub enum Allocation {
     Split(Vec<SplitLine>),
     /// One side of a transfer: the whole amount moved to or from another account, where
     /// the transaction with this id is its other side. The other side of a split line
-    /// names the split.
+    /// names the split. An other side the ledger makes, for a posting or an edit, takes a
+    /// later id than the side it was made for.
     Transfer(TransactionId),
 }
 

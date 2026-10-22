@@ -56,7 +56,9 @@ pub enum DomainCommand {
     /// Make every change in the list, in order, as one change that undoes in one step.
     /// When the ledger refuses any of them, it makes none.
     Compound(Vec<Self>),
-    /// Add a transaction to `account`, in date order after any already on its date.
+    /// Add a transaction to `account`, in date order after any already on its date. A
+    /// transfer's other side, and the other side of each split line to an account, takes
+    /// a later id than the transaction posted.
     PostTransaction {
         account: AccountId,
         transaction: NewTransaction,
@@ -225,8 +227,9 @@ pub enum TransactionEdit {
     /// side.
     Category(CategoryId),
     /// The account the whole amount moves to or from, which makes the transaction a
-    /// transfer. Its other side in that account is new, with the payee and memo copied,
-    /// and any other side it had before is deleted.
+    /// transfer. Unless its other side is already in that account, its other side there
+    /// is new, with the payee and memo copied and a later id than the transaction
+    /// edited, and any other side it had before is deleted.
     Transfer(AccountId),
     /// The whole amount, in the account's currency. A split transaction's amount is
     /// the sum of its lines, so it can't be edited here.
@@ -237,11 +240,11 @@ pub enum TransactionEdit {
     /// Every line of the transaction, which makes a transaction in one category or
     /// account a split. The lines must add up to `amount`, which becomes the
     /// transaction's amount. A new line to an account gets an other side there, with
-    /// the line's memo; a kept line's other side takes the line's new amount; and the
-    /// other side of every line the edit drops is deleted. A kept line names one of the
-    /// transaction's other sides, at most once, or the edit fails with
-    /// [`DomainError::UnknownTransaction`]. While any of the transaction's other sides is
-    /// in a closed account, its lines can't change.
+    /// the line's memo and a later id than the transaction edited; a kept line's other
+    /// side takes the line's new amount; and the other side of every line the edit drops
+    /// is deleted. A kept line names one of the transaction's other sides, at most once,
+    /// or the edit fails with [`DomainError::UnknownTransaction`]. While any of the
+    /// transaction's other sides is in a closed account, its lines can't change.
     Lines {
         amount: Money,
         lines: Vec<EditedSplitLine>,
