@@ -102,7 +102,7 @@ pub(crate) enum AnswerTo {
     Register,
     /// The Status bar, as nothing waits on it: a refused save shows there, and an
     /// applied one changes nothing more. A row's save sent as another row's changes
-    /// start goes here.
+    /// start, or as the window closes, goes here.
     StatusBar,
 }
 

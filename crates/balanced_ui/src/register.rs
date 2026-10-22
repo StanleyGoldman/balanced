@@ -765,9 +765,9 @@ pub(crate) struct Register {
     /// The row of the transaction with changes, showing them, as of the end of the
     /// last frame.
     changed_row: Option<RegisterRow>,
-    /// The save of a transaction's row, or the post of the draft row, sent to the
-    /// ledger until the Register catches up with the ledger's answer. A rejected post
-    /// keeps the draft.
+    /// The save of a transaction's row, sent to the ledger or waiting on the confirm,
+    /// or the post of the draft row, sent to the ledger, until the Register catches up
+    /// with the ledger's answer. A rejected post keeps the draft.
     pending: Option<Pending>,
     /// The changed row being left, from when leaving it asks until the answer is
     /// carried out.
@@ -1102,7 +1102,7 @@ impl Register {
         commands: &CommandSender,
     ) {
         self.settle_refused_leave(ctx, commands);
-        if self.leaving.is_some() || self.refused.is_some() || self.pending.is_some() {
+        if self.leaving.is_some() || self.refused.is_some() || self.waits_on_ledger() {
             return;
         }
         let Some(from) = self.unsaved.reopened_cell() else {
@@ -1528,8 +1528,9 @@ impl Register {
 
     /// Hands the Register the ledger's refusal of a save, `message`, which the
     /// "Can't save this transaction" Dialog says once the Register catches up with it.
-    /// Returns it when no save of the editing row is waiting on the ledger, such as a
-    /// save as another row's changes start, which the Status bar says instead.
+    /// Returns it when nothing waits on the ledger's answer any more, as when the
+    /// Register started over for another account while the save was on its way, which
+    /// the Status bar says instead.
     pub(crate) fn save_refused(&mut self, message: StatusMessage) -> Option<StatusMessage> {
         if !self.waits_on_ledger() {
             return Some(message);
@@ -1539,9 +1540,9 @@ impl Register {
     }
 
     /// Tells the Register that the ledger applied a save, which drops the editing row's
-    /// changes, or empties the draft row, once the Register catches up with it. A save
-    /// the editing row isn't waiting on, such as one sent as another row's changes
-    /// start, changes nothing here.
+    /// changes, or empties the draft row, once the Register catches up with it. With
+    /// nothing waiting on the answer any more, as when the Register started over for
+    /// another account while the save was on its way, it changes nothing here.
     pub(crate) fn save_applied(&mut self) {
         if self.waits_on_ledger() {
             self.ledger_answer = Some(LedgerAnswer::Applied);
@@ -3652,9 +3653,10 @@ fn send_save(
     rows: Rows<'_>,
     commands: &CommandSender,
 ) -> Confirm {
-    let Some(save) = changes.saving() else {
+    let Some(command) = changes.saving() else {
         return Confirm::NotAsked;
     };
+    let save = RowSave { command, answer };
     let transaction = changes.transaction();
     let saved = rows.saved(RowId::Transaction(transaction));
     let asks_first = saved.is_some_and(|row| amount_change_asks_first(row.cleared_status()));
@@ -3665,17 +3667,11 @@ fn send_save(
         commands.send(AppCommand::OpenDialog(DialogKind::ChangeReconciledAmount {
             transaction,
             amount,
-            save: RowSave {
-                command: save,
-                answer,
-            },
+            save,
         }));
         Confirm::Asked
     } else {
-        commands.send(AppCommand::SaveRow(RowSave {
-            command: save,
-            answer,
-        }));
+        commands.send(AppCommand::SaveRow(save));
         Confirm::NotAsked
     }
 }

@@ -389,6 +389,9 @@ fn account(ledger: &Ledger, name: &str) -> AccountId {
         .id()
 }
 
+/// Why the ledger refuses any change to the closed transfer of [`with_closed_transfer`].
+const TRANSFER_CLOSED: &str = "The other account of this transfer is closed, so the transfer can't be made, changed or deleted.";
+
 /// The stub ledger with a transfer of 200 from Everyday Checking to Emergency Fund on
 /// 1 October 2026, paid to "Saving up", and Emergency Fund closed since, so the ledger
 /// refuses any change to the transfer.
@@ -434,10 +437,7 @@ fn a_save_the_ledger_refuses_says_why() {
     press(&mut harness, Modifiers::NONE, Key::Enter);
 
     assert!(refused(&harness));
-    assert!(shows_text(
-        &harness,
-        "The other account of this transfer is closed, so the transfer can't be made, changed or deleted."
-    ));
+    assert!(shows_text(&harness, TRANSFER_CLOSED));
     assert_eq!(status(&harness), Vec::<String>::new());
 }
 
@@ -501,10 +501,7 @@ fn a_save_refused_as_another_change_is_applied_keeps_the_rows_changes() {
 
     press_enter_with(&mut harness, other);
 
-    assert!(shows_text(
-        &harness,
-        "The other account of this transfer is closed, so the transfer can't be made, changed or deleted."
-    ));
+    assert!(shows_text(&harness, TRANSFER_CLOSED));
     click_button(&mut harness, "Continue editing");
     assert_eq!(editor(&harness, "Payment").as_deref(), Some("250.00"));
 }
@@ -534,9 +531,6 @@ fn a_post_refused_as_another_change_is_applied_keeps_the_draft() {
         Some("792,281,625,142,643,375,935,439,503.35")
     );
 }
-
-/// Why the ledger refuses any change to the closed transfer of [`with_closed_transfer`].
-const TRANSFER_CLOSED: &str = "The other account of this transfer is closed, so the transfer can't be made, changed or deleted.";
 
 /// The id of the transaction paid to `payee` in the account named `account`.
 fn transaction(ledger: &Ledger, account: &str, payee: &str) -> TransactionId {
@@ -577,9 +571,10 @@ fn a_silent_save_refused_as_a_post_is_applied_says_why_in_the_status_bar() {
 
     assert!(!refused(&harness));
     assert_eq!(status(&harness), [TRANSFER_CLOSED]);
-    // The post went through: the draft row is empty, with the cell cursor on it.
-    assert!(shows(&harness, "Corner Shop"));
+    // The post went through, the one change the ledger applied, and the draft row is
+    // empty, with the cell cursor on it.
     assert_eq!(cursor(&harness), "");
+    assert!(can_undo(&mut harness));
 }
 
 #[test]
@@ -595,6 +590,18 @@ fn a_save_refused_as_a_silent_save_is_applied_keeps_the_rows_changes() {
     assert!(shows_text(&harness, TRANSFER_CLOSED));
     click_button(&mut harness, "Continue editing");
     assert_eq!(editor(&harness, "Payment").as_deref(), Some("250.00"));
+}
+
+/// Whether the Edit menu's Undo item is enabled, opening the menu to look and closing
+/// it again.
+fn can_undo(harness: &mut Harness<'static, App>) -> bool {
+    click_button(harness, "Edit");
+    let enabled = !harness
+        .get_by_role_and_label(Role::Button, "Undo Ctrl+Z")
+        .accesskit_node()
+        .is_disabled();
+    click_button(harness, "Edit");
+    enabled
 }
 
 /// The label of the cell under the cell cursor.
