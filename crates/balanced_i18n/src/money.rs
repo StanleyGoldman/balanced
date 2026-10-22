@@ -6,6 +6,8 @@
 //! version because its API breaks with every release. This module is the only code
 //! that names it.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 
 use icu_decimal::DecimalFormatter;
@@ -57,7 +59,7 @@ impl Currency {
 }
 
 /// Whether a formatted amount shows its currency.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AmountStyle {
     /// With the currency's symbol where the locale puts it: `$1,234.50`,
     /// `1.234,50 $`. For the Account bar, totals, and anywhere currencies mix.
@@ -66,42 +68,67 @@ pub enum AmountStyle {
     Bare,
 }
 
-/// Formats `amount` in `locale`, at the currency's decimal places, with the locale's
-/// standard minus sign for negative amounts.
-///
-/// `amount` should already be at the currency's decimal places, as `Money` amounts
-/// are. An amount with more significant decimal places shows all of them: display
-/// never rounds.
-pub(crate) fn format_amount(
-    locale: &Locale,
-    amount: Decimal,
-    currency: Currency,
-    style: AmountStyle,
-) -> String {
-    let significant_places =
-        u8::try_from(amount.normalize().scale()).expect("a Decimal's scale is at most 28");
-    let provider = IsoDigits {
-        decimal_places: currency.decimal_places.max(significant_places),
-    };
-    let prefs = locale.into();
-    let options = CurrencyFormatterOptions::default();
-    let formatter = match style {
-        AmountStyle::Symbol => {
-            CurrencyFormatter::try_new_symbol_unstable(&provider, prefs, currency.code, options)
-        }
-        AmountStyle::Bare => CurrencyFormatter::try_new_no_currency_unstable(
-            &provider,
-            prefs,
-            currency.code,
-            options,
-        ),
-    }
-    .expect("ICU4X's compiled currency data falls back to the root locale for every locale");
+/// The amount formatters of one formatting locale, each built the first time it is
+/// needed and kept: building one costs about six times as much as formatting with it,
+/// and a Register formats three amounts a row.
+#[derive(Debug)]
+pub(crate) struct AmountFormatters {
+    locale: Locale,
+    /// Each formatter by what it was built for: the currency, the decimal places it
+    /// shows and the style.
+    built: RefCell<HashMap<(CurrencyType, u8, AmountStyle), CurrencyFormatter<DecimalFormatter>>>,
+}
 
-    // The mantissa is an integer, so a negative zero amount loses its sign here.
-    let mut value = FixedDecimal::from(amount.mantissa());
-    value.multiply_pow10(-i16::try_from(amount.scale()).expect("a Decimal's scale is at most 28"));
-    formatter.format_fixed_decimal(&value).to_string()
+impl AmountFormatters {
+    pub(crate) fn new(locale: &Locale) -> Self {
+        Self {
+            locale: locale.clone(),
+            built: RefCell::new(HashMap::new()),
+        }
+    }
+
+    /// Formats `amount` at the currency's decimal places, with the locale's standard
+    /// minus sign for negative amounts.
+    ///
+    /// `amount` should already be at the currency's decimal places, as `Money` amounts
+    /// are. An amount with more significant decimal places shows all of them: display
+    /// never rounds.
+    pub(crate) fn format(&self, amount: Decimal, currency: Currency, style: AmountStyle) -> String {
+        let significant_places =
+            u8::try_from(amount.normalize().scale()).expect("a Decimal's scale is at most 28");
+        let decimal_places = currency.decimal_places.max(significant_places);
+        let mut built = self.built.borrow_mut();
+        let formatter = built
+            .entry((currency.code, decimal_places, style))
+            .or_insert_with(|| self.build(currency.code, decimal_places, style));
+        // The mantissa is an integer, so a negative zero amount loses its sign here.
+        let mut value = FixedDecimal::from(amount.mantissa());
+        value.multiply_pow10(
+            -i16::try_from(amount.scale()).expect("a Decimal's scale is at most 28"),
+        );
+        formatter.format_fixed_decimal(&value).to_string()
+    }
+
+    /// A formatter for `code` in `style`, showing `decimal_places` decimal places.
+    fn build(
+        &self,
+        code: CurrencyType,
+        decimal_places: u8,
+        style: AmountStyle,
+    ) -> CurrencyFormatter<DecimalFormatter> {
+        let provider = IsoDigits { decimal_places };
+        let prefs = (&self.locale).into();
+        let options = CurrencyFormatterOptions::default();
+        match style {
+            AmountStyle::Symbol => {
+                CurrencyFormatter::try_new_symbol_unstable(&provider, prefs, code, options)
+            }
+            AmountStyle::Bare => {
+                CurrencyFormatter::try_new_no_currency_unstable(&provider, prefs, code, options)
+            }
+        }
+        .expect("ICU4X's compiled currency data falls back to the root locale for every locale")
+    }
 }
 
 /// ICU4X's compiled data, except that every currency's decimal places come from
@@ -543,6 +570,15 @@ mod tests {
 
     fn usd() -> Currency {
         currency("USD", 2)
+    }
+
+    fn format_amount(
+        locale: &Locale,
+        amount: Decimal,
+        currency: Currency,
+        style: AmountStyle,
+    ) -> String {
+        AmountFormatters::new(locale).format(amount, currency, style)
     }
 
     fn symbols(locale: &Locale) -> NumberSymbols {
