@@ -1019,3 +1019,44 @@ pub(crate) fn type_label(i18n: &Localizer, category_type: CategoryType) -> Strin
 pub(crate) fn category_text(view: &LedgerView, id: CategoryId) -> Option<String> {
     Some(view.category_path(id)?.join(CATEGORY_SEPARATOR))
 }
+
+#[cfg(test)]
+mod tests {
+    use balanced_core::Ledger;
+
+    use super::*;
+
+    /// Everyday Checking's Register, sorted by `sort`, on a day before every row in
+    /// the stub.
+    fn all_after_today(sort: RegisterSort) -> RegisterModel {
+        let view = Ledger::stub().snapshot();
+        let summary = view
+            .accounts()
+            .iter()
+            .find(|summary| summary.account().name() == "Everyday Checking")
+            .expect("the stub has Everyday Checking");
+        let today = Date::try_new_iso(2000, 1, 1).expect("1 January 2000 is a date");
+        let shown = Showing {
+            sort,
+            filter: &RegisterFilter::default(),
+            today,
+            today_divider: TodayDivider::Shown { today },
+        };
+        RegisterModel::new(summary, &view, shown, &Localizer::for_tests())
+    }
+
+    #[test]
+    fn when_every_row_is_after_today_the_divider_sits_above_every_row() {
+        let model = all_after_today(RegisterSort::default());
+
+        assert_eq!(model.divider(), Some(0));
+    }
+
+    #[test]
+    fn under_a_descending_sort_when_every_row_is_after_today_the_divider_sits_below_every_row() {
+        let model = all_after_today(RegisterSort::default().clicked(SortKey::Date));
+
+        assert_ne!(model.rows(), []);
+        assert_eq!(model.divider(), Some(model.rows().len()));
+    }
+}
