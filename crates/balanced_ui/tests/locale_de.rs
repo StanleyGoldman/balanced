@@ -550,3 +550,59 @@ fn the_category_lists_filter_row_reads_german() {
         harness.get_by_role_and_label(Role::Button, option);
     }
 }
+
+/// Opens the merge Dialog for the Category List row named `name`.
+fn merge_row(harness: &mut Harness<'static, App>, name: &str) {
+    harness
+        .get_by_role_and_label(Role::Button, "Extras")
+        .click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Category List…")
+        .click();
+    harness.run();
+    harness.get_by_role_and_label(Role::TreeItem, name).click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Zusammenführen …")
+        .click();
+    harness.run();
+}
+
+#[test]
+fn the_merge_dialog_reads_german() {
+    let mut harness = app();
+    merge_row(&mut harness, "Household");
+
+    harness.get_by_label("Diese Kategorie mit einer anderen zusammenführen:");
+    harness.get_by_label("2.001 Buchungen werden verschoben.");
+    harness.get_by_role_and_label(Role::CheckBox, "Unbenutzte ausgewählte Kategorien löschen");
+    harness.get_by_role_and_label(Role::Button, "Zusammenführen");
+    let target = harness.get_by_role_and_label(Role::ComboBox, "Buchungen zusammenführen in:");
+    assert_eq!(
+        target.accesskit_node().value().as_deref(),
+        Some("Kategorie auswählen")
+    );
+    target.click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Income:Salary")
+        .scroll_to_me();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Income:Salary")
+        .click();
+    harness.run();
+
+    harness.get_by_label("Dies führt Ausgabe mit Einnahme zusammen.");
+}
+
+#[test]
+fn the_merge_refusal_reads_german() {
+    let mut harness = app();
+
+    merge_row(&mut harness, "Food & Dining");
+
+    harness
+        .get_by_label("Food & Dining hat Unterkategorien und kann nicht zusammengeführt werden:");
+}

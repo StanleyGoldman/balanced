@@ -443,10 +443,11 @@ dialog-delete-category-unused-parent = Delete { $name } and { $subcategories ->
         [one] its subcategory
        *[other] its { $subcategories } subcategories
     }? No transaction uses them.
-# The list of categories that take a deleted category's transactions, and what it
-# shows until one is picked.
+# The list of categories that take a deleted category's transactions.
 dialog-delete-category-move-to = Move those transactions to:
-dialog-delete-category-choose = Choose a category
+# What the list of categories that take a deleted or merged category's transactions
+# shows until one is picked.
+dialog-category-list-choose = Choose a category
 # The prompt for deleting a category that transactions use. $name is its full path, as
 # Food:Coffee, $subcategories how many categories under it are deleted with it, and
 # $total an amount.
@@ -467,6 +468,29 @@ dialog-delete-category-used-count = { $subcategories ->
         [one] 1 transaction
        *[other] { $count } transactions
     }.
+# The merge Dialog, which moves the transactions of the $categories categories it lists
+# below this line to another category.
+dialog-merge-categories-message = Merge { $categories ->
+        [one] this category
+       *[other] these { $categories } categories
+    } into another:
+dialog-merge-categories-merge = Merge
+# How many transactions and split lines the merge moves.
+dialog-merge-categories-count = { $count ->
+        [0] No transaction moves.
+        [one] 1 transaction moves.
+       *[other] { $count } transactions move.
+    }
+# The list of categories that take the merged transactions.
+dialog-merge-categories-into = Merge transactions into:
+# Shown when the category picked has another type than a merged one. $source_type and
+# $target_type are each Income or Expense.
+dialog-merge-categories-type-warning = This merges { $source_type } into { $target_type }.
+# The box that has the merge delete the categories it empties, ticked when it opens.
+dialog-merge-categories-delete-sources = Delete unused selected categories
+# Why a merge is refused, above the full path of each subcategory. $name is the full path
+# of a category it lists, as Food:Coffee.
+dialog-merge-categories-has-subcategories = { $name } has subcategories, so it can't be merged:
 
 # The New Account wizard. Each step's heading says how far through it is.
 dialog-new-account-step-type = Step 1 of 4: Type
