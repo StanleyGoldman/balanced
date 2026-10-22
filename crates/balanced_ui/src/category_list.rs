@@ -44,13 +44,9 @@ pub(crate) struct CategoryListForm {
     folded: HashSet<CategoryId>,
     /// Which rows the filter row lets the tree show.
     filter: Filter,
-    /// The index in the model of each row shown, top to bottom: every row the filter
-    /// keeps but those under a folded category. `None` once the model, the filter or
-    /// the folds change, so each index is in range of the model it was built from.
-    shown: Option<Vec<usize>>,
-    /// The categories the filter keeps a row under, which have a fold triangle. Built
-    /// with `shown`.
-    parents: HashSet<CategoryId>,
+    /// The rows the tree shows. `None` once the model, the filter or the folds change,
+    /// so each index is in range of the model it was built from.
+    shown: Option<Shown>,
     /// The selected rows.
     selection: HashSet<RowKey>,
     /// The row last clicked or stepped to, which is the tree's one Tab stop.
@@ -425,10 +421,18 @@ impl ListModel {
         }
     }
 
-    /// The index of each row shown through `filter` while the categories in `folded`
-    /// are folded.
-    fn shown(&self, filter: &Filter, folded: &HashSet<CategoryId>) -> Vec<usize> {
+    /// The rows shown through `filter` while the categories in `folded` are folded.
+    fn shown(&self, filter: &Filter, folded: &HashSet<CategoryId>) -> Shown {
         let kept = self.kept(filter);
+        let foldable = self
+            .rows
+            .iter()
+            .zip(&kept.above_pick)
+            .filter_map(|(row, &above_pick)| match row.key {
+                RowKey::Category(id) if above_pick => Some(id),
+                RowKey::Category(_) | RowKey::Transfer(_) => None,
+            })
+            .collect();
         let kept: Vec<bool> = (0..self.rows.len())
             .map(|index| kept.picked[index] || kept.above_pick[index])
             .collect();
@@ -451,7 +455,10 @@ impl ListModel {
             };
             shown.push(index);
         }
-        shown
+        Shown {
+            rows: shown,
+            foldable,
+        }
     }
 
     /// Whether `filter` keeps each row: those it picks, and every category above one.
@@ -497,6 +504,16 @@ impl ListModel {
                 RowKey::Category(_) | RowKey::Transfer(_) => None,
             })
     }
+}
+
+/// The rows the Category List shows through its filter and folds.
+#[derive(Debug)]
+struct Shown {
+    /// The index in the model of each row shown, top to bottom: every row the filter
+    /// keeps but those under a folded category.
+    rows: Vec<usize>,
+    /// The categories the filter keeps a row under, which have a fold triangle.
+    foldable: HashSet<CategoryId>,
 }
 
 /// Which rows a filter keeps, by index in the model.
@@ -624,9 +641,8 @@ impl CategoryListForm {
         };
         let shown = self.shown.take().unwrap_or_else(|| {
             let shown = model.shown(&self.filter, &self.folded);
-            self.parents = model.above_picks(&self.filter).collect();
             // A row a fold or the filter hides is no longer selected.
-            let still_shown = |key: &RowKey| model.place(&shown, *key).is_some();
+            let still_shown = |key: &RowKey| model.place(&shown.rows, *key).is_some();
             self.selection.retain(still_shown);
             self.cursor = self.cursor.filter(still_shown);
             self.anchor = self.anchor.filter(still_shown);
@@ -726,7 +742,7 @@ impl CategoryListForm {
         });
     }
 
-    /// Draws the rows of `model` at the indices `shown`, and does what a click or a key
+    /// Draws the rows of `model` that `shown` holds, and does what a click or a key
     /// in them asks for.
     fn table(
         &mut self,
@@ -734,11 +750,11 @@ impl CategoryListForm {
         i18n: &Localizer,
         theme: &Theme,
         model: &ListModel,
-        shown: Vec<usize>,
+        shown: Shown,
     ) {
         let tab_stop = self
             .cursor
-            .or_else(|| shown.first().map(|&index| model.rows[index].key));
+            .or_else(|| shown.rows.first().map(|&index| model.rows[index].key));
         let mut action = None;
         // A solid scroll bar takes its own width beside the columns, so it never covers
         // Total.
@@ -763,14 +779,14 @@ impl CategoryListForm {
         let scrolled = table
             .header(row_height, |header| headings(header, i18n))
             .body(|body| {
-                body.rows(row_height, shown.len(), |mut table_row| {
-                    // egui asks only for rows below `shown.len()`.
-                    let row = &model.rows[shown[table_row.index()]];
+                body.rows(row_height, shown.rows.len(), |mut table_row| {
+                    // egui asks only for rows below `shown.rows.len()`.
+                    let row = &model.rows[shown.rows[table_row.index()]];
                     let selected = self.selection.contains(&row.key);
                     let cursor = self.cursor == Some(row.key);
                     let state = RowState {
                         fold: match row.key {
-                            RowKey::Category(id) if !self.parents.contains(&id) => None,
+                            RowKey::Category(id) if !shown.foldable.contains(&id) => None,
                             RowKey::Category(id) if self.folded.contains(&id) => Some(Fold::Folded),
                             RowKey::Category(_) => Some(Fold::Open),
                             RowKey::Transfer(_) => None,
@@ -897,7 +913,7 @@ impl CategoryListForm {
     /// Does what a click or a key in the table asked for, in `model`, whose rows are
     /// `pitch` apart.
     fn act(&mut self, model: &ListModel, action: TableAction, pitch: f32) {
-        let shown = self.shown.as_deref().unwrap_or_default();
+        let shown = self.shown.as_ref().map_or(&[][..], |shown| &shown.rows);
         let place = |key| model.place(shown, key);
         match action {
             TableAction::Pick(key, pick) => self.pick(model, key, pick),
@@ -940,7 +956,7 @@ impl CategoryListForm {
     /// Picks the row shown at `place`, scrolling it into view, in `model`, whose rows
     /// are `pitch` apart.
     fn step_to(&mut self, model: &ListModel, place: usize, pick: Pick, pitch: f32) {
-        let Some(&index) = self.shown.as_deref().and_then(|shown| shown.get(place)) else {
+        let Some(&index) = self.shown.as_ref().and_then(|shown| shown.rows.get(place)) else {
             return;
         };
         // `shown` holds indices into the model it was built from.
@@ -965,7 +981,7 @@ impl CategoryListForm {
                 self.anchor = Some(key);
             }
             Pick::Range => {
-                let shown = self.shown.as_deref().unwrap_or_default();
+                let shown = self.shown.as_ref().map_or(&[][..], |shown| &shown.rows);
                 let place = |key| model.place(shown, key);
                 if let Some((from, to)) = self.anchor.and_then(place).zip(place(key)) {
                     let range = from.min(to)..=from.max(to);

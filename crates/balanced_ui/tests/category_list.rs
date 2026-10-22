@@ -1029,6 +1029,14 @@ fn search(harness: &mut Harness<'static, App>, text: &str) {
     type_text(harness, text);
 }
 
+/// Empties the Category List's Search box in one edit, as each shorter search would
+/// unfold the rows above its matches.
+fn clear_search(harness: &mut Harness<'static, App>) {
+    search(harness, "");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    press(harness, Key::Backspace);
+}
+
 #[test]
 fn search_keeps_the_categories_whose_names_hold_the_text_in_any_case() {
     let mut harness = category_list();
@@ -1266,10 +1274,7 @@ fn left_folds_nothing_on_a_parent_the_filter_keeps_nothing_under() {
     click_row(&mut harness, "Auto & Transport");
 
     press(&mut harness, Key::ArrowLeft);
-    // Cleared at once: each shorter search would unfold the rows above its matches.
-    search(&mut harness, "");
-    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
-    press(&mut harness, Key::Backspace);
+    clear_search(&mut harness);
 
     assert_eq!(expanded(&harness, "Auto & Transport"), Some(true));
     assert_eq!(
