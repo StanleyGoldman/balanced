@@ -1887,14 +1887,14 @@ impl Register {
             column,
         };
         let cell_x = ui.max_rect().x_range();
-        let editing = if editing != Some(row.id()) {
-            Editing::Off
+        let cover = if editing != Some(row.id()) {
+            EditingCover::NotEditing
         } else if column != RegisterColumn::Actions
             && buttons.is_some_and(|span| span.contains(cell_x.min) && span.contains(cell_x.max))
         {
-            Editing::Covered
+            EditingCover::Covered
         } else {
-            Editing::Uncovered
+            EditingCover::Uncovered
         };
         let cell = Cell {
             register_id,
@@ -1903,12 +1903,12 @@ impl Register {
             insets: self.insets(column),
             selected: self.cursor.is_some_and(|cursor| cursor.row == row.id()),
             cursor: self.cursor == Some(address),
-            editing,
+            cover,
             access,
             viewport,
         };
         let (response, mut action) = cell.show(ui, i18n, theme);
-        if editing != Editing::Off
+        if cover.is_editing_row()
             && column == RegisterColumn::Actions
             && let Some(picked) = self.row_buttons(ui, frame, row)
             && let Some(transaction) = row.transaction()
@@ -4133,7 +4133,7 @@ struct Cell<'a> {
     cursor: bool,
     /// Whether the cell's row is the editing row, whose Actions cell holds its buttons
     /// in place of the Actions menu, and whether those buttons cover the cell.
-    editing: Editing,
+    cover: EditingCover,
     access: Access,
     /// The visible part of the Register's body.
     viewport: Rect,
@@ -4141,15 +4141,33 @@ struct Cell<'a> {
 
 /// Where a cell stands toward the editing row and its buttons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Editing {
+enum EditingCover {
     /// The cell's row isn't the editing row.
-    Off,
+    NotEditing,
     /// The cell is on the editing row, clear of its buttons, or is the Actions cell
     /// that holds them.
     Uncovered,
     /// The cell is on the editing row, wholly under its buttons, which leaves it out
     /// of reach of the pointer and of assistive technology alike.
     Covered,
+}
+
+impl EditingCover {
+    /// Whether the cell is on the editing row.
+    fn is_editing_row(self) -> bool {
+        match self {
+            Self::NotEditing => false,
+            Self::Uncovered | Self::Covered => true,
+        }
+    }
+
+    /// Whether the editing row's buttons cover the whole cell.
+    fn is_covered(self) -> bool {
+        match self {
+            Self::NotEditing | Self::Uncovered => false,
+            Self::Covered => true,
+        }
+    }
 }
 
 impl Cell<'_> {
@@ -4168,13 +4186,13 @@ impl Cell<'_> {
             insets,
             selected,
             cursor,
-            editing,
+            cover,
             access,
             viewport,
         } = *self;
         let rect = ui.max_rect();
         let id = register_id.with(("register_cell", row.id(), column));
-        if editing == Editing::Covered {
+        if cover.is_covered() {
             // A cell only hovered, with no widget info, gets no AccessKit node.
             return (ui.interact(rect, id, Sense::hover()), None);
         }
@@ -4215,7 +4233,7 @@ impl Cell<'_> {
                 let mut action = None;
                 // The draft row is no transaction yet, so it has no commands.
                 let draft = row.id() == RowId::Draft;
-                if (selected || hovered || open) && !draft && editing == Editing::Off {
+                if (selected || hovered || open) && !draft && !cover.is_editing_row() {
                     action = actions_menu(ui, i18n, rect, menu, access, row);
                 }
                 return (response, action);
