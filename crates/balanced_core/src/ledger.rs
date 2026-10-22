@@ -2130,7 +2130,6 @@ fn one_or_compound(commands: Vec<DomainCommand>) -> DomainCommand {
     }
 }
 
-/// Writes `summary`'s account, at `place` in its sub-group, and its transactions.
 /// The Command that puts `old` back in `account` as it was, with its `other_sides`, in
 /// place of what it has become.
 fn restoring(account: AccountId, old: Transaction, other_sides: Vec<OtherSide>) -> DomainCommand {
@@ -2146,6 +2145,7 @@ fn restoring(account: AccountId, old: Transaction, other_sides: Vec<OtherSide>) 
     ])
 }
 
+/// Writes `summary`'s account, at `place` in its sub-group, and its transactions.
 fn write_account(store: &Store, summary: &AccountSummary, place: usize) -> Result<(), DomainError> {
     let account = &summary.account;
     store.insert_account(&account_row(account, place))?;
