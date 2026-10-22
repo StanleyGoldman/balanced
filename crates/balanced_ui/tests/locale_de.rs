@@ -496,3 +496,26 @@ fn the_edit_category_dialog_reads_german() {
     harness.get_by_role_and_label(Role::ComboBox, "Übergeordnete Kategorie");
     harness.get_by_role_and_label(Role::RadioButton, "Ausgabe");
 }
+
+#[test]
+fn the_category_lists_filter_row_reads_german() {
+    let mut harness = app();
+    harness
+        .get_by_role_and_label(Role::Button, "Extras")
+        .click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Category List…")
+        .click();
+    harness.run();
+
+    harness.get_by_role_and_label(Role::TextInput, "Suchen");
+    harness
+        .get_by_role_and_label(Role::ComboBox, "Anzeigen")
+        .click();
+    harness.run();
+
+    for option in ["Alle", "Einnahme", "Ausgabe", "Benutzt", "Unbenutzt"] {
+        harness.get_by_role_and_label(Role::Button, option);
+    }
+}
