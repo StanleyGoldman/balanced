@@ -1102,7 +1102,9 @@ impl Register {
     /// closing. The cell being edited is kept in its row first. A changed row is not
     /// left: the leave-row prompt asks about it, or, with "Save a changed transaction
     /// without asking" on, it saves, and `then` is sent once the row is saved or its
-    /// changes thrown away.
+    /// changes thrown away. While that save is on its way, `then` takes the place of
+    /// what left the row before it, and of the cell that move opened, so only the
+    /// latest leave goes on.
     pub(crate) fn leave(
         &mut self,
         ctx: &egui::Context,
@@ -1111,6 +1113,13 @@ impl Register {
         commands: &CommandSender,
         then: AppCommand,
     ) -> bool {
+        if let Some(leaving) = &mut self.leaving
+            && leaving.step == LeaveStep::Saving
+        {
+            leaving.then = Some(then);
+            leaving.resume = None;
+            return false;
+        }
         if self.leaving.is_some() || self.refused.is_some() {
             return false;
         }
