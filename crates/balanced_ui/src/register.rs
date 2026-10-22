@@ -615,20 +615,20 @@ impl Edit {
         }
     }
 
-    /// Whether committing the edit now would find anything to keep in its row in
-    /// `rows`: its text, with the list's highlighted row taken as the commit takes it,
-    /// differs from what the row shows, or can't be kept at all.
+    /// Whether committing the edit as it loses focus would find anything to keep in its
+    /// row in `rows`: its text differs from what the row shows, or can't be kept at all.
+    /// The list's highlighted row plays no part, as losing focus doesn't take it.
     fn differs(&self, rows: Rows<'_>, choices: &FieldChoices, i18n: &Localizer) -> bool {
         match self {
             Self::Text(edit) => {
                 let Some(row) = rows.find(edit.cell.row) else {
                     return false;
                 };
-                let text = match edit.highlighted(choices) {
-                    Some(ListRow::Choice(text)) => text,
-                    Some(ListRow::Create(_)) | None => edit.combo.text(),
-                };
-                !matches!(edit.change(row, text.trim(), choices), Ok(None))
+                let text = edit.combo.text().trim();
+                if edit.empties_draft_amount(row, text) {
+                    return row.amount().is_some();
+                }
+                !matches!(edit.change(row, text, choices), Ok(None))
             }
             Self::Date(edit) => edit.date.is_changed(i18n),
         }
@@ -703,6 +703,14 @@ impl CellEdit {
     fn highlighted<'a>(&self, choices: &'a FieldChoices) -> Option<ListRow<'a>> {
         self.combo
             .highlighted(|text| field_rows(&self.field, choices, text))
+    }
+
+    /// Whether `text`, already trimmed, empties the amount of `row`, the draft row,
+    /// which leaves the draft with no amount typed rather than an amount of zero.
+    fn empties_draft_amount(&self, row: &RegisterRow, text: &str) -> bool {
+        matches!(self.field, EditField::Amount { .. })
+            && text.is_empty()
+            && row.id() == RowId::Draft
     }
 
     /// The edit that keeps `text`, already trimmed, in the edited field of `row`, or
@@ -3512,8 +3520,7 @@ fn commit(
     };
     let text = edit.combo.text().trim();
     // An emptied draft row amount leaves the draft with no amount typed, as it started.
-    if matches!(edit.field, EditField::Amount { .. }) && text.is_empty() && row.id() == RowId::Draft
-    {
+    if edit.empties_draft_amount(row, text) {
         unsaved.draft.clear_amount();
         return Commit::Done;
     }

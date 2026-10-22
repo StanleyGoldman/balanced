@@ -1009,6 +1009,27 @@ fn another_rows_flag_cell_keeps_the_cursor_on_a_row_with_kept_changes_and_an_unc
 }
 
 #[test]
+fn another_rows_flag_cell_keeps_the_cursor_in_an_open_cell_its_list_would_complete() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Shell");
+    // Delete takes away the Inline completion, and ↓ highlights Shell in the list.
+    type_text(&mut harness, "She");
+    press(&mut harness, Modifiers::NONE, Key::Delete);
+    press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("She"));
+
+    harness
+        .get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG)
+        .click();
+    harness.run();
+
+    let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
+    assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
+    assert_eq!(cursor(&harness), "She");
+}
+
+#[test]
 fn another_reconciled_rows_clr_cell_asks_its_own_confirm_not_the_prompt() {
     let mut harness = app();
     rename_fresh_market(&mut harness);
