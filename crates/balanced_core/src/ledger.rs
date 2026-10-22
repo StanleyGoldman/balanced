@@ -1880,29 +1880,43 @@ impl Ledger {
         Ok(())
     }
 
-    /// Shows or hides category `id` and every category under it. The inverse gives each
-    /// its old visibility, from the top of the branch down, so a category's own setting
-    /// comes after the one above it.
+    /// Shows or hides category `id` and every category under it. The inverse sets the
+    /// branch to `id`'s old visibility, then each category whose old visibility differed
+    /// from its parent's back to its own, from the top of the branch down, so a setting
+    /// under another comes after it. It depends only on the old visibilities, so undoing
+    /// and redoing it again and again never makes it longer.
     fn set_category_visibility(
         &mut self,
         id: CategoryId,
         visibility: Visibility,
     ) -> Result<DomainCommand, DomainError> {
+        let mut old: HashMap<CategoryId, Visibility> = HashMap::new();
         let mut inverse = Vec::new();
         for branch in self.view.branch(id) {
             let index = self.category_index(branch)?;
-            let old = self.view.categories[index].visibility();
-            inverse.push(DomainCommand::SetCategoryVisibility {
-                category: branch,
-                visibility: old,
-            });
+            let category = &self.view.categories[index];
+            let was = category.visibility();
+            let parent_was = category
+                .parent()
+                .and_then(|parent| old.get(&parent).copied());
+            // `id` has no parent in `old`, so it always starts the inverse.
+            if parent_was != Some(was) {
+                inverse.push(DomainCommand::SetCategoryVisibility {
+                    category: branch,
+                    visibility: was,
+                });
+            }
+            old.insert(branch, was);
             // The branch starts at `id`, so an unknown category is refused before any
             // change.
-            if old != visibility {
+            if was != visibility {
                 self.change_category(index, |category| category.set_visibility(visibility))?;
             }
         }
-        Ok(DomainCommand::Compound(inverse))
+        Ok(match <[DomainCommand; 1]>::try_from(inverse) {
+            Ok([one]) => one,
+            Err(several) => DomainCommand::Compound(several),
+        })
     }
 
     fn delete_category(&mut self, id: CategoryId) -> Result<DomainCommand, DomainError> {

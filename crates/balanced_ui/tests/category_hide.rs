@@ -139,6 +139,20 @@ fn hide_takes_the_category_and_those_under_it_out_of_the_list() {
 }
 
 #[test]
+fn hiding_the_selected_category_drops_the_selection() {
+    let mut harness = category_list();
+
+    hide(&mut harness, "Restaurants");
+
+    let selected = harness
+        .query_all_by_role(Role::TreeItem)
+        .any(|row| row.accesskit_node().is_selected() == Some(true));
+    assert!(!selected);
+    let edit = harness.get_by_role_and_label(Role::Button, "Edit…");
+    assert!(edit.accesskit_node().is_disabled());
+}
+
+#[test]
 fn show_hidden_categories_lists_them_marked_hidden() {
     let mut harness = category_list();
     hide(&mut harness, "Restaurants");

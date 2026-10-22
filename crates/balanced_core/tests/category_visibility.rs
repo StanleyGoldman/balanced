@@ -247,3 +247,60 @@ fn hidden_categories_stay_hidden_after_reopening_the_data_file_and_undo_still_wo
 
     assert_eq!(visibilities(&reopened, ids), [Shown, Hidden, Shown]);
 }
+
+/// What hiding `category` in `household` gives back to undo it.
+fn hiding_inverse(household: &mut Household, category: CategoryId) -> DomainCommand {
+    household
+        .ledger
+        .apply(set_visibility(category, Hidden))
+        .expect("the ledger hides the category")
+        .inverse()
+        .clone()
+}
+
+#[test]
+fn hiding_a_branch_that_was_all_shown_is_undone_by_one_command() {
+    let mut household = Household::new();
+
+    let food = household.food;
+    let inverse = hiding_inverse(&mut household, food);
+
+    assert_eq!(inverse, set_visibility(household.food, Shown));
+}
+
+#[test]
+fn hiding_a_branch_is_undone_by_a_command_for_each_category_shown_otherwise_than_its_parent() {
+    let mut household = Household::new();
+    household.hide(household.restaurants);
+    household
+        .apply(set_visibility(household.coffee, Shown))
+        .unwrap();
+
+    let food = household.food;
+    let inverse = hiding_inverse(&mut household, food);
+
+    assert_eq!(
+        inverse,
+        DomainCommand::Compound(vec![
+            set_visibility(household.food, Shown),
+            set_visibility(household.restaurants, Hidden),
+            set_visibility(household.coffee, Shown),
+        ])
+    );
+}
+
+#[test]
+fn undo_and_redo_again_and_again_restore_each_category_the_same_way() {
+    let mut household = Household::new();
+    household.hide(household.groceries);
+    household.hide(household.food);
+    household.ledger.undo().unwrap();
+    household.ledger.redo().unwrap();
+
+    household.ledger.undo().unwrap();
+
+    assert_eq!(
+        household.visibilities(),
+        [Shown, Hidden, Shown, Shown, Shown, Shown]
+    );
+}

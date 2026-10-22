@@ -212,11 +212,7 @@ impl Ledger {
                     row.name,
                     row.parent_id.map(CategoryId::new),
                     category_type(&row.category_type)?,
-                    if row.hidden {
-                        Visibility::Hidden
-                    } else {
-                        Visibility::Shown
-                    },
+                    visibility(row.hidden),
                 ))
             })
             .collect::<Result<_, OpenError>>()?;
@@ -241,11 +237,7 @@ impl Ledger {
                     row.name,
                     kind,
                     currency,
-                    if row.hidden {
-                        Visibility::Hidden
-                    } else {
-                        Visibility::Shown
-                    },
+                    visibility(row.hidden),
                     if row.closed {
                         AccountStatus::Closed
                     } else {
@@ -404,6 +396,15 @@ fn cleared_status(name: &str) -> Result<ClearedStatus, OpenError> {
             what: "cleared status",
             value: name.to_owned(),
         })
+}
+
+/// The visibility of a row the store marks `hidden` or not.
+fn visibility(hidden: bool) -> Visibility {
+    if hidden {
+        Visibility::Hidden
+    } else {
+        Visibility::Shown
+    }
 }
 
 /// The store's name for `category_type`.
