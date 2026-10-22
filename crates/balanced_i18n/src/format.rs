@@ -21,7 +21,7 @@ use icu_locale::Locale;
 
 use crate::I18nError;
 use crate::date::{DateSegments, probe_date};
-use crate::money::NumberSymbols;
+use crate::money::{AmountFormatters, AmountStyle, Currency, NumberSymbols};
 
 /// The ICU4X formatters for one formatting locale.
 #[derive(Debug)]
@@ -35,6 +35,7 @@ pub(crate) struct Formatters {
     collator: CollatorBorrowed<'static>,
     symbols: NumberSymbols,
     date_segments: DateSegments,
+    amounts: AmountFormatters,
 }
 
 impl Formatters {
@@ -51,6 +52,7 @@ impl Formatters {
                 .to_string(),
         );
         Ok(Self {
+            amounts: AmountFormatters::new(locale),
             date_segments,
             symbols: NumberSymbols::new(&decimal),
             decimal,
@@ -68,6 +70,15 @@ impl Formatters {
             week: WeekInformation::try_new(locale.into())?,
             collator: Collator::try_new(locale.into(), CollatorOptions::default())?,
         })
+    }
+
+    pub(crate) fn amount(
+        &self,
+        amount: rust_decimal::Decimal,
+        currency: Currency,
+        style: AmountStyle,
+    ) -> String {
+        self.amounts.format(amount, currency, style)
     }
 
     pub(crate) fn number(&self, value: i64) -> String {

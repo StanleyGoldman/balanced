@@ -141,7 +141,7 @@ What still grows with the file:
 - A changed account copies its pointer and balance vectors: about 1.5–2 ms at 10× on top of the 1× cost. A post at 10× lands within 6 ms. Recommendation 1's "close to the 3 ms commit" holds at 1×.
 - A date edit that moves a transaction from the start of the register to the end counts every balance again. Back-dated edits pay for what they move.
 - `find_transaction` still scans every account's register.
-- The Category List's first read after a change counts usage over the whole file. [#504](https://github.com/StanleyGoldman/balanced/issues/504) times the UI's per-generation rebuilds, and this is one of them.
+- The Category List's first read after a change counts usage over the whole file. It is one of the UI's rebuilds after each Command, which [`ui-rebuild-performance.md`](ui-rebuild-performance.md) times ([#504](https://github.com/StanleyGoldman/balanced/issues/504)).
 
 ## Method
 

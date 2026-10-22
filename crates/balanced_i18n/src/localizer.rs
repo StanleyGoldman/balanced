@@ -193,7 +193,7 @@ impl Localizer {
     /// currency's decimal places, as a `Money` amount is. An amount with more
     /// significant decimal places shows all of them: display never rounds.
     pub fn format_amount(&self, amount: Decimal, currency: Currency, style: AmountStyle) -> String {
-        money::format_amount(&self.formatting_locale, amount, currency, style)
+        self.formatters.amount(amount, currency, style)
     }
 
     /// Reads an amount the user typed, written the formatting locale's way, for a
@@ -469,6 +469,52 @@ mod tests {
 
         assert_eq!(text, "-1.234,50\u{a0}$");
         assert_eq!(i18n.parse_amount(&text, 2), Ok(amount));
+    }
+
+    #[test]
+    fn an_amount_with_more_places_than_the_last_shows_every_place() {
+        let i18n = localizer(&langid!("en-US"), &locale!("en-US"));
+        let usd = Currency::new("USD", 2).unwrap();
+        i18n.format_amount(Decimal::new(100, 2), usd, AmountStyle::Bare);
+
+        let text = i18n.format_amount(Decimal::new(1005, 3), usd, AmountStyle::Bare);
+
+        assert_eq!(text, "1.005");
+    }
+
+    #[test]
+    fn an_amount_in_the_other_style_than_the_last_shows_in_its_own() {
+        let i18n = localizer(&langid!("en-US"), &locale!("en-US"));
+        let usd = Currency::new("USD", 2).unwrap();
+        i18n.format_amount(Decimal::new(123_450, 2), usd, AmountStyle::Symbol);
+
+        let text = i18n.format_amount(Decimal::new(123_450, 2), usd, AmountStyle::Bare);
+
+        assert_eq!(text, "1,234.50");
+    }
+
+    #[test]
+    fn an_amount_in_another_currency_than_the_last_shows_its_own_symbol() {
+        let i18n = localizer(&langid!("en-US"), &locale!("en-US"));
+        let usd = Currency::new("USD", 2).unwrap();
+        let eur = Currency::new("EUR", 2).unwrap();
+        i18n.format_amount(Decimal::new(100, 2), usd, AmountStyle::Symbol);
+
+        let text = i18n.format_amount(Decimal::new(100, 2), eur, AmountStyle::Symbol);
+
+        assert_eq!(text, "€1.00");
+    }
+
+    #[test]
+    fn amounts_follow_a_switch_of_formatting_locale() {
+        let mut i18n = localizer(&langid!("en-US"), &locale!("en-US"));
+        let usd = Currency::new("USD", 2).unwrap();
+        i18n.format_amount(Decimal::new(123_450, 2), usd, AmountStyle::Symbol);
+
+        i18n.set_formatting_locale(&locale!("de-DE")).unwrap();
+        let text = i18n.format_amount(Decimal::new(123_450, 2), usd, AmountStyle::Symbol);
+
+        assert_eq!(text, "1.234,50\u{a0}$");
     }
 
     #[test]

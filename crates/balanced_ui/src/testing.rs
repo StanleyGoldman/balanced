@@ -7,16 +7,21 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use balanced_core::{AccountKind, CurrencyCode, DomainCommand, Ledger, Money};
+use balanced_core::{
+    AccountId, AccountKind, CurrencyCode, DomainCommand, Ledger, LedgerView, Money,
+};
 use balanced_i18n::Localizer;
 use eframe::egui::{self, vec2};
 use egui_kittest::{Harness, SnapshotOptions};
 use egui_wgpu::{WgpuSetup, WgpuSetupCreateNew, wgpu};
 
-use icu_calendar::Date;
+use icu_calendar::{Date, Iso};
 
+use crate::combobox::FieldChoices;
 use crate::command::AppCommand;
 use crate::preferences::{Preferences, Scheme};
+use crate::register_filter::RegisterFilter;
+use crate::register_model::{RegisterModel, RegisterSort, Showing, TodayDivider};
 use crate::{App, Clock, PreferencesFile};
 
 /// How much one pixel may differ before it counts as failing: kittest's weighted squared
@@ -100,6 +105,40 @@ pub fn data_file(dir: &Path, name: &str, accounts: &[&str]) -> PathBuf {
             .expect("a new file takes a new account");
     }
     path
+}
+
+/// Builds the model of account `account`'s Register rows in `view`, as a Register does
+/// on its first frame after a change: sorted by date, unfiltered, with the Today divider
+/// shown on `today`. For the benchmarks; returns how many rows it shows.
+///
+/// # Panics
+///
+/// If `view` has no account `account`.
+pub fn build_register_model(
+    view: &LedgerView,
+    account: AccountId,
+    i18n: &Localizer,
+    today: Date<Iso>,
+) -> usize {
+    let summary = view.account(account).expect("the view has the account");
+    let filter = RegisterFilter::default();
+    let shown = Showing {
+        sort: RegisterSort::default(),
+        filter: &filter,
+        today,
+        today_divider: TodayDivider::Shown { today },
+    };
+    RegisterModel::new(summary, view, shown, i18n).rows().len()
+}
+
+/// Builds what account `account`'s Payee and Category comboboxes offer in `view`, as a
+/// Register does on its first frame after a change. For the benchmarks; returns how
+/// many payees it offers.
+pub fn build_field_choices(view: &LedgerView, account: AccountId, i18n: &Localizer) -> usize {
+    FieldChoices::new(view, account, i18n)
+        .payees()
+        .matching("")
+        .len()
 }
 
 /// A clock stopped on 14 October 2026.
