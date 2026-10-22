@@ -1,3 +1,5 @@
+experimental = ["wrapper-scripts"]
+
 # The one nextest profile: `cargo xtask test`, `snapshots`, `locales` and cargo-mutants
 # all run under it.
 [profile.default]
@@ -11,3 +13,13 @@ slow-timeout = { period = "60s", terminate-after = 3 }
 # Each run's results as JUnit, in target/nextest/default/junit.xml, which CI's
 # `test` job turns into annotations and a job summary when a test fails.
 junit = { path = "junit.xml" }
+
+# Cap each test process's memory, so a runaway test is killed alone rather than the
+# OOM killer taking down the machine. The script explains the cap and its fallback.
+[[profile.default.scripts]]
+filter = "all()"
+platform = "cfg(target_os = \"linux\")"
+run-wrapper = "memory-cap"
+
+[scripts.wrapper.memory-cap]
+command = { command-line = ".config/memory-cap.sh", relative-to = "workspace-root" }
