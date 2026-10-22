@@ -604,5 +604,5 @@ fn the_merge_refusal_reads_german() {
     merge_row(&mut harness, "Food & Dining");
 
     harness
-        .get_by_label("Food & Dining hat Unterkategorien und kann nicht zusammengeführt werden.");
+        .get_by_label("Food & Dining hat Unterkategorien und kann nicht zusammengeführt werden:");
 }

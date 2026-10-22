@@ -221,7 +221,7 @@ dialog-delete-category-unused-parent = { $name } und { $subcategories ->
     } löschen? Keine Buchung verwendet sie.
 # Coined from GnuCash's "Buchung" and "Kategorie".
 dialog-delete-category-move-to = Diese Buchungen verschieben nach:
-dialog-delete-category-choose = Kategorie auswählen
+dialog-category-list-choose = Kategorie auswählen
 # Coined from GnuCash's "Buchung" and "Unterkategorie".
 dialog-delete-category-used = { $subcategories ->
         [0] { $name } wird
@@ -259,7 +259,7 @@ dialog-merge-categories-type-warning = Dies führt { $source_type } mit { $targe
 # From GnuCash's "_Unbenutzte Konten anzeigen", "ausgewählte Unterkonten" and "Löschen".
 dialog-merge-categories-delete-sources = Unbenutzte ausgewählte Kategorien löschen
 # Coined from GnuCash's "Unterkonten" and "zusammenführen".
-dialog-merge-categories-has-subcategories = { $name } hat Unterkategorien und kann nicht zusammengeführt werden.
+dialog-merge-categories-has-subcategories = { $name } hat Unterkategorien und kann nicht zusammengeführt werden:
 dialog-new-account-back = Zurück
 dialog-new-account-next = Weiter
 dialog-new-account-finish = Fertigstellen

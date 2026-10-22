@@ -1567,11 +1567,13 @@ fn merging_a_category_with_subcategories_is_refused_naming_it() {
 
     assert!(shows(
         &harness,
-        "Food & Dining has subcategories, so it can't be merged."
+        "Food & Dining has subcategories, so it can't be merged:"
     ));
+    assert!(shows(&harness, "Food & Dining:Groceries"));
+    assert!(shows(&harness, "Food & Dining:Restaurants:Coffee Shops"));
     assert!(!shows(
         &harness,
-        "Shopping:Household has subcategories, so it can't be merged."
+        "Shopping:Household has subcategories, so it can't be merged:"
     ));
     assert!(!enabled(&harness, "Merge"));
 }

@@ -89,7 +89,8 @@ struct MergeConfirm {
     /// The categories merged, in tree order.
     sources: Vec<CategoryId>,
     targets: TargetPicker,
-    /// Whether the merge deletes the categories it empties.
+    /// Whether the merge deletes the categories it empties, as the "Delete unused
+    /// selected categories" box says.
     delete_sources: bool,
 }
 
@@ -146,7 +147,7 @@ impl TargetPicker {
         let chosen = self
             .target
             .and_then(|target| category_text(view, target))
-            .unwrap_or_else(|| fl!(i18n, "dialog-delete-category-choose"));
+            .unwrap_or_else(|| fl!(i18n, "dialog-category-list-choose"));
         let picker = ui.horizontal(|ui| {
             let label = ui.label(label);
             ComboBox::from_id_salt("category_list_target")
@@ -471,6 +472,12 @@ impl ListModel {
         kept
     }
 
+    /// Where the row `key` is among the rows at the indices `shown`, or `None` when it
+    /// isn't shown.
+    fn place(&self, shown: &[usize], key: RowKey) -> Option<usize> {
+        shown.iter().position(|&index| self.rows[index].key == key)
+    }
+
     /// The categories above a row that `filter` picks.
     fn above_picks(&self, filter: &Filter) -> impl Iterator<Item = CategoryId> {
         let kept = self.kept(filter);
@@ -590,8 +597,7 @@ impl CategoryListForm {
         let shown = self.shown.take().unwrap_or_else(|| {
             let shown = model.shown(&self.filter, &self.folded);
             // A row a fold or the filter hides is no longer selected.
-            let still_shown =
-                |key: &RowKey| shown.iter().any(|&index| model.rows[index].key == *key);
+            let still_shown = |key: &RowKey| model.place(&shown, *key).is_some();
             self.selection.retain(still_shown);
             self.cursor = self.cursor.filter(still_shown);
             self.anchor = self.anchor.filter(still_shown);
@@ -832,7 +838,7 @@ impl CategoryListForm {
     /// `pitch` apart.
     fn act(&mut self, model: &ListModel, action: TableAction, pitch: f32) {
         let shown = self.shown.as_deref().unwrap_or_default();
-        let place = |key| shown.iter().position(|&index| model.rows[index].key == key);
+        let place = |key| model.place(shown, key);
         match action {
             TableAction::Pick(key, pick) => self.pick(model, key, pick),
             TableAction::Focused(key) => {
@@ -900,7 +906,7 @@ impl CategoryListForm {
             }
             Pick::Range => {
                 let shown = self.shown.as_deref().unwrap_or_default();
-                let place = |key| shown.iter().position(|&index| model.rows[index].key == key);
+                let place = |key| model.place(shown, key);
                 if let Some((from, to)) = self.anchor.and_then(place).zip(place(key)) {
                     let range = from.min(to)..=from.max(to);
                     self.selection = shown[range]
@@ -1291,10 +1297,11 @@ fn show_merge(
     };
     // The ledger can't change while the Dialog blocks the list.
     let sources = dialog.form.sources.clone();
-    let parents: Vec<CategoryId> = sources
+    // Each source with subcategories, followed by those under it.
+    let refused: Vec<Vec<CategoryId>> = sources
         .iter()
-        .copied()
-        .filter(|&source| view.branch(source).len() > 1)
+        .map(|&source| view.branch(source))
+        .filter(|branch| branch.len() > 1)
         .collect();
     let outcome = LightDialog::new(
         Id::new("category_list_merge"),
@@ -1316,8 +1323,9 @@ fn show_merge(
                 ui.label(path);
             }
         }
-        if !parents.is_empty() {
-            for &parent in &parents {
+        if !refused.is_empty() {
+            for branch in &refused {
+                let (&parent, under) = branch.split_first().expect("a branch holds its category");
                 let name = category_text(view, parent).unwrap_or_default();
                 let text = fl!(
                     i18n,
@@ -1325,6 +1333,11 @@ fn show_merge(
                     name = name
                 );
                 ui.label(RichText::new(text).color(ui.visuals().error_fg_color));
+                for &subcategory in under {
+                    if let Some(path) = category_text(view, subcategory) {
+                        ui.label(path);
+                    }
+                }
             }
             return;
         }
@@ -1334,11 +1347,11 @@ fn show_merge(
             .sum();
         ui.label(fl!(i18n, "dialog-merge-categories-count", count = count));
         let label = fl!(i18n, "dialog-merge-categories-into");
-        let branches: Vec<CategoryId> = sources
+        let excluded: Vec<CategoryId> = sources
             .iter()
             .flat_map(|&source| view.branch(source))
             .collect();
-        confirm.targets.show(ui, i18n, view, label, &branches);
+        confirm.targets.show(ui, i18n, view, label, &excluded);
         if let Some(warning) = type_warning(i18n, view, &sources, confirm.targets.target) {
             ui.label(RichText::new(warning).color(ui.visuals().warn_fg_color));
         }
@@ -1353,8 +1366,12 @@ fn show_merge(
             let form = &dialog.form;
             // Merge takes no click and no Enter until a target is picked.
             if let Some(target) = form.targets.target
-                && let Some(command) =
-                    merge_command(view, &form.sources, target, form.delete_sources)
+                && let Some(command) = merge_command(
+                    view,
+                    &form.sources,
+                    target,
+                    Emptied::from_box(form.delete_sources),
+                )
             {
                 commands.send(AppCommand::Domain(command));
             }
@@ -1389,14 +1406,28 @@ fn type_warning(
     ))
 }
 
+/// What a merge does with the categories it empties.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Emptied {
+    Delete,
+    Keep,
+}
+
+impl Emptied {
+    /// What the "Delete unused selected categories" box asks for while `ticked`.
+    fn from_box(ticked: bool) -> Self {
+        if ticked { Self::Delete } else { Self::Keep }
+    }
+}
+
 /// The Command that moves the transactions and split lines of each of `sources` to
-/// `target`, then deletes each source when `delete_sources` says so, as one undo step;
-/// or `None` when it would change nothing.
+/// `target`, then deletes each source when `emptied` says so, as one undo step; or
+/// `None` when it would change nothing.
 fn merge_command(
     view: &LedgerView,
     sources: &[CategoryId],
     target: CategoryId,
-    delete_sources: bool,
+    emptied: Emptied,
 ) -> Option<DomainCommand> {
     let reassigns = sources
         .iter()
@@ -1406,7 +1437,7 @@ fn merge_command(
     let deletes = sources
         .iter()
         .copied()
-        .filter(|_| delete_sources)
+        .filter(|_| emptied == Emptied::Delete)
         .map(|category| DomainCommand::DeleteCategory { category });
     let commands: Vec<DomainCommand> = reassigns.chain(deletes).collect();
     (!commands.is_empty()).then_some(DomainCommand::Compound(commands))
