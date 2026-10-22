@@ -5,7 +5,10 @@
 
 use icu_calendar::{Date, Iso};
 
-use crate::{AccountId, CategoryId, CurrencyCode, DomainError, Money, MoneyError, TransactionEdit};
+use crate::{
+    AccountId, CategoryId, CategoryUse, CurrencyCode, DomainError, Money, MoneyError,
+    TransactionEdit,
+};
 
 /// Identifies a transaction for as long as it exists. Ids are never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -525,6 +528,66 @@ impl Transaction {
                 .iter()
                 .any(|line| line.target() == SplitTarget::Category(category)),
         }
+    }
+
+    /// The transaction's uses of `category`: the whole transaction, or each of its split
+    /// lines in it.
+    pub(crate) fn category_uses(&self, category: CategoryId) -> Vec<CategoryUse> {
+        match &self.allocation {
+            Allocation::Category(own) if *own == category => {
+                vec![CategoryUse::Transaction(self.id)]
+            }
+            Allocation::OpeningBalance | Allocation::Category(_) | Allocation::Transfer(_) => {
+                Vec::new()
+            }
+            Allocation::Split(lines) => lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| line.target() == SplitTarget::Category(category))
+                .map(|(line, _)| CategoryUse::SplitLine {
+                    split: self.id,
+                    line,
+                })
+                .collect(),
+        }
+    }
+
+    /// The transaction with each of `uses`, which are its own and in category `from`,
+    /// moved to category `to`. Fails when one names the transaction or a line of it
+    /// that isn't in `from`.
+    pub(crate) fn reassigned(
+        &self,
+        from: CategoryId,
+        to: CategoryId,
+        uses: &[CategoryUse],
+    ) -> Result<Self, DomainError> {
+        let not_in_from = DomainError::NotInCategory {
+            transaction: self.id,
+            category: from,
+        };
+        let mut reassigned = self.clone();
+        for &category_use in uses {
+            match (category_use, &mut reassigned.allocation) {
+                (CategoryUse::Transaction(id), Allocation::Category(category))
+                    if id == self.id && *category == from =>
+                {
+                    *category = to;
+                }
+                (CategoryUse::SplitLine { split, line }, Allocation::Split(lines))
+                    if split == self.id =>
+                {
+                    let line = lines.get_mut(line).ok_or(not_in_from.clone())?;
+                    if line.target != SplitTarget::Category(from) {
+                        return Err(not_in_from);
+                    }
+                    line.target = SplitTarget::Category(to);
+                }
+                (CategoryUse::Transaction(_) | CategoryUse::SplitLine { .. }, _) => {
+                    return Err(not_in_from);
+                }
+            }
+        }
+        Ok(reassigned)
     }
 
     /// Where the transaction sits in its account's register: by date, and on one date in

@@ -66,10 +66,71 @@ pub(crate) struct CategoryListForm {
     focus_return: Option<FocusReturn>,
 }
 
-/// The delete confirm's form: which unused category, with none under it, it deletes.
+/// The delete confirm's form: which category it deletes, with every category under it,
+/// and where their transactions go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DeleteConfirm {
     category: CategoryId,
+    /// The category the transactions move to, once one is picked (Reassign).
+    target: Option<CategoryId>,
+    /// Whether the target list is open, or the press that closed it is still held.
+    targets_held: bool,
+    /// Whether the target list takes keyboard focus when next drawn, as it does when
+    /// the confirm opens with Delete disabled.
+    focus_targets: bool,
+}
+
+impl DeleteConfirm {
+    fn new(category: CategoryId) -> Self {
+        Self {
+            category,
+            target: None,
+            targets_held: false,
+            focus_targets: true,
+        }
+    }
+
+    /// The target list, which leaves out the categories in `branch`: every other
+    /// category, by its path. It takes keyboard focus the first time it is drawn.
+    fn target_picker(
+        &mut self,
+        ui: &mut egui::Ui,
+        i18n: &Localizer,
+        view: &LedgerView,
+        branch: &[CategoryId],
+    ) {
+        let mut paths: Vec<(CategoryId, String)> = view
+            .categories()
+            .iter()
+            .map(Category::id)
+            .filter(|id| !branch.contains(id))
+            .filter_map(|id| Some((id, category_text(view, id)?)))
+            .collect();
+        paths.sort_by(|(_, a), (_, b)| i18n.compare_text(a, b));
+        let chosen = self
+            .target
+            .and_then(|target| category_text(view, target))
+            .unwrap_or_else(|| fl!(i18n, "dialog-delete-category-choose"));
+        let picker = ui.horizontal(|ui| {
+            let label = ui.label(fl!(i18n, "dialog-delete-category-move-to"));
+            ComboBox::from_id_salt("category_list_delete_target")
+                .selected_text(chosen)
+                .width(ui.available_width())
+                .show_ui(ui, |ui| {
+                    for (id, path) in paths {
+                        ui.selectable_value(&mut self.target, Some(id), path);
+                    }
+                })
+                .response
+                .labelled_by(label.id)
+        });
+        if std::mem::take(&mut self.focus_targets) {
+            picker.inner.request_focus();
+        }
+        let open = ComboBox::is_open(ui.ctx(), picker.inner.id);
+        let held = self.targets_held && ui.input(|input| input.pointer.any_down());
+        self.targets_held = open || held;
+    }
 }
 
 /// Which rows the filter row lets the tree show: those Show picks whose names hold the
@@ -514,7 +575,7 @@ impl CategoryListForm {
                 }
             }
             Some(ButtonAction::Delete(category)) => {
-                self.delete = Some(OpenDialog::new(ui.ctx(), DeleteConfirm { category }));
+                self.delete = Some(OpenDialog::new(ui.ctx(), DeleteConfirm::new(category)));
             }
         }
         self.model = Some(model);
@@ -634,9 +695,8 @@ impl CategoryListForm {
         }
     }
 
-    /// The button column: New… always, Edit… for a selected category, and Delete… for a
-    /// selected category nothing uses, with none under it. Merge… and Hide wait on their
-    /// own Dialogs. Returns what a click asked for.
+    /// The button column: New… always, and Edit… and Delete… for a selected category.
+    /// Merge… and Hide wait on their own Dialogs. Returns what a click asked for.
     fn buttons(
         &self,
         ui: &mut egui::Ui,
@@ -649,11 +709,6 @@ impl CategoryListForm {
         let editable = selected.and_then(|row| match row.key {
             RowKey::Category(id) => Some(id),
             RowKey::Transfer(_) => None,
-        });
-        // TODO(#488): Delete… a used category or a parent, with Reassign.
-        let deletable = selected.and_then(|row| match row.key {
-            RowKey::Category(id) if !row.used && !row.has_children => Some(id),
-            RowKey::Category(_) | RowKey::Transfer(_) => None,
         });
         let mut asked = None;
         ui.vertical(|ui| {
@@ -672,11 +727,8 @@ impl CategoryListForm {
             button(fl!(i18n, "dialog-category-list-merge"), false);
             // TODO(#491): Hide and Unhide a category.
             button(fl!(i18n, "dialog-category-list-hide"), false);
-            if button(
-                fl!(i18n, "dialog-category-list-delete"),
-                deletable.is_some(),
-            ) {
-                asked = deletable.map(ButtonAction::Delete);
+            if button(fl!(i18n, "dialog-category-list-delete"), editable.is_some()) {
+                asked = editable.map(ButtonAction::Delete);
             }
         });
         asked
@@ -987,19 +1039,26 @@ fn show_delete(
     let category = dialog.form.category;
     // The ledger can't change while the confirm blocks the list.
     let name = category_text(view, category).expect("the confirm asks about a category");
+    let branch = view.branch(category);
+    let used = view.category_usage(category).count() > 0;
     let outcome = LightDialog::new(
         Id::new("category_list_delete"),
         fl!(i18n, "dialog-delete-category-delete"),
         fl!(i18n, "dialog-cancel"),
         theme,
     )
-    .show(ctx, dialog, |ui, _confirm| {
-        ui.label(fl!(i18n, "dialog-delete-category-message", name = name));
+    .with_accept_enabled(!used || dialog.form.target.is_some())
+    .with_body_popup(dialog.form.targets_held)
+    .show(ctx, dialog, |ui, confirm| {
+        ui.label(delete_message(i18n, view, &branch, name));
+        if used {
+            confirm.target_picker(ui, i18n, view, &branch);
+        }
     });
     match outcome {
         DialogOutcome::Open => return,
         DialogOutcome::Accepted => {
-            let command = DomainCommand::DeleteCategory { category };
+            let command = delete_command(view, &branch, dialog.form.target);
             commands.send(AppCommand::Domain(command));
         }
         DialogOutcome::Cancelled => {}
@@ -1008,6 +1067,77 @@ fn show_delete(
         }
     }
     form.focus_return = form.delete.take().map(|dialog| dialog.close(ctx));
+}
+
+/// The Command that deletes the categories in `branch`, a category followed by those
+/// under it level by level, each after every category under it. It first moves the
+/// transactions of each used one to `target`, when there is one. It is one undo step.
+fn delete_command(
+    view: &LedgerView,
+    branch: &[CategoryId],
+    target: Option<CategoryId>,
+) -> DomainCommand {
+    let deepest_first = || branch.iter().rev().copied();
+    let deletes = deepest_first().map(|category| DomainCommand::DeleteCategory { category });
+    let Some(to) = target else {
+        return DomainCommand::Compound(deletes.collect());
+    };
+    let reassigns = deepest_first()
+        .filter(|&from| view.category_usage(from).count() > 0)
+        .map(|from| DomainCommand::ReassignCategory { from, to });
+    DomainCommand::Compound(reassigns.chain(deletes).collect())
+}
+
+/// What the delete confirm says about the categories in `branch`, the first of them the
+/// one deleted, whose full path is `name`: how many transactions use them and their
+/// total, or that none does, and how many go with it.
+fn delete_message(
+    i18n: &Localizer,
+    view: &LedgerView,
+    branch: &[CategoryId],
+    name: String,
+) -> String {
+    let (&category, under) = branch.split_first().expect("a branch holds its category");
+    let subcategories = under.len();
+    let usage = view.category_usage(category);
+    let count = usage.count();
+    if count == 0 && subcategories == 0 {
+        return fl!(i18n, "dialog-delete-category-message", name = name);
+    }
+    if count == 0 {
+        return fl!(
+            i18n,
+            "dialog-delete-category-unused-parent",
+            name = name,
+            subcategories = subcategories
+        );
+    }
+    match usage.total() {
+        Ok(total) => fl!(
+            i18n,
+            "dialog-delete-category-used",
+            name = name,
+            subcategories = subcategories,
+            count = count,
+            total = FormattedAmount::new(i18n, total, AmountStyle::Symbol)
+                .text()
+                .to_owned()
+        ),
+        Err(error) => {
+            tracing::warn!(
+                ?error,
+                ?category,
+                "a deleted category's total can't be summed"
+            );
+            fl!(
+                i18n,
+                "dialog-delete-category-used-count",
+                name = name,
+                subcategories = subcategories,
+                count = count
+            )
+        }
+    }
 }
 
 /// The New Category Dialog, while it is open over the list.

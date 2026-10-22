@@ -231,6 +231,10 @@ impl StatusMessage {
                     fl!(i18n, "status-category-under-itself")
                 }
                 DomainError::SubcategoryType { .. } => fl!(i18n, "status-subcategory-type"),
+                DomainError::ReassignIntoItself { .. } => {
+                    fl!(i18n, "status-reassign-into-itself")
+                }
+                DomainError::NotInCategory { .. } => fl!(i18n, "status-not-in-category"),
                 DomainError::Store(WriteError::AmountOutOfRange(_)) => {
                     fl!(i18n, "status-amount-too-large")
                 }

@@ -14,8 +14,8 @@ use crate::transaction::{
 };
 use crate::{
     Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId, CategoryType,
-    ClearedStatus, CurrencyCode, DomainCommand, Money, MoneyError, MoveDirection, NewTransaction,
-    OtherSide, Transaction, TransactionEdit, TransactionId, Visibility, WriteError,
+    CategoryUse, ClearedStatus, CurrencyCode, DomainCommand, Money, MoneyError, MoveDirection,
+    NewTransaction, OtherSide, Transaction, TransactionEdit, TransactionId, Visibility, WriteError,
 };
 
 /// Why an undo log entry couldn't be read back as a Command.
@@ -168,7 +168,26 @@ fn to_wire(command: &DomainCommand) -> Result<v1::Command, WriteError> {
             category: category.raw(),
             category_type: category_type_to_wire(*category_type),
         },
+        DomainCommand::ReassignCategory { from, to } => v1::Command::ReassignCategory {
+            from: from.raw(),
+            to: to.raw(),
+        },
+        DomainCommand::ReassignUses { from, to, uses } => v1::Command::ReassignUses {
+            from: from.raw(),
+            to: to.raw(),
+            uses: uses.iter().copied().map(category_use_to_wire).collect(),
+        },
     })
+}
+
+fn category_use_to_wire(category_use: CategoryUse) -> v1::CategoryUse {
+    match category_use {
+        CategoryUse::Transaction(transaction) => v1::CategoryUse::Transaction(transaction.raw()),
+        CategoryUse::SplitLine { split, line } => v1::CategoryUse::SplitLine {
+            split: split.raw(),
+            line: u32::try_from(line).expect("a split holds fewer than 2^32 lines"),
+        },
+    }
 }
 
 fn account_to_wire(account: &Account) -> v1::Account {
@@ -507,7 +526,28 @@ fn from_wire(
             category: CategoryId::new(category),
             category_type: category_type_from_wire(category_type),
         },
+        v1::Command::ReassignCategory { from, to } => DomainCommand::ReassignCategory {
+            from: CategoryId::new(from),
+            to: CategoryId::new(to),
+        },
+        v1::Command::ReassignUses { from, to, uses } => DomainCommand::ReassignUses {
+            from: CategoryId::new(from),
+            to: CategoryId::new(to),
+            uses: uses.into_iter().map(category_use_from_wire).collect(),
+        },
     })
+}
+
+fn category_use_from_wire(category_use: v1::CategoryUse) -> CategoryUse {
+    match category_use {
+        v1::CategoryUse::Transaction(transaction) => {
+            CategoryUse::Transaction(TransactionId::new(transaction))
+        }
+        v1::CategoryUse::SplitLine { split, line } => CategoryUse::SplitLine {
+            split: TransactionId::new(split),
+            line: usize::try_from(line).expect("a usize holds every u32 Balanced runs on"),
+        },
+    }
 }
 
 fn category_from_wire(category: v1::Category) -> Category {
@@ -736,8 +776,9 @@ mod tests {
         EditedSplitLine, EditedSplitTarget, NewSplitLine, NewSplitTarget, SplitLine, SplitTarget,
     };
     use crate::{
-        Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId, Money,
-        MoveDirection, NewTransaction, Transaction, TransactionEdit, TransactionId, Visibility,
+        Account, AccountId, AccountKind, AccountStatus, Allocation, Category, CategoryId,
+        CategoryUse, Money, MoveDirection, NewTransaction, Transaction, TransactionEdit,
+        TransactionId, Visibility,
     };
 
     fn usd_code() -> CurrencyCode {
@@ -1036,7 +1077,7 @@ mod tests {
     }
 
     /// One of every category Command, every field set and unset.
-    fn category_commands() -> [DomainCommand; 10] {
+    fn category_commands() -> [DomainCommand; 13] {
         [
             DomainCommand::CreateCategory {
                 name: "Fuel".to_owned(),
@@ -1087,6 +1128,26 @@ mod tests {
                 category: CategoryId::new(5),
                 category_type: CategoryType::Expense,
             },
+            DomainCommand::ReassignCategory {
+                from: CategoryId::new(6),
+                to: CategoryId::new(3),
+            },
+            DomainCommand::ReassignUses {
+                from: CategoryId::new(3),
+                to: CategoryId::new(6),
+                uses: vec![
+                    CategoryUse::Transaction(TransactionId::new(12)),
+                    CategoryUse::SplitLine {
+                        split: TransactionId::new(13),
+                        line: 1,
+                    },
+                ],
+            },
+            DomainCommand::ReassignUses {
+                from: CategoryId::new(3),
+                to: CategoryId::new(6),
+                uses: Vec::new(),
+            },
         ]
     }
 
@@ -1114,6 +1175,8 @@ mod tests {
             DomainCommand::RenameCategory { .. } => 16,
             DomainCommand::MoveCategory { .. } => 17,
             DomainCommand::SetCategoryType { .. } => 18,
+            DomainCommand::ReassignCategory { .. } => 19,
+            DomainCommand::ReassignUses { .. } => 20,
         }
     }
 
@@ -1122,7 +1185,7 @@ mod tests {
         let mut seen: Vec<usize> = every_command().iter().map(variant).collect();
         seen.dedup();
 
-        assert_eq!(seen, (0..19).collect::<Vec<_>>());
+        assert_eq!(seen, (0..21).collect::<Vec<_>>());
     }
 
     #[test]

@@ -47,3 +47,6 @@ expression: entries
 {"move_category":{"category":6,"parent":null}}
 {"set_category_type":{"category":5,"category_type":"income"}}
 {"set_category_type":{"category":5,"category_type":"expense"}}
+{"reassign_category":{"from":6,"to":3}}
+{"reassign_uses":{"from":3,"to":6,"uses":[{"transaction":12},{"split_line":{"split":13,"line":1}}]}}
+{"reassign_uses":{"from":3,"to":6,"uses":[]}}
