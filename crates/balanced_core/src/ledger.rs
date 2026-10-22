@@ -1014,8 +1014,13 @@ impl Ledger {
                 self.rename_category(category, &name)?
             }
             DomainCommand::MoveCategory { category, parent } => {
-                self.move_category(category, parent)?
+                self.edit_category(category, parent, None)?
             }
+            DomainCommand::EditCategory {
+                category,
+                name,
+                parent,
+            } => self.edit_category(category, parent, Some(&name))?,
             DomainCommand::SetCategoryType {
                 category,
                 category_type,
@@ -1714,10 +1719,7 @@ impl Ledger {
         parent: Option<CategoryId>,
         category_type: CategoryType,
     ) -> Result<DomainCommand, DomainError> {
-        let name = name.trim();
-        if name.is_empty() {
-            return Err(DomainError::BlankCategoryName);
-        }
+        let name = category_name(name)?;
         let (category_type, visibility) = match parent {
             Some(parent) => {
                 let above = self
@@ -1792,10 +1794,7 @@ impl Ledger {
         id: CategoryId,
         name: &str,
     ) -> Result<DomainCommand, DomainError> {
-        let name = name.trim();
-        if name.is_empty() {
-            return Err(DomainError::BlankCategoryName);
-        }
+        let name = category_name(name)?;
         let index = self.category_index(id)?;
         let parent = self.view.categories[index].parent();
         self.check_unique_name(name, parent, Some(id))?;
@@ -1806,11 +1805,15 @@ impl Ledger {
         })
     }
 
-    fn move_category(
+    /// Moves category `id` under `parent`, renaming it to `name` as well when there is
+    /// one, so the name is checked against the new parent's categories only.
+    fn edit_category(
         &mut self,
         id: CategoryId,
         parent: Option<CategoryId>,
+        name: Option<&str>,
     ) -> Result<DomainCommand, DomainError> {
+        let name = name.map(category_name).transpose()?;
         let index = self.category_index(id)?;
         let new_parent = parent
             .map(|parent| {
@@ -1828,13 +1831,23 @@ impl Ledger {
         let moved = &self.view.categories[index];
         let (old_parent, old_type, old_visibility) =
             (moved.parent(), moved.category_type(), moved.visibility());
-        self.check_unique_name(moved.name(), parent, Some(id))?;
-        self.change_category(index, |category| category.set_parent(parent))?;
+        self.check_unique_name(name.unwrap_or(moved.name()), parent, Some(id))?;
+        let old_name = self.change_category(index, |category| {
+            category.set_parent(parent);
+            name.map(|name| category.rename(name.to_owned()))
+        })?;
         // Undo moves the branch back first, so showing it again never shows its new
         // parent too.
-        let mut inverse = vec![DomainCommand::MoveCategory {
-            category: id,
-            parent: old_parent,
+        let mut inverse = vec![match old_name {
+            Some(name) => DomainCommand::EditCategory {
+                category: id,
+                name,
+                parent: old_parent,
+            },
+            None => DomainCommand::MoveCategory {
+                category: id,
+                parent: old_parent,
+            },
         }];
         if let Some(parent_type) = parent_type.filter(|&parent_type| parent_type != old_type) {
             self.set_branch_type(id, parent_type)?;
@@ -2098,6 +2111,15 @@ impl Ledger {
         view.accounts_changed();
         Ok(())
     }
+}
+
+/// `name` without the spaces around it, refused when nothing is left.
+fn category_name(name: &str) -> Result<&str, DomainError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(DomainError::BlankCategoryName);
+    }
+    Ok(name)
 }
 
 /// The one command in `commands`, or a Compound of them all in order.

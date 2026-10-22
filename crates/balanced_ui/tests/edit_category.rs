@@ -196,6 +196,28 @@ fn a_move_beside_a_category_of_the_same_name_is_refused_in_the_dialog() {
 }
 
 #[test]
+fn a_rename_and_a_move_made_together_take_a_name_only_the_old_parent_holds() {
+    let mut harness = category_list();
+    // Auto & Transport's Insurance comes first in the tree, beside its Fuel.
+    harness
+        .query_all_by_role_and_label(Role::TreeItem, "Insurance")
+        .next()
+        .expect("the stub has two categories named Insurance")
+        .click();
+    harness.run();
+    click(&mut harness, Role::Button, "Edit…");
+
+    retype(&mut harness, "Fuel");
+    choose_parent(&mut harness, "Shopping");
+    click(&mut harness, Role::Button, "OK");
+
+    assert!(!edit_open(&harness));
+    let names = categories(&harness);
+    let count = |name: &str| names.iter().filter(|row| *row == name).count();
+    assert_eq!((count("Fuel"), count("Insurance")), (2, 1));
+}
+
+#[test]
 fn only_a_top_level_category_offers_a_type() {
     let mut harness = category_list();
     edit(&mut harness, "Groceries");

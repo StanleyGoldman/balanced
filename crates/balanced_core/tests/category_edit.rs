@@ -346,6 +346,98 @@ fn a_top_level_category_moved_under_a_parent_of_its_own_type_is_undone_by_a_move
     assert_eq!(applied.inverse(), &move_to(household.groceries, None));
 }
 
+fn edit(category: CategoryId, name: &str, parent: Option<CategoryId>) -> DomainCommand {
+    DomainCommand::EditCategory {
+        category,
+        name: name.to_owned(),
+        parent,
+    }
+}
+
+#[test]
+fn a_rename_and_move_together_may_take_a_name_only_the_old_parent_holds() {
+    let mut household = Household::new();
+
+    household
+        .apply(edit(
+            household.groceries,
+            "Restaurants",
+            Some(household.income),
+        ))
+        .unwrap();
+
+    assert_eq!(household.path(household.groceries), "Income:Restaurants");
+}
+
+#[test]
+fn a_rename_and_move_together_may_go_under_a_parent_holding_the_old_name() {
+    let mut household = Household::new();
+    household
+        .apply(DomainCommand::CreateCategory {
+            name: "Coffee".to_owned(),
+            parent: Some(household.food),
+            category_type: CategoryType::Expense,
+        })
+        .unwrap();
+    let food_coffee = household
+        .view()
+        .categories()
+        .iter()
+        .find(|category| category.name() == "Coffee" && category.parent() == Some(household.food))
+        .unwrap()
+        .id();
+
+    household
+        .apply(edit(food_coffee, "Espresso", Some(household.restaurants)))
+        .unwrap();
+
+    assert_eq!(household.path(food_coffee), "Food:Restaurants:Espresso");
+}
+
+#[test]
+fn a_rename_and_move_together_to_a_name_the_new_parent_holds_ignoring_case_is_refused() {
+    let mut household = Household::new();
+    let before = household.view();
+
+    let result = household.apply(edit(household.groceries, "salary", Some(household.income)));
+
+    assert_eq!(
+        result,
+        Err(DomainError::DuplicateCategory {
+            name: "salary".to_owned()
+        })
+    );
+    assert_eq!(household.view(), before);
+}
+
+#[test]
+fn one_undo_gives_a_renamed_and_moved_category_its_old_name_and_parent_back() {
+    let mut household = Household::new();
+    household
+        .apply(edit(
+            household.restaurants,
+            "Dining",
+            Some(household.income),
+        ))
+        .unwrap();
+
+    household.ledger.undo().unwrap();
+
+    assert_eq!(household.path(household.coffee), "Food:Restaurants:Coffee");
+    assert_eq!(household.type_of(household.coffee), CategoryType::Expense);
+}
+
+#[test]
+fn a_rename_and_move_together_to_a_blank_name_is_refused() {
+    let mut household = Household::new();
+    let before = household.view();
+
+    let result = household.apply(edit(household.groceries, "  ", Some(household.income)));
+
+    assert_eq!(result, Err(DomainError::BlankCategoryName));
+    assert_eq!(household.view(), before);
+}
+
 fn set_type(category: CategoryId, category_type: CategoryType) -> DomainCommand {
     DomainCommand::SetCategoryType {
         category,
