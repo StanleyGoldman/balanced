@@ -665,11 +665,12 @@ impl MainWindow {
     /// Undo and Redo behind a Dialog whose changes apply as soon as they're confirmed,
     /// while nothing is open over it. The Category List is the one such Dialog.
     fn shortcuts(&self) -> Vec<Binding> {
-        let applies_at_once = self
+        let list_on_top = self
             .category_list
             .as_ref()
-            .is_some_and(|dialog| !dialog.form.covered());
-        if applies_at_once && !self.dialog_open_besides_category_list() {
+            .is_some_and(|dialog| !dialog.form.has_dialog_over())
+            && !self.dialog_open_besides_category_list();
+        if list_on_top {
             KEYMAP
                 .iter()
                 .copied()

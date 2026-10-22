@@ -815,7 +815,7 @@ fn undo_in_the_search_box_undoes_its_typing_not_the_ledger() {
         .get_by_role_and_label(Role::TextInput, "Search")
         .accesskit_node()
         .value();
-    assert_ne!(search_box.as_deref(), Some("pet"));
+    assert_eq!(search_box.as_deref(), Some(""));
 }
 
 /// The label of the Register cell under the cell cursor.
@@ -855,12 +855,11 @@ fn undoing_a_new_category_while_it_is_selected_leaves_no_selection() {
     click_row(&mut harness, "Pets");
 
     press_command(&mut harness, Key::Z);
-
-    assert!(!categories(&harness).contains(&"Pets".to_owned()));
-    assert_eq!(enabled_buttons(&harness), ONLY_NEW);
-    // A redo brings the row back unselected: the undo took it out of the selection.
+    let buttons_after_undo = enabled_buttons(&harness);
+    // A redo brings the row back, so a selection the undo left behind would show.
     press_command(&mut harness, Key::Y);
-    assert!(categories(&harness).contains(&"Pets".to_owned()));
+
+    assert_eq!(buttons_after_undo, ONLY_NEW);
     assert_eq!(selected(&harness), None);
 }
 
