@@ -126,6 +126,21 @@ impl Store {
         Ok(())
     }
 
+    /// Replaces category `category.id`'s name, parent and type by `category`'s.
+    pub fn update_category(&self, category: &CategoryRow) -> Result<(), StoreError> {
+        self.connection
+            .prepare_cached(
+                "UPDATE category SET parent_id = ?2, name = ?3, type = ?4 WHERE id = ?1",
+            )?
+            .execute(params![
+                category.id,
+                category.parent_id,
+                category.name,
+                category.category_type
+            ])?;
+        Ok(())
+    }
+
     /// Deletes category `id`. The file refuses it while a transaction, a split line or
     /// another category uses it.
     pub fn delete_category(&self, id: u32) -> Result<(), StoreError> {

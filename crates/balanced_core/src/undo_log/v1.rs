@@ -79,6 +79,18 @@ pub(crate) enum Command {
     RestoreCategory {
         category: Category,
     },
+    RenameCategory {
+        category: u32,
+        name: String,
+    },
+    MoveCategory {
+        category: u32,
+        parent: Option<u32>,
+    },
+    SetCategoryType {
+        category: u32,
+        category_type: CategoryType,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

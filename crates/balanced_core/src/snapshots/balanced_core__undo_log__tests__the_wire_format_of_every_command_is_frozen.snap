@@ -42,3 +42,8 @@ expression: entries
 {"delete_category":{"category":6}}
 {"restore_category":{"category":{"id":6,"name":"Fuel","parent":null,"category_type":"expense"}}}
 {"restore_category":{"category":{"id":7,"name":"Salary","parent":null,"category_type":"income"}}}
+{"rename_category":{"category":6,"name":"Petrol"}}
+{"move_category":{"category":6,"parent":5}}
+{"move_category":{"category":6,"parent":null}}
+{"set_category_type":{"category":5,"category_type":"income"}}
+{"set_category_type":{"category":5,"category_type":"expense"}}
