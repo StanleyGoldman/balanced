@@ -238,8 +238,7 @@ impl LightDialog {
             discard,
         } = &modal.inner;
         let others = [cancel.as_ref(), back.as_ref(), discard.as_ref()];
-        if accept.clicked()
-            || (accept_enabled && modal.is_top_modal && enter_pressed(ctx, others))
+        if accept.clicked() || (accept_enabled && modal.is_top_modal && enter_pressed(ctx, others))
         {
             DialogOutcome::Accepted
         } else if back.as_ref().is_some_and(Response::clicked) {

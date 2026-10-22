@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use balanced_core::{
     AccountId, AccountKind, Allocation, CategoryId, CategoryType, CategoryUse, CurrencyCode,
-    DomainCommand, DomainError, Ledger, Money, NewSplitLine, NewTransaction, SplitTarget,
-    TransactionId,
+    DomainCommand, DomainError, Ledger, Money, NewSplitLine, NewTransaction, RegisterEntry,
+    SplitTarget, TransactionId,
 };
 use icu_calendar::{Date, Iso};
 use tempfile::TempDir;
@@ -107,7 +107,7 @@ impl Household {
     /// The household as its file holds it, opened afresh.
     fn reopened(self) -> Self {
         let Self {
-            _dir,
+            _dir: dir,
             path,
             ledger,
             checking,
@@ -118,7 +118,7 @@ impl Household {
         drop(ledger);
         let ledger = Ledger::open(&path).expect("the file the ledger wrote opens");
         Self {
-            _dir,
+            _dir: dir,
             path,
             ledger,
             checking,
@@ -136,7 +136,7 @@ impl Household {
             .expect("Checking stays in the ledger")
             .register()
             .iter()
-            .map(|entry| entry.transaction())
+            .map(RegisterEntry::transaction)
             .find(|transaction| transaction.payee() == payee)
             .expect("the household paid the payee")
             .id()
@@ -156,7 +156,7 @@ impl Household {
             .expect("Checking stays in the ledger")
             .register()
             .iter()
-            .map(|entry| entry.transaction())
+            .map(RegisterEntry::transaction)
             .filter_map(|transaction| {
                 let names = match transaction.allocation() {
                     Allocation::OpeningBalance => return None,

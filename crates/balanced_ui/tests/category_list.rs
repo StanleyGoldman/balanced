@@ -819,7 +819,9 @@ fn choose_target(harness: &mut Harness<'static, App>, path: &str) {
 
 /// Whether the open Reassign target list offers `path`.
 fn offers(harness: &Harness<'static, App>, path: &str) -> bool {
-    harness.query_by_role_and_label(Role::Button, path).is_some()
+    harness
+        .query_by_role_and_label(Role::Button, path)
+        .is_some()
 }
 
 #[test]
@@ -868,7 +870,11 @@ fn a_click_on_the_dimmed_window_closes_only_the_target_list() {
     harness.run();
 
     assert!(!offers(&harness, "Shopping"));
-    assert!(harness.query_by_role_and_label(Role::ComboBox, MOVE_TO).is_some());
+    assert!(
+        harness
+            .query_by_role_and_label(Role::ComboBox, MOVE_TO)
+            .is_some()
+    );
 }
 
 #[test]
@@ -878,7 +884,11 @@ fn enter_deletes_nothing_until_a_target_is_picked() {
 
     press(&mut harness, Key::Enter);
 
-    assert!(harness.query_by_role_and_label(Role::ComboBox, MOVE_TO).is_some());
+    assert!(
+        harness
+            .query_by_role_and_label(Role::ComboBox, MOVE_TO)
+            .is_some()
+    );
     assert!(categories(&harness).contains(&"Groceries".to_owned()));
 }
 
@@ -946,7 +956,10 @@ fn deleting_a_parent_deletes_every_category_under_it_in_one_undo_step() {
     delete_moving_to(&mut harness, "Food & Dining", "Shopping:Household");
     open_category_list(&mut harness);
     for name in food {
-        assert!(!categories(&harness).contains(&name.to_owned()), "{name} is gone");
+        assert!(
+            !categories(&harness).contains(&name.to_owned()),
+            "{name} is gone"
+        );
     }
     assert_eq!(
         usage(&harness, "Household"),
@@ -959,7 +972,10 @@ fn deleting_a_parent_deletes_every_category_under_it_in_one_undo_step() {
     open_category_list(&mut harness);
 
     for name in food {
-        assert!(categories(&harness).contains(&name.to_owned()), "{name} is back");
+        assert!(
+            categories(&harness).contains(&name.to_owned()),
+            "{name} is back"
+        );
     }
     assert_eq!(
         usage(&harness, "Food & Dining"),

@@ -14,8 +14,8 @@ use balanced_i18n::{AmountStyle, Localizer};
 use eframe::egui::accesskit::{self, Role};
 use eframe::egui::style::ScrollStyle;
 use eframe::egui::{
-    self, Align, Button, ComboBox, EventFilter, Id, Key, Layout, Modifiers, Rect, Response, RichText, Sense,
-    TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
+    self, Align, Button, ComboBox, EventFilter, Id, Key, Layout, Modifiers, Rect, Response,
+    RichText, Sense, TextStyle, TextWrapMode, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, Size, StripBuilder, TableBuilder, TableRow};
 use icu_locale::{LanguageIdentifier, Locale};
@@ -98,10 +98,10 @@ impl DeleteConfirm {
             .filter_map(|id| Some((id, category_text(view, id)?)))
             .collect();
         paths.sort_by(|(_, a), (_, b)| i18n.compare_text(a, b));
-        let chosen = match self.target {
-            Some(target) => category_text(view, target).unwrap_or_default(),
-            None => fl!(i18n, "dialog-delete-category-choose"),
-        };
+        let chosen = self
+            .target
+            .and_then(|target| category_text(view, target))
+            .unwrap_or_else(|| fl!(i18n, "dialog-delete-category-choose"));
         let picker = ui.horizontal(|ui| {
             let label = ui.label(fl!(i18n, "dialog-delete-category-move-to"));
             ComboBox::from_id_salt("category_list_delete_target")
@@ -968,7 +968,11 @@ fn delete_message(
                 .to_owned()
         ),
         Err(error) => {
-            tracing::warn!(?error, ?category, "a deleted category's total can't be summed");
+            tracing::warn!(
+                ?error,
+                ?category,
+                "a deleted category's total can't be summed"
+            );
             fl!(
                 i18n,
                 "dialog-delete-category-used-count",
