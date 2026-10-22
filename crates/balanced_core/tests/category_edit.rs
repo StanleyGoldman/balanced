@@ -30,8 +30,8 @@ fn date(day: u8) -> Date<Iso> {
 ///
 /// and a checking account, Everyday, with a payment to Bean There in Coffee.
 struct Household {
-    /// Holds the file until the test ends.
-    _dir: TempDir,
+    /// Holds the data file, which a test can reopen.
+    dir: TempDir,
     ledger: Ledger,
     food: CategoryId,
     groceries: CategoryId,
@@ -79,7 +79,7 @@ impl Household {
             })
             .expect("the ledger posts the payment");
         Self {
-            _dir: dir,
+            dir,
             ledger,
             food,
             groceries,
@@ -390,7 +390,7 @@ fn a_type_change_survives_reopening_the_data_file() {
         .apply(rename(household.coffee, "Espresso"))
         .unwrap();
     household.apply(move_to(household.groceries, None)).unwrap();
-    let path = household._dir.path().join("Household.balanced");
+    let path = household.dir.path().join("Household.balanced");
     drop(household.ledger);
 
     let reopened = Ledger::open(&path).expect("the data file opens");

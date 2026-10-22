@@ -1817,7 +1817,7 @@ impl Ledger {
         };
         let moved = &self.view.categories[index];
         let (old_parent, old_type) = (moved.parent(), moved.category_type());
-        self.check_unique_name(&moved.name().to_owned(), parent, Some(id))?;
+        self.check_unique_name(moved.name(), parent, Some(id))?;
         self.change_category(index, |category| category.set_parent(parent))?;
         let move_back = DomainCommand::MoveCategory {
             category: id,
