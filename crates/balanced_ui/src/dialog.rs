@@ -23,7 +23,8 @@ pub(crate) enum DialogOutcome {
     /// The user clicked Discard, which only a Dialog asking whether to keep changes
     /// has.
     Discarded,
-    /// The user pressed Cancel or Esc, or clicked the dimmed window behind it.
+    /// The user pressed Cancel or Esc, or clicked the dimmed window behind it unless
+    /// the Dialog ignores such clicks.
     Cancelled,
 }
 
@@ -123,6 +124,8 @@ pub(crate) struct LightDialog {
     /// Whether the body has a popup of its own open, or the press that closed one is
     /// still held, so that a click on the dimmed window closes only the popup.
     body_popup: bool,
+    /// Whether a click on the dimmed window closes the Dialog.
+    backdrop_closes: bool,
     /// Whether the default button takes clicks and Enter.
     accept_enabled: bool,
 }
@@ -139,6 +142,7 @@ impl LightDialog {
             discard: None,
             backdrop: theme.backdrop(),
             body_popup: false,
+            backdrop_closes: true,
             accept_enabled: true,
         }
     }
@@ -154,6 +158,7 @@ impl LightDialog {
             discard: None,
             backdrop: theme.backdrop(),
             body_popup: false,
+            backdrop_closes: true,
             accept_enabled: true,
         }
     }
@@ -185,6 +190,15 @@ impl LightDialog {
         }
     }
 
+    /// The same Dialog, left open by a click on the dimmed window. Its buttons and Esc
+    /// still close it.
+    pub(crate) fn ignoring_backdrop(self) -> Self {
+        Self {
+            backdrop_closes: false,
+            ..self
+        }
+    }
+
     /// The same Dialog, whose default button takes no click and no Enter unless
     /// `enabled`.
     pub(crate) fn with_accept_enabled(self, enabled: bool) -> Self {
@@ -211,6 +225,7 @@ impl LightDialog {
             discard,
             backdrop,
             body_popup,
+            backdrop_closes,
             accept_enabled,
         } = self;
         let room =
@@ -240,6 +255,8 @@ impl LightDialog {
             discard,
         } = &modal.inner;
         let others = [cancel.as_ref(), back.as_ref(), discard.as_ref()];
+        let backdrop_ignored =
+            (body_popup || !backdrop_closes) && modal.backdrop_response.clicked();
         if accept.clicked() || (accept_enabled && modal.is_top_modal && enter_pressed(ctx, others))
         {
             DialogOutcome::Accepted
@@ -248,7 +265,7 @@ impl LightDialog {
         } else if discard.as_ref().is_some_and(Response::clicked) {
             DialogOutcome::Discarded
         } else if cancel.as_ref().is_some_and(Response::clicked)
-            || (!(body_popup && modal.backdrop_response.clicked()) && modal.should_close())
+            || (!backdrop_ignored && modal.should_close())
         {
             DialogOutcome::Cancelled
         } else {
