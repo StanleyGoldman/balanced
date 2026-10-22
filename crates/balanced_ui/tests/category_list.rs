@@ -1178,6 +1178,14 @@ fn search(harness: &mut Harness<'static, App>, text: &str) {
     type_text(harness, text);
 }
 
+/// Empties the Category List's Search box in one edit, as each shorter search would
+/// unfold the rows above its matches.
+fn clear_search(harness: &mut Harness<'static, App>) {
+    search(harness, "");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    press(harness, Key::Backspace);
+}
+
 #[test]
 fn search_keeps_the_categories_whose_names_hold_the_text_in_any_case() {
     let mut harness = category_list();
@@ -1392,6 +1400,36 @@ fn search_unfolds_a_folded_parent_above_a_match() {
         .map(|(level, name)| (level, name.to_owned()))
     );
     assert_eq!(expanded(&harness, "Home"), Some(true));
+}
+
+#[test]
+fn a_parent_the_filter_keeps_nothing_under_has_no_fold() {
+    let mut harness = category_list();
+
+    search(&mut harness, "auto");
+
+    assert_eq!(expanded(&harness, "Auto & Transport"), None);
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Collapse Auto & Transport")
+            .is_none()
+    );
+}
+
+#[test]
+fn left_folds_nothing_on_a_parent_the_filter_keeps_nothing_under() {
+    let mut harness = category_list();
+    search(&mut harness, "auto");
+    click_row(&mut harness, "Auto & Transport");
+
+    press(&mut harness, Key::ArrowLeft);
+    clear_search(&mut harness);
+
+    assert_eq!(expanded(&harness, "Auto & Transport"), Some(true));
+    assert_eq!(
+        categories(&harness)[..3],
+        ["Auto & Transport", "Fuel", "Insurance"]
+    );
 }
 
 /// Clicks the row named `name` while `modifiers` are held, then runs the App until it

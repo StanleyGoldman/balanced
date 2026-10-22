@@ -44,10 +44,9 @@ pub(crate) struct CategoryListForm {
     folded: HashSet<CategoryId>,
     /// Which rows the filter bar lets the tree show.
     filter: Filter,
-    /// The index in the model of each row shown, top to bottom: every row the filter
-    /// keeps but those under a folded category. `None` once the model, the filter or
-    /// the folds change, so each index is in range of the model it was built from.
-    shown: Option<Vec<usize>>,
+    /// The rows the tree shows. `None` once the model, the filter or the folds change,
+    /// so each index is in range of the model it was built from.
+    shown: Option<Shown>,
     /// The selected rows.
     selection: HashSet<RowKey>,
     /// The row last clicked or stepped to, which is the tree's one Tab stop.
@@ -299,7 +298,9 @@ impl Pick {
 /// How a row is drawn this frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RowState {
-    fold: Fold,
+    /// How its fold triangle is folded, or `None` when the filter keeps no row under
+    /// it, so it has none.
+    fold: Option<Fold>,
     selected: bool,
     /// Whether it is the tree's Tab stop: the selected row, or the first row while none
     /// shown is selected.
@@ -323,8 +324,6 @@ struct ListRow {
     /// How many categories it sits under: 0 at the top of the tree.
     depth: usize,
     name: String,
-    /// Whether any category sits under it.
-    has_children: bool,
     /// Whether it is a hidden category.
     hidden: bool,
     /// A category's type, or `None` for an account.
@@ -395,9 +394,8 @@ impl ListModel {
             let usage = view.category_usage(category.id());
             let under = children.get(&Some(category.id()));
             let name = category.name().to_owned();
-            let has_children = under.is_some();
             let category_type = Some(category.category_type());
-            let mut row = ListRow::new(i18n, key, depth, name, has_children, category_type, usage);
+            let mut row = ListRow::new(i18n, key, depth, name, category_type, usage);
             if category.visibility() == Visibility::Hidden {
                 row = row.hidden(i18n);
             }
@@ -415,7 +413,7 @@ impl ListModel {
             let usage = view.transfer_usage(account.id());
             let name = transfer_text(account.name());
             let key = RowKey::Transfer(account.id());
-            rows.push(ListRow::new(i18n, key, 0, name, false, None, usage));
+            rows.push(ListRow::new(i18n, key, 0, name, None, usage));
         }
         Self {
             source: Source::of(view, i18n),
@@ -423,10 +421,18 @@ impl ListModel {
         }
     }
 
-    /// The index of each row shown through `filter` while the categories in `folded`
-    /// are folded.
-    fn shown(&self, filter: &Filter, folded: &HashSet<CategoryId>) -> Vec<usize> {
+    /// The rows shown through `filter` while the categories in `folded` are folded.
+    fn shown(&self, filter: &Filter, folded: &HashSet<CategoryId>) -> Shown {
         let kept = self.kept(filter);
+        let foldable = self
+            .rows
+            .iter()
+            .zip(&kept.above_pick)
+            .filter_map(|(row, &above_pick)| match row.key {
+                RowKey::Category(id) if above_pick => Some(id),
+                RowKey::Category(_) | RowKey::Transfer(_) => None,
+            })
+            .collect();
         let kept: Vec<bool> = (0..self.rows.len())
             .map(|index| kept.picked[index] || kept.above_pick[index])
             .collect();
@@ -449,7 +455,10 @@ impl ListModel {
             };
             shown.push(index);
         }
-        shown
+        Shown {
+            rows: shown,
+            foldable,
+        }
     }
 
     /// Whether `filter` keeps each row: those it picks, and every category above one.
@@ -497,6 +506,16 @@ impl ListModel {
     }
 }
 
+/// The rows the Category List shows through its filter and folds.
+#[derive(Debug)]
+struct Shown {
+    /// The index in the model of each row shown, top to bottom: every row the filter
+    /// keeps but those under a folded category.
+    rows: Vec<usize>,
+    /// The categories the filter keeps a row under, which have a fold triangle.
+    foldable: HashSet<CategoryId>,
+}
+
 /// Which rows a filter keeps, by index in the model.
 struct Kept {
     /// The rows the filter picks.
@@ -511,7 +530,6 @@ impl ListRow {
         key: RowKey,
         depth: usize,
         name: String,
-        has_children: bool,
         category_type: Option<CategoryType>,
         usage: &Usage,
     ) -> Self {
@@ -548,7 +566,6 @@ impl ListRow {
             key,
             depth,
             name,
-            has_children,
             hidden: false,
             category_type,
             type_text,
@@ -634,7 +651,7 @@ impl CategoryListForm {
         let shown = self.shown.take().unwrap_or_else(|| {
             let shown = model.shown(&self.filter, &self.folded);
             // A row a fold or the filter hides is no longer selected.
-            let still_shown = |key: &RowKey| model.place(&shown, *key).is_some();
+            let still_shown = |key: &RowKey| model.place(&shown.rows, *key).is_some();
             self.selection.retain(still_shown);
             self.cursor = self.cursor.filter(still_shown);
             self.anchor = self.anchor.filter(still_shown);
@@ -734,7 +751,7 @@ impl CategoryListForm {
         });
     }
 
-    /// Draws the rows of `model` at the indices `shown`, and does what a click or a key
+    /// Draws the rows of `model` that `shown` holds, and does what a click or a key
     /// in them asks for.
     fn table(
         &mut self,
@@ -742,11 +759,11 @@ impl CategoryListForm {
         i18n: &Localizer,
         theme: &Theme,
         model: &ListModel,
-        shown: Vec<usize>,
+        shown: Shown,
     ) {
         let tab_stop = self
             .cursor
-            .or_else(|| shown.first().map(|&index| model.rows[index].key));
+            .or_else(|| shown.rows.first().map(|&index| model.rows[index].key));
         let mut action = None;
         // A solid scroll bar takes its own width beside the columns, so it never covers
         // Total.
@@ -771,15 +788,17 @@ impl CategoryListForm {
         let scrolled = table
             .header(row_height, |header| headings(header, i18n))
             .body(|body| {
-                body.rows(row_height, shown.len(), |mut table_row| {
-                    // egui asks only for rows below `shown.len()`.
-                    let row = &model.rows[shown[table_row.index()]];
+                body.rows(row_height, shown.rows.len(), |mut table_row| {
+                    // egui asks only for rows below `shown.rows.len()`.
+                    let row = &model.rows[shown.rows[table_row.index()]];
                     let selected = self.selection.contains(&row.key);
                     let cursor = self.cursor == Some(row.key);
                     let state = RowState {
                         fold: match row.key {
-                            RowKey::Category(id) if self.folded.contains(&id) => Fold::Folded,
-                            RowKey::Category(_) | RowKey::Transfer(_) => Fold::Open,
+                            RowKey::Category(id) if !shown.foldable.contains(&id) => None,
+                            RowKey::Category(id) if self.folded.contains(&id) => Some(Fold::Folded),
+                            RowKey::Category(_) => Some(Fold::Open),
+                            RowKey::Transfer(_) => None,
                         },
                         selected,
                         tab_stop: tab_stop == Some(row.key),
@@ -903,7 +922,7 @@ impl CategoryListForm {
     /// Does what a click or a key in the table asked for, in `model`, whose rows are
     /// `pitch` apart.
     fn act(&mut self, model: &ListModel, action: TableAction, pitch: f32) {
-        let shown = self.shown.as_deref().unwrap_or_default();
+        let shown = self.shown.as_ref().map_or(&[][..], |shown| &shown.rows);
         let place = |key| model.place(shown, key);
         match action {
             TableAction::Pick(key, pick) => self.pick(model, key, pick),
@@ -946,7 +965,7 @@ impl CategoryListForm {
     /// Picks the row shown at `place`, scrolling it into view, in `model`, whose rows
     /// are `pitch` apart.
     fn step_to(&mut self, model: &ListModel, place: usize, pick: Pick, pitch: f32) {
-        let Some(&index) = self.shown.as_deref().and_then(|shown| shown.get(place)) else {
+        let Some(&index) = self.shown.as_ref().and_then(|shown| shown.rows.get(place)) else {
             return;
         };
         // `shown` holds indices into the model it was built from.
@@ -971,7 +990,7 @@ impl CategoryListForm {
                 self.anchor = Some(key);
             }
             Pick::Range => {
-                let shown = self.shown.as_deref().unwrap_or_default();
+                let shown = self.shown.as_ref().map_or(&[][..], |shown| &shown.rows);
                 let place = |key| model.place(shown, key);
                 if let Some((from, to)) = self.anchor.and_then(place).zip(place(key)) {
                     let range = from.min(to)..=from.max(to);
@@ -1029,8 +1048,8 @@ fn row_in_view(view: Scrolled, index: usize, pitch: f32) -> Option<f32> {
     }
 }
 
-/// The Category cell of `row`, drawn as `state` says: its fold triangle, when a
-/// category sits under it, and its name, indented to its depth. A screen reader reads
+/// The Category cell of `row`, drawn as `state` says: its fold triangle, when the
+/// filter keeps a row under it, and its name, indented to its depth. A screen reader reads
 /// the name as one tree item, with its level, its usage, whether it is selected and
 /// whether it is expanded. While the name has focus, ↑ and ↓ move the selection, and ←
 /// and → fold and unfold the row. Returns what a click or a key asked for.
@@ -1079,8 +1098,8 @@ fn name_cell(
         node.set_description(row.description.clone());
         node.set_level(row.depth + 1);
         node.set_selected(state.selected);
-        if row.has_children {
-            node.set_expanded(state.fold == Fold::Open);
+        if let Some(fold) = state.fold {
+            node.set_expanded(fold == Fold::Open);
         }
     });
     let text = match row.key {
@@ -1130,10 +1149,10 @@ fn name_cell(
         action = Some(TableAction::Focused(row.key));
     }
     if response.has_focus() {
-        action = row_keys(ui, response.id, row).or(action);
+        action = row_keys(ui, response.id, row, state.fold).or(action);
     }
-    if row.has_children
-        && fold_triangle_button(ui, i18n, row, slot, state.fold).clicked()
+    if let Some(fold) = state.fold
+        && fold_triangle_button(ui, i18n, row, slot, fold).clicked()
         && let RowKey::Category(id) = row.key
     {
         action = Some(TableAction::Toggle(id));
@@ -1143,8 +1162,8 @@ fn name_cell(
 
 /// The keys the focused name of `row`, widget `id`, takes from egui's focus moves: ↑
 /// and ↓ move the selection, Shift+↑ and Shift+↓ extend it, and ← and → fold and
-/// unfold a row with categories under it.
-fn row_keys(ui: &egui::Ui, id: Id, row: &ListRow) -> Option<TableAction> {
+/// unfold a row with a fold triangle, as `fold` says it has.
+fn row_keys(ui: &egui::Ui, id: Id, row: &ListRow, fold: Option<Fold>) -> Option<TableAction> {
     ui.memory_mut(|memory| {
         memory.set_focus_lock_filter(
             id,
@@ -1157,7 +1176,7 @@ fn row_keys(ui: &egui::Ui, id: Id, row: &ListRow) -> Option<TableAction> {
     });
     let pressed = |key| ui.input_mut(|input| input.consume_key(Modifiers::NONE, key));
     let folding = match row.key {
-        RowKey::Category(id) if row.has_children => Some(id),
+        RowKey::Category(id) if fold.is_some() => Some(id),
         RowKey::Category(_) | RowKey::Transfer(_) => None,
     };
     let shifted = |key| ui.input_mut(|input| input.consume_key(Modifiers::SHIFT, key));
