@@ -14,11 +14,12 @@ use balanced_i18n::{AmountReader, AmountStyle, Localizer};
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
 use eframe::egui::{
-    self, Align, Align2, Area, EventFilter, Frame, Id, Key, Label, Layout, Modifiers, Order, Rect,
-    Response, RichText, Sense, StrokeKind, TextEdit, TextStyle, WidgetInfo, WidgetType, vec2,
+    self, Align, Align2, Area, Frame, Id, Key, Label, Layout, Modifiers, Order, Rect, Response,
+    RichText, Sense, StrokeKind, TextEdit, TextStyle, WidgetInfo, WidgetType, vec2,
 };
 
 use crate::amount_field::{self, Preview};
+use crate::field_keys::FieldKeys;
 use crate::formatted_amount::i18n_currency;
 use crate::i18n::fl;
 use crate::theme::Theme;
@@ -285,10 +286,7 @@ impl Keypad {
                 .id(display_id(id))
                 .horizontal_align(Align::RIGHT)
                 .desired_width(width)
-                .event_filter(EventFilter {
-                    escape: true,
-                    ..Default::default()
-                }),
+                .event_filter(FieldKeys::text_field().into()),
         )
         .labelled_by(caption.id);
         self.result_line(ui, i18n, reader, currency, width);

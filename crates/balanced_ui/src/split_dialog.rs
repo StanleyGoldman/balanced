@@ -6,13 +6,14 @@
 use balanced_core::{AccountId, CurrencyCode, LedgerView, Money, MoneyError, TransactionId};
 use balanced_i18n::{AmountParseError, AmountReader, AmountStyle, Localizer};
 use eframe::egui::{
-    self, Align, Button, EventFilter, Id, Key, Label, Layout, Modifiers, RichText, ScrollArea,
-    Sense, TextEdit, vec2,
+    self, Align, Button, Id, Key, Label, Layout, Modifiers, RichText, ScrollArea, Sense, TextEdit,
+    vec2,
 };
 
 use crate::amount_field;
 use crate::combo_field::{self, ComboText, ListScope, text_typed};
 use crate::combobox::{CategoryTarget, FieldChoices, ListRow};
+use crate::field_keys::FieldKeys;
 use crate::formatted_amount::{FormattedAmount, i18n_currency};
 use crate::i18n::fl;
 use crate::register_model::{
@@ -504,13 +505,9 @@ impl SplitForm {
             vec2(Theme::SPLIT_CATEGORY_WIDTH - height - gap, height),
             TextEdit::singleline(line.category.text_mut())
                 .id(id)
-                // Esc and the arrows reach `list_keys` before egui takes the field's
+                // Esc, ↑ and ↓ reach `list_keys` before egui takes the field's
                 // focus or moves it on them.
-                .event_filter(EventFilter {
-                    escape: true,
-                    vertical_arrows: true,
-                    ..Default::default()
-                }),
+                .event_filter(FieldKeys::text_field().with_vertical_arrows().into()),
         );
         let number = LineNumber::at(index).0;
         let label = fl!(i18n, "dialog-split-line-category", line = number);
