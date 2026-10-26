@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use balanced_core::{
-    AccountId, AccountKind, CurrencyCode, DomainCommand, Ledger, LedgerView, Money,
+    AccountId, AccountKind, CurrencyCode, DomainCommand, Ledger, LedgerView, Money, TransactionId,
 };
 use balanced_i18n::Localizer;
 use eframe::egui::{self, vec2};
@@ -18,7 +18,7 @@ use egui_wgpu::{WgpuSetup, WgpuSetupCreateNew, wgpu};
 use icu_calendar::{Date, Iso};
 
 use crate::combobox::FieldChoices;
-use crate::command::{AnswerTo, AppCommand, RowSave};
+use crate::command::{AnswerTo, AppCommand, DialogKind, RowSave};
 use crate::preferences::{Preferences, Scheme};
 use crate::register_filter::RegisterFilter;
 use crate::register_model::{RegisterModel, RegisterSort, Showing, TodayDivider};
@@ -90,6 +90,37 @@ pub fn send_silent_save(harness: &Harness<'_, App>, command: DomainCommand) {
         command,
         answer: AnswerTo::StatusBar,
     }));
+}
+
+/// Opens the confirm for changing Reconciled transaction `transaction`'s amount to
+/// `amount`, holding a save nothing waits on, `command`, as a row's save sent as
+/// another row's changes start would. Accepting it sends `command`.
+///
+/// It opens at the start of the next frame, ahead of any Dialog asked for in that
+/// frame, which `MainWindow` then refuses. Focus leaves whatever widget has it first,
+/// so the confirm gives it back to none when it closes: a cell editor focused now may
+/// close in that frame, and focus given back to it would be lost.
+pub fn ask_to_confirm_silent_save(
+    harness: &Harness<'_, App>,
+    transaction: TransactionId,
+    amount: Money,
+    command: DomainCommand,
+) {
+    harness.ctx.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
+    harness
+        .state()
+        .send(AppCommand::OpenDialog(DialogKind::ChangeReconciledAmount {
+            transaction,
+            amount,
+            save: RowSave {
+                command,
+                answer: AnswerTo::StatusBar,
+            },
+        }));
 }
 
 /// A closed data file named `name` in `dir`, in US dollars, holding checking accounts

@@ -19,7 +19,7 @@ use crate::account_bar::{AccountBar, BarFrame};
 use crate::accounts_model::AccountsModel;
 use crate::calculator::{self, Calculator};
 use crate::category_list::{self, CategoryListForm, CategoryListOutcome};
-use crate::command::{AppCommand, CommandSender, DialogKind, RowSave, StatusMessage};
+use crate::command::{AnswerTo, AppCommand, CommandSender, DialogKind, RowSave, StatusMessage};
 use crate::data_file::{self, DataFileRefusal};
 use crate::dialog::{DialogOutcome, FocusReturn, HeavyDialog, LightDialog, OpenDialog};
 use crate::formatted_amount::FormattedAmount;
@@ -1276,8 +1276,12 @@ impl MainWindow {
         match outcome {
             DialogOutcome::Open => return,
             DialogOutcome::Accepted => commands.send(AppCommand::SaveRow(form.save)),
+            // A silent save's confirm leaves the Register alone: whatever save it holds
+            // pending waits on a confirm of its own.
             DialogOutcome::Cancelled => {
-                if let Some(register) = self.register_mut() {
+                if form.save.answer == AnswerTo::Register
+                    && let Some(register) = self.register_mut()
+                {
                     register.confirm_cancelled();
                 }
             }
