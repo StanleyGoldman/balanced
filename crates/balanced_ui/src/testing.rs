@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use balanced_core::{
-    AccountId, AccountKind, CurrencyCode, DomainCommand, Ledger, LedgerView, Money,
+    AccountId, AccountKind, CurrencyCode, DomainCommand, Ledger, LedgerView, Money, TransactionId,
 };
 use balanced_i18n::Localizer;
 use eframe::egui::{self, vec2};
@@ -18,7 +18,7 @@ use egui_wgpu::{WgpuSetup, WgpuSetupCreateNew, wgpu};
 use icu_calendar::{Date, Iso};
 
 use crate::combobox::FieldChoices;
-use crate::command::{AnswerTo, AppCommand, RowSave};
+use crate::command::{AnswerTo, AppCommand, DialogKind, RowSave};
 use crate::preferences::{Preferences, Scheme};
 use crate::register_filter::RegisterFilter;
 use crate::register_model::{RegisterModel, RegisterSort, Showing, TodayDivider};
@@ -90,6 +90,27 @@ pub fn send_silent_save(harness: &Harness<'_, App>, command: DomainCommand) {
         command,
         answer: AnswerTo::StatusBar,
     }));
+}
+
+/// Opens the confirm a save of a Register row whose answer nothing waits on asks for
+/// when it changes Reconciled transaction `transaction`'s amount to `amount`, as a
+/// row's save sent as another row's changes start does. Accepting it sends `command`.
+pub fn ask_to_confirm_silent_save(
+    harness: &Harness<'_, App>,
+    transaction: TransactionId,
+    amount: Money,
+    command: DomainCommand,
+) {
+    harness
+        .state()
+        .send(AppCommand::OpenDialog(DialogKind::ChangeReconciledAmount {
+            transaction,
+            amount,
+            save: RowSave {
+                command,
+                answer: AnswerTo::StatusBar,
+            },
+        }));
 }
 
 /// A closed data file named `name` in `dir`, in US dollars, holding checking accounts

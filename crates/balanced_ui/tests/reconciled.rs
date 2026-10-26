@@ -3,9 +3,9 @@
 //! Changing and deleting Reconciled transactions, which asks first, driven through the
 //! AccessKit tree the way a user drives it.
 
-use balanced_core::Ledger;
+use balanced_core::{CurrencyCode, DomainCommand, Ledger, Money, TransactionEdit, TransactionId};
 use balanced_i18n::Localizer;
-use balanced_ui::{App, Clock, PreferencesFile};
+use balanced_ui::{App, Clock, PreferencesFile, testing};
 use eframe::App as _;
 use eframe::egui::accesskit::Role;
 use eframe::egui::{Event, Key, Modifiers, Rangef, vec2};
@@ -20,13 +20,19 @@ const RENT_CONFIRM: &str = "This transaction is reconciled. Change its amount to
 /// The App on stub data, in the test locale, wide enough to show every Register column,
 /// with Everyday Checking open.
 fn everyday_checking() -> Harness<'static, App> {
+    everyday_checking_on(Ledger::stub())
+}
+
+/// The App on `ledger`, in the test locale, wide enough to show every Register column,
+/// with Everyday Checking open.
+fn everyday_checking_on(ledger: Ledger) -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1280.0, 720.0))
         .build_eframe(|cc| {
             App::on_ledger(
                 cc,
                 Localizer::for_tests(),
-                Ledger::stub(),
+                ledger,
                 Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
                 PreferencesFile::for_tests(),
             )
@@ -511,4 +517,67 @@ fn an_accepted_amount_the_ledger_refuses_says_why() {
         &harness,
         "That change would make a balance too large to hold."
     ));
+}
+
+/// The id of the transaction paid to `payee` in Everyday Checking in `ledger`.
+fn transaction(ledger: &Ledger, payee: &str) -> TransactionId {
+    ledger
+        .snapshot()
+        .accounts()
+        .iter()
+        .find(|summary| summary.account().name() == "Everyday Checking")
+        .expect("the ledger has Everyday Checking")
+        .register()
+        .iter()
+        .find(|entry| entry.transaction().payee() == payee)
+        .expect("Everyday Checking has a transaction paid to the payee")
+        .transaction()
+        .id()
+}
+
+/// `payment` US dollars paid out.
+fn payment(payment: &str) -> Money {
+    let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
+    let amount = format!("-{payment}").parse().expect("a decimal");
+    Money::new(amount, usd).expect("an amount")
+}
+
+#[test]
+fn cancelling_a_silent_saves_confirm_leaves_the_waiting_save_waiting() {
+    let ledger = Ledger::stub();
+    let acme = transaction(&ledger, "Acme Corp");
+    let mut harness = everyday_checking_on(ledger);
+    click_cell(&mut harness, "Payment", "Maple Property Management");
+    type_text(&mut harness, "1500");
+    // No path reaches this: a silent save's confirm opening as the rent's save asks for
+    // its own, which is refused while a Dialog is open, so the rent's save waits on a
+    // confirm that never opens. Focus leaves the Payment editor first, as Enter closes
+    // it, so the confirm has no widget to give focus back to.
+    harness.ctx.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
+    let amount = payment("10.00");
+    testing::ask_to_confirm_silent_save(
+        &harness,
+        acme,
+        amount,
+        DomainCommand::Compound(vec![DomainCommand::EditTransaction {
+            transaction: acme,
+            edit: TransactionEdit::Amount(amount),
+        }]),
+    );
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    assert!(
+        !asks(&harness, RENT_CONFIRM),
+        "the silent save's confirm is open"
+    );
+    assert!(!editing(&harness), "the rent's save waits");
+
+    dialog_button(&harness, "Cancel").click();
+    harness.run();
+
+    // The rent's save still waits on its confirm, so its cell doesn't open again.
+    assert!(!editing(&harness));
 }
