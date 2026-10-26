@@ -1261,3 +1261,32 @@ fn a_leave_just_after_save_replaces_the_one_that_asked() {
     // Everyday Checking's Register, not Visa Rewards'.
     assert!(current_balance_is(&harness, "$5,642.21"));
 }
+
+/// Ticks "Save a changed transaction without asking" in the Preferences.
+fn turn_on_save_without_asking(harness: &mut Harness<'static, App>) {
+    click_button(harness, "Tools");
+    click_button(harness, "Preferences…");
+    harness.get_by_role_and_label(Role::Tab, "Register").click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::CheckBox, "Save a changed transaction without asking")
+        .click();
+    harness.run();
+    click_button(harness, "OK");
+}
+
+#[test]
+fn closing_the_window_just_after_a_save_without_asking_closes_it_once_saved() {
+    let mut harness = app();
+    turn_on_save_without_asking(&mut harness);
+    rename_fresh_market(&mut harness);
+
+    // The click's frame leaves the row and answers Save without asking, and the next
+    // one's start sees the close before the save is sent.
+    harness.get_by_role_and_label(Role::Cell, "Bean There").click();
+    harness.step();
+    request_close(&mut harness);
+
+    assert!(viewport_commands(&mut harness).contains(&ViewportCommand::Close));
+    assert!(can_undo(&mut harness));
+}
