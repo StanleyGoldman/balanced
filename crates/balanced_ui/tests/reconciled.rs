@@ -535,10 +535,10 @@ fn transaction(ledger: &Ledger, payee: &str) -> TransactionId {
         .id()
 }
 
-/// `payment` US dollars paid out.
-fn payment(payment: &str) -> Money {
+/// `dollars` US dollars paid out.
+fn payment(dollars: &str) -> Money {
     let usd = CurrencyCode::new("USD").expect("USD is an ISO 4217 currency");
-    let amount = format!("-{payment}").parse().expect("a decimal");
+    let amount = format!("-{dollars}").parse().expect("a decimal");
     Money::new(amount, usd).expect("an amount")
 }
 
@@ -551,13 +551,7 @@ fn cancelling_a_silent_saves_confirm_leaves_the_waiting_save_waiting() {
     type_text(&mut harness, "1500");
     // No path reaches this: a silent save's confirm opening as the rent's save asks for
     // its own, which is refused while a Dialog is open, so the rent's save waits on a
-    // confirm that never opens. Focus leaves the Payment editor first, as Enter closes
-    // it, so the confirm has no widget to give focus back to.
-    harness.ctx.memory_mut(|memory| {
-        if let Some(id) = memory.focused() {
-            memory.surrender_focus(id);
-        }
-    });
+    // confirm that never opens.
     let amount = payment("10.00");
     testing::ask_to_confirm_silent_save(
         &harness,
@@ -570,8 +564,8 @@ fn cancelling_a_silent_saves_confirm_leaves_the_waiting_save_waiting() {
     );
     press(&mut harness, Modifiers::NONE, Key::Enter);
     assert!(
-        !asks(&harness, RENT_CONFIRM),
-        "the silent save's confirm is open"
+        !asks(&harness, RENT_CONFIRM) && asks(&harness, "Change Amount"),
+        "the silent save's confirm is open, not the rent's"
     );
     assert!(!editing(&harness), "the rent's save waits");
 

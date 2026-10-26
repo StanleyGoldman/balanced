@@ -92,15 +92,25 @@ pub fn send_silent_save(harness: &Harness<'_, App>, command: DomainCommand) {
     }));
 }
 
-/// Opens the confirm a save of a Register row whose answer nothing waits on asks for
-/// when it changes Reconciled transaction `transaction`'s amount to `amount`, as a
-/// row's save sent as another row's changes start does. Accepting it sends `command`.
+/// Opens the confirm for changing Reconciled transaction `transaction`'s amount to
+/// `amount`, holding a save nothing waits on, `command`, as a row's save sent as
+/// another row's changes start would. Accepting it sends `command`.
+///
+/// It opens at the start of the next frame, ahead of any Dialog asked for in that
+/// frame, which `MainWindow` then refuses. Focus leaves whatever widget has it first,
+/// so the confirm gives it back to none when it closes: a cell editor focused now may
+/// close in that frame, and focus given back to it would be lost.
 pub fn ask_to_confirm_silent_save(
     harness: &Harness<'_, App>,
     transaction: TransactionId,
     amount: Money,
     command: DomainCommand,
 ) {
+    harness.ctx.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
     harness
         .state()
         .send(AppCommand::OpenDialog(DialogKind::ChangeReconciledAmount {
