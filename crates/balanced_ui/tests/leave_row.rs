@@ -360,6 +360,14 @@ fn closing_the_window_with_nothing_changed_asks_nothing() {
     assert!(!prompted(&harness));
 }
 
+/// Opens the Preferences Dialog on its Register tab.
+fn open_register_preferences(harness: &mut Harness<'static, App>) {
+    click_button(harness, "Tools");
+    click_button(harness, "Preferences…");
+    harness.get_by_role_and_label(Role::Tab, "Register").click();
+    harness.run();
+}
+
 /// Ticks "Always save without asking" in the open prompt.
 fn tick_always_save(harness: &mut Harness<'static, App>) {
     harness
@@ -377,10 +385,7 @@ fn saving_with_always_save_ticked_turns_the_preference_on() {
 
     click_button(&mut harness, "Save");
 
-    click_button(&mut harness, "Tools");
-    click_button(&mut harness, "Preferences…");
-    harness.get_by_role_and_label(Role::Tab, "Register").click();
-    harness.run();
+    open_register_preferences(&mut harness);
     let preference = harness
         .get_by_role_and_label(Role::CheckBox, "Save a changed transaction without asking")
         .accesskit_node()
@@ -392,10 +397,7 @@ fn saving_with_always_save_ticked_turns_the_preference_on() {
 fn always_save_ticked_over_the_preferences_dialog_ticks_its_preference_too() {
     let mut harness = app();
     rename_fresh_market(&mut harness);
-    click_button(&mut harness, "Tools");
-    click_button(&mut harness, "Preferences…");
-    harness.get_by_role_and_label(Role::Tab, "Register").click();
-    harness.run();
+    open_register_preferences(&mut harness);
     close_window(&mut harness);
     tick_always_save(&mut harness);
 
@@ -1262,12 +1264,10 @@ fn a_leave_just_after_save_replaces_the_one_that_asked() {
     assert!(current_balance_is(&harness, "$5,642.21"));
 }
 
-/// Ticks "Save a changed transaction without asking" in the Preferences.
+/// Ticks "Save a changed transaction without asking", off until then, in the
+/// Preferences.
 fn turn_on_save_without_asking(harness: &mut Harness<'static, App>) {
-    click_button(harness, "Tools");
-    click_button(harness, "Preferences…");
-    harness.get_by_role_and_label(Role::Tab, "Register").click();
-    harness.run();
+    open_register_preferences(harness);
     harness
         .get_by_role_and_label(Role::CheckBox, "Save a changed transaction without asking")
         .click();
@@ -1281,9 +1281,13 @@ fn closing_the_window_just_after_a_save_without_asking_closes_it_once_saved() {
     turn_on_save_without_asking(&mut harness);
     rename_fresh_market(&mut harness);
 
-    // The click's frame leaves the row and answers Save without asking, and the next
-    // one's start sees the close before the save is sent.
-    harness.get_by_role_and_label(Role::Cell, "Bean There").click();
+    // The click's frame leaves the row and saves without asking, and the next one's
+    // start sees the close before the save is sent. Another row, not another account:
+    // the App reads a close before the Commands of the frame before it, so the close
+    // would come first and the account win.
+    harness
+        .get_by_role_and_label(Role::Cell, "Bean There")
+        .click();
     harness.step();
     request_close(&mut harness);
 
