@@ -564,7 +564,10 @@ impl DateEdit {
             ui.memory_mut(|memory| {
                 memory.set_focus_lock_filter(
                     id,
-                    FieldKeys::new().with_vertical_arrows().with_tab().into(),
+                    FieldKeys::text_field()
+                        .with_vertical_arrows()
+                        .with_tab()
+                        .into(),
                 );
             });
             self.handle_input(ui.ctx(), i18n, today);

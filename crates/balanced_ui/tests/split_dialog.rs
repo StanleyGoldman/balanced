@@ -624,14 +624,16 @@ fn escape_in_a_lines_category_with_its_list_closed_closes_the_dialog() {
 }
 
 #[test]
-fn left_in_a_lines_category_moves_the_caret_and_keeps_the_field_focused() {
+fn left_and_right_in_a_lines_category_move_the_caret_and_keep_the_field_focused() {
     let mut harness = app();
     type_third_category(&mut harness, "Zq");
 
     press(&mut harness, Modifiers::NONE, Key::ArrowLeft);
     type_text(&mut harness, "x");
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+    type_text(&mut harness, "y");
 
-    assert_eq!(field(&harness, "Line 3 category"), "Zxq");
+    assert_eq!(field(&harness, "Line 3 category"), "Zxqy");
     assert!(
         harness
             .get_by_role_and_label(Role::TextInput, "Line 3 category")

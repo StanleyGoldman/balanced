@@ -482,14 +482,16 @@ fn a_click_on_the_dimmed_window_closes_only_the_keypad() {
 }
 
 #[test]
-fn left_in_the_keypad_moves_the_caret_and_keeps_the_display_focused() {
+fn left_and_right_in_the_keypad_move_the_caret_and_keep_the_display_focused() {
     let mut harness = wizard();
     type_in_keypad(&mut harness, "86.42", "*2");
 
     press(&mut harness, Key::ArrowLeft);
     type_in_display(&mut harness, "0");
+    press(&mut harness, Key::ArrowRight);
+    type_in_display(&mut harness, "5");
 
-    assert_eq!(display(&harness).as_deref(), Some("86.42*02"));
+    assert_eq!(display(&harness).as_deref(), Some("86.42*025"));
     assert!(
         harness
             .get_by_role_and_label(Role::TextInput, "Keypad")

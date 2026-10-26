@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
 
-//! The keys a text field takes before egui's focus handling reads them, built in one
-//! place so no field can drop ← and →.
+//! The keys a text field takes before egui's focus handling reads them.
 
 use eframe::egui::EventFilter;
 
@@ -13,7 +12,7 @@ pub(crate) struct FieldKeys(EventFilter);
 
 impl FieldKeys {
     /// Esc, ← and →, the keys every text field takes.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn text_field() -> Self {
         Self(EventFilter {
             escape: true,
             horizontal_arrows: true,

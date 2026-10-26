@@ -505,9 +505,9 @@ impl SplitForm {
             vec2(Theme::SPLIT_CATEGORY_WIDTH - height - gap, height),
             TextEdit::singleline(line.category.text_mut())
                 .id(id)
-                // Esc and the arrows reach `list_keys` before egui takes the field's
+                // Esc, ↑ and ↓ reach `list_keys` before egui takes the field's
                 // focus or moves it on them.
-                .event_filter(FieldKeys::new().with_vertical_arrows().into()),
+                .event_filter(FieldKeys::text_field().with_vertical_arrows().into()),
         );
         let number = LineNumber::at(index).0;
         let label = fl!(i18n, "dialog-split-line-category", line = number);

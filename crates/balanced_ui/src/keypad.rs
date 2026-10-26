@@ -286,7 +286,7 @@ impl Keypad {
                 .id(display_id(id))
                 .horizontal_align(Align::RIGHT)
                 .desired_width(width)
-                .event_filter(FieldKeys::new().into()),
+                .event_filter(FieldKeys::text_field().into()),
         )
         .labelled_by(caption.id);
         self.result_line(ui, i18n, reader, currency, width);

@@ -3979,9 +3979,9 @@ fn editor(
     let inner = Rect::from_x_y_ranges(rect.left() + left..=rect.right() - right, rect.y_range());
     let id = edit.editor_id();
     let keys = if edit.field.offers_list() {
-        FieldKeys::new().with_vertical_arrows()
+        FieldKeys::text_field().with_vertical_arrows()
     } else {
-        FieldKeys::new()
+        FieldKeys::text_field()
     };
     ui.put(
         inner,
