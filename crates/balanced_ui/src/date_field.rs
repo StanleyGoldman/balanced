@@ -18,14 +18,15 @@
 use balanced_i18n::{DateParseError, DateSegment, DateSegments, Localizer};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{
-    self, Align2, Area, Event, EventFilter, Frame, Id, Key, Label, Modifiers, Order, Rect,
-    Response, Sense, StrokeKind, TextStyle, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
+    self, Align2, Area, Event, Frame, Id, Key, Label, Modifiers, Order, Rect, Response, Sense,
+    StrokeKind, TextStyle, WidgetInfo, WidgetText, WidgetType, pos2, vec2,
 };
 use icu_calendar::types::Weekday;
 use icu_calendar::{Date, Iso};
 use jiff::ToSpan as _;
 
 use crate::clock::{to_civil, to_iso};
+use crate::field_keys::FieldKeys;
 use crate::i18n::fl;
 use crate::theme::Theme;
 
@@ -563,12 +564,7 @@ impl DateEdit {
             ui.memory_mut(|memory| {
                 memory.set_focus_lock_filter(
                     id,
-                    EventFilter {
-                        tab: true,
-                        horizontal_arrows: true,
-                        vertical_arrows: true,
-                        escape: true,
-                    },
+                    FieldKeys::new().with_vertical_arrows().with_tab().into(),
                 );
             });
             self.handle_input(ui.ctx(), i18n, today);

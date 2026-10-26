@@ -15,10 +15,10 @@ use eframe::egui::emath::GuiRounding as _;
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::text_edit::TextEditState;
 use eframe::egui::{
-    self, Align, Align2, Area, Button, Checkbox, CursorIcon, Event, EventFilter, Frame, Id, Key,
-    Label, Layout, Margin, Modifiers, Order, Popup, PopupCloseBehavior, Rangef, Rect, Response,
-    ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, UiBuilder,
-    WidgetInfo, WidgetText, WidgetType, pos2, vec2,
+    self, Align, Align2, Area, Button, Checkbox, CursorIcon, Event, Frame, Id, Key, Label, Layout,
+    Margin, Modifiers, Order, Popup, PopupCloseBehavior, Rangef, Rect, Response, ScrollArea, Sense,
+    Shape, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, UiBuilder, WidgetInfo,
+    WidgetText, WidgetType, pos2, vec2,
 };
 use egui_extras::{Column, TableBody, TableBuilder};
 use icu_calendar::{Date, Iso};
@@ -29,6 +29,7 @@ use crate::combobox::{CategoryTarget, FieldChoices, ListRow};
 use crate::command::{AnswerTo, AppCommand, CommandSender, DialogKind, RowSave, StatusMessage};
 use crate::date_field::{self, DateEdit};
 use crate::draft_row::{Draft, Missing};
+use crate::field_keys::FieldKeys;
 use crate::formatted_amount::i18n_currency;
 use crate::i18n::fl;
 use crate::keypad::{self, Keypad};
@@ -3977,18 +3978,18 @@ fn editor(
 ) -> Response {
     let inner = Rect::from_x_y_ranges(rect.left() + left..=rect.right() - right, rect.y_range());
     let id = edit.editor_id();
+    let keys = if edit.field.offers_list() {
+        FieldKeys::new().with_vertical_arrows()
+    } else {
+        FieldKeys::new()
+    };
     ui.put(
         inner,
         TextEdit::singleline(edit.combo.text_mut())
             .id(id)
             .margin(Margin::ZERO)
             .desired_width(inner.width())
-            .event_filter(EventFilter {
-                escape: true,
-                horizontal_arrows: true,
-                vertical_arrows: edit.field.offers_list(),
-                ..Default::default()
-            }),
+            .event_filter(keys.into()),
     )
     .labelled_by(heading)
 }
