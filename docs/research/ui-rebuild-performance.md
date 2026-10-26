@@ -9,8 +9,8 @@ Measured 2026-10-22 on the branch for #504, cut from `main` at `ef01571`.
 - **The UI's rebuild, not the core, sets how long a Command takes.** Before this work, the frame that applied a flag took 52 ms at the stub's size (20,000 transactions) and 499 ms at 10×. The Command itself was 3–5 ms of that.
 - **The Register's rows were 85–95% of the frame.** `RegisterModel::new` took 44.5 ms at 1× and 475 ms at 10×. About three quarters of that went to building a new ICU4X `CurrencyFormatter` for each of the three amounts on every row.
 - **Fixed here: each formatting locale keeps the amount formatters it builds.** The Register now takes 12.4 ms at 1× and 154 ms at 10×, and the frame after a Command 19 ms and 182 ms.
-- **10× still needs the Register to rebuild less than every row.** 154 ms is about ten frames. [#580](https://github.com/StanleyGoldman/balanced/issues/580) tracks it.
-- **The comboboxes' choices and the usage count are small beside it.** `FieldChoices::new` takes 1.2 ms at 1× and 15.5 ms at 10×, and the usage count 1.3 ms and 13.4 ms. Only an open Category List pays for the usage count. [#581](https://github.com/StanleyGoldman/balanced/issues/581) and [#582](https://github.com/StanleyGoldman/balanced/issues/582) track them.
+- **10× still needs the Register to rebuild less than every row.** 154 ms is about ten frames. [#580](https://github.com/StanleyGoldman/balanced/issues/580) tracks it, aiming for one frame after a Command at 4.5× (90,000 transactions in one account), with 10× only not getting slower.
+- **The comboboxes' choices and the usage count are small beside it.** `FieldChoices::new` takes 1.2 ms at 1× and 15.5 ms at 10×, and the usage count 1.3 ms and 13.4 ms. Only an open Category List pays for the usage count. [#581](https://github.com/StanleyGoldman/balanced/issues/581) tracks the choices, after #580; [#582](https://github.com/StanleyGoldman/balanced/issues/582), the usage count, closed as not worth its code for now.
 
 ## Results
 
@@ -59,9 +59,9 @@ Each row formats three amounts: the signed amount, the unsigned one its column s
 
 ## What still grows with the file
 
-- **The Register's rows: 154 ms at 10×.** It formats every row when one changed, and when only the filter or sort changed. [#580](https://github.com/StanleyGoldman/balanced/issues/580) weighs reformatting only the changed rows, reusing the rest by `Arc<Transaction>` identity, against formatting only the visible rows. The filter matches on formatted text, and three sorts compare it, so either way some text is needed for every row.
-- **The comboboxes' choices: 15.5 ms at 10×.** They walk every transaction in the file for payees and Payee recalls. [#581](https://github.com/StanleyGoldman/balanced/issues/581).
-- **The usage count: 13.4 ms at 10×, while the Category List is open.** [#582](https://github.com/StanleyGoldman/balanced/issues/582). Adjusting it by each Command's changes meets the two snags #511 found: a `Usage` total's overflow error is sticky, so a subtraction can't undo it, and a transfer's target account needs a lookup.
+- **The Register's rows: 154 ms at 10×.** It formats every row when one changed, and when only the filter or sort changed. [#580](https://github.com/StanleyGoldman/balanced/issues/580) settled on reformatting only the changed rows, reusing the rest by `Arc<Transaction>` identity, and formatting the running balance only when its row is drawn, so an edit to an old row's amount doesn't reformat every later balance. The filter and three sorts read every row's text, which the reused rows keep.
+- **The comboboxes' choices: 15.5 ms at 10×.** They walk every transaction in the file for payees and Payee recalls. [#581](https://github.com/StanleyGoldman/balanced/issues/581), measured again once #580 lands: about 7 ms at 4.5× is part of the same one-frame budget.
+- **The usage count: 13.4 ms at 10×, while the Category List is open.** [#582](https://github.com/StanleyGoldman/balanced/issues/582) closed it as `wontfix` for now: only an open Category List pays, and adjusting it by each Command's changes meets the two snags #511 found: a `Usage` total's overflow error is sticky, so a subtraction can't undo it, and a transfer's target account needs a lookup.
 
 At 1×, after the cache, a Command's frame is 19 ms, just over one frame at 60 Hz. At a busy household's 30 years (4.5×, see [Sizes](data-file-performance.md#sizes-and-what-decades-means)), the frame comes to about 80 ms, interpolating linearly.
 
