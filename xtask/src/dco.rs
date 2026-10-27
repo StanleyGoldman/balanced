@@ -22,11 +22,14 @@ pub(crate) const TASK: Task = Task {
     run: |args| args.is_empty().then(run),
 };
 
-/// The last commit before the DCO: `main` just before the check landed, the merge of
-/// ADR 0009 (#301). Every non-merge commit after it needs a sign-off. When an unsigned commit lands on `main`
-/// anyway, move this to that commit, naming it in a comment, since history on
-/// `main` can't be rewritten.
-const CUTOFF: &str = "9e05b056c89b150d6846fc58f99bf9b4cd2d554d";
+/// The commit every non-merge commit after which needs a sign-off. When an unsigned
+/// commit lands on `main` anyway, move this to that commit, naming it in a comment,
+/// since history on `main` can't be rewritten.
+///
+/// The DCO began after the merge of ADR 0009 (#301), `9e05b05`. This is now the merge
+/// of #612, `964d7a1`, past two unsigned commits that landed while CI skipped this
+/// check on prose-only pull requests: `639a28d` (#611) and `fafc590` (#612).
+const CUTOFF: &str = "964d7a157b242fe2dff927ab846931ae9f9e43d1";
 
 pub(crate) fn run() -> Result<()> {
     let commits = commits(Path::new("."), CUTOFF)?;
