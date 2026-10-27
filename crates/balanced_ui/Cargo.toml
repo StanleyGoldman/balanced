@@ -41,6 +41,9 @@ test-support = ["dep:egui-wgpu", "dep:egui_kittest", "dep:tempfile", "balanced_i
 
 [dev-dependencies]
 egui_kittest.workspace = true
+# The register edge-cases prototype (`examples/register_edge_prototype`, #483).
+balanced_prototype_harness.workspace = true
+serde_json.workspace = true
 divan.workspace = true
 balanced_core = { workspace = true, features = ["test-support"] }
 balanced_i18n = { workspace = true, features = ["test-support"] }
