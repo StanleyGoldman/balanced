@@ -2962,16 +2962,11 @@ impl Register {
         let row = rows.position(cursor.row)?;
         let column = columns.iter().position(|&column| column == cursor.column)?;
         let in_row = |column: usize| columns.get(column).copied();
+        let into_row =
+            |row: usize| Some((row, self.landing_column(rows.get(row)?.id(), cursor.column)));
         let (row, column) = match step {
-            Move::Up | Move::Down => {
-                let row = if step == Move::Up {
-                    row.checked_sub(1)?
-                } else {
-                    row + 1
-                };
-                let column = self.landing_column(rows.get(row)?.id(), cursor.column);
-                (row, column)
-            }
+            Move::Up => into_row(row.checked_sub(1)?)?,
+            Move::Down => into_row(row + 1)?,
             Move::Left => (row, in_row(column.checked_sub(1)?)?),
             Move::Right => (row, in_row(column + 1)?),
             Move::Next => {
@@ -2983,10 +2978,12 @@ impl Register {
                 }
             }
             Move::NextStop | Move::PreviousStop => {
-                // Every column shown, so that each row's Tab stops sit in one grid.
+                // The grid spans every column shown, so each row's Tab stops sit at
+                // the same width.
                 let shown = &self.shown;
                 let width = shown.len();
-                let start = row * width + shown.iter().position(|&c| c == cursor.column)?;
+                let at = shown.iter().position(|&column| column == cursor.column)?;
+                let start = row * width + at;
                 let stops_tab = |position: usize| {
                     rows.get(position / width).is_some_and(|row| {
                         // The remainder of a division by the width is a column index.
@@ -3303,7 +3300,7 @@ impl Register {
                 .and_then(|index| keys.rows.get(index + 1))
                 .map(|row| CellAddress {
                     row: row.id(),
-                    column: cursor.column,
+                    column: self.landing_column(row.id(), cursor.column),
                 }),
             AfterEnter::SameRow => None,
         };

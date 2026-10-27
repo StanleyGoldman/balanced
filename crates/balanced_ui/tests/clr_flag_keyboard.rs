@@ -9,8 +9,8 @@ use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::App as _;
 use eframe::egui::accesskit::Role;
 use eframe::egui::{Event, Key, Modifiers, vec2};
-use egui_kittest::Harness;
 use egui_kittest::kittest::{By, NodeT as _, Queryable as _};
+use egui_kittest::{Harness, Node};
 use icu_calendar::Date;
 
 /// Fresh Market's Clr cell in Everyday Checking, which starts Uncleared.
@@ -105,9 +105,9 @@ fn click_cell(harness: &mut Harness<'static, App>, label: &str) {
     harness.run();
 }
 
-/// The label of the cell under the cell cursor, whatever its role: a Clr cell is a
-/// button and a Flag cell a checkbox.
-fn cursor(harness: &Harness<'static, App>) -> String {
+/// The cell under the cell cursor, whatever its role: a Clr cell is a button and a
+/// Flag cell a checkbox.
+fn cursor_node<'h>(harness: &'h Harness<'static, App>) -> Node<'h> {
     let mut cursors = harness.query_all(By::default()).filter(|node| {
         let node = node.accesskit_node();
         matches!(node.role(), Role::Cell | Role::Button | Role::CheckBox)
@@ -115,7 +115,15 @@ fn cursor(harness: &Harness<'static, App>) -> String {
     });
     let cursor = cursors.next().expect("a cell holds the cell cursor");
     assert!(cursors.next().is_none(), "one cell holds the cell cursor");
-    cursor.accesskit_node().label().unwrap_or_default()
+    cursor
+}
+
+/// The label of the cell under the cell cursor.
+fn cursor(harness: &Harness<'static, App>) -> String {
+    cursor_node(harness)
+        .accesskit_node()
+        .label()
+        .unwrap_or_default()
 }
 
 #[test]
@@ -409,24 +417,12 @@ fn shift_tab_from_a_changed_row_onto_the_previous_rows_flag_asks_then_rests_ther
 
 /// The title of the column heading over the cell under the cell cursor.
 fn cursor_column(harness: &Harness<'static, App>) -> String {
-    let mut cursors = harness.query_all(By::default()).filter(|node| {
-        let node = node.accesskit_node();
-        matches!(node.role(), Role::Cell | Role::Button | Role::CheckBox)
-            && node.is_selected() == Some(true)
-    });
-    let x = cursors
-        .next()
-        .expect("a cell holds the cell cursor")
-        .rect()
-        .center()
-        .x;
+    let x = cursor_node(harness).rect().center().x;
     harness
         .query_all_by_role(Role::ColumnHeader)
         .find(|heading| heading.rect().x_range().contains(x))
-        .expect("a heading sits over every cell")
-        .accesskit_node()
-        .label()
-        .unwrap_or_default()
+        .and_then(|heading| heading.accesskit_node().label())
+        .expect("a heading tops the cell cursor's column")
 }
 
 #[test]
@@ -459,22 +455,36 @@ fn the_down_arrow_from_the_last_rows_clr_lands_on_the_draft_rows_deposit() {
     assert_eq!(cursor_column(&harness), "Deposit");
 }
 
+/// The height of the middle of the draft row, which holds the cell cursor when an
+/// account opens. Its cells have no labels to find them by.
+fn draft_row_middle(harness: &Harness<'static, App>) -> f32 {
+    cursor_node(harness).rect().center().y
+}
+
+/// Clicks the draft row's cell under the heading `title`, the draft row's middle at
+/// `draft_y`.
+fn click_draft_cell(harness: &mut Harness<'static, App>, title: &str, draft_y: f32) {
+    let heading = harness
+        .get_by_role_and_label(Role::ColumnHeader, title)
+        .rect()
+        .x_range();
+    harness
+        .query_all_by_role(Role::Cell)
+        .find(|cell| {
+            heading.contains(cell.rect().center().x) && cell.rect().y_range().contains(draft_y)
+        })
+        .expect("the draft row has a cell in every column")
+        .click();
+    harness.run();
+}
+
 #[test]
 fn a_click_on_the_draft_rows_clr_cell_from_a_clr_cell_rests_the_cursor_on_its_deposit() {
     let mut harness = everyday_checking();
+    let draft_y = draft_row_middle(&harness);
     arrow_to_fresh_market_clr(&mut harness);
-    let clr = harness
-        .get_by_role_and_label(Role::ColumnHeader, "Clr")
-        .rect()
-        .x_range();
-    // The draft row's Clr cell, the lowest under the heading.
-    let draft_clr = harness
-        .query_all_by_role(Role::Cell)
-        .filter(|cell| clr.contains(cell.rect().center().x))
-        .max_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
-        .expect("the draft row has a Clr cell");
-    draft_clr.click();
-    harness.run();
+
+    click_draft_cell(&mut harness, "Clr", draft_y);
 
     assert_eq!(cursor(&harness), "");
     assert_eq!(cursor_column(&harness), "Deposit");
@@ -502,4 +512,37 @@ fn the_down_arrow_from_a_leftmost_clr_lands_on_the_draft_rows_nearest_cell_to_th
 
     assert!(on_clr.starts_with("Clr "));
     assert_eq!(cursor_column(&harness), "Num");
+}
+
+#[test]
+fn ctrl_enter_on_the_last_rows_clr_moves_the_cursor_to_the_draft_rows_deposit() {
+    let mut harness = everyday_checking();
+    // The November rent's Payment, the last transaction's, then Deposit and Clr.
+    click_cell(&mut harness, "1,475.00");
+    type_text(&mut harness, "1,400.00");
+    press(&mut harness, Key::Tab);
+    press(&mut harness, Key::Tab);
+
+    send(&mut harness, [key(Modifiers::COMMAND, Key::Enter)]);
+
+    assert_eq!(cursor(&harness), "");
+    assert_eq!(cursor_column(&harness), "Deposit");
+}
+
+#[test]
+fn the_left_arrow_from_the_draft_rows_deposit_passes_over_its_clr_and_flag() {
+    let dir = tempfile::tempdir().expect("the test machine can make a temporary directory");
+    std::fs::write(
+        dir.path().join("preferences.toml"),
+        "version = 2\n\
+         register_columns = [\"date\", \"num\", \"payee\", \"category\", \"memo\", \"payment\", \"clr\", \"flag\", \"deposit\", \"balance\"]\n",
+    )
+    .expect("the test can write the preferences file");
+    let mut harness = everyday_checking_with(PreferencesFile::in_dir(dir.path()));
+    let draft_y = draft_row_middle(&harness);
+    click_draft_cell(&mut harness, "Deposit", draft_y);
+
+    press(&mut harness, Key::ArrowLeft);
+
+    assert_eq!(cursor_column(&harness), "Payment");
 }
