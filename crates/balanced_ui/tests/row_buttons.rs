@@ -586,3 +586,35 @@ fn an_empty_draft_row_disables_add_and_cancel() {
         [false, false]
     );
 }
+
+/// Whether a cell holds the cell cursor.
+fn shows_cursor(harness: &Harness<'static, App>) -> bool {
+    harness
+        .query_all_by_role(Role::Cell)
+        .any(|cell| cell.accesskit_node().is_selected() == Some(true))
+}
+
+#[test]
+fn a_focused_row_button_hides_the_cell_cursor() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    open_last_cell(&mut harness);
+
+    // Tab from the unchanged row's last cell focuses Split.
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(focused_button(&harness).as_deref(), Some("Split"));
+    assert!(!shows_cursor(&harness));
+}
+
+#[test]
+fn tabbing_from_the_row_buttons_back_into_a_cell_shows_the_cell_cursor_again() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    open_last_cell(&mut harness);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    press(&mut harness, Modifiers::SHIFT, Key::Tab);
+
+    assert_eq!(cursor(&harness), "");
+}

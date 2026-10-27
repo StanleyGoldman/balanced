@@ -1770,6 +1770,7 @@ impl Register {
                             access: Access::of(summary.account()),
                             editing: None,
                             buttons: None,
+                            buttons_focused: false,
                             viewport: Rect::NOTHING,
                         };
                         self.body(body, frame, actions, row_height, pitch);
@@ -1881,6 +1882,9 @@ impl Register {
         pitch: f32,
     ) {
         let viewport = body.ui_mut().clip_rect();
+        // The buttons drawn last frame say which has focus, before they are forgotten.
+        let buttons_focused =
+            self.focus_button.is_some() || self.focused_button(body.ui_mut().ctx()).is_some();
         let editing = self.editing_row_for_drawing(body.ui_mut().ctx());
         let buttons = editing
             .and(actions)
@@ -1888,6 +1892,7 @@ impl Register {
         let frame = BodyFrame {
             editing,
             buttons,
+            buttons_focused,
             viewport,
             ..frame
         };
@@ -1964,6 +1969,7 @@ impl Register {
             access,
             editing,
             buttons,
+            buttons_focused,
             viewport,
             ..
         } = *frame;
@@ -1987,7 +1993,8 @@ impl Register {
             column,
             insets: self.insets(column),
             selected: self.cursor.is_some_and(|cursor| cursor.row == row.id()),
-            cursor: self.cursor == Some(address),
+            // A focused row button holds the keyboard in place of the cell cursor.
+            cursor: self.cursor == Some(address) && !buttons_focused,
             cover,
             access,
             viewport,
@@ -3379,6 +3386,9 @@ struct BodyFrame<'a> {
     /// Where across the Register the editing row's buttons lie, over the row's cells
     /// beside its Actions cell, while there is an editing row.
     buttons: Option<Rangef>,
+    /// Whether one of the editing row's buttons has keyboard focus, or is about to,
+    /// which hides the cell cursor.
+    buttons_focused: bool,
     /// The visible part of the Register's body.
     viewport: Rect,
 }
