@@ -554,10 +554,30 @@ impl App {
         }
     }
 
-    /// PROTOTYPE: starts again on `ledger`, throwing away every change.
+    /// PROTOTYPE: starts again on `ledger`, throwing away every change, with the
+    /// account that was open (found by name) open again.
     pub fn replace_ledger(&mut self, ledger: Ledger) {
+        let open = self.main_window.proto_open_account_id().and_then(|id| {
+            self.view().and_then(|view| {
+                view.accounts()
+                    .iter()
+                    .find(|summary| summary.account().id() == id)
+                    .map(|summary| summary.account().name().to_owned())
+            })
+        });
         self.session = Session::Open { ledger, path: None };
         self.main_window.data_file_switched();
+        let reopened = open.and_then(|name| {
+            self.view().and_then(|view| {
+                view.accounts()
+                    .iter()
+                    .find(|summary| summary.account().name() == name)
+                    .map(|summary| summary.account().id())
+            })
+        });
+        if let Some(id) = reopened {
+            self.send(AppCommand::Navigate(crate::route::Route::Account(id)));
+        }
     }
 
     /// PROTOTYPE #469: shows or hides the Register column with id `column`.

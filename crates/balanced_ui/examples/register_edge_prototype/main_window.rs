@@ -222,6 +222,11 @@ impl MainWindow {
         }
     }
 
+    /// PROTOTYPE: the account whose Register is open, so a data reset can reopen it.
+    pub(crate) fn proto_open_account_id(&self) -> Option<AccountId> {
+        self.open_account_id()
+    }
+
     /// The account whose Register is open, or `None` while none is.
     fn open_account_id(&self) -> Option<AccountId> {
         self.open_register.as_ref().map(|open| open.account)
