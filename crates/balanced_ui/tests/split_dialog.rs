@@ -4,7 +4,8 @@
 //! row is saved.
 
 use balanced_core::{
-    AccountId, CategoryId, CurrencyCode, DomainCommand, Ledger, Money, NewSplitLine, NewTransaction,
+    AccountId, AccountStatus, CategoryId, CurrencyCode, DomainCommand, Ledger, Money, NewSplitLine,
+    NewTransaction,
 };
 use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
@@ -53,6 +54,11 @@ fn app() -> Harness<'static, App> {
 /// October: 50.00 on Food & Dining, and 200.00 to Emergency Fund, whose other side
 /// there is memoed Rainy day.
 fn payday() -> Harness<'static, App> {
+    on(payday_ledger())
+}
+
+/// The stub ledger with the Payday split of [`payday`].
+fn payday_ledger() -> Ledger {
     let mut ledger = Ledger::stub();
     let everyday = account(&ledger, "Everyday Checking");
     let emergency = account(&ledger, "Emergency Fund");
@@ -70,7 +76,7 @@ fn payday() -> Harness<'static, App> {
             ),
         })
         .expect("the stub takes the split");
-    on(ledger)
+    ledger
 }
 
 /// The App on `ledger`, in the test locale, wide enough to show every Register column.
@@ -695,4 +701,65 @@ fn escape_from_a_dialog_opened_on_a_highlighted_row_leaves_it_the_editing_row() 
             .query_by_role_and_label(Role::Button, "Save")
             .is_some()
     );
+}
+
+/// The App on the data of [`payday`], with Emergency Fund, which Payday has a line to,
+/// closed since.
+fn payday_to_a_closed_account() -> Harness<'static, App> {
+    let mut ledger = payday_ledger();
+    let emergency = account(&ledger, "Emergency Fund");
+    ledger
+        .apply(DomainCommand::SetAccountStatus {
+            account: emergency,
+            status: AccountStatus::Closed,
+        })
+        .expect("the stub closes the account");
+    on(ledger)
+}
+
+/// Why the ledger refuses any change to Payday's lines or date in
+/// [`payday_to_a_closed_account`].
+const SPLIT_LINE_CLOSED: &str =
+    "This split has a line to Emergency Fund, which is closed. Reopen it to change the split.";
+
+#[test]
+fn changing_a_splits_lines_while_one_goes_to_a_closed_account_names_the_account() {
+    let mut harness = payday_to_a_closed_account();
+    open(&mut harness, "Everyday Checking");
+    split_payday(&mut harness);
+    fill(&mut harness, "Line 1 memo", "Dinner");
+
+    click_button(&mut harness, "Done");
+    // A refused save opens the "Can't save this transaction" Dialog a few Commands
+    // later.
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    harness.run_steps(8);
+
+    assert!(shows_text(&harness, "Can't save this transaction"));
+    assert!(shows_text(&harness, SPLIT_LINE_CLOSED));
+}
+
+#[test]
+fn done_reads_a_kept_line_to_a_closed_account_as_that_account() {
+    let mut harness = payday_to_a_closed_account();
+    open(&mut harness, "Everyday Checking");
+    split_payday(&mut harness);
+
+    click_button(&mut harness, "Done");
+
+    assert_eq!(lines(&harness), expect_lines([]));
+}
+
+#[test]
+fn changing_a_splits_date_while_a_line_goes_to_a_closed_account_names_the_account() {
+    let mut harness = payday_to_a_closed_account();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "10/1/2026");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    type_text(&mut harness, "+");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert!(shows_text(&harness, "Can't save this transaction"));
+    assert!(shows_text(&harness, SPLIT_LINE_CLOSED));
 }
