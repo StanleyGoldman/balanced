@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
 use balanced_core::{
-    AccountId, DomainCommand, DomainError, LedgerView, Money, TransactionId, WriteError,
+    AccountId, Allocation, DomainCommand, DomainError, LedgerView, Money, RegisterEntry,
+    TransactionId, WriteError,
 };
 use balanced_i18n::Localizer;
 use eframe::egui;
@@ -184,17 +185,34 @@ pub(crate) enum StatusMessage {
     /// or to delete it: those change only from the split, in the account named
     /// `split_account`.
     SplitLineOtherSide { split_account: String },
+    /// Why the ledger refused to change a split's lines or date: one of its lines goes
+    /// to the account named `account`, which is closed.
+    SplitLineAccountClosed { account: String },
 }
 
 impl StatusMessage {
     /// Why the ledger refused a change with `error`, naming from `view` the account the
-    /// refusal points to.
-    pub(crate) fn refusal(error: DomainError, view: &LedgerView) -> Self {
+    /// refusal points to. `edited` is the transaction the change edits, if it edits one:
+    /// a split refused for a line's closed account says it is the split's line.
+    pub(crate) fn refusal(
+        error: DomainError,
+        edited: Option<TransactionId>,
+        view: &LedgerView,
+    ) -> Self {
         if let DomainError::SplitLineOtherSide { account } = error
             && let Some(summary) = view.account(account)
         {
             return Self::SplitLineOtherSide {
                 split_account: summary.account().name().to_owned(),
+            };
+        }
+        if let DomainError::TransferAccountClosed { account } = error
+            && let Some(edited) = edited
+            && is_split(view, edited)
+            && let Some(summary) = view.account(account)
+        {
+            return Self::SplitLineAccountClosed {
+                account: summary.account().name().to_owned(),
             };
         }
         Self::Rejected(error)
@@ -217,6 +235,11 @@ impl StatusMessage {
                 i18n,
                 "status-split-line-other-side-in",
                 account = split_account.clone()
+            ),
+            Self::SplitLineAccountClosed { account } => fl!(
+                i18n,
+                "status-split-line-account-closed",
+                account = account.clone()
             ),
             Self::Rejected(error) => match error {
                 DomainError::AccountClosed { .. } => fl!(i18n, "status-account-closed"),
@@ -270,6 +293,28 @@ impl StatusMessage {
             },
         }
     }
+}
+
+/// The transaction `command` edits: the first one a Compound's edits name. `None` when
+/// it edits none.
+pub(crate) fn edited_transaction(command: &DomainCommand) -> Option<TransactionId> {
+    if let DomainCommand::EditTransaction { transaction, .. } = command {
+        return Some(*transaction);
+    }
+    if let DomainCommand::Compound(commands) = command {
+        return commands.iter().find_map(edited_transaction);
+    }
+    None
+}
+
+/// Whether transaction `id` in `view` is a split.
+fn is_split(view: &LedgerView, id: TransactionId) -> bool {
+    view.accounts()
+        .iter()
+        .flat_map(|summary| summary.register())
+        .map(RegisterEntry::transaction)
+        .find(|transaction| transaction.id() == id)
+        .is_some_and(|transaction| matches!(transaction.allocation(), Allocation::Split(_)))
 }
 
 /// Sends [`AppCommand`]s to `App::logic`. Sending requests a repaint, so the

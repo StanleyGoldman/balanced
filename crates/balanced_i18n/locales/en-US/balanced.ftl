@@ -622,6 +622,8 @@ status-no-such-category = No category has that name. Pick one from the list, or 
 status-reconciled-amount-not-saved = The changed row wasn't saved: a reconciled transaction's amount changes only once you confirm it.
 status-account-closed = This account is closed, so its transactions can't be changed.
 status-transfer-account-closed = The other account of this transfer is closed, so the transfer can't be made, changed or deleted.
+# A split's lines or date can't change while one of its lines goes to a closed account. $account is that account's name.
+status-split-line-account-closed = This split has a line to { $account }, which is closed. Reopen it to change the split.
 status-transfer-to-own-account = A transfer moves money to another account. Pick an account other than this one.
 status-split-line-other-side = This is the other side of a split line. Change its date, amount or category, or delete it, from the split.
 # $account is the name of the account holding the split.

@@ -14,7 +14,9 @@ use balanced_i18n::Localizer;
 use eframe::egui;
 
 use crate::clock::Clock;
-use crate::command::{AnswerTo, AppCommand, CommandSender, RowSave, StatusMessage};
+use crate::command::{
+    AnswerTo, AppCommand, CommandSender, RowSave, StatusMessage, edited_transaction,
+};
 use crate::data_file::DataFileRefusal;
 use crate::i18n::fl;
 use crate::layout::Layout;
@@ -282,8 +284,9 @@ impl App {
         let Session::Open { ledger, .. } = &mut self.session else {
             return;
         };
+        let edited = edited_transaction(&command);
         if let Err(error) = ledger.apply(command) {
-            let message = StatusMessage::refusal(error, &ledger.snapshot());
+            let message = StatusMessage::refusal(error, edited, &ledger.snapshot());
             self.main_window.show_status(message);
         }
     }
@@ -300,10 +303,11 @@ impl App {
         let Session::Open { ledger, .. } = &mut self.session else {
             return;
         };
+        let edited = edited_transaction(&command);
         match ledger.apply(command) {
             Ok(_) => self.main_window.save_applied(),
             Err(error) => {
-                let message = StatusMessage::refusal(error, &ledger.snapshot());
+                let message = StatusMessage::refusal(error, edited, &ledger.snapshot());
                 self.main_window.save_refused(message);
             }
         }
@@ -413,7 +417,7 @@ impl App {
                     && let Session::Open { ledger, .. } = &mut self.session
                     && let Err(error) = ledger.undo()
                 {
-                    let message = StatusMessage::refusal(error, &ledger.snapshot());
+                    let message = StatusMessage::refusal(error, None, &ledger.snapshot());
                     self.main_window.show_status(message);
                 }
             }
@@ -422,7 +426,7 @@ impl App {
                     && let Session::Open { ledger, .. } = &mut self.session
                     && let Err(error) = ledger.redo()
                 {
-                    let message = StatusMessage::refusal(error, &ledger.snapshot());
+                    let message = StatusMessage::refusal(error, None, &ledger.snapshot());
                     self.main_window.show_status(message);
                 }
             }

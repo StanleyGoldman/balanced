@@ -94,10 +94,13 @@ pub(crate) enum DoneOutcome {
 }
 
 /// The other side a line had when the Dialog opened, and the account holding it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct KeptSide {
     account: AccountId,
     other_side: TransactionId,
+    /// The line's Category text for the account, which still names it when the account
+    /// is closed and so isn't among the choices.
+    category_text: String,
 }
 
 /// A line's place in the form, counting from 1, as the user reads it.
@@ -206,17 +209,19 @@ impl SplitForm {
             focus: None,
         };
         for line in &start.lines {
+            let name = target_text(view, line.target()).unwrap_or_default();
             let kept = match (line.target(), line.other_side()) {
                 (CategoryTarget::Transfer(account), Some(other_side)) => Some(KeptSide {
                     account,
                     other_side,
+                    category_text: name.clone(),
                 }),
                 (CategoryTarget::Transfer(_), None) | (CategoryTarget::Category(_), _) => None,
             };
             let key = form.next_key();
             form.lines.push(LineForm {
                 key,
-                category: ComboText::new(target_text(view, line.target()).unwrap_or_default()),
+                category: ComboText::new(name),
                 kept,
                 memo: line.memo().to_owned(),
                 amount: shown(line.amount()),
@@ -282,15 +287,21 @@ impl SplitForm {
             if name.is_empty() {
                 return Err(SplitError::NoCategory(number));
             }
-            let target = *self
+            let kept_account = line
+                .kept
+                .as_ref()
+                .filter(|kept| kept.category_text == name)
+                .map(|kept| CategoryTarget::Transfer(kept.account));
+            let target = self
                 .choices
                 .categories()
                 .named(name)
+                .map(|choice| *choice.value())
+                .or(kept_account)
                 .ok_or_else(|| SplitError::UnknownCategory {
                     line: number,
                     name: name.to_owned(),
-                })?
-                .value();
+                })?;
             let amount = self
                 .read_amount(&line.amount)
                 .map_err(|error| SplitError::Amount {
@@ -299,6 +310,7 @@ impl SplitForm {
                 })?;
             let other_side = line
                 .kept
+                .as_ref()
                 .filter(|kept| target == CategoryTarget::Transfer(kept.account))
                 .map(|kept| kept.other_side);
             lines.push(SplitLineRow::new(
