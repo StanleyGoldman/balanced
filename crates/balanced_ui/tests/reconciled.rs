@@ -8,7 +8,9 @@ use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile, testing};
 use eframe::App as _;
 use eframe::egui::accesskit::Role;
-use eframe::egui::{Event, Key, Modifiers, Rangef, vec2};
+use eframe::egui::{
+    Event, Key, Modifiers, Rangef, ViewportCommand, ViewportEvent, ViewportId, vec2,
+};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use icu_calendar::Date;
@@ -574,4 +576,222 @@ fn cancelling_a_silent_saves_confirm_leaves_the_waiting_save_waiting() {
 
     // The rent's save still waits on its confirm, so its cell doesn't open again.
     assert!(!editing(&harness));
+}
+
+/// The events of the root viewport the next frame's input holds.
+fn root_events<'a>(harness: &'a mut Harness<'static, App>) -> &'a mut Vec<ViewportEvent> {
+    &mut harness
+        .input_mut()
+        .viewports
+        .entry(ViewportId::ROOT)
+        .or_default()
+        .events
+}
+
+/// Asks to close the window, as its title bar's × does, in the next frame only.
+fn request_close(harness: &mut Harness<'static, App>) {
+    root_events(harness).push(ViewportEvent::Close);
+    harness.step();
+    // `egui_kittest` keeps a viewport's events from frame to frame; eframe doesn't.
+    root_events(harness).clear();
+}
+
+/// Asks to close the window, as its title bar's × does, then lets the App settle.
+fn close_window(harness: &mut Harness<'static, App>) {
+    request_close(harness);
+    harness.run();
+}
+
+/// Whether the App closes the window over the next four frames: those a confirm or
+/// a save takes to be sent, applied, and to apply the Quit it sends. Each frame's
+/// output carries only the commands sent in that frame.
+fn closes(harness: &mut Harness<'static, App>) -> bool {
+    let mut closes = false;
+    for _ in 0..4 {
+        harness.step();
+        closes |= harness.output().viewport_output[&ViewportId::ROOT]
+            .commands
+            .contains(&ViewportCommand::Close);
+    }
+    closes
+}
+
+/// Clicks the open Dialog's `label` button, then whether the App closes the window,
+/// and lets the App settle.
+fn click_and_closes(harness: &mut Harness<'static, App>, label: &str) -> bool {
+    dialog_button(harness, label).click();
+    let closes = closes(harness);
+    harness.run();
+    closes
+}
+
+/// Whether the Edit menu's Undo item is enabled, opening the menu to look and closing
+/// it again.
+fn can_undo(harness: &mut Harness<'static, App>) -> bool {
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    let enabled = !harness
+        .get_by_role_and_label(Role::Button, "Undo Ctrl+Z")
+        .accesskit_node()
+        .is_disabled();
+    harness.get_by_role_and_label(Role::Button, "Edit").click();
+    harness.run();
+    enabled
+}
+
+/// Types 1500 over the rent's Payment, leaving the edit open, then closes the window.
+fn change_the_rent_then_close(harness: &mut Harness<'static, App>) {
+    click_cell(harness, "Payment", "Maple Property Management");
+    type_text(harness, "1500");
+    close_window(harness);
+}
+
+/// Changes the rent's Payment and closes the window, as `change_the_rent_then_close`
+/// does, then answers the leave-row prompt with Save.
+fn change_the_rent_close_and_save(harness: &mut Harness<'static, App>) {
+    change_the_rent_then_close(harness);
+    dialog_button(harness, "Save").click();
+    harness.run();
+}
+
+/// The text in the open Payment cell editor, or `None` when it isn't open. A kept
+/// amount opens formatted: 1500 as 1,500.00.
+fn payment_editor(harness: &Harness<'static, App>) -> Option<String> {
+    harness
+        .query_by_role_and_label(Role::TextInput, "Payment")
+        .map(|node| node.accesskit_node().value().unwrap_or_default())
+}
+
+#[test]
+fn save_on_closing_with_a_changed_reconciled_amount_asks_to_confirm_it_first() {
+    let mut harness = everyday_checking();
+    change_the_rent_then_close(&mut harness);
+
+    let closed = click_and_closes(&mut harness, "Save");
+
+    assert!(!closed);
+    assert!(asks(&harness, RENT_CONFIRM));
+}
+
+#[test]
+fn confirming_the_amount_on_closing_saves_it_and_closes_the_window() {
+    let mut harness = everyday_checking();
+    change_the_rent_close_and_save(&mut harness);
+
+    let closed = click_and_closes(&mut harness, "Change Amount");
+
+    assert!(closed);
+    assert!(can_undo(&mut harness));
+}
+
+#[test]
+fn cancelling_the_amount_confirm_on_closing_keeps_the_window_and_the_change() {
+    let mut harness = everyday_checking();
+    change_the_rent_close_and_save(&mut harness);
+
+    let closed = click_and_closes(&mut harness, "Cancel");
+
+    assert!(!closed);
+    assert!(cursor_on(&harness, "Payment", "Maple Property Management"));
+    assert_eq!(payment_editor(&harness).as_deref(), Some("1,500.00"));
+    assert!(!can_undo(&mut harness));
+}
+
+#[test]
+fn discard_on_closing_closes_without_asking_to_confirm_the_amount() {
+    let mut harness = everyday_checking();
+    change_the_rent_then_close(&mut harness);
+
+    let closed = click_and_closes(&mut harness, "Discard");
+
+    assert!(closed);
+    assert!(!asks(&harness, RENT_CONFIRM));
+}
+
+#[test]
+fn save_on_closing_with_a_changed_reconciled_memo_closes_without_a_confirm() {
+    let mut harness = everyday_checking();
+    click_cell(&mut harness, "Memo", "Maple Property Management");
+    type_text(&mut harness, "September");
+    close_window(&mut harness);
+
+    let closed = click_and_closes(&mut harness, "Save");
+
+    assert!(closed);
+    assert!(can_undo(&mut harness));
+}
+
+/// Ticks "Save a changed transaction without asking", off until then, in the
+/// Preferences.
+fn turn_on_save_without_asking(harness: &mut Harness<'static, App>) {
+    harness.get_by_role_and_label(Role::Button, "Tools").click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::Button, "Preferences…")
+        .click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Tab, "Register").click();
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::CheckBox, "Save a changed transaction without asking")
+        .click();
+    harness.run();
+    dialog_button(harness, "OK").click();
+    harness.run();
+}
+
+#[test]
+fn closing_with_save_without_asking_on_asks_to_confirm_a_reconciled_amount() {
+    let mut harness = everyday_checking();
+    turn_on_save_without_asking(&mut harness);
+    click_cell(&mut harness, "Payment", "Maple Property Management");
+    type_text(&mut harness, "1500");
+
+    request_close(&mut harness);
+    let closed = closes(&mut harness);
+    harness.run();
+
+    assert!(!closed);
+    assert!(asks(&harness, RENT_CONFIRM));
+}
+
+#[test]
+fn confirming_the_amount_with_save_without_asking_on_closes_once_saved() {
+    let mut harness = everyday_checking();
+    turn_on_save_without_asking(&mut harness);
+    change_the_rent_then_close(&mut harness);
+
+    let closed = click_and_closes(&mut harness, "Change Amount");
+
+    assert!(closed);
+    assert!(can_undo(&mut harness));
+}
+
+#[test]
+fn cancelling_the_amount_confirm_with_save_without_asking_on_keeps_the_window() {
+    let mut harness = everyday_checking();
+    turn_on_save_without_asking(&mut harness);
+    change_the_rent_then_close(&mut harness);
+
+    let closed = click_and_closes(&mut harness, "Cancel");
+
+    assert!(!closed);
+    assert!(cursor_on(&harness, "Payment", "Maple Property Management"));
+    assert_eq!(payment_editor(&harness).as_deref(), Some("1,500.00"));
+    assert!(!can_undo(&mut harness));
+}
+
+#[test]
+fn closing_with_save_without_asking_on_and_a_changed_reconciled_memo_closes() {
+    let mut harness = everyday_checking();
+    turn_on_save_without_asking(&mut harness);
+    click_cell(&mut harness, "Memo", "Maple Property Management");
+    type_text(&mut harness, "September");
+    // The close's frame leaves the row, and the next ones save it and close.
+    request_close(&mut harness);
+    let closed = closes(&mut harness);
+    harness.run();
+
+    assert!(closed);
+    assert!(can_undo(&mut harness));
 }
