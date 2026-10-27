@@ -22,6 +22,25 @@ const FRESH_MARKET_FLAG: &str = "Flag Fresh Market, 9/5/2026, -86.42";
 /// The App on stub data, in the test locale, wide enough to show every Register column,
 /// with Everyday Checking open.
 fn everyday_checking() -> Harness<'static, App> {
+    everyday_checking_with(PreferencesFile::for_tests())
+}
+
+/// The App as [`everyday_checking`] makes it, with "Enter moves to the next row"
+/// turned off in `preferences.toml`, which lives in the returned directory.
+fn everyday_checking_with_enter_moving_off() -> (tempfile::TempDir, Harness<'static, App>) {
+    let dir = tempfile::tempdir().expect("the test machine can make a temporary directory");
+    std::fs::write(
+        dir.path().join("preferences.toml"),
+        "version = 2\nenter_moves_to_next_row = false\n",
+    )
+    .expect("the test can write the preferences file");
+    let harness = everyday_checking_with(PreferencesFile::in_dir(dir.path()));
+    (dir, harness)
+}
+
+/// The App on stub data with `preferences`, in the test locale, wide enough to show
+/// every Register column, with Everyday Checking open.
+fn everyday_checking_with(preferences: PreferencesFile) -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size(vec2(1440.0, 720.0))
         .build_eframe(|cc| {
@@ -30,7 +49,7 @@ fn everyday_checking() -> Harness<'static, App> {
                 Localizer::for_tests(),
                 Ledger::stub(),
                 Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
-                PreferencesFile::for_tests(),
+                preferences,
             )
         });
     harness.run();
@@ -320,4 +339,70 @@ fn escape_on_a_clr_cell_tab_reached_ends_the_unchanged_rows_editing() {
             .is_none()
     );
     assert_eq!(cursor(&harness), FRESH_MARKET_CLR);
+}
+
+#[test]
+fn ctrl_enter_on_a_clr_cell_tab_reached_saves_the_row_and_ends_its_editing() {
+    let (_dir, mut harness) = everyday_checking_with_enter_moving_off();
+    change_fresh_market_and_tab_to_deposit(&mut harness);
+    press(&mut harness, Key::Tab);
+
+    send(&mut harness, [key(Modifiers::COMMAND, Key::Enter)]);
+
+    assert_eq!(cursor(&harness), CORNER_SHOP_CLR);
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Split")
+            .is_none()
+    );
+}
+
+#[test]
+fn save_pressed_after_tabbing_past_flag_ends_the_rows_editing() {
+    let mut harness = everyday_checking();
+    change_fresh_market_and_tab_to_deposit(&mut harness);
+    // Clr, Flag, then Save.
+    for _ in 0..3 {
+        press(&mut harness, Key::Tab);
+    }
+
+    press(&mut harness, Key::Enter);
+
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Split")
+            .is_none()
+    );
+}
+
+#[test]
+fn shift_tab_from_a_changed_row_onto_the_previous_rows_flag_asks_then_rests_there() {
+    let mut harness = everyday_checking();
+    click_cell(&mut harness, "Fresh Market");
+    type_text(&mut harness, "Corner Shop");
+    // Payee, Num, Date, then the row before's Flag cell.
+    for _ in 0..3 {
+        shift_tab(&mut harness);
+    }
+    let asked = harness
+        .query_by_role_and_label(Role::Button, "Continue editing")
+        .is_some();
+    let buttons_while_asking = harness
+        .query_by_role_and_label(Role::Button, "Split")
+        .is_some();
+
+    harness
+        .get_by_role_and_label(Role::Button, "Discard")
+        .click();
+    harness.run();
+
+    assert!(asked);
+    assert!(!buttons_while_asking);
+    assert!(cursor(&harness).starts_with("Flag "));
+    assert!(cursor(&harness) != FRESH_MARKET_FLAG);
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Split")
+            .is_some()
+    );
 }

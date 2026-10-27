@@ -1311,8 +1311,8 @@ fn a_leave_while_the_save_is_on_its_way_replaces_the_one_that_asked() {
 fn a_leave_while_the_save_is_on_its_way_keeps_the_cell_shift_tab_opened_closed() {
     let mut harness = app();
     rename_fresh_market(&mut harness);
-    // Payee, Num, Date, then the row before, whose Deposit cell opens again once the
-    // row is saved.
+    // Payee, Num, Date, then the row before, whose Flag cell Tab would rest on again
+    // once the row is saved, showing the row's buttons.
     for _ in 0..3 {
         press(&mut harness, Modifiers::SHIFT, Key::Tab);
     }
@@ -1321,7 +1321,11 @@ fn a_leave_while_the_save_is_on_its_way_keeps_the_cell_shift_tab_opened_closed()
 
     harness.run();
 
-    assert_eq!(editor(&harness, "Deposit"), None);
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Split")
+            .is_none()
+    );
 }
 
 #[test]
