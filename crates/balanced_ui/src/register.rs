@@ -745,12 +745,7 @@ impl CellEdit {
 fn field_rows<'a>(field: &EditField, choices: &'a FieldChoices, text: &str) -> Vec<ListRow<'a>> {
     match field {
         EditField::Text(TextField::Payee) => choices.payees().list(text),
-        EditField::Text(TextField::Category) => {
-            let categories = choices.categories();
-            let mut rows = categories.list(text);
-            rows.extend(categories.create_row(text));
-            rows
-        }
+        EditField::Text(TextField::Category) => choices.categories().list_creating(text),
         EditField::Text(TextField::Number | TextField::Memo) | EditField::Amount { .. } => {
             Vec::new()
         }
