@@ -3,7 +3,9 @@
 //! The Split dialog's form: a transaction's split lines and the total they add up to,
 //! edited until Done hands them back to the Register's editing row.
 
-use balanced_core::{AccountId, CurrencyCode, LedgerView, Money, MoneyError, TransactionId};
+use balanced_core::{
+    AccountId, CurrencyCode, DomainError, LedgerView, Money, MoneyError, TransactionId,
+};
 use balanced_i18n::{AmountParseError, AmountReader, AmountStyle, Localizer};
 use eframe::egui::{
     self, Align, Button, Id, Key, Label, Layout, Modifiers, RichText, ScrollArea, Sense, TextEdit,
@@ -13,9 +15,12 @@ use eframe::egui::{
 use crate::amount_field;
 use crate::combo_field::{self, ComboText, ListScope, text_typed};
 use crate::combobox::{CategoryTarget, FieldChoices, ListRow};
+use crate::command::CommandSender;
+use crate::dialog::{FocusReturn, OpenDialog};
 use crate::field_keys::FieldKeys;
 use crate::formatted_amount::{FormattedAmount, i18n_currency};
 use crate::i18n::fl;
+use crate::new_category::{self, NewCategoryForm, NewCategoryOutcome};
 use crate::register_model::{
     AmountSide, RegisterRow, RowId, SplitLineRow, SplitLines, target_text,
 };
@@ -134,6 +139,15 @@ struct LineForm {
     amount: String,
 }
 
+/// The New Category Dialog a line's Create row opened, and the line waiting for it to
+/// close.
+#[derive(Debug, Clone)]
+struct LineNewCategory {
+    dialog: OpenDialog<NewCategoryForm>,
+    /// The key of the line that asked for the category.
+    line: usize,
+}
+
 /// Why Done didn't close the Dialog, shown below the lines until a field changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SplitError {
@@ -173,6 +187,13 @@ pub(crate) struct SplitForm {
     error: Option<SplitError>,
     /// The field that takes keyboard focus on the next frame.
     focus: Option<Id>,
+    /// The account whose Register opened the Dialog, whose choices its lines offer.
+    account: AccountId,
+    /// The New Category Dialog a line's Create row opened over this one, while it is
+    /// open.
+    new_category: Option<LineNewCategory>,
+    /// Where keyboard focus goes back to once the New Category Dialog has closed.
+    focus_return: Option<FocusReturn>,
 }
 
 impl SplitForm {
@@ -207,6 +228,9 @@ impl SplitForm {
             next_key: 0,
             error: None,
             focus: None,
+            account,
+            new_category: None,
+            focus_return: None,
         };
         for line in &start.lines {
             let name = target_text(view, line.target()).unwrap_or_default();
@@ -362,15 +386,23 @@ impl SplitForm {
     }
 
     /// Draws the lines, scrolling past [`Theme::SPLIT_LINES_SHOWN`] of them, then Add
-    /// line, the total and why Done was refused, in `theme`. Category fields complete
-    /// typed text when `inline_completion` is on.
+    /// line, the total and why Done was refused, in `theme`. Category fields offer the
+    /// categories and accounts of `view`, and complete typed text when
+    /// `inline_completion` is on.
     pub(crate) fn show(
         &mut self,
         ui: &mut egui::Ui,
         i18n: &Localizer,
         theme: &Theme,
+        view: &LedgerView,
         inline_completion: bool,
     ) {
+        if let Some(focus) = self.focus_return.take() {
+            self.focus_return = focus.restore_in(ui.ctx(), dialog_id());
+        }
+        if !self.choices.is_current(view, self.account, i18n) {
+            self.choices = FieldChoices::new(view, self.account, i18n);
+        }
         let height = theme.row_height();
         let left = Layout::left_to_right(Align::Center);
         let right = Layout::right_to_left(Align::Center);
@@ -506,12 +538,13 @@ impl SplitForm {
         let height = ui.spacing().interact_size.y;
         let gap = ui.spacing().item_spacing.x;
         let choices = &self.choices;
-        let list = |text: &str| choices.categories().list(text);
+        let list = |text: &str| choices.categories().list_creating(text);
         // `show` draws only indices below the number of lines.
         let line = &mut self.lines[index];
         let id = category_id(line.key);
+        let mut create = None;
         if ui.memory(|memory| memory.has_focus(id)) {
-            list_keys(ui.ctx(), &mut line.category, list);
+            create = list_keys(ui.ctx(), &mut line.category, list);
         }
         let response = ui.add_sized(
             vec2(Theme::SPLIT_CATEGORY_WIDTH - height - gap, height),
@@ -559,10 +592,71 @@ impl SplitForm {
             response.rect,
             theme.row_height(),
         );
-        if let Some(ListRow::Choice(text)) = pressed {
-            line.category.set_text(text);
-            line.category.close_list();
+        match pressed {
+            Some(ListRow::Choice(text)) => {
+                line.category.set_text(text);
+                line.category.close_list();
+            }
+            Some(ListRow::Create(name)) => create = Some(name),
+            None => {}
         }
+        if let Some(name) = create {
+            // The typed text stays in the field while New Category is open.
+            line.category.drop_completion();
+            line.category.close_list();
+            self.new_category = Some(LineNewCategory {
+                dialog: OpenDialog::new(ui.ctx(), NewCategoryForm::new(name)),
+                line: line.key,
+            });
+        }
+    }
+
+    /// Draws the New Category Dialog a line's Create row opened over this one, while it
+    /// is open, from `view`. Cancel gives the line's Category field back its typed text.
+    pub(crate) fn show_new_category(
+        &mut self,
+        ctx: &egui::Context,
+        i18n: &Localizer,
+        theme: &Theme,
+        commands: &CommandSender,
+        view: &LedgerView,
+    ) {
+        let Some(open) = &mut self.new_category else {
+            return;
+        };
+        match new_category::show(ctx, i18n, theme, commands, &mut open.dialog, view) {
+            NewCategoryOutcome::Open => {}
+            NewCategoryOutcome::Cancelled => {
+                self.focus_return = self.new_category.take().map(|open| open.dialog.close(ctx));
+            }
+        }
+    }
+
+    /// Hands the New Category Dialog open over this one the ledger's answer to the
+    /// category it asked for: once the category is created, the Dialog closes and the
+    /// line that asked for it names it; a refusal shows in the Dialog. Returns the
+    /// answer when no Dialog over this one waits on it.
+    pub(crate) fn applied(
+        &mut self,
+        ctx: &egui::Context,
+        applied: Result<(), DomainError>,
+    ) -> Option<Result<(), DomainError>> {
+        let Some(open) = &mut self.new_category else {
+            return Some(applied);
+        };
+        if let Err(error) = applied {
+            open.dialog.form.rejected(error);
+            return None;
+        }
+        let LineNewCategory { mut dialog, line } = self.new_category.take()?;
+        // Lines can't be removed while New Category is open over them, and the form
+        // holds the path of the category it asked for until it is taken here.
+        let path = dialog.form.take_created_path();
+        self.focus_return = Some(dialog.close(ctx));
+        if let (Some(path), Some(line)) = (path, self.lines.iter_mut().find(|l| l.key == line)) {
+            line.category.set_text(&path);
+        }
+        None
     }
 
     /// Why Done didn't close the Dialog, in words.
@@ -632,6 +726,11 @@ struct LineFields<'a> {
     inline_completion: bool,
 }
 
+/// The id of the Split dialog, whose heavy Dialog window it names.
+pub(crate) fn dialog_id() -> Id {
+    Id::new("split_dialog")
+}
+
 /// The id of the Category field of the line with `key`.
 fn category_id(key: usize) -> Id {
     Id::new(("split_category", key))
@@ -671,11 +770,12 @@ fn amount_text_field(ui: &mut egui::Ui, text: &mut String, id: Id, label: &str) 
 /// `list` gives: the arrows as [`ComboText::arrow_keys`] takes them, and while the
 /// list is open, Esc closes it and Enter takes its highlighted row. The keys it acts on
 /// go no further, so Esc and Enter close the Dialog only while the list is closed.
+/// Returns the name to create when Enter takes the Create row.
 fn list_keys<'a>(
     ctx: &egui::Context,
     combo: &mut ComboText,
     list: impl Fn(&str) -> Vec<ListRow<'a>>,
-) {
+) -> Option<String> {
     let open = !combo.rows(&list).is_empty();
     combo.arrow_keys(ctx, &list);
     let (escape, enter) = ctx.input_mut(|input| {
@@ -688,6 +788,10 @@ fn list_keys<'a>(
         combo.close_list();
         combo.drop_completion();
     } else if enter {
+        if let Some(ListRow::Create(name)) = combo.highlighted(&list) {
+            return Some(name);
+        }
         combo.take_highlighted(&list);
     }
+    None
 }
