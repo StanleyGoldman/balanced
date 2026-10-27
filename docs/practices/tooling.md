@@ -52,7 +52,7 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 | `.config/nextest.toml` | The one nextest profile, used by `test`, `snapshots`, `locales` and cargo-mutants: no fail-fast, no retries, a hung test killed after 3 minutes, and each test process run through `.config/memory-cap.sh` |
 | `.config/memory-cap.sh` | The memory cap on each test process (8G) and on every test process from every session together (24G, in `balanced-tests.slice`), so a runaway test is killed alone instead of the OOM killer taking every session down. The header names the overrides. Uncapped where there is no systemd user session, as in CI |
 | `.config/rustc-memory-cap.sh` | The `RUSTC_WRAPPER` that caps every rustc and linker from every agent session together (20G, in `balanced-builds.slice`). The header names the override. Uncapped where there is no systemd user session |
-| `.claude/hooks/build-memory-cap.sh` | The SessionStart hook that exports `RUSTC_WRAPPER` to the build cap, by absolute path, for agent sessions only. A session that already has a wrapper (sccache in `~/.cargo/config.toml`) keeps it and builds uncapped |
+| `.claude/hooks/build-memory-cap.sh` | The SessionStart hook that exports `RUSTC_WRAPPER` to the build cap, by absolute path, for agent sessions only. A session that already has a wrapper configured keeps it, and builds uncapped unless that wrapper runs the cap itself (see Build cache) |
 | `.typos.toml` | Words typos accepts, each with a comment, and the translations it skips |
 
 - To add a lint or a ban, put it in config, not prose. A ban's `reason` names the replacement to use.
@@ -64,15 +64,14 @@ Every check lives in `xtask` (`cargo xtask` lists them), so the same commands ru
 ## Build cache
 
 - In CI, every run builds into an empty `target/`, and sccache caches the library crates in the GitHub Actions cache (see [ADR 0003](../adr/0003-ci-caches-with-sccache-not-a-persistent-target.md) and [ADR 0010](../adr/0010-ci-runs-on-github-actions.md)).
-- Locally, sccache is optional and set up per developer, in `~/.cargo/config.toml` (`[build] rustc-wrapper = "sccache"`). The repo's `.cargo/config.toml` holds only aliases.
+- Locally, sccache is optional and set up per developer, in `~/.cargo/config.toml`. The repo's `.cargo/config.toml` holds only aliases.
+- To keep the build memory cap under sccache, point `build.rustc-wrapper` at a wrapper that sets `SCCACHE_CLIENT_SIDE=1` and, when `CLAUDECODE` is set, runs `.config/rustc-memory-cap.sh sccache "$@"`. Client-side mode runs each compile in the calling sccache process, so rustc and the linker land in `balanced-builds.slice`. A plain `rustc-wrapper = "sccache"` leaves agent sessions uncapped, since the hook sees a configured wrapper and steps aside. The main dev machine runs this as `~/.local/bin/rustc-sccache` (#594 tracks whether agents should rely on it).
 - Agents leave `RUSTC_WRAPPER`, `CARGO_HOME` and `CARGO_TARGET_DIR` as the session starts them, and keep `rustc-wrapper` out of the repo's cargo config. The SessionStart hook alone sets `RUSTC_WRAPPER`, to the build memory cap (`.claude/hooks/build-memory-cap.sh`). Each worktree builds into its own `target/`.
-- **Verified 2026-10-13 (sccache 0.18.0, Rust 1.99.0), with egui 0.36.2 + eframe + tracing as a test dependency set:**
-  - sccache works under the Claude Code sandbox. The client reaches the server on `127.0.0.1:4226`, and `sccache --show-stats` counts rise during a worktree build.
-  - With the default setup, the cache key includes absolute paths. A first worktree build missed all 266 cacheable crates. Building the same tree again with a different `CARGO_TARGET_DIR` also got 0 hits.
-  - The server was then restarted with `SCCACHE_BASEDIRS` listing two checkout roots:
-    - Rebuilding the first worktree after `rm -rf target` got 266 hits out of 266.
-    - A copy of the worktree at another path got 219 hits and 47 misses.
-  - So by default **each new worktree builds its dependencies cold**, and sccache speeds up only rebuilds at the same path. Sharing across worktrees needs `SCCACHE_BASEDIRS`, set in the environment that starts the sccache server and listing every worktree root.
+- **Verified 2026-10-27 (sccache 0.19.0, Rust 1.99.0), building balanced at `origin/main` in two fresh worktrees, each with an empty cache:**
+  - A new worktree reuses about two thirds of another worktree's cache with no extra setup: `cargo build --workspace --tests` got 257 hits out of 378, and the build took 53 s against 61 s cold.
+  - `SCCACHE_BASEDIRS` listing both worktrees changed nothing, whether set for the client or for the server: 257 of 378 again, and 216 of 331 for `--lib --bins`. The misses are crates whose cache key still holds the worktree's path. In a smaller probe these were the crates with build scripts (`serde`, `serde_core`), even though their build-script output was identical in both worktrees. The likely cause is their `OUT_DIR`, which sits under each worktree's `target/`; the crates built on them then miss in turn. Unconfirmed.
+  - Under client-side mode each rustc is a child of the sccache client, in `balanced-builds.slice`, when the wrapper runs it through the cap.
+  - sccache 0.18.0 (2026-10-13) differed: a new worktree got 0 hits, and `SCCACHE_BASEDIRS` was what let worktrees share.
 
 ## Measuring performance
 
