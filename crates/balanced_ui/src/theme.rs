@@ -184,8 +184,8 @@ impl Theme {
     /// Space between the Register's edge and the text in its first and last columns.
     pub(crate) const EDGE_INSET: f32 = 6.0;
 
-    /// The space between the editing row's buttons, kept tight so the buttons cover as
-    /// little of the row as they can.
+    /// The space between the editing row's buttons, kept tight so the Actions column,
+    /// as wide as the buttons, takes as little of the Register as it can.
     pub(crate) const ROW_BUTTON_GAP: f32 = 4.0;
 
     /// The space between each of the editing row's buttons' sides and its text, tight

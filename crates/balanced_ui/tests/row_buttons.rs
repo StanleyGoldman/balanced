@@ -7,19 +7,25 @@ use balanced_i18n::Localizer;
 use balanced_ui::{App, Clock, PreferencesFile};
 use eframe::App as _;
 use eframe::egui::accesskit::Role;
-use eframe::egui::{Event, Key, Modifiers, vec2};
+use eframe::egui::{Event, Key, Modifiers, Rect, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use icu_calendar::Date;
+use icu_locale::{langid, locale};
 
 /// The App on stub data, in the test locale, wide enough to show every Register column.
 fn app() -> Harness<'static, App> {
+    app_in(Localizer::for_tests(), 1440.0)
+}
+
+/// The App on stub data, in `i18n`'s locale, `width` points wide.
+fn app_in(i18n: Localizer, width: f32) -> Harness<'static, App> {
     let mut harness = Harness::builder()
-        .with_size(vec2(1280.0, 720.0))
+        .with_size(vec2(width, 720.0))
         .build_eframe(|cc| {
             App::on_ledger(
                 cc,
-                Localizer::for_tests(),
+                i18n,
                 Ledger::stub(),
                 Clock::fixed(Date::try_new_iso(2026, 10, 14).expect("14 October 2026 is a date")),
                 PreferencesFile::for_tests(),
@@ -171,6 +177,198 @@ fn button_counts<const N: usize>(harness: &Harness<'static, App>, labels: [&str;
             .query_all_by_role_and_label(Role::Button, label)
             .count()
     })
+}
+
+/// The editing row's buttons, the buttons in its toolbar.
+fn row_buttons(harness: &Harness<'static, App>) -> Vec<(String, Rect)> {
+    let buttons: Vec<_> = harness
+        .query_all_by_role(Role::Button)
+        .filter(|button| {
+            button
+                .accesskit_node()
+                .parent()
+                .is_some_and(|parent| parent.role() == Role::Toolbar)
+        })
+        .map(|button| {
+            let label = button.accesskit_node().label().unwrap_or_default();
+            (label, button.rect())
+        })
+        .collect();
+    assert_eq!(buttons.len(), 4, "the editing row shows its four buttons");
+    buttons
+}
+
+/// The labels of the editing row's buttons that reach outside the Actions column, the
+/// rightmost column, whose heading is blank.
+fn buttons_outside_actions(harness: &Harness<'static, App>) -> Vec<String> {
+    let actions = harness
+        .query_all_by_role(Role::ColumnHeader)
+        .max_by(|a, b| a.rect().center().x.total_cmp(&b.rect().center().x))
+        .expect("the Register has headings")
+        .rect()
+        .x_range();
+    row_buttons(harness)
+        .into_iter()
+        .filter(|(_, rect)| !(actions.contains(rect.left()) && actions.contains(rect.right())))
+        .map(|(label, _)| label)
+        .collect()
+}
+
+/// The labels of the cells, and of the editors over them, that any of the editing
+/// row's buttons overlaps.
+fn cells_under_buttons(harness: &Harness<'static, App>) -> Vec<String> {
+    let buttons = row_buttons(harness);
+    let under = |rect: Rect| {
+        buttons
+            .iter()
+            .any(|(_, button)| button.intersect(rect).is_positive())
+    };
+    [Role::Cell, Role::CheckBox, Role::TextInput]
+        .into_iter()
+        .flat_map(|role| harness.query_all_by_role(role).collect::<Vec<_>>())
+        .chain(harness.query_all_by_role(Role::Button).filter(|button| {
+            button
+                .accesskit_node()
+                .parent()
+                .is_none_or(|parent| parent.role() != Role::Toolbar)
+        }))
+        // The Actions cell, which holds the buttons, is blank.
+        .filter(|node| !node.accesskit_node().label().unwrap_or_default().is_empty())
+        .filter(|node| under(node.rect()))
+        .map(|node| node.accesskit_node().label().unwrap_or_default())
+        .collect()
+}
+
+/// Opens Fresh Market's Payee cell in Everyday Checking, which makes its row the
+/// editing row.
+fn edit_fresh_market(harness: &mut Harness<'static, App>) {
+    open(harness, "Everyday Checking");
+    click_cell(harness, "Fresh Market");
+    press(harness, Modifiers::NONE, Key::Enter);
+}
+
+#[test]
+fn the_editing_rows_buttons_lie_in_the_actions_column_over_no_cell() {
+    let mut harness = app();
+
+    edit_fresh_market(&mut harness);
+    assert_eq!(cells_under_buttons(&harness), Vec::<String>::new());
+
+    assert_eq!(buttons_outside_actions(&harness), Vec::<String>::new());
+}
+
+#[test]
+fn in_german_the_editing_rows_buttons_lie_in_the_actions_column_over_no_cell() {
+    let german = Localizer::for_tests_in(&langid!("de"), &locale!("de-DE"))
+        .expect("the embedded de messages and de-DE formatting data load");
+    let mut harness = app_in(german, 1440.0);
+
+    edit_fresh_market(&mut harness);
+    assert_eq!(cells_under_buttons(&harness), Vec::<String>::new());
+
+    assert_eq!(buttons_outside_actions(&harness), Vec::<String>::new());
+}
+
+/// The Register's column headings, left to right. The Actions column's is empty.
+fn headings(harness: &Harness<'static, App>) -> Vec<String> {
+    let mut headers: Vec<_> = harness
+        .query_all_by_role(Role::ColumnHeader)
+        .map(|header| {
+            let label = header.accesskit_node().label().unwrap_or_default();
+            (header.rect().left(), label)
+        })
+        .collect();
+    headers.sort_by(|(left, _), (right, _)| left.total_cmp(right));
+    headers.into_iter().map(|(_, label)| label).collect()
+}
+
+/// Opens Everyday Checking, makes `change` in its column chooser, then opens Fresh
+/// Market's Payee cell, which makes its row the editing row.
+fn edit_fresh_market_after(
+    harness: &mut Harness<'static, App>,
+    change: impl FnOnce(&mut Harness<'static, App>),
+) {
+    open(harness, "Everyday Checking");
+    click_button(harness, "Choose columns");
+    change(harness);
+    press(harness, Modifiers::NONE, Key::Escape);
+    click_cell(harness, "Fresh Market");
+    press(harness, Modifiers::NONE, Key::Enter);
+}
+
+#[test]
+fn with_balance_clr_or_flag_hidden_the_editing_rows_buttons_cover_no_cell() {
+    for column in ["Balance", "Clr", "Flag"] {
+        let mut harness = app();
+
+        edit_fresh_market_after(&mut harness, |harness| {
+            harness
+                .get_by_role_and_label(Role::CheckBox, column)
+                .click();
+            harness.run();
+        });
+
+        assert!(!headings(&harness).iter().any(|heading| heading == column));
+        assert_eq!(
+            cells_under_buttons(&harness),
+            Vec::<String>::new(),
+            "{column} hidden"
+        );
+        assert_eq!(
+            buttons_outside_actions(&harness),
+            Vec::<String>::new(),
+            "{column} hidden"
+        );
+    }
+}
+
+#[test]
+fn with_memo_payment_or_deposit_beside_actions_the_editing_rows_buttons_cover_no_cell() {
+    for column in ["Memo", "Payment", "Deposit"] {
+        let mut harness = app();
+
+        edit_fresh_market_after(&mut harness, |harness| {
+            // Memo has the furthest to go: past Payment, Deposit, Balance, Clr and Flag.
+            for _ in 0..5 {
+                click_button(harness, &format!("Move {column} down"));
+            }
+        });
+
+        let headings = headings(&harness);
+        assert_eq!(
+            headings[headings.len() - 2],
+            column,
+            "{column} sits beside Actions"
+        );
+        assert_eq!(
+            cells_under_buttons(&harness),
+            Vec::<String>::new(),
+            "{column} beside"
+        );
+        assert_eq!(
+            buttons_outside_actions(&harness),
+            Vec::<String>::new(),
+            "{column} beside"
+        );
+    }
+}
+
+#[test]
+fn in_a_narrow_window_the_register_scrolls_sideways_and_the_buttons_cover_no_cell() {
+    let mut harness = app_in(Localizer::for_tests(), 900.0);
+
+    edit_fresh_market(&mut harness);
+
+    let right = harness
+        .query_all_by_role(Role::ColumnHeader)
+        .map(|header| header.rect().right())
+        .fold(f32::NEG_INFINITY, f32::max);
+    assert!(
+        right > 900.0,
+        "the Register runs past the window's right edge"
+    );
+    assert_eq!(cells_under_buttons(&harness), Vec::<String>::new());
+    assert_eq!(buttons_outside_actions(&harness), Vec::<String>::new());
 }
 
 #[test]

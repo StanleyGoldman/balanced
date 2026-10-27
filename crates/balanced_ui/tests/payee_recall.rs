@@ -20,7 +20,7 @@ use icu_calendar::Date;
 /// keeping its Preferences in `preferences`.
 fn app_with(ledger: Ledger, preferences: PreferencesFile) -> Harness<'static, App> {
     let mut harness = Harness::builder()
-        .with_size(vec2(1280.0, 720.0))
+        .with_size(vec2(1440.0, 720.0))
         .build_eframe(|cc| {
             App::on_ledger(
                 cc,
@@ -204,8 +204,7 @@ fn cells(harness: &Harness<'static, App>) -> Vec<String> {
         .collect()
 }
 
-/// The draft row's cells, from Date to Deposit. It is the last row, whose cells the
-/// editing row's buttons leave out of the tree while they cover them.
+/// The draft row's cells, from Date to Deposit. It is the last row.
 fn draft_row(harness: &Harness<'static, App>) -> Vec<String> {
     let cells: Vec<_> = harness
         .query_all_by_role(Role::Cell)
