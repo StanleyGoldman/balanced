@@ -10,6 +10,7 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - **Comment on an issue**: `gh issue comment <number> --body "..."`
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
+- **Edit a PR's title, body or base** through the REST API: `gh api -X PATCH repos/StanleyGoldman/balanced/pulls/<n> -F body=@<file>` (or `-f title="..."`, `-f base=<branch>`). The installed `gh` 2.46 reads Projects (classic) in `gh pr edit`, so `gh pr edit --body-file` fails with a GraphQL deprecation error naming `projectCards` and changes nothing. Check the PR afterwards when a `gh pr edit` prints that error.
 
 `gh` infers the repo from `git remote -v` only inside a clone. From any other directory (the scratchpad, where issue bodies are written), pass `--repo StanleyGoldman/balanced` to `gh issue` and `gh pr`; without it they fail with "not a git repository". `gh api` takes the repo in its path instead.
 
