@@ -25,6 +25,7 @@ pub enum Setting {
     QuitReconciled,
     PayeeRecallAgain,
     Locale,
+    FocusAfterFlagClr,
 }
 
 pub struct SettingDef {
@@ -36,7 +37,7 @@ pub struct SettingDef {
     pub options: &'static [&'static str],
 }
 
-pub const SETTINGS: [SettingDef; 13] = [
+pub const SETTINGS: [SettingDef; 14] = [
     SettingDef {
         setting: Setting::EnterKey,
         id: "enter",
@@ -179,9 +180,20 @@ pub const SETTINGS: [SettingDef; 13] = [
         title: "Language",
         options: &["en-US", "de-DE"],
     },
+    SettingDef {
+        setting: Setting::FocusAfterFlagClr,
+        id: "focus-after-flag",
+        step: 12,
+        ticket: 599,
+        title: "Another row's Flag or Clr clicked with a cell open",
+        options: &[
+            "the open cell closes, typed text kept (today)",
+            "the open cell keeps the keyboard, as after a refused commit",
+        ],
+    },
 ];
 
-pub const STEPS: u8 = 11;
+pub const STEPS: u8 = 12;
 
 pub const VARIANTS: [(&str, &str); 4] = [
     ("A", "overlay strip (today)"),

@@ -20,7 +20,8 @@
 //! change thrown away), `quit`, `account <name>`, `key <Ctrl+Shift+Name>` (a key press,
 //! e.g. `key Tab`, `key Ctrl+Enter`, `key Esc`), `text <chars>` (typed text),
 //! `click <tracked widget name>` (a left click on its centre), `resetsettings`,
-//! `hide <column id>` / `show <column id>` (the column chooser's checkbox), `wait <ms>`.
+//! `hide <column id>` / `show <column id>` (the column chooser's checkbox),
+//! `left <column id>` / `right <column id>` (its arrows), `width <points>|max`, `wait <ms>`.
 
 #![allow(
     dead_code,
@@ -293,6 +294,30 @@ impl Proto {
             "hide" | "show" => {
                 if self.app.proto_show_column(rest, verb == "show") {
                     proto::log("column", json!({ "column": rest, "shown": verb == "show" }));
+                } else {
+                    bad();
+                }
+            }
+            // PROTOTYPE #469 (#602): move a column one place, as the column chooser's
+            // arrows do, so an editable one can sit next to Actions.
+            "left" | "right" => {
+                if self.app.proto_move_column(rest, verb == "right") {
+                    proto::log("column", json!({ "column": rest, "moved": verb }));
+                } else {
+                    bad();
+                }
+            }
+            // PROTOTYPE #469 (#602): `width <points>` narrows the window, `width max`
+            // maximizes it again.
+            "width" => {
+                if rest == "max" {
+                    ctx.send_viewport_cmd(ViewportCommand::Maximized(true));
+                    proto::log("width", json!({ "width": "max" }));
+                } else if let Ok(width) = rest.parse::<f32>() {
+                    let height = ctx.content_rect().height();
+                    ctx.send_viewport_cmd(ViewportCommand::Maximized(false));
+                    ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(width, height)));
+                    proto::log("width", json!({ "width": width }));
                 } else {
                     bad();
                 }

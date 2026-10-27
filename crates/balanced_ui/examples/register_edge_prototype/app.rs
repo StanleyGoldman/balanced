@@ -577,6 +577,28 @@ impl App {
         true
     }
 
+    /// PROTOTYPE #469: moves `column` one place right (`later`) or left, as the column
+    /// chooser's arrows do.
+    pub fn proto_move_column(&mut self, column: &str, later: bool) -> bool {
+        let Some(column) = crate::register_columns::RegisterColumn::ALL
+            .into_iter()
+            .find(|c| c.id().eq_ignore_ascii_case(column))
+        else {
+            return false;
+        };
+        let mut register_columns = self.preferences.register_columns.clone();
+        if later {
+            register_columns.move_down(column);
+        } else {
+            register_columns.move_up(column);
+        }
+        self.set_preferences(Preferences {
+            register_columns,
+            ..self.preferences.clone()
+        });
+        true
+    }
+
     /// PROTOTYPE: the open ledger as it stands.
     pub fn view(&self) -> Option<Arc<balanced_core::LedgerView>> {
         match &self.session {
