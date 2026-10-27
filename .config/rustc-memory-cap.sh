@@ -18,7 +18,8 @@
 #
 # When `sccache` is on PATH, rustc runs through it with SCCACHE_CLIENT_SIDE=1: the
 # sccache client compiles in its own process, inside the slice, instead of handing the
-# compile to its server outside it. A RUSTC_WRAPPER env var overrides this script, so
+# compile to its server outside it. Verified with sccache 0.19.0; an sccache without
+# client-side mode would compile in its server, uncapped. A RUSTC_WRAPPER env var overrides this script, so
 # `RUSTC_WRAPPER= cargo ...` builds with neither the cap nor sccache.
 set -euo pipefail
 

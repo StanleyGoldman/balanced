@@ -5,7 +5,8 @@
 # RUSTC_WRAPPER or CARGO_BUILD_RUSTC_WRAPPER env var overrides that config. When either
 # is set (even empty) to anything but a `rustc-memory-cap.sh`, prints a SessionStart
 # JSON result on stdout: `systemMessage` for the user, `additionalContext` for the
-# agent. Otherwise prints nothing. Always exits 0.
+# agent. Otherwise prints nothing. Exits 0; builds the JSON with jq, so a missing jq
+# fails the hook.
 set -euo pipefail
 
 for var in RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER; do
