@@ -5355,7 +5355,14 @@ fn icon_button(ui: &mut egui::Ui, glyph: &str, label: &str, enabled: bool) -> Re
 /// the keyboard to a press on another row's Flag or Clr cell, takes it back. Logs the
 /// setting's decision whenever the press was on such a cell.
 fn proto_keeps_edit(ui: &egui::Ui, editor: &Response) -> bool {
-    let Some(origin) = ui.input(|input| input.pointer.press_origin()) else {
+    // The press origin is gone once the button is up, by when a quick click has
+    // finished, so the pointer's place stands in for it.
+    let Some(origin) = ui.input(|input| {
+        input
+            .pointer
+            .press_origin()
+            .or_else(|| input.pointer.latest_pos())
+    }) else {
         return false;
     };
     let other_row = |name: &str, rect: Rect| {
