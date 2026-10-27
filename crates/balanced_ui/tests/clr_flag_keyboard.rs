@@ -406,3 +406,100 @@ fn shift_tab_from_a_changed_row_onto_the_previous_rows_flag_asks_then_rests_ther
             .is_some()
     );
 }
+
+/// The title of the column heading over the cell under the cell cursor.
+fn cursor_column(harness: &Harness<'static, App>) -> String {
+    let mut cursors = harness.query_all(By::default()).filter(|node| {
+        let node = node.accesskit_node();
+        matches!(node.role(), Role::Cell | Role::Button | Role::CheckBox)
+            && node.is_selected() == Some(true)
+    });
+    let x = cursors
+        .next()
+        .expect("a cell holds the cell cursor")
+        .rect()
+        .center()
+        .x;
+    harness
+        .query_all_by_role(Role::ColumnHeader)
+        .find(|heading| heading.rect().x_range().contains(x))
+        .expect("a heading sits over every cell")
+        .accesskit_node()
+        .label()
+        .unwrap_or_default()
+}
+
+#[test]
+fn the_right_arrow_from_the_draft_rows_deposit_passes_over_its_clr_and_flag() {
+    // The cell cursor starts on the draft row's Date cell.
+    let mut harness = everyday_checking();
+    // Number, Payee, Category, Memo, Payment, Deposit.
+    for _ in 0..6 {
+        press(&mut harness, Key::ArrowRight);
+    }
+
+    press(&mut harness, Key::ArrowRight);
+
+    assert_eq!(cursor_column(&harness), "Deposit");
+}
+
+#[test]
+fn the_down_arrow_from_the_last_rows_clr_lands_on_the_draft_rows_deposit() {
+    let mut harness = everyday_checking();
+    // The November rent's Payment, the last transaction's, then its Deposit and Clr.
+    click_cell(&mut harness, "1,475.00");
+    press(&mut harness, Key::ArrowRight);
+    press(&mut harness, Key::ArrowRight);
+    let on_clr = cursor(&harness);
+
+    press(&mut harness, Key::ArrowDown);
+
+    assert!(on_clr.starts_with("Clr "));
+    assert_eq!(cursor(&harness), "");
+    assert_eq!(cursor_column(&harness), "Deposit");
+}
+
+#[test]
+fn a_click_on_the_draft_rows_clr_cell_from_a_clr_cell_rests_the_cursor_on_its_deposit() {
+    let mut harness = everyday_checking();
+    arrow_to_fresh_market_clr(&mut harness);
+    let clr = harness
+        .get_by_role_and_label(Role::ColumnHeader, "Clr")
+        .rect()
+        .x_range();
+    // The draft row's Clr cell, the lowest under the heading.
+    let draft_clr = harness
+        .query_all_by_role(Role::Cell)
+        .filter(|cell| clr.contains(cell.rect().center().x))
+        .max_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+        .expect("the draft row has a Clr cell");
+    draft_clr.click();
+    harness.run();
+
+    assert_eq!(cursor(&harness), "");
+    assert_eq!(cursor_column(&harness), "Deposit");
+}
+
+#[test]
+fn the_down_arrow_from_a_leftmost_clr_lands_on_the_draft_rows_nearest_cell_to_the_right() {
+    let dir = tempfile::tempdir().expect("the test machine can make a temporary directory");
+    std::fs::write(
+        dir.path().join("preferences.toml"),
+        "version = 2\n\
+         register_columns = [\"clr\", \"flag\", \"num\", \"date\", \"payee\", \"category\", \"memo\", \"payment\", \"deposit\", \"balance\"]\n",
+    )
+    .expect("the test can write the preferences file");
+    let mut harness = everyday_checking_with(PreferencesFile::in_dir(dir.path()));
+    // The November rent's Payment, the last transaction's, then left past Memo,
+    // Category, Payee, Date, Num and Flag to Clr.
+    click_cell(&mut harness, "1,475.00");
+    for _ in 0..7 {
+        press(&mut harness, Key::ArrowLeft);
+    }
+    let on_clr = cursor(&harness);
+
+    press(&mut harness, Key::ArrowDown);
+
+    assert!(on_clr.starts_with("Clr "));
+    assert_eq!(cursor_column(&harness), "Num");
+}
