@@ -869,6 +869,10 @@ pub(crate) struct Register {
     /// The lines the Split dialog's Done gave a row, which the row keeps from the next
     /// frame.
     split_done: Option<SplitDone>,
+    /// The Split dialog a `[Split]` click on another row opens once the changed row
+    /// it left is saved or its changes thrown away. It lasts only the frame of the
+    /// click.
+    split_on_leave: Option<SplitStart>,
 }
 
 impl Register {
@@ -1135,7 +1139,7 @@ impl Register {
             // A click on another row leaves a row that can't be saved.
             let leaving = Leaving {
                 from: at,
-                then: None,
+                then: self.split_on_leave.take().map(open_split_command),
                 resume: None,
                 step: LeaveStep::Asked,
             };
@@ -1155,6 +1159,7 @@ impl Register {
         commands: &CommandSender,
     ) {
         self.settle_refused_leave(ctx, commands);
+        let split = self.split_on_leave.take();
         if self.leaving.is_some() || self.refused.is_some() || self.waits_on_ledger() {
             return;
         }
@@ -1170,7 +1175,7 @@ impl Register {
         });
         let leaving = Leaving {
             from,
-            then: None,
+            then: split.map(open_split_command),
             resume,
             step: LeaveStep::Asked,
         };
@@ -2010,9 +2015,10 @@ impl Register {
             if matches!(column.field(row), Some(CellField::Amount(_))) {
                 self.paste_target = Some(address);
             }
-            // A click that leaves another row, which may ask about its changes, only
-            // moves the cell cursor. A Clr or Flag click there acts on its own row
-            // without leaving a changed one, so the cell cursor stays and nothing asks.
+            // A click that leaves another row, which may ask about its changes, moves
+            // the cell cursor, and a `[Split]` click's Split dialog waits for the
+            // answer. A Clr or Flag click there acts on its own row without leaving a
+            // changed one, so the cell cursor stays and nothing asks.
             let leaves_row = self
                 .edit
                 .as_ref()
@@ -2026,7 +2032,9 @@ impl Register {
             if !acts_in_place {
                 self.place_cursor(row.id(), column);
             }
-            if !leaves_row {
+            if leaves_row {
+                self.split_on_leave = split_from_cell(row, column);
+            } else {
                 open_split_from_cell(row, column, commands);
             }
         }
@@ -3535,6 +3543,12 @@ impl InlineCompletion {
     }
 }
 
+/// The Split dialog on `row` when `column` is the Category cell of a split row, whose
+/// `[Split]` acts as a button.
+fn split_from_cell(row: &RegisterRow, column: RegisterColumn) -> Option<SplitStart> {
+    (column == RegisterColumn::Category && row.is_split()).then(|| SplitStart::of(row))
+}
+
 /// Opens the Split dialog on `row` when `column` is the Category cell of a split row,
 /// whose `[Split]` acts as a button. Returns whether it opened.
 fn open_split_from_cell(
@@ -3542,18 +3556,22 @@ fn open_split_from_cell(
     column: RegisterColumn,
     commands: &CommandSender,
 ) -> bool {
-    let split = column == RegisterColumn::Category && row.is_split();
-    if split {
-        open_split_dialog(row, commands);
+    let start = split_from_cell(row, column);
+    let split = start.is_some();
+    if let Some(start) = start {
+        commands.send(open_split_command(start));
     }
     split
 }
 
 /// Opens the Split dialog on `row`'s lines, as the row shows them.
 fn open_split_dialog(row: &RegisterRow, commands: &CommandSender) {
-    commands.send(AppCommand::OpenDialog(DialogKind::Split(SplitStart::of(
-        row,
-    ))));
+    commands.send(open_split_command(SplitStart::of(row)));
+}
+
+/// The command that opens the Split dialog at `start`.
+fn open_split_command(start: SplitStart) -> AppCommand {
+    AppCommand::OpenDialog(DialogKind::Split(start))
 }
 
 /// Whether a commit went through.
@@ -3855,8 +3873,8 @@ struct Leaving {
     /// The cell that opens again when the user stays, or the save is refused.
     from: CellAddress,
     /// What left the row, sent once the row is saved or its changes thrown away.
-    /// `None` when the cell cursor left it for another row of the Register, which it
-    /// already has.
+    /// When the cell cursor left it for another row of the Register, which it already
+    /// has, this is the Split dialog a `[Split]` click there opens, if any.
     then: Option<AppCommand>,
     /// The cell the move to another row opened, which opens again once the row is
     /// saved or its changes thrown away.

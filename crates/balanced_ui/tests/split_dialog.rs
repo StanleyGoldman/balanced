@@ -659,6 +659,87 @@ fn clicking_split_on_another_row_asks_about_the_changed_row_first() {
     assert_eq!(lines(&harness), expect_lines([]));
 }
 
+/// The button labelled `label` in the open Dialog, not among the editing row's
+/// buttons.
+fn dialog_button<'tree>(
+    harness: &'tree Harness<'static, App>,
+    label: &'tree str,
+) -> egui_kittest::Node<'tree> {
+    harness
+        .query_all_by_role_and_label(Role::Button, label)
+        .find(|button| {
+            button
+                .accesskit_node()
+                .parent()
+                .is_none_or(|parent| parent.role() != Role::Toolbar)
+        })
+        .expect("the Dialog has the button")
+}
+
+/// Costco's lines, which the Split dialog shows once it opens on Costco's row.
+fn costco_lines() -> Vec<[String; 3]> {
+    expect_lines([
+        ["Food & Dining:Groceries", "Food", "142.37"],
+        ["Shopping:Household", "Paper towels, detergent", "63.90"],
+    ])
+}
+
+#[test]
+fn save_in_the_prompt_a_split_click_raised_saves_the_row_and_opens_the_split_dialog() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    rename_fresh_market(&mut harness);
+    click_cell(&mut harness, "[Split]");
+
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    // The save, then the Split dialog it asks for: more frames than `run` allows.
+    harness.run_steps(8);
+
+    assert_eq!(cells(&harness, "Corner Shop"), 1);
+    assert_eq!(lines(&harness), costco_lines());
+}
+
+#[test]
+fn discard_in_the_prompt_a_split_click_raised_drops_the_changes_and_opens_the_split_dialog() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    rename_fresh_market(&mut harness);
+    click_cell(&mut harness, "[Split]");
+
+    click_button(&mut harness, "Discard");
+
+    assert_eq!(cells(&harness, "Fresh Market"), 1);
+    assert_eq!(lines(&harness), costco_lines());
+}
+
+#[test]
+fn continue_editing_in_the_prompt_a_split_click_raised_opens_nothing() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    rename_fresh_market(&mut harness);
+    click_cell(&mut harness, "[Split]");
+
+    click_button(&mut harness, "Continue editing");
+
+    assert_eq!(lines(&harness), expect_lines([]));
+    assert_eq!(field(&harness, "Payee"), "Corner Shop");
+}
+
+#[test]
+fn a_refused_save_in_the_prompt_a_split_click_raised_opens_nothing() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "1,450.00");
+    type_text(&mut harness, "1500.00");
+    click_cell(&mut harness, "[Split]");
+    click_button(&mut harness, "Save");
+
+    dialog_button(&harness, "Cancel").click();
+    harness.run();
+
+    assert_eq!(lines(&harness), expect_lines([]));
+}
+
 #[test]
 fn done_with_a_line_naming_no_category_says_so() {
     let mut harness = app();
