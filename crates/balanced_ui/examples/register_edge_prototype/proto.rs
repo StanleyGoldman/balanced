@@ -79,7 +79,7 @@ pub const SETTINGS: [SettingDef; 14] = [
         title: "Clr from the keyboard",
         options: &[
             "no way (today)",
-            "cursor stops on Clr and Flag; Space toggles",
+            "cursor and Tab stop on Clr and Flag; Space toggles",
             "Mark Cleared / Uncleared in More",
             "Ctrl+Shift+C toggles Clr",
         ],

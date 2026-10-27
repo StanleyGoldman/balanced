@@ -1539,7 +1539,7 @@ impl Register {
         };
         self.cursor_columns()
             .into_iter()
-            .filter(|column| column.field(row).is_some())
+            .filter(|column| column.field(row).is_some() || proto_tab_stop(*column, row))
             .collect()
     }
 
@@ -3093,17 +3093,16 @@ impl Register {
                 let width = columns.len();
                 let start = row * width + column;
                 let editable = |position: usize| {
-                    let row = rows.get(position / width)?;
-                    // The remainder of a division by the width is a column index.
-                    columns[position % width].field(row)
+                    rows.get(position / width).is_some_and(|row| {
+                        // The remainder of a division by the width is a column index.
+                        let column = columns[position % width];
+                        column.field(row).is_some() || proto_tab_stop(column, row)
+                    })
                 };
                 let position = if step == Move::NextEditable {
-                    (start + 1..rows.len() * width)
-                        .find(|&position| editable(position).is_some())?
+                    (start + 1..rows.len() * width).find(|&position| editable(position))?
                 } else {
-                    (0..start)
-                        .rev()
-                        .find(|&position| editable(position).is_some())?
+                    (0..start).rev().find(|&position| editable(position))?
                 };
                 (position / width, position % width)
             }
@@ -5393,4 +5392,12 @@ fn proto_keeps_edit(ui: &egui::Ui, editor: &Response) -> bool {
         );
         false
     }
+}
+
+/// PROTOTYPE #443: whether Tab stops on `column` of `row` as well as on its editable
+/// cells: Clr and Flag on a saved transaction's row, while the cursor stops there.
+fn proto_tab_stop(column: RegisterColumn, row: &RegisterRow) -> bool {
+    proto::is(Setting::ClrKeyboard, 1)
+        && matches!(column, RegisterColumn::Clr | RegisterColumn::Flag)
+        && row.transaction().is_some()
 }
