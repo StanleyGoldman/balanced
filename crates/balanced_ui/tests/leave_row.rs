@@ -10,7 +10,7 @@ use eframe::App as _;
 use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::{Event, Key, Modifiers, ViewportCommand, ViewportEvent, ViewportId, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use egui_kittest::kittest::{By, NodeT as _, Queryable as _};
 use icu_calendar::Date;
 
 /// The App on stub data, in the test locale, wide enough to show every Register column.
@@ -88,11 +88,14 @@ fn editor(harness: &Harness<'static, App>, column: &str) -> Option<String> {
         .map(|node| node.accesskit_node().value().unwrap_or_default())
 }
 
-/// The label of the cell under the cell cursor.
+/// The label of the cell under the cell cursor, whatever its role: a Clr cell is a
+/// button and a Flag cell a checkbox.
 fn cursor(harness: &Harness<'static, App>) -> String {
-    let mut cursors = harness
-        .query_all_by_role(Role::Cell)
-        .filter(|cell| cell.accesskit_node().is_selected() == Some(true));
+    let mut cursors = harness.query_all(By::default()).filter(|node| {
+        let node = node.accesskit_node();
+        matches!(node.role(), Role::Cell | Role::Button | Role::CheckBox)
+            && node.is_selected() == Some(true)
+    });
     let cursor = cursors.next().expect("a cell holds the cell cursor");
     assert!(cursors.next().is_none(), "one cell holds the cell cursor");
     cursor.accesskit_node().label().unwrap_or_default()
@@ -896,7 +899,7 @@ fn open_shell_payee(harness: &mut Harness<'static, App>) {
 }
 
 #[test]
-fn another_rows_flag_cell_moves_the_cursor_from_an_unchanged_open_cell() {
+fn another_rows_flag_cell_moves_the_cursor_onto_itself_from_an_unchanged_open_cell() {
     let mut harness = app();
     open_shell_payee(&mut harness);
 
@@ -907,7 +910,7 @@ fn another_rows_flag_cell_moves_the_cursor_from_an_unchanged_open_cell() {
 
     let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
     assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
-    assert_eq!(cursor(&harness), "Fresh Market");
+    assert_eq!(cursor(&harness), FRESH_MARKET_FLAG);
 }
 
 /// Fresh Market's Clr cell in Everyday Checking, which starts Uncleared. Its row is
@@ -915,7 +918,7 @@ fn another_rows_flag_cell_moves_the_cursor_from_an_unchanged_open_cell() {
 const FRESH_MARKET_CLR: &str = "Clr Fresh Market, 9/5/2026, -86.42";
 
 #[test]
-fn another_rows_clr_cell_moves_the_cursor_from_an_unchanged_open_cell() {
+fn another_rows_clr_cell_moves_the_cursor_onto_itself_from_an_unchanged_open_cell() {
     let mut harness = app();
     open_shell_payee(&mut harness);
 
@@ -926,7 +929,7 @@ fn another_rows_clr_cell_moves_the_cursor_from_an_unchanged_open_cell() {
 
     let clr = harness.get_by_role_and_label(Role::Button, FRESH_MARKET_CLR);
     assert_eq!(clr.accesskit_node().value().as_deref(), Some("Cleared"));
-    assert_eq!(cursor(&harness), "Fresh Market");
+    assert_eq!(cursor(&harness), FRESH_MARKET_CLR);
 }
 
 /// Types over Shell's Payee cell, then deletes the typing and types Shell back,
@@ -943,7 +946,7 @@ fn retype_shell_payee(harness: &mut Harness<'static, App>) {
 }
 
 #[test]
-fn another_rows_flag_cell_moves_the_cursor_from_an_open_cell_typed_back_as_it_was() {
+fn another_rows_flag_cell_moves_the_cursor_onto_itself_from_an_open_cell_typed_back_as_it_was() {
     let mut harness = app();
     retype_shell_payee(&mut harness);
 
@@ -954,11 +957,11 @@ fn another_rows_flag_cell_moves_the_cursor_from_an_open_cell_typed_back_as_it_wa
 
     let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
     assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
-    assert_eq!(cursor(&harness), "Fresh Market");
+    assert_eq!(cursor(&harness), FRESH_MARKET_FLAG);
 }
 
 #[test]
-fn another_rows_clr_cell_moves_the_cursor_from_an_open_cell_typed_back_as_it_was() {
+fn another_rows_clr_cell_moves_the_cursor_onto_itself_from_an_open_cell_typed_back_as_it_was() {
     let mut harness = app();
     retype_shell_payee(&mut harness);
 
@@ -969,7 +972,7 @@ fn another_rows_clr_cell_moves_the_cursor_from_an_open_cell_typed_back_as_it_was
 
     let clr = harness.get_by_role_and_label(Role::Button, FRESH_MARKET_CLR);
     assert_eq!(clr.accesskit_node().value().as_deref(), Some("Cleared"));
-    assert_eq!(cursor(&harness), "Fresh Market");
+    assert_eq!(cursor(&harness), FRESH_MARKET_CLR);
 }
 
 /// Renames Shell to Corner Shop in its Payee cell, leaving the edit open.
@@ -1050,7 +1053,7 @@ fn another_rows_clr_cell_keeps_the_cursor_in_an_open_cell_typed_differently() {
 }
 
 #[test]
-fn another_rows_flag_cell_moves_the_cursor_from_an_unchanged_open_amount() {
+fn another_rows_flag_cell_moves_the_cursor_onto_itself_from_an_unchanged_open_amount() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "48.20");
@@ -1064,11 +1067,11 @@ fn another_rows_flag_cell_moves_the_cursor_from_an_unchanged_open_amount() {
 
     let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
     assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
-    assert_eq!(cursor(&harness), "86.42");
+    assert_eq!(cursor(&harness), FRESH_MARKET_FLAG);
 }
 
 #[test]
-fn another_rows_flag_cell_moves_the_cursor_from_an_unchanged_open_date() {
+fn another_rows_flag_cell_moves_the_cursor_onto_itself_from_an_unchanged_open_date() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     click_cell(&mut harness, "9/15/2026");
@@ -1082,7 +1085,7 @@ fn another_rows_flag_cell_moves_the_cursor_from_an_unchanged_open_date() {
 
     let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
     assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
-    assert_eq!(cursor(&harness), "9/5/2026");
+    assert_eq!(cursor(&harness), FRESH_MARKET_FLAG);
 }
 
 #[test]
