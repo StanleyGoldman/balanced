@@ -1,2 +1,8 @@
 [alias]
 xtask = "run --package xtask --"
+
+[build]
+# Every local build runs rustc through the build memory cap, and through sccache when
+# it is installed (see the script's header). A path with a slash resolves from the
+# directory holding `.cargo/`, so each worktree uses its own copy.
+rustc-wrapper = ".config/rustc-memory-cap.sh"
