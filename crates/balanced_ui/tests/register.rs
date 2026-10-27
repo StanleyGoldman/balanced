@@ -860,7 +860,10 @@ fn tab_on_the_last_transactions_last_cell_keeps_the_row_unsaved_and_moves_into_s
     press(&mut harness, Modifiers::NONE, Key::ArrowRight);
     type_text(&mut harness, "70");
 
-    press(&mut harness, Modifiers::NONE, Key::Tab);
+    // Clr, Flag, then Save.
+    for _ in 0..3 {
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+    }
 
     let deposits = column(&harness, "Deposit");
     // The last transaction's, above the draft row's.

@@ -83,6 +83,10 @@ name = "clr"
 required-features = ["test-support"]
 
 [[test]]
+name = "clr_flag_keyboard"
+required-features = ["test-support"]
+
+[[test]]
 name = "reconciled"
 required-features = ["test-support"]
 

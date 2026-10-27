@@ -9,7 +9,7 @@ use eframe::App as _;
 use eframe::egui::accesskit::Role;
 use eframe::egui::{Event, Key, Modifiers, Rect, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use egui_kittest::kittest::{By, NodeT as _, Queryable as _};
 use icu_calendar::Date;
 use icu_locale::{langid, locale};
 
@@ -98,11 +98,23 @@ fn focused_button(harness: &Harness<'static, App>) -> Option<String> {
         .map(|node| node.accesskit_node().label().unwrap_or_default())
 }
 
+/// Fresh Market's Flag cell in Everyday Checking, the last of its row Tab stops on.
+const FRESH_MARKET_FLAG: &str = "Flag Fresh Market, 9/5/2026, -86.42";
+
 /// Opens Fresh Market's Deposit cell, the last cell of its row that can be edited.
 fn open_last_cell(harness: &mut Harness<'static, App>) {
     click_cell(harness, "86.42");
     press(harness, Modifiers::NONE, Key::ArrowRight);
     press(harness, Modifiers::NONE, Key::Enter);
+}
+
+/// Opens Fresh Market's Deposit cell, then Tabs on through its Clr cell to its Flag
+/// cell, the last of its row Tab stops on.
+fn tab_to_last_stop(harness: &mut Harness<'static, App>) {
+    open_last_cell(harness);
+    for _ in 0..2 {
+        press(harness, Modifiers::NONE, Key::Tab);
+    }
 }
 
 /// Whether a cell editor is open: a text field other than the filter bar's search box.
@@ -114,12 +126,22 @@ fn editing(harness: &Harness<'static, App>) -> bool {
 
 /// The label of the cell under the cell cursor.
 fn cursor(harness: &Harness<'static, App>) -> String {
-    let mut cursors = harness
-        .query_all_by_role(Role::Cell)
-        .filter(|cell| cell.accesskit_node().is_selected() == Some(true));
+    let mut cursors = cursor_cells(harness);
     let cursor = cursors.next().expect("a cell holds the cell cursor");
     assert!(cursors.next().is_none(), "one cell holds the cell cursor");
     cursor.accesskit_node().label().unwrap_or_default()
+}
+
+/// The cells that report the cell cursor on them, whatever their role: a Clr cell is a
+/// button and a Flag cell a checkbox.
+fn cursor_cells<'h>(
+    harness: &'h Harness<'static, App>,
+) -> impl Iterator<Item = egui_kittest::Node<'h>> {
+    harness.query_all(By::default()).filter(|node| {
+        let node = node.accesskit_node();
+        matches!(node.role(), Role::Cell | Role::Button | Role::CheckBox)
+            && node.is_selected() == Some(true)
+    })
 }
 
 /// Whether the cell cursor is on the row of the cell labelled `label`.
@@ -129,10 +151,7 @@ fn cursor_on_row_of(harness: &Harness<'static, App>, label: &str) -> bool {
         .rect()
         .center()
         .y;
-    harness
-        .query_all_by_role(Role::Cell)
-        .filter(|cell| cell.accesskit_node().is_selected() == Some(true))
-        .any(|cell| cell.rect().y_range().contains(row))
+    cursor_cells(harness).any(|cell| cell.rect().y_range().contains(row))
 }
 
 /// Whether a label shows `text`, as the Status bar and Dialogs show messages.
@@ -419,12 +438,12 @@ fn the_actions_column_heading_is_blank() {
 }
 
 #[test]
-fn tab_from_the_last_editable_cell_of_a_changed_row_moves_through_save_cancel_split_and_more() {
+fn tab_from_the_flag_cell_of_a_changed_row_moves_through_save_cancel_split_and_more() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     rename_fresh_market(&mut harness);
-    // Payee, Category, Memo, Payment, then Deposit.
-    for _ in 0..4 {
+    // From Payee: Category, Memo, Payment, Deposit, Clr, then Flag.
+    for _ in 0..6 {
         press(&mut harness, Modifiers::NONE, Key::Tab);
     }
 
@@ -439,10 +458,10 @@ fn tab_from_the_last_editable_cell_of_a_changed_row_moves_through_save_cancel_sp
 }
 
 #[test]
-fn tab_from_the_last_editable_cell_of_an_unchanged_row_moves_through_split_and_more() {
+fn tab_from_the_flag_cell_of_an_unchanged_row_moves_through_split_and_more() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    open_last_cell(&mut harness);
+    tab_to_last_stop(&mut harness);
 
     let mut reached = Vec::new();
     for _ in 0..2 {
@@ -455,12 +474,12 @@ fn tab_from_the_last_editable_cell_of_an_unchanged_row_moves_through_split_and_m
 }
 
 #[test]
-fn shift_tab_from_save_goes_back_to_the_last_editable_cell() {
+fn shift_tab_from_save_goes_back_to_the_flag_cell() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     rename_fresh_market(&mut harness);
-    // Payee, Category, Memo, Payment, Deposit, then Save and Cancel.
-    for _ in 0..6 {
+    // From Payee: Category, Memo, Payment, Deposit, Clr, Flag, then Save and Cancel.
+    for _ in 0..8 {
         press(&mut harness, Modifiers::NONE, Key::Tab);
     }
 
@@ -469,26 +488,26 @@ fn shift_tab_from_save_goes_back_to_the_last_editable_cell() {
     press(&mut harness, Modifiers::SHIFT, Key::Tab);
 
     assert_eq!(back_one.as_deref(), Some("Save"));
-    assert_eq!(editor(&harness, "Deposit").as_deref(), Some(""));
+    assert_eq!(cursor(&harness), "Flag Corner Shop, 9/5/2026, -86.42");
 }
 
 #[test]
-fn shift_tab_from_split_of_an_unchanged_row_goes_back_to_the_last_editable_cell() {
+fn shift_tab_from_split_of_an_unchanged_row_goes_back_to_the_flag_cell() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    open_last_cell(&mut harness);
+    tab_to_last_stop(&mut harness);
     press(&mut harness, Modifiers::NONE, Key::Tab);
 
     press(&mut harness, Modifiers::SHIFT, Key::Tab);
 
-    assert_eq!(editor(&harness, "Deposit").as_deref(), Some(""));
+    assert_eq!(cursor(&harness), FRESH_MARKET_FLAG);
 }
 
 #[test]
 fn tab_from_more_goes_round_to_the_rows_first_cell() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    open_last_cell(&mut harness);
+    tab_to_last_stop(&mut harness);
     // Split, then More.
     for _ in 0..2 {
         press(&mut harness, Modifiers::NONE, Key::Tab);
@@ -517,8 +536,8 @@ fn save_from_the_keyboard(key: Key) -> Harness<'static, App> {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     rename_fresh_market(&mut harness);
-    // Payee, Category, Memo, Payment, Deposit, then Save.
-    for _ in 0..5 {
+    // From Payee: Category, Memo, Payment, Deposit, Clr, Flag, then Save.
+    for _ in 0..7 {
         press(&mut harness, Modifiers::NONE, Key::Tab);
     }
 
@@ -648,8 +667,8 @@ fn escape_on_a_button_throws_away_the_rows_changes() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     rename_fresh_market(&mut harness);
-    // Payee, Category, Memo, Payment, Deposit, then Save.
-    for _ in 0..5 {
+    // From Payee: Category, Memo, Payment, Deposit, Clr, Flag, then Save.
+    for _ in 0..7 {
         press(&mut harness, Modifiers::NONE, Key::Tab);
     }
 
@@ -779,18 +798,16 @@ fn an_empty_draft_row_disables_add_and_cancel() {
 
 /// Whether a cell holds the cell cursor.
 fn shows_cursor(harness: &Harness<'static, App>) -> bool {
-    harness
-        .query_all_by_role(Role::Cell)
-        .any(|cell| cell.accesskit_node().is_selected() == Some(true))
+    cursor_cells(harness).next().is_some()
 }
 
 #[test]
 fn a_focused_row_button_hides_the_cell_cursor() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    open_last_cell(&mut harness);
+    tab_to_last_stop(&mut harness);
 
-    // Tab from the unchanged row's last cell focuses Split.
+    // Tab from the unchanged row's Flag cell focuses Split.
     press(&mut harness, Modifiers::NONE, Key::Tab);
 
     assert_eq!(focused_button(&harness).as_deref(), Some("Split"));
@@ -801,10 +818,10 @@ fn a_focused_row_button_hides_the_cell_cursor() {
 fn tabbing_from_the_row_buttons_back_into_a_cell_shows_the_cell_cursor_again() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    open_last_cell(&mut harness);
+    tab_to_last_stop(&mut harness);
     press(&mut harness, Modifiers::NONE, Key::Tab);
 
     press(&mut harness, Modifiers::SHIFT, Key::Tab);
 
-    assert_eq!(cursor(&harness), "");
+    assert_eq!(cursor(&harness), FRESH_MARKET_FLAG);
 }

@@ -158,7 +158,7 @@ impl RegisterColumn {
     }
 
     /// Whether the cell cursor can rest in the column. Balance is worked out from the
-    /// other cells, Clr and Flag change on a click, and Actions holds a menu.
+    /// other cells, and Actions holds a menu.
     fn holds_cursor(self) -> bool {
         match self {
             Self::Date
@@ -167,8 +167,10 @@ impl RegisterColumn {
             | Self::Category
             | Self::Memo
             | Self::Payment
-            | Self::Deposit => true,
-            Self::Balance | Self::Clr | Self::Flag | Self::Actions => false,
+            | Self::Deposit
+            | Self::Clr
+            | Self::Flag => true,
+            Self::Balance | Self::Actions => false,
         }
     }
 
@@ -195,6 +197,13 @@ impl RegisterColumn {
             | Self::Flag
             | Self::Actions => None,
         }
+    }
+
+    /// Whether Tab stops on the column's cell on `row`: a cell that can be edited, or a
+    /// transaction's Clr or Flag cell, which Space presses. The draft row's Clr and
+    /// Flag cells take no press.
+    fn stops_tab(self, row: &RegisterRow) -> bool {
+        self.field(row).is_some() || RowAction::of_press(row, self).is_some()
     }
 
     /// Where the column's text sits: amounts on the right, the Cleared status and the
@@ -529,10 +538,10 @@ enum Move {
     Right,
     /// Right, wrapping to the first cell of the next row.
     Next,
-    /// To the next cell that can be edited, wrapping from row to row.
-    NextEditable,
-    /// To the previous cell that can be edited, wrapping from row to row.
-    PreviousEditable,
+    /// To the next Tab stop, wrapping from row to row.
+    NextStop,
+    /// To the previous Tab stop, wrapping from row to row.
+    PreviousStop,
 }
 
 /// The cell being edited, the field it edits, its unsaved text, and its combobox list
@@ -799,6 +808,9 @@ pub(crate) struct Register {
     centre_pending: bool,
     cursor: Option<CellAddress>,
     edit: Option<Edit>,
+    /// The Clr or Flag cell Tab moved the cell cursor to, which keeps its row the
+    /// editing row while the cursor stays on it, though no editor opens there.
+    tab_rest: Option<CellAddress>,
     /// What the Payee and Category comboboxes offer, rebuilt when it is out of date.
     choices: Option<FieldChoices>,
     /// The modifiers held with each Tab press `App::raw_input_hook` took for the
@@ -915,14 +927,20 @@ impl Register {
     }
 
     /// The editing row: the row of the cell being edited, else the cell cursor's row
-    /// while it has changes not yet saved or its buttons hold the keyboard. A row with
-    /// the cell cursor and none of these is highlighted, not edited.
+    /// while the cursor rests where Tab put it on a Clr or Flag cell, the row has
+    /// changes not yet saved, or its buttons hold the keyboard. A row with the cell
+    /// cursor and none of these is highlighted, not edited.
     fn editing_row(&self, ctx: &egui::Context) -> Option<RowId> {
         if let Some(edit) = &self.edit {
             return Some(edit.cell().row);
         }
         if let Some(awaiting) = &self.awaiting_category {
             return Some(awaiting.edit.cell.row);
+        }
+        if let Some(rest) = self.tab_rest
+            && self.cursor == Some(rest)
+        {
+            return Some(rest.row);
         }
         let row = self.cursor?.row;
         let in_buttons = self.focus_button.is_some()
@@ -1194,10 +1212,16 @@ impl Register {
         if self.cursor.map(|cursor| cursor.row) == Some(from.row) {
             return;
         }
-        let resume = self.edit.take().map(|edit| {
-            ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
-            edit.cell()
-        });
+        // The cell the move opened, or the Clr or Flag cell Tab rested on, waits for
+        // the answer.
+        let resume = self
+            .edit
+            .take()
+            .map(|edit| {
+                ctx.memory_mut(|memory| memory.surrender_focus(edit.editor_id()));
+                edit.cell()
+            })
+            .or(self.tab_rest.take());
         let leaving = Leaving {
             from,
             then: split.map(open_split_command),
@@ -1471,27 +1495,27 @@ impl Register {
             .collect()
     }
 
-    /// The columns of `row`'s cells that can be edited, left to right, or none when
-    /// the row is gone.
-    fn editable_columns(&self, rows: Rows<'_>, row: RowId) -> Vec<RegisterColumn> {
+    /// The columns of `row`'s cells Tab stops on, left to right, or none when the row
+    /// is gone.
+    fn tab_stops(&self, rows: Rows<'_>, row: RowId) -> Vec<RegisterColumn> {
         let Some(row) = rows.find(row) else {
             return Vec::new();
         };
         self.cursor_columns()
             .into_iter()
-            .filter(|column| column.field(row).is_some())
+            .filter(|column| column.stops_tab(row))
             .collect()
     }
 
     /// Whether `step`, a Tab move from `cursor`, goes into the editing row's buttons:
-    /// a Tab forward from a cell with no cell after it in its row that can be edited.
+    /// a Tab forward from a cell with no Tab stop after it in its row.
     fn tabs_into_buttons(&self, cursor: CellAddress, step: Move, rows: Rows<'_>) -> bool {
         let columns = self.cursor_columns();
         let Some(at) = columns.iter().position(|&column| column == cursor.column) else {
             return false;
         };
-        let editable = self.editable_columns(rows, cursor.row);
-        step == Move::NextEditable && !columns[at + 1..].iter().any(|c| editable.contains(c))
+        let stops = self.tab_stops(rows, cursor.row);
+        step == Move::NextStop && !columns[at + 1..].iter().any(|c| stops.contains(c))
     }
 
     /// Carries out `action`, picked on transaction `id`'s row.
@@ -2357,6 +2381,7 @@ impl Register {
                 .map_or(RegisterColumn::Date, |cursor| cursor.column)
         };
         self.cursor = Some(CellAddress { row, column });
+        self.tab_rest = None;
     }
 
     /// Acts on this frame's keys while the Register owns the keyboard, and returns
@@ -2409,10 +2434,16 @@ impl Register {
             Some(Edit::Date(edit)) => return self.handle_date_keys(ctx, keys, edit, cursor, tab),
             None => {}
         }
-        if self.unsaved.is_changed(cursor.row)
+        // Esc throws away the row's changes, and ends its editing where Tab rested the
+        // cell cursor on a Clr or Flag cell.
+        let resting = self.tab_rest == Some(cursor);
+        if (resting || self.unsaved.is_changed(cursor.row))
             && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape))
         {
             self.discard_row(cursor.row);
+            return None;
+        }
+        if self.press_cell(ctx, keys, cursor) {
             return None;
         }
         let pressed = ctx.input_mut(|input| {
@@ -2427,7 +2458,7 @@ impl Register {
             .map(|(_, step)| step)
         });
         if let Some(step) = tab
-            && self.unsaved.is_changed(cursor.row)
+            && (resting || self.unsaved.is_changed(cursor.row))
             && self.tabs_into_buttons(cursor, step, keys.rows)
         {
             return self.focus_buttons(cursor.row);
@@ -2466,6 +2497,26 @@ impl Register {
         None
     }
 
+    /// Acts on Space with the cell cursor on a Clr or Flag cell, `cursor`: it presses
+    /// the cell as a click does. Returns whether it acted.
+    fn press_cell(
+        &mut self,
+        ctx: &egui::Context,
+        keys: &KeyContext<'_>,
+        cursor: CellAddress,
+    ) -> bool {
+        if !keys.closed
+            && let Some(row) = keys.rows.find(cursor.row)
+            && let Some(action) = RowAction::of_press(row, cursor.column)
+            && let Some(id) = row.transaction()
+            && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Space))
+        {
+            self.act(id, action, keys.commands);
+            return true;
+        }
+        false
+    }
+
     /// The move the first Tab press queued for the Register asks for, taken from the
     /// queue, if there is one. Each Tab acts on the cell the one before it opened, so
     /// the rest wait for later frames.
@@ -2476,9 +2527,9 @@ impl Register {
         }
         tab.map(|modifiers| {
             if modifiers.shift {
-                Move::PreviousEditable
+                Move::PreviousStop
             } else {
-                Move::NextEditable
+                Move::NextStop
             }
         })
     }
@@ -2844,11 +2895,11 @@ impl Register {
             return true;
         }
         self.release_buttons(ctx);
-        let editable = self.editable_columns(keys.rows, row);
+        let stops = self.tab_stops(keys.rows, row);
         let column = if modifiers.shift {
-            editable.last()
+            stops.last()
         } else {
-            editable.first()
+            stops.first()
         };
         if let Some(&column) = column {
             self.cursor = Some(CellAddress { row, column });
@@ -2897,21 +2948,19 @@ impl Register {
                     (row + 1, 0)
                 }
             }
-            Move::NextEditable | Move::PreviousEditable => {
+            Move::NextStop | Move::PreviousStop => {
                 let width = columns.len();
                 let start = row * width + column;
-                let editable = |position: usize| {
-                    let row = rows.get(position / width)?;
-                    // The remainder of a division by the width is a column index.
-                    columns[position % width].field(row)
+                let stops_tab = |position: usize| {
+                    rows.get(position / width).is_some_and(|row| {
+                        // The remainder of a division by the width is a column index.
+                        columns[position % width].stops_tab(row)
+                    })
                 };
-                let position = if step == Move::NextEditable {
-                    (start + 1..rows.len() * width)
-                        .find(|&position| editable(position).is_some())?
+                let position = if step == Move::NextStop {
+                    (start + 1..rows.len() * width).find(|&position| stops_tab(position))?
                 } else {
-                    (0..start)
-                        .rev()
-                        .find(|&position| editable(position).is_some())?
+                    (0..start).rev().find(|&position| stops_tab(position))?
                 };
                 (position / width, position % width)
             }
@@ -2921,6 +2970,7 @@ impl Register {
             column: *columns.get(column)?,
         };
         self.cursor = Some(address);
+        self.tab_rest = None;
         Some(Moved {
             scroll_offset: self
                 .lines_in_view
@@ -2930,11 +2980,20 @@ impl Register {
 
     /// Opens the cell under the cursor for editing, starting from `start`, when it can
     /// be edited as text. A closed account's cells can't be: the Status bar says so.
+    /// Opened from its saved text, as Tab opens it, a Clr or Flag cell opens no editor,
+    /// and the cell cursor rests on it in the editing row.
     fn start_edit(&mut self, ctx: &egui::Context, keys: &KeyContext<'_>, start: EditStart) {
         let Some(cursor) = self.cursor else {
             return;
         };
         let Some((row, field)) = field_at(keys.rows, cursor) else {
+            let tab_stop = keys
+                .rows
+                .find(cursor.row)
+                .is_some_and(|row| cursor.column.stops_tab(row));
+            if start == EditStart::Saved && tab_stop {
+                self.tab_rest = Some(cursor);
+            }
             return;
         };
         // The frame's rows show the draft as it was before this frame's commits, and a
@@ -3178,6 +3237,9 @@ impl Register {
         cursor: CellAddress,
         after: AfterEnter,
     ) -> Option<f32> {
+        // A saved row is no longer the editing row, though the cell cursor stays on
+        // the Clr or Flag cell Tab rested it on.
+        self.tab_rest = None;
         if cursor.row == RowId::Draft {
             if let Err(missing) = self.post(keys) {
                 self.refuse_missing(ctx, keys.commands, missing, None);
@@ -3233,8 +3295,10 @@ impl Register {
     }
 
     /// Throws away every change to `row`, leaving the cell cursor on it with no cell
-    /// open: the draft row empties, and a transaction's row shows its saved values.
+    /// open and the row no longer the editing row: the draft row empties, and a
+    /// transaction's row shows its saved values.
     fn discard_row(&mut self, row: RowId) {
+        self.tab_rest = None;
         self.unsaved.discard(row);
     }
 
@@ -3429,6 +3493,34 @@ enum RowAction {
 }
 
 impl RowAction {
+    /// What pressing `row`'s cell in `column` does, by a click or by Space under the
+    /// cell cursor, or `None` when the cell takes no press. Clr marks an Uncleared
+    /// transaction Cleared and a Cleared one Uncleared, and asks before setting a
+    /// Reconciled one back to Cleared. Flag flags the transaction or takes its flag
+    /// off. The draft row is no transaction yet, so its cells take none.
+    fn of_press(row: &RegisterRow, column: RegisterColumn) -> Option<Self> {
+        if row.id() == RowId::Draft {
+            return None;
+        }
+        match column {
+            RegisterColumn::Clr => Some(match row.cleared_status() {
+                ClearedStatus::Uncleared => Self::SetClearedStatus(ClearedStatus::Cleared),
+                ClearedStatus::Cleared => Self::SetClearedStatus(ClearedStatus::Uncleared),
+                ClearedStatus::Reconciled => Self::Unreconcile,
+            }),
+            RegisterColumn::Flag => Some(Self::SetFlagged(!row.is_flagged())),
+            RegisterColumn::Date
+            | RegisterColumn::Number
+            | RegisterColumn::Payee
+            | RegisterColumn::Category
+            | RegisterColumn::Memo
+            | RegisterColumn::Payment
+            | RegisterColumn::Deposit
+            | RegisterColumn::Balance
+            | RegisterColumn::Actions => None,
+        }
+    }
+
     /// The command that carries out the action on transaction `id`'s row. Delete's
     /// confirm asks about the selected row.
     fn command(self, id: TransactionId) -> AppCommand {
@@ -3930,8 +4022,8 @@ struct Leaving {
     /// When the cell cursor left it for another row of the Register, which it already
     /// has, this is the Split dialog a `[Split]` click there opens, if any.
     then: Option<AppCommand>,
-    /// The cell the move to another row opened, which opens again once the row is
-    /// saved or its changes thrown away.
+    /// The cell the move to another row opened, or the Clr or Flag cell Tab rested
+    /// on, which opens again once the row is saved or its changes thrown away.
     resume: Option<CellAddress>,
     step: LeaveStep,
 }
@@ -4358,8 +4450,18 @@ impl Cell<'_> {
                     .styled(theme)
                     .into()
             }),
-            RegisterColumn::Clr => return clr_cell(ui, i18n, row, &response, access),
-            RegisterColumn::Flag => return flag_cell(ui, i18n, row, &response, access),
+            RegisterColumn::Clr => {
+                if cursor {
+                    show_cursor(ui, theme, &response);
+                }
+                return clr_cell(ui, i18n, row, &response, access);
+            }
+            RegisterColumn::Flag => {
+                if cursor {
+                    show_cursor(ui, theme, &response);
+                }
+                return flag_cell(ui, i18n, row, &response, access);
+            }
             RegisterColumn::Actions => {
                 // Around the menu, or the editing row's buttons, the cell selects the
                 // row.
@@ -4395,19 +4497,27 @@ impl Cell<'_> {
                 &label,
             )
         });
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_role(Role::Cell);
-            if cursor {
-                node.set_selected(true);
-            }
-        });
+        ui.ctx()
+            .accesskit_node_builder(response.id, |node| node.set_role(Role::Cell));
         paint_text(ui, rect, column, insets, text);
         if cursor {
-            ui.painter()
-                .rect_stroke(rect, 0.0, theme.cell_cursor_stroke(), StrokeKind::Inside);
+            show_cursor(ui, theme, &response);
         }
         (response, None)
     }
+}
+
+/// Outlines the cell whose click target is `response` as the one under the cell
+/// cursor, and tells assistive technology it is selected.
+fn show_cursor(ui: &egui::Ui, theme: &Theme, response: &Response) {
+    ui.ctx()
+        .accesskit_node_builder(response.id, |node| node.set_selected(true));
+    ui.painter().rect_stroke(
+        response.rect,
+        0.0,
+        theme.cell_cursor_stroke(),
+        StrokeKind::Inside,
+    );
 }
 
 /// The Today divider as `preferences` say, on `today`.
@@ -4537,14 +4647,15 @@ fn flag_cell(
             colour,
         );
     }
-    let action = (editable && response.clicked()).then_some(RowAction::SetFlagged(!flagged));
+    let action = (editable && response.clicked())
+        .then(|| RowAction::of_press(row, RegisterColumn::Flag))
+        .flatten();
     (response.clone(), action)
 }
 
 /// The Clr cell of `row`, whose click target is `response`: `c` on a Cleared
 /// transaction, `R` on a Reconciled one, and nothing on an Uncleared one. A click on an
-/// editable row's cell marks an Uncleared transaction Cleared and a Cleared one
-/// Uncleared, and asks before setting a Reconciled one back to Cleared. Assistive
+/// editable row's cell does what [`RowAction::of_press`] says. Assistive
 /// technology reads it as a button whose value is the status. The draft row's cell is
 /// empty and takes no click.
 fn clr_cell(
@@ -4598,12 +4709,9 @@ fn clr_cell(
             ui.style().interact(response).text_color(),
         );
     }
-    let action = match status {
-        ClearedStatus::Uncleared => RowAction::SetClearedStatus(ClearedStatus::Cleared),
-        ClearedStatus::Cleared => RowAction::SetClearedStatus(ClearedStatus::Uncleared),
-        ClearedStatus::Reconciled => RowAction::Unreconcile,
-    };
-    let action = (editable && response.clicked()).then_some(action);
+    let action = (editable && response.clicked())
+        .then(|| RowAction::of_press(row, RegisterColumn::Clr))
+        .flatten();
     (response.clone(), action)
 }
 
