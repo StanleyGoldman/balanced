@@ -100,7 +100,7 @@ struct KeptSide {
     other_side: TransactionId,
     /// The line's Category text for the account, which still names it when the account
     /// is closed and so isn't among the choices.
-    name: String,
+    category_text: String,
 }
 
 /// A line's place in the form, counting from 1, as the user reads it.
@@ -214,7 +214,7 @@ impl SplitForm {
                 (CategoryTarget::Transfer(account), Some(other_side)) => Some(KeptSide {
                     account,
                     other_side,
-                    name: name.clone(),
+                    category_text: name.clone(),
                 }),
                 (CategoryTarget::Transfer(_), None) | (CategoryTarget::Category(_), _) => None,
             };
@@ -290,7 +290,7 @@ impl SplitForm {
             let kept_account = line
                 .kept
                 .as_ref()
-                .filter(|kept| kept.name == name)
+                .filter(|kept| kept.category_text == name)
                 .map(|kept| CategoryTarget::Transfer(kept.account));
             let target = self
                 .choices
