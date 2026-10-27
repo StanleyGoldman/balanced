@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# RUSTC_WRAPPER for agent sessions, exported by the SessionStart hook in
-# `.claude/hooks/build-memory-cap.sh`: runs each rustc, and so the linker it spawns, in
-# the user slice `balanced-builds.slice`, so several sessions building at once are
-# killed one rustc at a time instead of the kernel's OOM killer taking every process
-# on the machine. One fresh workspace build peaks at about 6 GB.
+# `build.rustc-wrapper` in the repo's `.cargo/config.toml`, so every local build uses it,
+# from agent sessions and terminals alike: runs each rustc, and so the linker it spawns,
+# in the user slice `balanced-builds.slice`, so several builds at once are killed one
+# rustc at a time instead of the kernel's OOM killer taking every process on the
+# machine. One fresh workspace build peaks at about 6 GB.
 #
 # Usage: rustc-memory-cap.sh <rustc> <args...>   (cargo passes these)
 #
@@ -15,7 +15,17 @@
 # MemoryMax=<size>`. A rustc over the cap is killed with SIGKILL, which cargo reports
 # as `(signal: 9, SIGKILL: kill)`. Without a systemd user session (CI containers,
 # cargo-mutants in Docker) rustc runs uncapped.
+#
+# When `sccache` is on PATH, rustc runs through it with SCCACHE_CLIENT_SIDE=1: the
+# sccache client compiles in its own process, inside the slice, instead of handing the
+# compile to its server outside it. A RUSTC_WRAPPER env var overrides this script, so
+# `RUSTC_WRAPPER= cargo ...` builds with neither the cap nor sccache.
 set -euo pipefail
+
+if command -v sccache >/dev/null; then
+  export SCCACHE_CLIENT_SIDE=1
+  set -- sccache "$@"
+fi
 
 if ! command -v systemd-run >/dev/null || [[ ! -S ${XDG_RUNTIME_DIR:-/nonexistent}/bus ]]; then
   exec "$@"
