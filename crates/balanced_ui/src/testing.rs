@@ -21,7 +21,7 @@ use crate::combobox::FieldChoices;
 use crate::command::{AnswerTo, AppCommand, DialogKind, RowSave};
 use crate::preferences::{Preferences, Scheme};
 use crate::register_filter::RegisterFilter;
-use crate::register_model::{RegisterModel, RegisterSort, Showing, TodayDivider};
+use crate::register_model::{RegisterModel, RegisterSort, Showing, TodayDivider, shared_summary};
 use crate::{App, Clock, PreferencesFile};
 
 /// How much one pixel may differ before it counts as failing: kittest's weighted squared
@@ -148,9 +148,25 @@ pub fn data_file(dir: &Path, name: &str, accounts: &[&str]) -> PathBuf {
     path
 }
 
-/// Builds the model of account `account`'s Register rows in `view`, as a Register does
-/// on its first frame after a change: sorted by date, unfiltered, with the Today divider
-/// shown on `today`. For the benchmarks; returns how many rows it shows.
+/// An account's Register rows, as a Register keeps them from one frame to the next.
+#[derive(Debug)]
+pub struct RegisterRows(RegisterModel);
+
+impl RegisterRows {
+    /// How many rows the Register shows.
+    pub fn len(&self) -> usize {
+        self.0.rows().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.rows().is_empty()
+    }
+}
+
+/// Builds account `account`'s Register rows in `view`, as a Register does on its first
+/// frame after a change: sorted by date, unfiltered, with the Today divider shown on
+/// `today`. `earlier` are the rows they replace, whose cells they keep for every
+/// transaction that is unchanged. For the benchmarks.
 ///
 /// # Panics
 ///
@@ -160,8 +176,9 @@ pub fn build_register_model(
     account: AccountId,
     i18n: &Localizer,
     today: Date<Iso>,
-) -> usize {
-    let summary = view.account(account).expect("the view has the account");
+    earlier: Option<RegisterRows>,
+) -> RegisterRows {
+    let summary = shared_summary(view, account).expect("the view has the account");
     let filter = RegisterFilter::default();
     let shown = Showing {
         sort: RegisterSort::default(),
@@ -169,7 +186,13 @@ pub fn build_register_model(
         today,
         today_divider: TodayDivider::Shown { today },
     };
-    RegisterModel::new(summary, view, shown, i18n).rows().len()
+    RegisterRows(RegisterModel::new(
+        summary,
+        view,
+        shown,
+        i18n,
+        earlier.map(|rows| rows.0),
+    ))
 }
 
 /// Builds what account `account`'s Payee and Category comboboxes offer in `view`, as a
