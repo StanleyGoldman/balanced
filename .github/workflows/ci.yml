@@ -113,13 +113,15 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/ci-setup
 
-      # These two run on every change. They are the checks that read prose,
-      # the spell-check and the record names under `docs/`, so a prose-only
-      # change, which skips the rest, still gets them.
+      # These three run on every change. Two read prose, the spell-check and
+      # the record names under `docs/`, and `dco` reads the commits, which a
+      # prose-only change, skipping the rest, makes too.
       - name: typos
         run: .github/in-image.sh cargo xtask typos
       - name: adrs
         run: .github/in-image.sh cargo xtask adrs
+      - name: dco
+        run: .github/in-image.sh cargo xtask dco
 
       - name: fmt
         if: needs.changes.outputs.code != 'false'
@@ -136,9 +138,6 @@ jobs:
       - name: spdx
         if: needs.changes.outputs.code != 'false'
         run: .github/in-image.sh cargo xtask spdx
-      - name: dco
-        if: needs.changes.outputs.code != 'false'
-        run: .github/in-image.sh cargo xtask dco
       - name: sccache summary
         if: always()
         run: .github/sccache-summary.sh
