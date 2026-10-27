@@ -1160,8 +1160,10 @@ fn close_while_saving_on_the_way_to_visa_rewards(harness: &mut Harness<'static, 
     save_then_close_while_on_its_way(harness);
 }
 
-/// The commands the App sends the window over the next few frames. Each frame's
-/// output carries only the commands sent in that frame.
+/// The commands the App sends the window over the next four frames: those a Save
+/// clicked in the leave-row prompt takes to close it, one each to take the answer,
+/// carry it out, apply the save, and apply the Quit it sends. Each frame's output
+/// carries only the commands sent in that frame.
 fn viewport_commands(harness: &mut Harness<'static, App>) -> Vec<ViewportCommand> {
     let mut commands = Vec::new();
     for _ in 0..4 {
@@ -1314,7 +1316,7 @@ fn closing_the_window_just_after_an_account_click_saves_without_asking_and_close
     assert!(can_undo(&mut harness));
 }
 
-/// How many leave-row prompts are open.
+/// How many leave-row prompts are open, so a test can tell one from two.
 fn prompts_open(harness: &Harness<'static, App>) -> usize {
     harness
         .query_all_by_role_and_label(Role::Button, "Continue editing")
@@ -1322,11 +1324,12 @@ fn prompts_open(harness: &Harness<'static, App>) -> usize {
 }
 
 #[test]
-fn closing_the_window_just_after_an_account_click_asks_once_then_closes_it() {
+fn closing_the_window_just_after_an_account_click_closes_it_once_answered() {
     let mut harness = app();
     rename_fresh_market(&mut harness);
     open_then_close_before_applied(&mut harness, "Visa Rewards");
     harness.run();
+
     assert_eq!(prompts_open(&harness), 1);
 
     dialog_button(&harness, "Save").click();
@@ -1340,9 +1343,10 @@ fn closing_the_window_while_the_prompt_is_open_closes_it_once_answered() {
     let mut harness = app();
     rename_fresh_market(&mut harness);
     open(&mut harness, "Visa Rewards");
-
     close_window(&mut harness);
+
     assert_eq!(prompts_open(&harness), 1);
+
     dialog_button(&harness, "Save").click();
 
     assert!(viewport_commands(&mut harness).contains(&ViewportCommand::Close));
