@@ -2124,7 +2124,10 @@ impl Register {
             column,
             insets: self.insets(column),
             selected: self.cursor.is_some_and(|cursor| cursor.row == row.id()),
-            cursor: self.cursor == Some(address),
+            // PROTOTYPE #443: the cell cursor hides while a row button has the keyboard.
+            cursor: self.cursor == Some(address)
+                && !(proto::is(Setting::CursorWhileButtons, 1)
+                    && self.focused_button(ui.ctx()).is_some()),
             cover,
             access,
             viewport,

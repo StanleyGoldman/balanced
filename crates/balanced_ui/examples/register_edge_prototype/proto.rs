@@ -27,6 +27,7 @@ pub enum Setting {
     Locale,
     FocusAfterFlagClr,
     CleanButtons,
+    CursorWhileButtons,
 }
 
 pub struct SettingDef {
@@ -38,7 +39,7 @@ pub struct SettingDef {
     pub options: &'static [&'static str],
 }
 
-pub const SETTINGS: [SettingDef; 15] = [
+pub const SETTINGS: [SettingDef; 16] = [
     SettingDef {
         setting: Setting::EnterKey,
         id: "enter",
@@ -113,6 +114,14 @@ pub const SETTINGS: [SettingDef; 15] = [
         ticket: 462,
         title: "Save and Cancel on an editing row with no changes",
         options: &["enabled (today)", "disabled until the row changes"],
+    },
+    SettingDef {
+        setting: Setting::CursorWhileButtons,
+        id: "cursor-buttons",
+        step: 5,
+        ticket: 443,
+        title: "The cell cursor while a row button has the keyboard",
+        options: &["shown (today)", "hidden"],
     },
     SettingDef {
         setting: Setting::SplitAfterPrompt,
