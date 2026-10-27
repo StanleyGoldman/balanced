@@ -10,10 +10,9 @@ use std::ptr;
 use std::sync::Arc;
 
 use balanced_core::{
-    Account, AccountId, AccountSummary, Allocation, Category, CategoryId, CategoryType,
-    ClearedStatus, CurrencyCode, EditedSplitLine, EditedSplitTarget, Generation, LedgerView, Money,
-    NewSplitLine, Register, RegisterEntry, SplitLine, SplitTarget, Transaction, TransactionEdit,
-    TransactionId,
+    Account, AccountId, AccountSummary, Allocation, CategoryId, CategoryType, ClearedStatus,
+    CurrencyCode, EditedSplitLine, EditedSplitTarget, Generation, LedgerView, Money, NewSplitLine,
+    Register, RegisterEntry, SplitLine, SplitTarget, Transaction, TransactionEdit, TransactionId,
 };
 use balanced_i18n::{AmountStyle, Localizer};
 use icu_calendar::{Date, Iso};
@@ -383,16 +382,16 @@ impl RegisterRow {
     /// Whether the row already holds the value `edit` gives its field.
     pub(crate) fn holds(&self, edit: &TransactionEdit) -> bool {
         match edit {
-            TransactionEdit::Date(date) => self.cells.saved_date == Some(*date),
+            TransactionEdit::Date(date) => self.saved_date() == Some(*date),
             TransactionEdit::Number(number) => {
-                self.cells.number == number.as_deref().unwrap_or_default()
+                self.number() == number.as_deref().unwrap_or_default()
             }
-            TransactionEdit::Payee(payee) => &self.cells.payee == payee,
-            TransactionEdit::Memo(memo) => &self.cells.memo == memo,
+            TransactionEdit::Payee(payee) => self.payee() == payee,
+            TransactionEdit::Memo(memo) => self.memo() == memo,
             TransactionEdit::Category(category) => self.category_id() == Some(*category),
             TransactionEdit::Transfer(account) => self.transfer_account() == Some(*account),
             TransactionEdit::Amount(amount) => self.amount() == Some(*amount),
-            TransactionEdit::ClearedStatus(status) => self.cells.cleared_status == *status,
+            TransactionEdit::ClearedStatus(status) => self.cleared_status() == *status,
             TransactionEdit::Lines { amount, lines } => {
                 self.is_split()
                     && self.amount() == Some(*amount)
@@ -610,9 +609,9 @@ impl RegisterRow {
     fn compare(&self, other: &Self, key: SortKey, i18n: &Localizer) -> Ordering {
         match key {
             SortKey::Date => self.place.cmp(&other.place),
-            SortKey::Payee => i18n.compare_text(&self.cells.payee, &other.cells.payee),
-            SortKey::Category => i18n.compare_text(&self.cells.category, &other.cells.category),
-            SortKey::Memo => i18n.compare_text(&self.cells.memo, &other.cells.memo),
+            SortKey::Payee => i18n.compare_text(self.payee(), other.payee()),
+            SortKey::Category => i18n.compare_text(self.category(), other.category()),
+            SortKey::Memo => i18n.compare_text(self.memo(), other.memo()),
             SortKey::Amount(_) => {
                 let amount = |row: &Self| row.amount().map(|amount| amount.amount());
                 amount(self).cmp(&amount(other))
@@ -713,6 +712,16 @@ struct Source {
     formatting_locale: Locale,
 }
 
+impl Source {
+    /// Whether cells formatted for a model built from `self` still hold for one built
+    /// from `later`, as far as the account and the locale go.
+    fn formats_like(&self, later: &Self) -> bool {
+        self.account == later.account
+            && self.text_language == later.text_language
+            && self.formatting_locale == later.formatting_locale
+    }
+}
+
 /// One account's Register rows that its filter shows, in the order of its sort.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisterModel {
@@ -760,12 +769,9 @@ impl RegisterModel {
         let source = Self::source(summary.account().id(), view, shown, i18n);
         let names = Names::of(view);
         let earlier = earlier.filter(|earlier| {
-            earlier.source.account == source.account
-                && earlier.source.text_language == source.text_language
-                && earlier.source.formatting_locale == source.formatting_locale
-                && earlier.names == names
+            earlier.source.formats_like(&source) && earlier.names.still_hold_in(&names)
         });
-        let cells = cells(summary, CellFormatter::new(view, i18n), earlier);
+        let cells = cells(summary, CellFormatter::new(view, i18n, &names), earlier);
         let matcher = filter.matcher(today);
         let shows_balance = sort.key == SortKey::Date;
         let mut rows: Vec<RegisterRow> = summary
@@ -859,13 +865,13 @@ impl RegisterModel {
         &'a self,
         summary: &'a AccountSummary,
     ) -> impl Iterator<Item = TransactionId> + 'a {
-        let (old, new) = changed_entries(self.summary.register(), summary.register());
+        let changed = ChangedEntries::between(self.summary.register(), summary.register());
         let ids = |register: Register<'a>, entries: Range<usize>| {
             entries.filter_map(move |entry| Some(register.get(entry)?.transaction().id()))
         };
         // An id outside the changed entries is in both registers, each holding it once.
-        let earlier: HashSet<TransactionId> = ids(self.summary.register(), old).collect();
-        ids(summary.register(), new).filter(move |id| !earlier.contains(id))
+        let earlier: HashSet<TransactionId> = ids(self.summary.register(), changed.old).collect();
+        ids(summary.register(), changed.new).filter(move |id| !earlier.contains(id))
     }
 
     /// The index of the row the Today divider sits above: the first row dated after
@@ -877,23 +883,43 @@ impl RegisterModel {
     }
 }
 
-/// The names a row's cells show for categories and accounts.
+/// The names a row's cells show: each category's path, and each account's name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Names {
-    categories: Vec<Category>,
-    accounts: Vec<(AccountId, String)>,
+    category_paths: HashMap<CategoryId, String>,
+    account_names: HashMap<AccountId, String>,
 }
 
 impl Names {
     fn of(view: &LedgerView) -> Self {
         Self {
-            categories: view.categories().to_vec(),
-            accounts: view
+            category_paths: view
+                .categories()
+                .iter()
+                .map(|category| {
+                    let path = category_text(view, category.id())
+                        .expect("a category in the snapshot has a path in it");
+                    (category.id(), path)
+                })
+                .collect(),
+            account_names: view
                 .accounts()
                 .iter()
                 .map(|summary| (summary.account().id(), summary.account().name().to_owned()))
                 .collect(),
         }
+    }
+
+    /// Whether every name in `self` is the same in `later`, so the cells that show
+    /// them still hold. A category or account only `later` has is in no earlier cell.
+    fn still_hold_in(&self, later: &Self) -> bool {
+        self.category_paths
+            .iter()
+            .all(|(id, path)| later.category_paths.get(id) == Some(path))
+            && self
+                .account_names
+                .iter()
+                .all(|(id, name)| later.account_names.get(id) == Some(name))
     }
 }
 
@@ -913,7 +939,7 @@ fn cells(
             .collect();
     };
     let earlier_register = earlier.summary.register();
-    let (old, new) = changed_entries(earlier_register, register);
+    let ChangedEntries { old, new } = ChangedEntries::between(earlier_register, register);
     let mut cells = earlier.cells;
     let suffix = cells.split_off(old.end);
     // A transaction that moved within the changed entries, such as one whose date
@@ -934,31 +960,42 @@ fn cells(
     cells
 }
 
-/// The entries of `new`, a later version of `old`'s account, that may differ from
-/// `old`'s: those left between the run of transactions both start with and the run
-/// both end with. Returns the range of each register that is left. Transactions are
-/// told apart by identity, so the comparison costs no more than the pointers, and
-/// holding `old` keeps its transactions alive, so no new one can take an old one's
-/// place in memory.
-fn changed_entries(old: Register<'_>, new: Register<'_>) -> (Range<usize>, Range<usize>) {
-    let same = |a: Option<RegisterEntry<'_>>, b: Option<RegisterEntry<'_>>| {
-        a.zip(b)
-            .is_some_and(|(a, b)| ptr::eq(a.transaction(), b.transaction()))
-    };
-    let shorter = old.len().min(new.len());
-    let start = (0..shorter)
-        .take_while(|&entry| same(old.get(entry), new.get(entry)))
-        .count();
-    let end = (1..=shorter - start)
-        .take_while(|&back| same(old.get(old.len() - back), new.get(new.len() - back)))
-        .count();
-    (start..old.len() - end, start..new.len() - end)
+/// The entries that may differ between two versions of one account's register: those
+/// left between the run of transactions both start with and the run both end with.
+/// Transactions are told apart by identity. The caller holds the older register's
+/// account, which keeps its transactions alive, so no newer one has an older one's
+/// address.
+struct ChangedEntries {
+    /// The entries left in the older register.
+    old: Range<usize>,
+    /// The entries left in the newer register.
+    new: Range<usize>,
+}
+
+impl ChangedEntries {
+    fn between(old: Register<'_>, new: Register<'_>) -> Self {
+        let same = |a: Option<RegisterEntry<'_>>, b: Option<RegisterEntry<'_>>| {
+            a.zip(b)
+                .is_some_and(|(a, b)| ptr::eq(a.transaction(), b.transaction()))
+        };
+        let shorter = old.len().min(new.len());
+        let start = (0..shorter)
+            .take_while(|&entry| same(old.get(entry), new.get(entry)))
+            .count();
+        let end = (1..=shorter - start)
+            .take_while(|&back| same(old.get(old.len() - back), new.get(new.len() - back)))
+            .count();
+        Self {
+            old: start..old.len() - end,
+            new: start..new.len() - end,
+        }
+    }
 }
 
 /// The index of the row the Today divider sits above in `rows`, sorted by date in
 /// `direction`, unless no row is dated after `today`.
 fn divider(rows: &[RegisterRow], direction: SortDirection, today: Date<Iso>) -> Option<usize> {
-    let scheduled = |row: &RegisterRow| row.cells.saved_date.is_some_and(|date| date > today);
+    let scheduled = |row: &RegisterRow| row.saved_date().is_some_and(|date| date > today);
     match direction {
         SortDirection::Ascending => rows.iter().position(scheduled),
         // The scheduled rows come first, so there are some only if the first is one.
@@ -974,21 +1011,19 @@ fn divider(rows: &[RegisterRow], direction: SortDirection, today: Date<Iso>) -> 
 /// other account once.
 struct CellFormatter<'a> {
     i18n: &'a Localizer,
-    paths: CategoryPaths<'a>,
+    names: &'a Names,
     other_accounts: OtherAccounts<'a>,
     split: String,
     opening_balance: String,
 }
 
 impl<'a> CellFormatter<'a> {
-    /// Formats with `i18n`, naming categories and accounts as in `view`.
-    fn new(view: &'a LedgerView, i18n: &'a Localizer) -> Self {
+    /// Formats with `i18n`, naming categories by `names`, `view`'s, and finding
+    /// transfers' other sides in `view`.
+    fn new(view: &'a LedgerView, i18n: &'a Localizer, names: &'a Names) -> Self {
         Self {
             i18n,
-            paths: CategoryPaths {
-                view,
-                paths: HashMap::new(),
-            },
+            names,
             other_accounts: OtherAccounts {
                 view,
                 holders: None,
@@ -1009,7 +1044,7 @@ impl<'a> CellFormatter<'a> {
             Allocation::Category(id) => (
                 RowKind::Category(*id),
                 transaction.payee().to_owned(),
-                self.paths.path(*id).to_owned(),
+                self.path(*id).to_owned(),
             ),
             Allocation::Split(_) => (
                 RowKind::Split,
@@ -1050,34 +1085,26 @@ impl<'a> CellFormatter<'a> {
         }
     }
 
+    /// The path from the top of the tree to category `id`: `Food & Dining:Groceries`.
+    fn path(&self, id: CategoryId) -> &str {
+        self.names
+            .category_paths
+            .get(&id)
+            .expect("a transaction's categories are in its snapshot")
+    }
+
     /// What the Category field shows for each of `lines`, a split's: a category's
     /// path, or `[Name]` for the account holding a line's other side.
     fn split_targets(&mut self, lines: &[SplitLine]) -> Vec<String> {
         lines
             .iter()
             .map(|line| match line.target() {
-                SplitTarget::Category(category) => self.paths.path(category).to_owned(),
+                SplitTarget::Category(category) => self.path(category).to_owned(),
                 SplitTarget::Transfer(other_side) => {
                     transfer_text(self.other_accounts.holding(other_side).name)
                 }
             })
             .collect()
-    }
-}
-
-/// Category paths, each built once while a model is built.
-struct CategoryPaths<'a> {
-    view: &'a LedgerView,
-    paths: HashMap<CategoryId, String>,
-}
-
-impl CategoryPaths<'_> {
-    /// The path from the top of the tree to category `id`: `Food & Dining:Groceries`.
-    fn path(&mut self, id: CategoryId) -> &str {
-        let view = self.view;
-        self.paths.entry(id).or_insert_with(|| {
-            category_text(view, id).expect("a transaction's categories are in its snapshot")
-        })
     }
 }
 
@@ -1128,6 +1155,14 @@ impl<'a> OtherAccounts<'a> {
             name: account.name(),
         }
     }
+}
+
+/// Account `id` in `view`, shared with the snapshot, which a [`RegisterModel`] holds on
+/// to. `None` once it has been deleted.
+pub(crate) fn shared_summary(view: &LedgerView, id: AccountId) -> Option<&Arc<AccountSummary>> {
+    view.accounts()
+        .iter()
+        .find(|summary| summary.account().id() == id)
 }
 
 /// Every transaction of `view`, with the account holding it, by the transaction's id.
@@ -1254,6 +1289,47 @@ mod tests {
     }
 
     #[test]
+    fn a_new_amount_formats_only_its_row_again_and_moves_every_later_balance() {
+        let mut ledger = Ledger::stub();
+        let i18n = Localizer::for_tests();
+        let filter = RegisterFilter::default();
+        let before = register(&ledger.snapshot(), &filter, &i18n, None);
+        let edited = &before.rows()[1];
+        let raised = edited
+            .amount()
+            .and_then(|amount| amount.checked_add(usd(dec!(100))).ok())
+            .expect("the row has an amount with room for 100 more");
+
+        ledger
+            .apply(DomainCommand::EditTransaction {
+                transaction: edited.transaction().expect("a transaction's row"),
+                edit: TransactionEdit::Amount(raised),
+            })
+            .expect("the amount changes");
+        let after = register(&ledger.snapshot(), &filter, &i18n, Some(before.clone()));
+
+        let formatted: Vec<_> = after
+            .rows()
+            .iter()
+            .filter(|row| !reused(&before, row))
+            .map(RegisterRow::transaction)
+            .collect();
+        assert_eq!(formatted, [edited.transaction()]);
+        let raised_by_100 = |row: (&RegisterRow, &RegisterRow)| {
+            row.0
+                .balance()
+                .and_then(|old| old.checked_add(usd(dec!(100))).ok())
+                == row.1.balance()
+        };
+        assert!(
+            before.rows()[1..]
+                .iter()
+                .zip(&after.rows()[1..])
+                .all(raised_by_100)
+        );
+    }
+
+    #[test]
     fn a_new_date_formats_only_the_row_it_moves_again() {
         let mut ledger = Ledger::stub();
         let i18n = Localizer::for_tests();
@@ -1276,6 +1352,25 @@ mod tests {
             .map(RegisterRow::transaction)
             .collect();
         assert_eq!(formatted, [Some(moved)]);
+    }
+
+    #[test]
+    fn a_new_category_formats_no_row_again() {
+        let mut ledger = Ledger::stub();
+        let i18n = Localizer::for_tests();
+        let filter = RegisterFilter::default();
+        let before = register(&ledger.snapshot(), &filter, &i18n, None);
+
+        ledger
+            .apply(DomainCommand::CreateCategory {
+                name: "Pets".to_owned(),
+                parent: None,
+                category_type: CategoryType::Expense,
+            })
+            .expect("the category is created");
+        let after = register(&ledger.snapshot(), &filter, &i18n, Some(before.clone()));
+
+        assert!(after.rows().iter().all(|row| reused(&before, row)));
     }
 
     #[test]
@@ -1379,16 +1474,7 @@ mod tests {
             .expect("the stub has Emergency Fund")
             .account()
             .id();
-        let top_up = NewTransaction::transfer(
-            today(),
-            "Top-up",
-            fund,
-            Money::new(
-                dec!(-10),
-                CurrencyCode::new("USD").expect("USD has minor units"),
-            )
-            .expect("cents fit USD"),
-        );
+        let top_up = NewTransaction::transfer(today(), "Top-up", fund, usd(dec!(-10)));
         ledger
             .apply(DomainCommand::PostTransaction {
                 account: everyday_checking(&view).account().id(),

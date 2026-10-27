@@ -21,7 +21,7 @@ use crate::combobox::FieldChoices;
 use crate::command::{AnswerTo, AppCommand, DialogKind, RowSave};
 use crate::preferences::{Preferences, Scheme};
 use crate::register_filter::RegisterFilter;
-use crate::register_model::{RegisterModel, RegisterSort, Showing, TodayDivider};
+use crate::register_model::{RegisterModel, RegisterSort, Showing, TodayDivider, shared_summary};
 use crate::{App, Clock, PreferencesFile};
 
 /// How much one pixel may differ before it counts as failing: kittest's weighted squared
@@ -178,11 +178,7 @@ pub fn build_register_model(
     today: Date<Iso>,
     earlier: Option<RegisterRows>,
 ) -> RegisterRows {
-    let summary = view
-        .accounts()
-        .iter()
-        .find(|summary| summary.account().id() == account)
-        .expect("the view has the account");
+    let summary = shared_summary(view, account).expect("the view has the account");
     let filter = RegisterFilter::default();
     let shown = Showing {
         sort: RegisterSort::default(),

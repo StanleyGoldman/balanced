@@ -38,7 +38,7 @@ use crate::register_columns::{RegisterColumn, RegisterColumns};
 use crate::register_filter::RegisterFilter;
 use crate::register_model::{
     AmountSide, OtherSide, RegisterModel, RegisterRow, RegisterSort, RowId, Showing, SortDirection,
-    SortKey, SplitLines, TodayDivider,
+    SortKey, SplitLines, TodayDivider, shared_summary,
 };
 use crate::row_changes::RowChanges;
 use crate::save_refusal::{RefusalAnswer, SaveRefusal};
@@ -1812,10 +1812,7 @@ impl Register {
         match self.model.take() {
             Some(model) if model.is_current(account, view, shown, i18n) => (model, false),
             earlier => {
-                let summary = view
-                    .accounts()
-                    .iter()
-                    .find(|shared| shared.account().id() == account)
+                let summary = shared_summary(view, account)
                     .expect("the Register's account is in its snapshot");
                 (
                     RegisterModel::new(summary, view, shown, i18n, earlier),
