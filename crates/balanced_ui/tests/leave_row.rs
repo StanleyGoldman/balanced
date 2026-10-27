@@ -1127,7 +1127,8 @@ fn current_balance_is(harness: &Harness<'static, App>, balance: &str) -> bool {
 
 /// Answers Save to the open prompt, then asks to close the window while the save is
 /// on its way: the click, the frame that carries out the answer and sends the save,
-/// then the one whose start sees the close before the ledger applies the save.
+/// then the one whose start sees the close before the Register takes the ledger's
+/// answer.
 fn save_then_close_while_on_its_way(harness: &mut Harness<'static, App>) {
     dialog_button(harness, "Save").click();
     harness.step();
@@ -1163,7 +1164,7 @@ fn close_while_saving_on_the_way_to_visa_rewards(harness: &mut Harness<'static, 
 /// output carries only the commands sent in that frame.
 fn viewport_commands(harness: &mut Harness<'static, App>) -> Vec<ViewportCommand> {
     let mut commands = Vec::new();
-    for _ in 0..3 {
+    for _ in 0..4 {
         harness.step();
         commands.extend(
             harness.output().viewport_output[&ViewportId::ROOT]
@@ -1282,14 +1283,67 @@ fn closing_the_window_just_after_a_save_without_asking_closes_it_once_saved() {
     rename_fresh_market(&mut harness);
 
     // The click's frame leaves the row and saves without asking, and the next one's
-    // start sees the close before the save is sent. Another row, not another account:
-    // the App reads a close before the Commands of the frame before it, so the close
-    // would come first and the account win.
+    // start sees the close before the save is sent.
     harness
         .get_by_role_and_label(Role::Cell, "Bean There")
         .click();
     harness.step();
     request_close(&mut harness);
+
+    assert!(viewport_commands(&mut harness).contains(&ViewportCommand::Close));
+    assert!(can_undo(&mut harness));
+}
+
+/// Clicks the Account bar's `name`, then asks to close the window in the next frame,
+/// before the App has applied the click's Command.
+fn open_then_close_before_applied(harness: &mut Harness<'static, App>, name: &str) {
+    harness.get_by_role_and_label(Role::Button, name).click();
+    harness.step();
+    request_close(harness);
+}
+
+#[test]
+fn closing_the_window_just_after_an_account_click_saves_without_asking_and_closes_it() {
+    let mut harness = app();
+    turn_on_save_without_asking(&mut harness);
+    rename_fresh_market(&mut harness);
+
+    open_then_close_before_applied(&mut harness, "Visa Rewards");
+
+    assert!(viewport_commands(&mut harness).contains(&ViewportCommand::Close));
+    assert!(can_undo(&mut harness));
+}
+
+/// How many leave-row prompts are open.
+fn prompts_open(harness: &Harness<'static, App>) -> usize {
+    harness
+        .query_all_by_role_and_label(Role::Button, "Continue editing")
+        .count()
+}
+
+#[test]
+fn closing_the_window_just_after_an_account_click_asks_once_then_closes_it() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    open_then_close_before_applied(&mut harness, "Visa Rewards");
+    harness.run();
+    assert_eq!(prompts_open(&harness), 1);
+
+    dialog_button(&harness, "Save").click();
+
+    assert!(viewport_commands(&mut harness).contains(&ViewportCommand::Close));
+    assert!(can_undo(&mut harness));
+}
+
+#[test]
+fn closing_the_window_while_the_prompt_is_open_closes_it_once_answered() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    open(&mut harness, "Visa Rewards");
+
+    close_window(&mut harness);
+    assert_eq!(prompts_open(&harness), 1);
+    dialog_button(&harness, "Save").click();
 
     assert!(viewport_commands(&mut harness).contains(&ViewportCommand::Close));
     assert!(can_undo(&mut harness));

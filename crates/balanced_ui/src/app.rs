@@ -524,13 +524,15 @@ impl eframe::App for App {
     /// applies every Command sent since the last frame, and shows the open Preferences
     /// Dialog's draft, or else the Preferences in use.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        while let Ok(command) = self.command_receiver.try_recv() {
+            self.apply(ctx, command);
+        }
+        // The Commands sent the frame before are applied first, so a close is always
+        // the latest leave of the editing row.
         if ctx.input(|input| input.viewport().close_requested())
             && !self.leave_editing_row(ctx, AppCommand::Quit)
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-        }
-        while let Ok(command) = self.command_receiver.try_recv() {
-            self.apply(ctx, command);
         }
         let preferences = self
             .main_window
