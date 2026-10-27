@@ -812,8 +812,8 @@ pub(crate) struct Register {
     lines_in_view: Option<LinesInView>,
     /// Whether the edit refused to let the keyboard leave its cell this frame.
     refused_leave: bool,
-    /// The edit a click took the keyboard from this frame, which opens again when the
-    /// click acted on another row without leaving the changed one.
+    /// The edit that closed this frame with its text kept in its row, which opens again
+    /// when a click acted on another row without leaving the changed one.
     closed: ClosedEdit,
     /// What the draft row holds, and the changes to a transaction's row, kept back
     /// until the row is saved.
@@ -1117,16 +1117,24 @@ impl Register {
         self.changed_row = draft_frame.changed_row(model, self.unsaved.changes.as_ref());
     }
 
-    /// Opens the edit a Clr or Flag click on another row closed this frame again, with
-    /// the keyboard, its text and its text cursor as they were.
+    /// Opens again the edit that a Clr or Flag click on another row closed this frame,
+    /// with the keyboard, its text and its text cursor as they were. Its commit is
+    /// taken back, as if it had been refused, so nothing it would recall fills in yet.
+    /// The click and the editor losing focus come in the same frame, as egui takes
+    /// focus away when a click ends.
     fn reopen_closed(&mut self, ctx: &egui::Context) {
-        let ClosedEdit { edit, reopen } = std::mem::take(&mut self.closed);
+        let ClosedEdit {
+            edit,
+            before,
+            reopen,
+        } = std::mem::take(&mut self.closed);
         if reopen
             && self.edit.is_none()
             && let Some(edit) = edit
         {
             ctx.memory_mut(|memory| memory.request_focus(edit.editor_id()));
             self.edit = Some(edit);
+            self.unsaved = before;
         }
     }
 
@@ -1785,8 +1793,8 @@ impl Register {
                         self.body(body, frame, actions, row_height, pitch);
                     });
             });
-        self.end_frame(&model, draft_row, draft_frame);
         self.reopen_closed(ui.ctx());
+        self.end_frame(&model, draft_row, draft_frame);
         self.act_on_picked(ui.ctx(), i18n, preferences, commands);
         // The cell cursor has left the row only once an edit that refused to let the
         // keyboard go has kept it.
@@ -2179,6 +2187,7 @@ impl Register {
             let Edit::Text(edit) = edit else {
                 return;
             };
+            let before = self.unsaved.clone();
             match commit(
                 &edit,
                 frame.rows,
@@ -2187,7 +2196,7 @@ impl Register {
                 frame.commands,
                 &mut self.unsaved,
             ) {
-                Commit::Done => self.closed.edit = Some(Edit::Text(edit)),
+                Commit::Done => self.closed.close(Edit::Text(edit), before),
                 Commit::Refused(refusal) => {
                     // Leaving the cell is refused too: the edit keeps the keyboard, and
                     // the cell cursor comes back to it once the rows are laid out, or
@@ -2309,6 +2318,7 @@ impl Register {
         if response.lost_focus()
             && let Some(Edit::Date(mut edit)) = self.edit.take()
         {
+            let before = self.unsaved.clone();
             if commit_date(
                 frame.i18n,
                 &mut edit,
@@ -2317,7 +2327,7 @@ impl Register {
                 &mut self.unsaved,
             ) == Commit::Done
             {
-                self.closed.edit = Some(Edit::Date(edit));
+                self.closed.close(Edit::Date(edit), before);
             } else {
                 self.refused_leave = true;
                 self.edit = Some(Edit::Date(edit));
@@ -3639,7 +3649,7 @@ fn amount_change_asks_first(status: ClearedStatus) -> bool {
 
 /// What the Register holds and hasn't saved: what the draft row holds, and the
 /// changes to one transaction's row.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 struct Unsaved {
     draft: Draft,
     changes: Option<RowChanges>,
@@ -3845,13 +3855,23 @@ struct Refused {
     answer: Option<RefusalAnswer>,
 }
 
-/// The edit a click took the keyboard from in a frame, its text kept in its row.
+/// The edit that closed in a frame with its text kept in its row.
 #[derive(Debug, Default)]
 struct ClosedEdit {
     edit: Option<Edit>,
+    /// What the Register held unsaved before the edit's text was kept.
+    before: Unsaved,
     /// Whether the click was on another row's Clr or Flag cell, which acted without
     /// leaving the changed row, so the edit opens again.
     reopen: bool,
+}
+
+impl ClosedEdit {
+    /// Puts aside `edit`, whose text was kept over `before`.
+    fn close(&mut self, edit: Edit, before: Unsaved) {
+        self.edit = Some(edit);
+        self.before = before;
+    }
 }
 
 /// The cell at fault in a refused save, and its refused text edit, if any, which open

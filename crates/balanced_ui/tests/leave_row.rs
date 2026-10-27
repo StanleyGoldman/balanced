@@ -813,7 +813,9 @@ fn another_rows_flag_cell_flags_it_and_stays_on_the_changed_row() {
     assert!(!prompted(&harness));
     let shell = harness.get_by_role_and_label(Role::CheckBox, SHELL_FLAG);
     assert_eq!(shell.accesskit_node().toggled(), Some(Toggled::True));
-    assert_eq!(cursor(&harness), "Corner Shop");
+    // The cell cursor stays on the row, under the cell still open with the typed text.
+    assert_eq!(cursor(&harness), "Fresh Market");
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Corner Shop"));
 }
 
 /// Shell's Clr cell in Everyday Checking, which starts Uncleared.
@@ -832,7 +834,9 @@ fn another_rows_clr_cell_marks_it_cleared_and_stays_on_the_changed_row() {
     assert!(!prompted(&harness));
     let shell = harness.get_by_role_and_label(Role::Button, SHELL_CLR);
     assert_eq!(shell.accesskit_node().value().as_deref(), Some("Cleared"));
-    assert_eq!(cursor(&harness), "Corner Shop");
+    // The cell cursor stays on the row, under the cell still open with the typed text.
+    assert_eq!(cursor(&harness), "Fresh Market");
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Corner Shop"));
 }
 
 #[test]
@@ -886,6 +890,9 @@ fn another_rows_flag_cell_keeps_the_text_cursor_where_it_was() {
 
     assert_eq!(editor(&harness, "Payee").as_deref(), Some("Corner ShXop"));
 }
+
+/// Fresh Market's Flag cell in Everyday Checking, which starts unflagged. Its row
+/// is above Shell's.
 const FRESH_MARKET_FLAG: &str = "Flag Fresh Market, 9/5/2026, -86.42";
 
 /// Opens Shell's Payee cell with Enter, leaving the edit open with nothing typed.
@@ -992,8 +999,9 @@ fn another_rows_flag_cell_keeps_the_cursor_in_an_open_cell_typed_differently() {
 
     let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
     assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
-    // The typed text stays in the row, under the cell cursor.
-    assert_eq!(cursor(&harness), "Corner Shop");
+    // The cell cursor stays on the row, under the cell still open with the typed text.
+    assert_eq!(cursor(&harness), "Shell");
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Corner Shop"));
 }
 
 #[test]
@@ -1003,6 +1011,24 @@ fn another_rows_flag_cell_above_leaves_the_changed_rows_cell_open_for_typing() {
 
     harness
         .get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG)
+        .click();
+    harness.run();
+    type_text(&mut harness, "more");
+
+    assert!(!prompted(&harness));
+    assert_eq!(
+        editor(&harness, "Payee").as_deref(),
+        Some("Corner Shopmore")
+    );
+}
+
+#[test]
+fn another_rows_clr_cell_above_leaves_the_changed_rows_cell_open_for_typing() {
+    let mut harness = app();
+    rename_shell(&mut harness);
+
+    harness
+        .get_by_role_and_label(Role::Button, FRESH_MARKET_CLR)
         .click();
     harness.run();
     type_text(&mut harness, "more");
@@ -1026,8 +1052,9 @@ fn another_rows_clr_cell_keeps_the_cursor_in_an_open_cell_typed_differently() {
 
     let clr = harness.get_by_role_and_label(Role::Button, FRESH_MARKET_CLR);
     assert_eq!(clr.accesskit_node().value().as_deref(), Some("Cleared"));
-    // The typed text stays in the row, under the cell cursor.
-    assert_eq!(cursor(&harness), "Corner Shop");
+    // The cell cursor stays on the row, under the cell still open with the typed text.
+    assert_eq!(cursor(&harness), "Shell");
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Corner Shop"));
 }
 
 #[test]
@@ -1124,7 +1151,8 @@ fn another_rows_flag_cell_keeps_the_cursor_in_an_open_cell_its_list_would_comple
 
     let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
     assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
-    assert_eq!(cursor(&harness), "She");
+    assert_eq!(cursor(&harness), "Shell");
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("She"));
 }
 
 #[test]

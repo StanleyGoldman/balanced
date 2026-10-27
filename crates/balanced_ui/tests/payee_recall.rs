@@ -855,3 +855,36 @@ fn with_payee_recall_off_a_transfers_payee_fills_nothing() {
 
     assert_eq!(draft_row(&harness), ["", "", "Saving up", "", "", "", ""]);
 }
+
+#[test]
+fn another_rows_flag_cell_recalls_nothing_until_the_payee_is_committed() {
+    let mut harness = everyday_checking();
+    type_payee(&mut harness, "Maple Property Management");
+
+    click(
+        &mut harness,
+        Role::CheckBox,
+        "Flag Shell, 9/15/2026, -48.20",
+    );
+
+    // The Payee cell is still open, so nothing is recalled yet.
+    assert_eq!(draft_row(&harness), ["", "", "", "", "", "", ""]);
+    let payee = harness.get_by_role_and_label(Role::TextInput, "Payee");
+    assert_eq!(
+        payee.accesskit_node().value().as_deref(),
+        Some("Maple Property Management")
+    );
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    assert_eq!(
+        draft_row(&harness),
+        [
+            "",
+            "",
+            "Maple Property Management",
+            "Home",
+            "November rent",
+            "1,475.00",
+            "",
+        ]
+    );
+}
