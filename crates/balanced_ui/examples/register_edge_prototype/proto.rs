@@ -275,6 +275,19 @@ pub fn track(response: &Response, name: impl Into<String>) {
     with(|h| h.track(response, name));
 }
 
+/// The name of a tracked widget, drawn this frame or the last, whose rect holds `pos`
+/// and that `wanted` accepts.
+pub fn hit(pos: eframe::egui::Pos2, wanted: impl Fn(&str, Rect) -> bool) -> Option<String> {
+    let look = |r: &HashMap<String, Rect>| {
+        r.iter()
+            .find(|(n, rect)| rect.contains(pos) && wanted(n, **rect))
+            .map(|(n, _)| n.clone())
+    };
+    RECTS
+        .with(|r| look(&r.borrow()))
+        .or_else(|| PREV_RECTS.with(|r| look(&r.borrow())))
+}
+
 /// The rect of the tracked widget whose name contains `name` (case-insensitive),
 /// preferring an exact match.
 pub fn find(name: &str) -> Option<(String, Rect)> {

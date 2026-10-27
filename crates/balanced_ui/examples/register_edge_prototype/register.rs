@@ -879,9 +879,6 @@ pub(crate) struct Register {
     proto_rows: HashMap<RowId, usize>,
     /// PROTOTYPE #469: the right edge of the editable cells drawn so far in this row.
     proto_editable_right: f32,
-    /// PROTOTYPE #599: frames left in which the open cell, which a Flag or Clr click on
-    /// another row just took the keyboard from, takes it back instead of closing.
-    proto_keep_edit: Option<u8>,
 }
 
 impl Register {
@@ -1127,10 +1124,6 @@ impl Register {
         draft_row: Option<DraftRow>,
         draft_frame: DraftFrame<'_>,
     ) {
-        self.proto_keep_edit = self
-            .proto_keep_edit
-            .and_then(|left| left.checked_sub(1))
-            .filter(|&left| left > 0);
         if self.buttons.is_none() {
             // The editing row is out of view, so no button can take the keyboard.
             self.focus_button = None;
@@ -1560,34 +1553,11 @@ impl Register {
     /// acting at once (#564), so step 4 left the prototype.
     fn act_or_ask(
         &mut self,
-        row: RowId,
+        _row: RowId,
         id: TransactionId,
         action: RowAction,
         commands: &CommandSender,
     ) {
-        // PROTOTYPE #599: a click on another row's Flag or Clr gives the open cell back
-        // its keyboard, as a refused commit does, when the setting says so.
-        let flag_or_clr = matches!(
-            action,
-            RowAction::SetFlagged(_) | RowAction::SetClearedStatus(_) | RowAction::Unreconcile
-        );
-        if flag_or_clr
-            && let Some(Edit::Text(edit)) = &self.edit
-            && edit.cell.row != row
-        {
-            if proto::is(Setting::FocusAfterFlagClr, 1) {
-                proto::decided(
-                    Setting::FocusAfterFlagClr,
-                    "the open cell keeps the keyboard",
-                );
-                self.proto_keep_edit = Some(2);
-            } else {
-                proto::decided(
-                    Setting::FocusAfterFlagClr,
-                    "the open cell closes, text kept",
-                );
-            }
-        }
         self.act(id, action, commands);
     }
 
@@ -2343,8 +2313,9 @@ impl Register {
             } else {
                 edit.keypad = Some(Box::new(Keypad::new(edit.combo.text())));
             }
-        } else if response.lost_focus() && self.proto_keep_edit.take().is_some() {
-            // PROTOTYPE #599: the Flag or Clr click elsewhere has acted; the edit stays.
+        } else if response.lost_focus() && proto_keeps_edit(ui, &response) {
+            // PROTOTYPE #599: the press on another row's Flag or Clr acts on it, and the
+            // edit keeps the keyboard.
             ui.memory_mut(|memory| memory.request_focus(edit.editor_id()));
         } else if response.lost_focus() && edit.keypad.is_none() {
             let edit = self.edit.take().expect("the edit was just shown");
@@ -5378,4 +5349,33 @@ fn icon_button(ui: &mut egui::Ui, glyph: &str, label: &str, enabled: bool) -> Re
     let response = ui.add_enabled(enabled, Button::new(glyph));
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
     response
+}
+
+/// PROTOTYPE #599: whether the open cell whose editor is `editor`, which has just lost
+/// the keyboard to a press on another row's Flag or Clr cell, takes it back. Logs the
+/// setting's decision whenever the press was on such a cell.
+fn proto_keeps_edit(ui: &egui::Ui, editor: &Response) -> bool {
+    let Some(origin) = ui.input(|input| input.pointer.press_origin()) else {
+        return false;
+    };
+    let other_row = |name: &str, rect: Rect| {
+        (name.starts_with("Flag cell") || name.starts_with("Clr cell"))
+            && !rect.y_range().contains(editor.rect.center().y)
+    };
+    if proto::hit(origin, other_row).is_none() {
+        return false;
+    }
+    if proto::is(Setting::FocusAfterFlagClr, 1) {
+        proto::decided(
+            Setting::FocusAfterFlagClr,
+            "the open cell keeps the keyboard",
+        );
+        true
+    } else {
+        proto::decided(
+            Setting::FocusAfterFlagClr,
+            "the open cell closes, text kept",
+        );
+        false
+    }
 }
