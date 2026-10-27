@@ -1,31 +1,18 @@
 #!/usr/bin/env bash
-# SessionStart hook (see `.claude/settings.json`): turns on the build memory cap,
-# `.config/rustc-memory-cap.sh`, for the agent session. It appends
-# `export RUSTC_WRAPPER=<this checkout>/.config/rustc-memory-cap.sh` to
-# $CLAUDE_ENV_FILE, which Claude Code runs before each Bash command. The path is
-# absolute, so cargo finds the wrapper from any directory and in checkouts that
-# predate it.
-#
-# Leaves the session as it is when a wrapper is already set (RUSTC_WRAPPER,
-# CARGO_BUILD_RUSTC_WRAPPER) or configured (`build.rustc-wrapper`, e.g. sccache in
-# ~/.cargo/config.toml): RUSTC_WRAPPER would override it, and that session's builds
-# stay uncapped. Also when there is no $CLAUDE_ENV_FILE, or when cargo can't answer,
-# which it reports on stderr.
+# SessionStart hook (see `.claude/settings.json`): warns when the session's builds
+# bypass the build memory cap. The repo's `.cargo/config.toml` sets
+# `build.rustc-wrapper` to `.config/rustc-memory-cap.sh`, which also runs sccache, but a
+# RUSTC_WRAPPER or CARGO_BUILD_RUSTC_WRAPPER env var overrides that config. When either
+# is set (even empty) to anything but a `rustc-memory-cap.sh`, prints a SessionStart
+# JSON result on stdout: `systemMessage` for the user, `additionalContext` for the
+# agent. Otherwise prints nothing. Always exits 0.
 set -euo pipefail
 
-root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-if [[ -z ${CLAUDE_ENV_FILE:-} || -n ${RUSTC_WRAPPER:-} ]]; then
-  exit 0
-fi
-# `cargo config get` is the only way to read cargo's merged config (files and
-# CARGO_BUILD_RUSTC_WRAPPER), and it is unstable; RUSTC_BOOTSTRAP=1 lets stable cargo
-# run it. An unset key is its one error that says "is not set".
-if configured=$(cd "$root" && RUSTC_BOOTSTRAP=1 cargo -Zunstable-options config get \
-  build.rustc-wrapper 2>&1); then
-  exit 0
-fi
-if [[ $configured == *"is not set"* ]]; then
-  printf "export RUSTC_WRAPPER='%s'\n" "$root/.config/rustc-memory-cap.sh" >>"$CLAUDE_ENV_FILE"
-else
-  echo "build-memory-cap: builds stay uncapped; cargo config get failed: $configured" >&2
-fi
+for var in RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER; do
+  if [[ -n ${!var+set} && ${!var} != *rustc-memory-cap.sh ]]; then
+    message="build-memory-cap: $var='${!var}' overrides the repo's build.rustc-wrapper, so this session's builds run uncapped. Unset it and restart the session; the cap already runs sccache when it is installed."
+    jq -n --arg m "$message" \
+      '{systemMessage: $m, hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $m}}'
+    exit 0
+  fi
+done
