@@ -555,6 +555,8 @@ version = "0.0.0"
 dependencies = [
  "balanced_core",
  "balanced_i18n",
+ "balanced_prototype_harness",
+ "balanced_store",
  "directories",
  "divan",
  "eframe",
@@ -570,6 +572,7 @@ dependencies = [
  "rust_decimal",
  "rust_decimal_macros",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "toml 1.1.8+spec-1.1.0",
