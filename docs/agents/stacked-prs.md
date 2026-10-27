@@ -1,6 +1,6 @@
 # Stacked pull requests
 
-A **stack** is a chain of open PRs, each based on the branch below it, with the bottom one based on `main`. GitHub shows the chain on every PR in it, and each PR's diff holds only its own commits, so the user reviews them one layer at a time. The `gh stack` extension (`github/gh-stack`) is installed; `gh stack <command> --help` is the full reference.
+A **stack** is a chain of open PRs, each based on the branch below it, with the bottom one based on `main`. GitHub shows the chain on every PR in it, and each PR's diff holds only its own commits, so the user reviews them one layer at a time. The `gh stack` extension (`github/gh-stack`) is per user, so confirm it with `gh extension list` before the first stack command. When it is missing, `gh stack` prints only an install hint. Ask the user, then run `gh extension install github/gh-stack`. `gh stack <command> --help` is the full reference.
 
 Stack a PR whenever its branch builds on another open PR's branch, including when you rebase one PR onto another to resolve their conflicts. The exception is a prototype PR: a stack exists for merging, and a prototype PR closes unmerged, so rebase it and set its PR's base to the branch below, without `gh stack` (`docs/agents/prototypes.md`).
 
