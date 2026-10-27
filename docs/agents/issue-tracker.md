@@ -13,6 +13,17 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 `gh` infers the repo from `git remote -v` only inside a clone. From any other directory (the scratchpad, where issue bodies are written), pass `--repo StanleyGoldman/balanced` to `gh issue` and `gh pr`; without it they fail with "not a git repository". `gh api` takes the repo in its path instead.
 
+## When git's SSH remote is refused
+
+`origin` is an SSH URL. A shell with no SSH agent gets `Permission denied (publickey)` on `git fetch` and `git push`, while `gh` still works on its own token. Run the git command over HTTPS with `gh` as the credential helper, naming the URL in place of `origin`:
+
+```sh
+git -c credential.helper='!gh auth git-credential' fetch https://github.com/StanleyGoldman/balanced.git main:refs/remotes/origin/main
+git -c credential.helper='!gh auth git-credential' push -u https://github.com/StanleyGoldman/balanced.git <branch>
+```
+
+The fetch's refspec updates `origin/main`, so `git worktree add ... origin/main` branches from the fresh tip. Leave `origin` and the global git config as they are; the user's own checkout uses SSH.
+
 ## Linking a pull request to its issue
 
 Every PR that comes from an issue opens its body with `Closes #<n>`, and that includes prototype PRs. The keyword is what puts the PR in the issue's **Development** panel. A prototype PR is closed unmerged, so its keyword only links; the resolution comment closes the issue.
