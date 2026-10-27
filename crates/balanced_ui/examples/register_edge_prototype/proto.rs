@@ -195,15 +195,28 @@ pub const SETTINGS: [SettingDef; 14] = [
 
 pub const STEPS: u8 = 12;
 
-pub const VARIANTS: [(&str, &str); 4] = [
+pub const VARIANTS: [(&str, &str); 5] = [
     ("A", "overlay strip (today)"),
     ("B", "compact icon buttons"),
     ("C", "strip below the row (over the next row)"),
     ("D", "overflow into More"),
+    ("E", "wide Actions column (Quicken's Action buttons column)"),
 ];
 
 static VALUES: [AtomicU8; SETTINGS.len()] = [const { AtomicU8::new(0) }; SETTINGS.len()];
 static VARIANT: AtomicU8 = AtomicU8::new(0);
+/// PROTOTYPE #469 E: the editing row's buttons' full width last laid out, in f32 bits.
+static STRIP_FULL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// PROTOTYPE #469 E: keeps the editing row's buttons' full width for the Actions column.
+pub fn set_strip_full(width: f32) {
+    STRIP_FULL.store(width.to_bits(), Ordering::Relaxed);
+}
+
+/// PROTOTYPE #469 E: the editing row's buttons' full width last laid out, if any.
+pub fn strip_full() -> Option<f32> {
+    Some(f32::from_bits(STRIP_FULL.load(Ordering::Relaxed))).filter(|&w| w > 0.0)
+}
 
 pub fn def(setting: Setting) -> &'static SettingDef {
     SETTINGS.iter().find(|d| d.setting == setting).unwrap()

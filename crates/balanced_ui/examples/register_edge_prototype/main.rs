@@ -7,15 +7,15 @@
 //! `dialog.rs`); `diff -u ../../src/<module>.rs <module>.rs` shows each patch. With every
 //! setting on its first option the App behaves as it ships.
 //!
-//! Run: `cargo run -p balanced_ui --example register_edge_prototype -- [--variant <A-D>]
+//! Run: `cargo run -p balanced_ui --example register_edge_prototype -- [--variant <A-E>]
 //! [--log <dir>/events.jsonl] [--control <dir>/control.txt]`.
 //!
-//! Keys (Alt, since every plain key types into the Register): Alt+A–D variant (step 11),
+//! Keys (Alt, since every plain key types into the Register): Alt+A–E variant (step 11),
 //! Alt+←/→ variant, Alt+1–3 cycle the current step's settings, Alt+PgUp/PgDn step.
 //! F2 note, F3 marker, F4 dock, F5 spotlight, F6 prompt panel (the app's own F6, Switch
 //! pane, is off while the prototype runs).
 //!
-//! Control verbs: `variant <A-D>`, `toggle <id> [<option 1-based>]` (no option cycles),
+//! Control verbs: `variant <A-E>`, `toggle <id> [<option 1-based>]` (no option cycles),
 //! `step <n>`, `screenshot [label]`, `dock on|off`, `reload` (fresh stub data, every
 //! change thrown away), `quit`, `account <name>`, `key <Ctrl+Shift+Name>` (a key press,
 //! e.g. `key Tab`, `key Ctrl+Enter`, `key Esc`), `text <chars>` (typed text),
@@ -346,7 +346,10 @@ impl Proto {
     /// The prototype's own keys, all with Alt so none types into the Register.
     fn keys(&mut self, ctx: &egui::Context) {
         let alt = |key| ctx.input_mut(|i| i.consume_key(Modifiers::ALT, key));
-        for (v, key) in [Key::A, Key::B, Key::C, Key::D].into_iter().enumerate() {
+        for (v, key) in [Key::A, Key::B, Key::C, Key::D, Key::E]
+            .into_iter()
+            .enumerate()
+        {
             if alt(key) {
                 self.set_variant(v as u8, "key");
             }
@@ -458,7 +461,7 @@ impl Proto {
                 if self.step == 11 {
                     ui.add_space(4.0);
                     ui.label(
-                        RichText::new("Variant (Alt+A–D): the editing row's buttons").strong(),
+                        RichText::new("Variant (Alt+A–E): the editing row's buttons").strong(),
                     );
                     for (v, (key, label)) in VARIANTS.iter().enumerate() {
                         let r = ui.selectable_label(

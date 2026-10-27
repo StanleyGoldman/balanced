@@ -143,7 +143,12 @@ impl RegisterColumn {
             // Two rows' height fits the heading and its one-letter marks.
             Self::Clr => Column::exact(2.0 * theme.row_height()),
             Self::Flag => Column::exact(theme.row_height()),
-            Self::Actions => Column::exact(theme.row_height() + Theme::EDGE_INSET),
+            // PROTOTYPE #469 E: the column is as wide as the editing row's buttons on
+            // every row, as Quicken's Action buttons column is.
+            Self::Actions => match proto::strip_full().filter(|_| proto::variant() == 4) {
+                Some(full) => Column::exact(full + Theme::ROW_BUTTON_GAP + Theme::EDGE_INSET),
+                None => Column::exact(theme.row_height() + Theme::EDGE_INSET),
+            },
             Self::Date
             | Self::Number
             | Self::Memo
@@ -1807,6 +1812,9 @@ impl Register {
             commands,
         };
         let key_scroll_offset = self.handle_keys(ui.ctx(), &keys);
+        // PROTOTYPE #469 E: the Actions column's width comes from the buttons' width.
+        let full_widths = button_widths(ui, i18n, false);
+        proto::set_strip_full(full_widths.iter().sum::<f32>() + 3.0 * Theme::ROW_BUTTON_GAP);
         let row_height = theme.row_height();
         let pitch = row_height + ui.spacing().item_spacing.y;
         let centre_on = self.line_to_centre(rows);
