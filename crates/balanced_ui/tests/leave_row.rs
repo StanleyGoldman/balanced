@@ -1348,3 +1348,34 @@ fn closing_the_window_while_the_prompt_is_open_closes_it_once_answered() {
     assert!(viewport_commands(&mut harness).contains(&ViewportCommand::Close));
     assert!(can_undo(&mut harness));
 }
+
+#[test]
+fn edit_undo_is_disabled_while_an_open_cell_holds_a_change() {
+    let mut harness = app();
+    save_a_rename(&mut harness);
+    click_cell(&mut harness, "Bean There");
+
+    type_text(&mut harness, "Cafe");
+
+    assert!(!can_undo(&mut harness));
+    assert!(shows(&harness, "Corner Shop"));
+}
+
+#[test]
+fn edit_undo_opened_with_f10_is_disabled_while_an_open_cell_holds_a_change() {
+    let mut harness = app();
+    save_a_rename(&mut harness);
+    click_cell(&mut harness, "Bean There");
+    type_text(&mut harness, "Cafe");
+
+    // F10 opens the File menu, and → the Edit menu.
+    press(&mut harness, Modifiers::NONE, Key::F10);
+    press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+
+    assert!(
+        harness
+            .get_by_role_and_label(Role::Button, "Undo Ctrl+Z")
+            .accesskit_node()
+            .is_disabled()
+    );
+}
