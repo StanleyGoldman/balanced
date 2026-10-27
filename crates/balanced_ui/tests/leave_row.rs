@@ -835,8 +835,57 @@ fn another_rows_clr_cell_marks_it_cleared_and_stays_on_the_changed_row() {
     assert_eq!(cursor(&harness), "Corner Shop");
 }
 
-/// Fresh Market's Flag cell in Everyday Checking, which starts unflagged. Its row
-/// is above Shell's.
+#[test]
+fn another_rows_flag_cell_leaves_the_changed_rows_cell_open_for_typing() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+
+    harness
+        .get_by_role_and_label(Role::CheckBox, SHELL_FLAG)
+        .click();
+    harness.run();
+    type_text(&mut harness, "more");
+
+    assert!(!prompted(&harness));
+    assert_eq!(
+        editor(&harness, "Payee").as_deref(),
+        Some("Corner Shopmore")
+    );
+}
+
+#[test]
+fn another_rows_clr_cell_leaves_the_changed_rows_cell_open_for_typing() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+
+    harness
+        .get_by_role_and_label(Role::Button, SHELL_CLR)
+        .click();
+    harness.run();
+    type_text(&mut harness, "more");
+
+    assert!(!prompted(&harness));
+    assert_eq!(
+        editor(&harness, "Payee").as_deref(),
+        Some("Corner Shopmore")
+    );
+}
+
+#[test]
+fn another_rows_flag_cell_keeps_the_text_cursor_where_it_was() {
+    let mut harness = app();
+    rename_fresh_market(&mut harness);
+    press(&mut harness, Modifiers::NONE, Key::ArrowLeft);
+    press(&mut harness, Modifiers::NONE, Key::ArrowLeft);
+
+    harness
+        .get_by_role_and_label(Role::CheckBox, SHELL_FLAG)
+        .click();
+    harness.run();
+    type_text(&mut harness, "X");
+
+    assert_eq!(editor(&harness, "Payee").as_deref(), Some("Corner ShXop"));
+}
 const FRESH_MARKET_FLAG: &str = "Flag Fresh Market, 9/5/2026, -86.42";
 
 /// Opens Shell's Payee cell with Enter, leaving the edit open with nothing typed.
@@ -948,6 +997,24 @@ fn another_rows_flag_cell_keeps_the_cursor_in_an_open_cell_typed_differently() {
 }
 
 #[test]
+fn another_rows_flag_cell_above_leaves_the_changed_rows_cell_open_for_typing() {
+    let mut harness = app();
+    rename_shell(&mut harness);
+
+    harness
+        .get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG)
+        .click();
+    harness.run();
+    type_text(&mut harness, "more");
+
+    assert!(!prompted(&harness));
+    assert_eq!(
+        editor(&harness, "Payee").as_deref(),
+        Some("Corner Shopmore")
+    );
+}
+
+#[test]
 fn another_rows_clr_cell_keeps_the_cursor_in_an_open_cell_typed_differently() {
     let mut harness = app();
     rename_shell(&mut harness);
@@ -997,6 +1064,25 @@ fn another_rows_flag_cell_moves_the_cursor_from_an_unchanged_open_date() {
     let flag = harness.get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG);
     assert_eq!(flag.accesskit_node().toggled(), Some(Toggled::True));
     assert_eq!(cursor(&harness), "9/5/2026");
+}
+
+#[test]
+fn another_rows_flag_cell_leaves_a_changed_open_date_open() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "9/15/2026");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+    // + moves the date a day on.
+    type_text(&mut harness, "+");
+    assert_eq!(editor(&harness, "Date").as_deref(), Some("9/16/2026"));
+
+    harness
+        .get_by_role_and_label(Role::CheckBox, FRESH_MARKET_FLAG)
+        .click();
+    harness.run();
+
+    assert!(!prompted(&harness));
+    assert_eq!(editor(&harness, "Date").as_deref(), Some("9/16/2026"));
 }
 
 #[test]
