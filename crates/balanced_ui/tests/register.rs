@@ -20,7 +20,7 @@ fn app() -> Harness<'static, App> {
 /// The App as [`app`] makes it, keeping its Preferences in `file`.
 fn app_with(file: PreferencesFile) -> Harness<'static, App> {
     let mut harness = Harness::builder()
-        .with_size(vec2(1280.0, 720.0))
+        .with_size(vec2(1440.0, 720.0))
         .build_eframe(move |cc| {
             App::on_ledger(
                 cc,

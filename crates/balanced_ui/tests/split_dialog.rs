@@ -82,7 +82,7 @@ fn payday_ledger() -> Ledger {
 /// The App on `ledger`, in the test locale, wide enough to show every Register column.
 fn on(ledger: Ledger) -> Harness<'static, App> {
     let mut harness = Harness::builder()
-        .with_size(vec2(1280.0, 720.0))
+        .with_size(vec2(1440.0, 720.0))
         .build_eframe(|cc| {
             App::on_ledger(
                 cc,

@@ -91,7 +91,7 @@ The labelled line in a register sorted by date between the rows dated today or e
 _Avoid_: Today line, future separator
 
 **Actions column**:
-The untitled last column of a register, holding a menu of commands for its row (e.g. Split, Void, Delete).
+The untitled last column of a register, holding a menu of commands for its row (e.g. Split, Void, Delete). On the editing row it holds the row's Save, Cancel, Split and More buttons instead, and it is as wide as those buttons on every row.
 _Avoid_: Row menu, context column
 
 **Cleared status**:

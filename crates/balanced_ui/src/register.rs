@@ -133,16 +133,16 @@ impl RegisterColumn {
         }
     }
 
-    /// How wide the column is: as `widths` says for a column that resizes. Payee and
-    /// Category share the width the others leave, down to [`MIN_FLEX_WIDTH`]; below
-    /// that the Register scrolls sideways.
-    fn width(self, theme: &Theme, widths: &ColumnWidths) -> Column {
+    /// How wide the column is: as `widths` says for a column that resizes, and `actions`
+    /// wide for Actions. Payee and Category share the width the others leave, down to
+    /// [`MIN_FLEX_WIDTH`]; below that the Register scrolls sideways.
+    fn width(self, theme: &Theme, widths: &ColumnWidths, actions: f32) -> Column {
         let column = match self {
             Self::Payee | Self::Category => Column::remainder().at_least(MIN_FLEX_WIDTH),
             // Two rows' height fits the heading and its one-letter marks.
             Self::Clr => Column::exact(2.0 * theme.row_height()),
             Self::Flag => Column::exact(theme.row_height()),
-            Self::Actions => Column::exact(theme.row_height() + Theme::EDGE_INSET),
+            Self::Actions => Column::exact(actions),
             Self::Date
             | Self::Number
             | Self::Memo
@@ -807,6 +807,9 @@ pub(crate) struct Register {
     lines_in_view: Option<LinesInView>,
     /// Whether the edit refused to let the keyboard leave its cell this frame.
     refused_leave: bool,
+    /// The edit that closed this frame with its text kept in its row, which opens again
+    /// when a click acted on another row without leaving the changed one.
+    closed: ClosedEdit,
     /// What the draft row holds, and the changes to a transaction's row, kept back
     /// until the row is saved.
     unsaved: Unsaved,
@@ -1117,6 +1120,27 @@ impl Register {
         self.draft_row = draft_row;
         self.refresh_draft_row(draft_frame, false);
         self.changed_row = draft_frame.changed_row(model, self.unsaved.changes.as_ref());
+    }
+
+    /// Opens again the edit that a Clr or Flag click on another row closed this frame,
+    /// with the keyboard, its text and its text cursor as they were. Its commit is
+    /// taken back, as if it had been refused, so nothing it would recall fills in yet.
+    /// The click and the editor losing focus come in the same frame, as egui takes
+    /// focus away when a click ends.
+    fn reopen_closed(&mut self, ctx: &egui::Context) {
+        let ClosedEdit {
+            edit,
+            before,
+            reopen,
+        } = std::mem::take(&mut self.closed);
+        if reopen
+            && self.edit.is_none()
+            && let Some(edit) = edit
+        {
+            ctx.memory_mut(|memory| memory.request_focus(edit.editor_id()));
+            self.edit = Some(edit);
+            self.unsaved = before;
+        }
     }
 
     /// Settles an edit that refused to let the keyboard leave its cell this frame: a
@@ -1727,10 +1751,7 @@ impl Register {
                 let register_id = ui.id();
                 let scroll_offset = key_scroll_offset
                     .or_else(|| centre_on.map(|index| centring_offset(ui, row_height, index)));
-                // Where the Actions column lies, from its heading, which is laid out
-                // before the rows whose cells the editing row's buttons cover.
-                let mut actions = None;
-                register_table(ui, account, &self.shown, theme, widths, scroll_offset)
+                register_table(ui, i18n, account, &self.shown, theme, widths, scroll_offset)
                     .header(row_height, |mut header| {
                         let frame = HeaderFrame {
                             i18n,
@@ -1742,9 +1763,6 @@ impl Register {
                         let shown = self.shown.clone();
                         for column in shown {
                             header.col(|ui| {
-                                if column == RegisterColumn::Actions {
-                                    actions = Some(ui.max_rect().x_range());
-                                }
                                 let heading = Heading {
                                     register_id,
                                     column,
@@ -1769,13 +1787,13 @@ impl Register {
                             register_id,
                             access: Access::of(summary.account()),
                             editing: None,
-                            buttons: None,
                             buttons_focused: false,
                             viewport: Rect::NOTHING,
                         };
-                        self.body(body, frame, actions, row_height, pitch);
+                        self.body(body, frame, row_height, pitch);
                     });
             });
+        self.reopen_closed(ui.ctx());
         self.end_frame(&model, draft_row, draft_frame);
         self.act_on_picked(ui.ctx(), i18n, preferences, commands);
         // The cell cursor has left the row only once an edit that refused to let the
@@ -1870,28 +1888,16 @@ impl Register {
     }
 
     /// Lays out the rows in view of the Register's body, and notes which of them are
-    /// fully in view for keyboard scrolling. `frame`'s viewport, editing row and the
-    /// span of its buttons, which end at the right of `actions`, the Actions column,
-    /// are filled in here.
-    fn body(
-        &mut self,
-        mut body: TableBody<'_>,
-        frame: BodyFrame<'_>,
-        actions: Option<Rangef>,
-        row_height: f32,
-        pitch: f32,
-    ) {
+    /// fully in view for keyboard scrolling. `frame`'s viewport and editing row are
+    /// filled in here.
+    fn body(&mut self, mut body: TableBody<'_>, frame: BodyFrame<'_>, row_height: f32, pitch: f32) {
         let viewport = body.ui_mut().clip_rect();
         // The buttons drawn last frame say which has focus, before they are forgotten.
         let buttons_focused =
             self.focus_button.is_some() || self.focused_button(body.ui_mut().ctx()).is_some();
         let editing = self.editing_row_for_drawing(body.ui_mut().ctx());
-        let buttons = editing
-            .and(actions)
-            .map(|actions| buttons_span(body.ui_mut(), frame.i18n, actions));
         let frame = BodyFrame {
             editing,
-            buttons,
             buttons_focused,
             viewport,
             ..frame
@@ -1968,7 +1974,6 @@ impl Register {
             register_id,
             access,
             editing,
-            buttons,
             buttons_focused,
             viewport,
             ..
@@ -1977,15 +1982,10 @@ impl Register {
             row: row.id(),
             column,
         };
-        let cell_x = ui.max_rect().x_range();
-        let cover = if editing != Some(row.id()) {
-            EditingCover::NotEditing
-        } else if column != RegisterColumn::Actions
-            && buttons.is_some_and(|span| span.contains(cell_x.min) && span.contains(cell_x.max))
-        {
-            EditingCover::Covered
+        let row_editing = if editing == Some(row.id()) {
+            RowEditing::Editing
         } else {
-            EditingCover::Uncovered
+            RowEditing::NotEditing
         };
         let cell = Cell {
             register_id,
@@ -1995,12 +1995,12 @@ impl Register {
             selected: self.cursor.is_some_and(|cursor| cursor.row == row.id()),
             // A focused row button holds the keyboard in place of the cell cursor.
             cursor: self.cursor == Some(address) && !buttons_focused,
-            cover,
+            row_editing,
             access,
             viewport,
         };
         let (response, mut action) = cell.show(ui, i18n, theme);
-        if cover.is_editing_row()
+        if row_editing == RowEditing::Editing
             && column == RegisterColumn::Actions
             && let Some(picked) = self.row_buttons(ui, frame, row)
             && let Some(transaction) = row.transaction()
@@ -2026,7 +2026,8 @@ impl Register {
             // A click that leaves another row, which may ask about its changes, moves
             // the cell cursor, and a `[Split]` click's Split dialog waits for the
             // answer. A Clr or Flag click there acts on its own row without leaving a
-            // changed one, so the cell cursor stays and nothing asks.
+            // changed one, so the cell cursor stays, nothing asks, and the edit the
+            // click closed opens again once the rows are drawn.
             let leaves_row = self
                 .edit
                 .as_ref()
@@ -2037,7 +2038,9 @@ impl Register {
                 && action.is_some()
                 && matches!(column, RegisterColumn::Clr | RegisterColumn::Flag)
                 && self.editing_row_changed(frame);
-            if !acts_in_place {
+            if acts_in_place {
+                self.closed.reopen = true;
+            } else {
                 self.place_cursor(row.id(), column);
             }
             if leaves_row {
@@ -2063,9 +2066,9 @@ impl Register {
             .extend(rules);
     }
 
-    /// Draws the editing `row`'s buttons from the right edge of its Actions cell `ui`
-    /// leftwards, over the row's cells beside it, gives keyboard focus to the button
-    /// waiting for it, and keeps a pressed button for the next frame, which acts on it.
+    /// Draws the editing `row`'s buttons in its Actions cell `ui`, which is as wide as
+    /// they are, gives keyboard focus to the button waiting for it, and keeps a pressed
+    /// button for the next frame, which acts on it.
     /// Returns the command picked from More's menu.
     fn row_buttons(
         &mut self,
@@ -2074,28 +2077,22 @@ impl Register {
         row: &RegisterRow,
     ) -> Option<RowAction> {
         let cell = ui.max_rect();
-        let right = cell.right() - Theme::EDGE_INSET;
-        let span = buttons_span(ui, frame.i18n, cell.x_range());
-        let left = span.min;
-        let strip = Rect::from_x_y_ranges(span, cell.y_range());
         let mut strip_ui = ui.new_child(
             UiBuilder::new()
                 .max_rect(Rect::from_x_y_ranges(
-                    left + Theme::ROW_BUTTON_GAP..=right,
+                    cell.left() + Theme::ROW_BUTTON_GAP..=cell.right() - Theme::EDGE_INSET,
                     cell.y_range(),
                 ))
                 .layout(Layout::left_to_right(Align::Center)),
         );
-        strip_ui.set_clip_rect(strip.intersect(frame.viewport));
+        strip_ui.set_clip_rect(cell.intersect(frame.viewport));
         // Assistive technology reads the buttons as one group, the row's toolbar.
         strip_ui
             .ctx()
             .accesskit_node_builder(strip_ui.unique_id(), |node| node.set_role(Role::Toolbar));
-        // The strip hides the cells under it, and takes the clicks between its buttons.
-        let fill = strip_ui.visuals().selection.bg_fill;
-        strip_ui.painter().rect_filled(strip, 0.0, fill);
+        // The strip takes the clicks between its buttons.
         let _blocked = strip_ui.interact(
-            strip,
+            cell,
             frame.register_id.with("register_row_buttons"),
             Sense::CLICK,
         );
@@ -2177,6 +2174,7 @@ impl Register {
             let Edit::Text(edit) = edit else {
                 return;
             };
+            let before = self.unsaved.clone();
             match commit(
                 &edit,
                 frame.rows,
@@ -2185,7 +2183,7 @@ impl Register {
                 frame.commands,
                 &mut self.unsaved,
             ) {
-                Commit::Done => {}
+                Commit::Done => self.closed.close(Edit::Text(edit), before),
                 Commit::Refused(refusal) => {
                     // Leaving the cell is refused too: the edit keeps the keyboard, and
                     // the cell cursor comes back to it once the rows are laid out, or
@@ -2306,16 +2304,21 @@ impl Register {
             .labelled_by(heading_id(frame.register_id, column));
         if response.lost_focus()
             && let Some(Edit::Date(mut edit)) = self.edit.take()
-            && commit_date(
+        {
+            let before = self.unsaved.clone();
+            if commit_date(
                 frame.i18n,
                 &mut edit,
                 frame.rows,
                 frame.commands,
                 &mut self.unsaved,
-            ) != Commit::Done
-        {
-            self.refused_leave = true;
-            self.edit = Some(Edit::Date(edit));
+            ) == Commit::Done
+            {
+                self.closed.close(Edit::Date(edit), before);
+            } else {
+                self.refused_leave = true;
+                self.edit = Some(Edit::Date(edit));
+            }
         }
     }
 
@@ -3386,9 +3389,6 @@ struct BodyFrame<'a> {
     access: Access,
     /// The editing row as the frame began, whose Actions cell holds its buttons.
     editing: Option<RowId>,
-    /// Where across the Register the editing row's buttons lie, over the row's cells
-    /// beside its Actions cell, while there is an editing row.
-    buttons: Option<Rangef>,
     /// Whether one of the editing row's buttons has keyboard focus, or is about to,
     /// which hides the cell cursor.
     buttons_focused: bool,
@@ -3668,7 +3668,7 @@ fn amount_change_asks_first(status: ClearedStatus) -> bool {
 
 /// What the Register holds and hasn't saved: what the draft row holds, and the
 /// changes to one transaction's row.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 struct Unsaved {
     draft: Draft,
     changes: Option<RowChanges>,
@@ -3872,6 +3872,25 @@ struct Refused {
     /// changes are thrown away.
     leaving: Option<Leaving>,
     answer: Option<RefusalAnswer>,
+}
+
+/// The edit that closed in a frame with its text kept in its row.
+#[derive(Debug, Default)]
+struct ClosedEdit {
+    edit: Option<Edit>,
+    /// What the Register held unsaved before the edit's text was kept.
+    before: Unsaved,
+    /// Whether the click was on another row's Clr or Flag cell, which acted without
+    /// leaving the changed row, so the edit opens again.
+    reopen: bool,
+}
+
+impl ClosedEdit {
+    /// Puts aside `edit`, whose text was kept over `before`.
+    fn close(&mut self, edit: Edit, before: Unsaved) {
+        self.edit = Some(edit);
+        self.before = before;
+    }
 }
 
 /// The cell at fault in a refused save, and its refused text edit, if any, which open
@@ -4112,12 +4131,14 @@ fn preview(i18n: &Localizer, edit: &CellEdit) -> Option<Preview> {
 /// to `scroll_offset` when it is set.
 fn register_table<'a>(
     ui: &'a mut egui::Ui,
+    i18n: &Localizer,
     account: AccountId,
     columns: &[RegisterColumn],
     theme: &Theme,
     widths: &ColumnWidths,
     scroll_offset: Option<f32>,
 ) -> TableBuilder<'a> {
+    let actions = actions_width(ui, i18n);
     let mut table = TableBuilder::new(ui)
         .id_salt(("register", account))
         // The rows stripe themselves, so the Today divider takes no stripe.
@@ -4127,7 +4148,7 @@ fn register_table<'a>(
         .auto_shrink(false)
         .max_scroll_height(f32::INFINITY);
     for &column in columns {
-        table = table.column(column.width(theme, widths));
+        table = table.column(column.width(theme, widths, actions));
     }
     if let Some(offset) = scroll_offset {
         table = table.vertical_scroll_offset(offset);
@@ -4281,42 +4302,20 @@ struct Cell<'a> {
     /// Whether the cell cursor is on this cell.
     cursor: bool,
     /// Whether the cell's row is the editing row, whose Actions cell holds its buttons
-    /// in place of the Actions menu, and whether those buttons cover the cell.
-    cover: EditingCover,
+    /// in place of the Actions menu.
+    row_editing: RowEditing,
     access: Access,
     /// The visible part of the Register's body.
     viewport: Rect,
 }
 
-/// Where a cell stands toward the editing row and its buttons.
+/// Whether a row is the editing row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EditingCover {
-    /// The cell's row isn't the editing row.
+enum RowEditing {
+    /// The row is the editing row.
+    Editing,
+    /// The row isn't the editing row.
     NotEditing,
-    /// The cell is on the editing row, clear of its buttons, or is the Actions cell
-    /// that holds them.
-    Uncovered,
-    /// The cell is on the editing row, wholly under its buttons, which leaves it out
-    /// of reach of the pointer and of assistive technology alike.
-    Covered,
-}
-
-impl EditingCover {
-    /// Whether the cell is on the editing row.
-    fn is_editing_row(self) -> bool {
-        match self {
-            Self::NotEditing => false,
-            Self::Uncovered | Self::Covered => true,
-        }
-    }
-
-    /// Whether the editing row's buttons cover the whole cell.
-    fn is_covered(self) -> bool {
-        match self {
-            Self::NotEditing | Self::Uncovered => false,
-            Self::Covered => true,
-        }
-    }
 }
 
 impl Cell<'_> {
@@ -4335,16 +4334,12 @@ impl Cell<'_> {
             insets,
             selected,
             cursor,
-            cover,
+            row_editing,
             access,
             viewport,
         } = *self;
         let rect = ui.max_rect();
         let id = register_id.with(("register_cell", row.id(), column));
-        if cover.is_covered() {
-            // A cell only hovered, with no widget info, gets no AccessKit node.
-            return (ui.interact(rect, id, Sense::hover()), None);
-        }
         let response = ui.interact(rect, id, Sense::click());
         let text: WidgetText = match column {
             RegisterColumn::Date => row.date().into(),
@@ -4384,7 +4379,8 @@ impl Cell<'_> {
                 let mut action = None;
                 // The draft row is no transaction yet, so it has no commands.
                 let draft = row.id() == RowId::Draft;
-                if (selected || hovered || open) && !draft && !cover.is_editing_row() {
+                if (selected || hovered || open) && !draft && row_editing == RowEditing::NotEditing
+                {
                     action = actions_menu(ui, i18n, rect, menu, access, row);
                 }
                 return (response, action);
@@ -4884,14 +4880,10 @@ fn edit_buttons(
     }
 }
 
-/// Where across the Register the editing row's buttons lie in `ui`, with the gap before
-/// them, drawn from the right edge of `actions`, its Actions cell, leftwards.
-fn buttons_span(ui: &egui::Ui, i18n: &Localizer, actions: Rangef) -> Rangef {
-    let right = actions.max - Theme::EDGE_INSET;
-    Rangef::new(
-        right - buttons_width(ui, i18n) - Theme::ROW_BUTTON_GAP,
-        actions.max,
-    )
+/// The width of the Actions column in `ui`: the editing row's buttons, with the gap
+/// before them and the Register's edge inset after them.
+fn actions_width(ui: &egui::Ui, i18n: &Localizer) -> f32 {
+    Theme::ROW_BUTTON_GAP + buttons_width(ui, i18n) + Theme::EDGE_INSET
 }
 
 /// The width of the editing row's buttons side by side in `ui`, with Save as wide as Add

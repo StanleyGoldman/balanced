@@ -29,7 +29,7 @@ fn app(size: Vec2) -> Harness<'static, App> {
 
 /// The App with Everyday Checking open and its Costco transaction selected.
 fn costco_selected() -> Harness<'static, App> {
-    let mut harness = app(vec2(1280.0, 720.0));
+    let mut harness = app(vec2(1440.0, 720.0));
     harness
         .get_by_role_and_label(Role::Button, "Everyday Checking")
         .click();
@@ -261,7 +261,7 @@ fn the_delete_key_alone_opens_nothing() {
 
 #[test]
 fn ctrl_d_on_the_draft_row_opens_nothing() {
-    let mut harness = app(vec2(1280.0, 720.0));
+    let mut harness = app(vec2(1440.0, 720.0));
     // Opening the account puts the cell cursor on its draft row.
     harness
         .get_by_role_and_label(Role::Button, "Everyday Checking")
@@ -279,7 +279,7 @@ fn ctrl_d_on_the_draft_row_opens_nothing() {
 
 #[test]
 fn ctrl_d_in_a_closed_account_opens_nothing() {
-    let mut harness = app(vec2(1280.0, 720.0));
+    let mut harness = app(vec2(1440.0, 720.0));
     harness
         .get_by_role_and_label(Role::Button, "Closed")
         .click();
