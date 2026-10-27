@@ -413,8 +413,7 @@ impl App {
                 }
             }
             AppCommand::Undo => {
-                if self.leave_editing_row(ctx, AppCommand::Undo)
-                    && let Session::Open { ledger, .. } = &mut self.session
+                if let Some(ledger) = ledger
                     && let Err(error) = ledger.undo()
                 {
                     let message = StatusMessage::refusal(error, None, &ledger.snapshot());
@@ -422,8 +421,7 @@ impl App {
                 }
             }
             AppCommand::Redo => {
-                if self.leave_editing_row(ctx, AppCommand::Redo)
-                    && let Session::Open { ledger, .. } = &mut self.session
+                if let Some(ledger) = ledger
                     && let Err(error) = ledger.redo()
                 {
                     let message = StatusMessage::refusal(error, None, &ledger.snapshot());

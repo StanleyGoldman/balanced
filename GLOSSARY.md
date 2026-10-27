@@ -63,7 +63,7 @@ The empty row at the bottom of a register where the user types a new transaction
 _Avoid_: New row, blank row, entry row
 
 **Editing row**:
-The register row being changed. Its changes are kept back until the row is saved, and Esc throws them away. It holds the Save, Cancel, Split and More actions buttons; the draft row has Add in place of Save.
+The register row being changed. Its changes are kept back until the row is saved, and Esc throws them away. It holds the Save, Cancel, Split and More actions buttons; the draft row has Add in place of Save. Save and Cancel stay disabled until a value in the row changes.
 _Avoid_: Open row, active row, entry row
 
 **Leave-row prompt**:
