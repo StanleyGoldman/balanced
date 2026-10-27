@@ -13,9 +13,12 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use icu_calendar::Date;
 use icu_locale::{langid, locale};
 
+/// A window width that shows every Register column in en-US and in German.
+const EVERY_COLUMN_WIDTH: f32 = 1440.0;
+
 /// The App on stub data, in the test locale, wide enough to show every Register column.
 fn app() -> Harness<'static, App> {
-    app_in(Localizer::for_tests(), 1440.0)
+    app_in(Localizer::for_tests(), EVERY_COLUMN_WIDTH)
 }
 
 /// The App on stub data, in `i18n`'s locale, `width` points wide.
@@ -179,16 +182,18 @@ fn button_counts<const N: usize>(harness: &Harness<'static, App>, labels: [&str;
     })
 }
 
+/// Whether `node` is one of the editing row's buttons, which sit in its toolbar.
+fn in_toolbar(node: &egui_kittest::Node<'_>) -> bool {
+    node.accesskit_node()
+        .parent()
+        .is_some_and(|parent| parent.role() == Role::Toolbar)
+}
+
 /// The editing row's buttons, the buttons in its toolbar.
 fn row_buttons(harness: &Harness<'static, App>) -> Vec<(String, Rect)> {
     let buttons: Vec<_> = harness
         .query_all_by_role(Role::Button)
-        .filter(|button| {
-            button
-                .accesskit_node()
-                .parent()
-                .is_some_and(|parent| parent.role() == Role::Toolbar)
-        })
+        .filter(in_toolbar)
         .map(|button| {
             let label = button.accesskit_node().label().unwrap_or_default();
             (label, button.rect())
@@ -198,9 +203,9 @@ fn row_buttons(harness: &Harness<'static, App>) -> Vec<(String, Rect)> {
     buttons
 }
 
-/// The labels of the editing row's buttons that reach outside the Actions column, the
-/// rightmost column, whose heading is blank.
+/// The labels of the editing row's buttons that reach outside the Actions column.
 fn buttons_outside_actions(harness: &Harness<'static, App>) -> Vec<String> {
+    // The Actions heading is blank, so it is found as the rightmost heading.
     let actions = harness
         .query_all_by_role(Role::ColumnHeader)
         .max_by(|a, b| a.rect().center().x.total_cmp(&b.rect().center().x))
@@ -226,12 +231,11 @@ fn cells_under_buttons(harness: &Harness<'static, App>) -> Vec<String> {
     [Role::Cell, Role::CheckBox, Role::TextInput]
         .into_iter()
         .flat_map(|role| harness.query_all_by_role(role).collect::<Vec<_>>())
-        .chain(harness.query_all_by_role(Role::Button).filter(|button| {
-            button
-                .accesskit_node()
-                .parent()
-                .is_none_or(|parent| parent.role() != Role::Toolbar)
-        }))
+        .chain(
+            harness
+                .query_all_by_role(Role::Button)
+                .filter(|button| !in_toolbar(button)),
+        )
         // The Actions cell, which holds the buttons, is blank.
         .filter(|node| !node.accesskit_node().label().unwrap_or_default().is_empty())
         .filter(|node| under(node.rect()))
@@ -239,47 +243,15 @@ fn cells_under_buttons(harness: &Harness<'static, App>) -> Vec<String> {
         .collect()
 }
 
-/// Opens Fresh Market's Payee cell in Everyday Checking, which makes its row the
-/// editing row.
-fn edit_fresh_market(harness: &mut Harness<'static, App>) {
-    open(harness, "Everyday Checking");
-    click_cell(harness, "Fresh Market");
-    press(harness, Modifiers::NONE, Key::Enter);
-}
-
-#[test]
-fn the_editing_rows_buttons_lie_in_the_actions_column_over_no_cell() {
-    let mut harness = app();
-
-    edit_fresh_market(&mut harness);
-    assert_eq!(cells_under_buttons(&harness), Vec::<String>::new());
-
-    assert_eq!(buttons_outside_actions(&harness), Vec::<String>::new());
-}
-
-#[test]
-fn in_german_the_editing_rows_buttons_lie_in_the_actions_column_over_no_cell() {
-    let german = Localizer::for_tests_in(&langid!("de"), &locale!("de-DE"))
-        .expect("the embedded de messages and de-DE formatting data load");
-    let mut harness = app_in(german, 1440.0);
-
-    edit_fresh_market(&mut harness);
-    assert_eq!(cells_under_buttons(&harness), Vec::<String>::new());
-
-    assert_eq!(buttons_outside_actions(&harness), Vec::<String>::new());
-}
-
-/// The Register's column headings, left to right. The Actions column's is empty.
-fn headings(harness: &Harness<'static, App>) -> Vec<String> {
-    let mut headers: Vec<_> = harness
-        .query_all_by_role(Role::ColumnHeader)
-        .map(|header| {
-            let label = header.accesskit_node().label().unwrap_or_default();
-            (header.rect().left(), label)
-        })
-        .collect();
-    headers.sort_by(|(left, _), (right, _)| left.total_cmp(right));
-    headers.into_iter().map(|(_, label)| label).collect()
+/// Asserts that the editing row's buttons lie inside the Actions column, over no cell,
+/// naming `case` when they don't.
+fn assert_buttons_fit(harness: &Harness<'static, App>, case: &str) {
+    assert_eq!(cells_under_buttons(harness), Vec::<String>::new(), "{case}");
+    assert_eq!(
+        buttons_outside_actions(harness),
+        Vec::<String>::new(),
+        "{case}"
+    );
 }
 
 /// Opens Everyday Checking, makes `change` in its column chooser, then opens Fresh
@@ -296,6 +268,45 @@ fn edit_fresh_market_after(
     press(harness, Modifiers::NONE, Key::Enter);
 }
 
+/// Opens Fresh Market's Payee cell in Everyday Checking, with the columns as they
+/// start, which makes its row the editing row.
+fn edit_fresh_market(harness: &mut Harness<'static, App>) {
+    edit_fresh_market_after(harness, |_| {});
+}
+
+#[test]
+fn the_editing_rows_buttons_lie_in_the_actions_column_over_no_cell() {
+    let mut harness = app();
+
+    edit_fresh_market(&mut harness);
+
+    assert_buttons_fit(&harness, "en-US");
+}
+
+#[test]
+fn in_german_the_editing_rows_buttons_lie_in_the_actions_column_over_no_cell() {
+    let german = Localizer::for_tests_in(&langid!("de"), &locale!("de-DE"))
+        .expect("the embedded de messages and de-DE formatting data load");
+    let mut harness = app_in(german, EVERY_COLUMN_WIDTH);
+
+    edit_fresh_market(&mut harness);
+
+    assert_buttons_fit(&harness, "de-DE");
+}
+
+/// The Register's column headings, left to right. The Actions column's is empty.
+fn headings(harness: &Harness<'static, App>) -> Vec<String> {
+    let mut headers: Vec<_> = harness
+        .query_all_by_role(Role::ColumnHeader)
+        .map(|header| {
+            let label = header.accesskit_node().label().unwrap_or_default();
+            (header.rect().left(), label)
+        })
+        .collect();
+    headers.sort_by(|(left, _), (right, _)| left.total_cmp(right));
+    headers.into_iter().map(|(_, label)| label).collect()
+}
+
 #[test]
 fn with_balance_clr_or_flag_hidden_the_editing_rows_buttons_cover_no_cell() {
     for column in ["Balance", "Clr", "Flag"] {
@@ -309,16 +320,7 @@ fn with_balance_clr_or_flag_hidden_the_editing_rows_buttons_cover_no_cell() {
         });
 
         assert!(!headings(&harness).iter().any(|heading| heading == column));
-        assert_eq!(
-            cells_under_buttons(&harness),
-            Vec::<String>::new(),
-            "{column} hidden"
-        );
-        assert_eq!(
-            buttons_outside_actions(&harness),
-            Vec::<String>::new(),
-            "{column} hidden"
-        );
+        assert_buttons_fit(&harness, &format!("{column} hidden"));
     }
 }
 
@@ -340,16 +342,7 @@ fn with_memo_payment_or_deposit_beside_actions_the_editing_rows_buttons_cover_no
             column,
             "{column} sits beside Actions"
         );
-        assert_eq!(
-            cells_under_buttons(&harness),
-            Vec::<String>::new(),
-            "{column} beside"
-        );
-        assert_eq!(
-            buttons_outside_actions(&harness),
-            Vec::<String>::new(),
-            "{column} beside"
-        );
+        assert_buttons_fit(&harness, &format!("{column} beside Actions"));
     }
 }
 
@@ -367,8 +360,7 @@ fn in_a_narrow_window_the_register_scrolls_sideways_and_the_buttons_cover_no_cel
         right > 900.0,
         "the Register runs past the window's right edge"
     );
-    assert_eq!(cells_under_buttons(&harness), Vec::<String>::new());
-    assert_eq!(buttons_outside_actions(&harness), Vec::<String>::new());
+    assert_buttons_fit(&harness, "900 pt wide");
 }
 
 #[test]
