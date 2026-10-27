@@ -111,8 +111,16 @@ impl<T> Choices<T> {
             .collect()
     }
 
+    /// The list for `text` with, after the choices matching it, a row creating it,
+    /// unless it is blank or a choice has that name.
+    pub(crate) fn list_creating(&self, text: &str) -> Vec<ListRow<'_>> {
+        let mut rows = self.list(text);
+        rows.extend(self.create_row(text));
+        rows
+    }
+
     /// The row creating `text`, trimmed, unless it is blank or a choice has that name.
-    pub(crate) fn create_row(&self, text: &str) -> Option<ListRow<'static>> {
+    fn create_row(&self, text: &str) -> Option<ListRow<'static>> {
         let text = text.trim();
         (!text.is_empty() && self.named(text).is_none()).then(|| ListRow::Create(text.to_owned()))
     }

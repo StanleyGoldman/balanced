@@ -38,7 +38,7 @@ use crate::register::{ColumnWidths, LeaveAnswer, LeftRow, Register};
 use crate::register_model::RegisterRow;
 use crate::route::{Route, TopLevelTab};
 use crate::save_refusal::{RefusalAnswer, SaveRefusal};
-use crate::split_dialog::{DoneOutcome, SplitForm};
+use crate::split_dialog::{self, DoneOutcome, SplitForm};
 use crate::theme::Theme;
 use crate::user_action::UserAction;
 
@@ -656,6 +656,13 @@ impl MainWindow {
             },
             None => applied,
         };
+        let applied = match &mut self.split {
+            Some(dialog) => match dialog.form.applied(ctx, applied) {
+                Some(unclaimed) => unclaimed,
+                None => return,
+            },
+            None => applied,
+        };
         let Some(dialog) = &mut self.new_category else {
             if let Err(error) = applied {
                 self.show_status(StatusMessage::Rejected(error));
@@ -856,26 +863,28 @@ impl MainWindow {
         self.category_list_dialog(ctx, i18n, theme, commands, view);
         self.data_file_refusal_dialog(ctx, i18n, theme);
         self.go_to_date_dialog(ctx, i18n, theme, commands, today);
-        self.split_dialog(ctx, i18n, theme, preferences);
+        self.split_dialog(ctx, i18n, theme, commands, view, preferences);
         self.leave_row_dialog(ctx, i18n, theme, commands, preferences);
         self.cant_save_dialog(ctx, i18n, theme);
     }
 
-    /// The Split dialog, while it is open. Done hands its lines to the Register's row,
-    /// unless they don't add up, which the Dialog then shows; Cancel and Esc drop the
-    /// changes made in it.
+    /// The Split dialog, while it is open, and the New Category Dialog a line opened
+    /// over it. Done hands its lines to the Register's row, unless they don't add up,
+    /// which the Dialog then shows; Cancel and Esc drop the changes made in it.
     fn split_dialog(
         &mut self,
         ctx: &egui::Context,
         i18n: &Localizer,
         theme: &Theme,
+        commands: &CommandSender,
+        view: &LedgerView,
         preferences: &Preferences,
     ) {
         let Some(dialog) = &mut self.split else {
             return;
         };
         let outcome = HeavyDialog::new(
-            Id::new("split_dialog"),
+            split_dialog::dialog_id(),
             fl!(i18n, "dialog-split-title"),
             fl!(i18n, "dialog-split-done"),
             fl!(i18n, "dialog-cancel"),
@@ -884,8 +893,11 @@ impl MainWindow {
         )
         .fitted(SplitForm::body_width(ctx))
         .show(ctx, dialog, |ui, form| {
-            form.show(ui, i18n, theme, preferences.inline_completion);
+            form.show(ui, i18n, theme, view, preferences.inline_completion);
         });
+        dialog
+            .form
+            .show_new_category(ctx, i18n, theme, commands, view);
         match outcome {
             DialogOutcome::Open => {}
             DialogOutcome::Accepted => {

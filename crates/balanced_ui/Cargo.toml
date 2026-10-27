@@ -175,6 +175,10 @@ name = "split_dialog"
 required-features = ["test-support"]
 
 [[test]]
+name = "split_new_category"
+required-features = ["test-support"]
+
+[[test]]
 name = "transfer"
 required-features = ["test-support"]
 
