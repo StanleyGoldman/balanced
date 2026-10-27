@@ -229,10 +229,14 @@ fn the_actions_column_heading_is_blank() {
 }
 
 #[test]
-fn tab_from_the_last_editable_cell_moves_through_save_cancel_split_and_more() {
+fn tab_from_the_last_editable_cell_of_a_changed_row_moves_through_save_cancel_split_and_more() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
-    open_last_cell(&mut harness);
+    rename_fresh_market(&mut harness);
+    // Payee, Category, Memo, Payment, then Deposit.
+    for _ in 0..4 {
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+    }
 
     let mut reached = Vec::new();
     for _ in 0..4 {
@@ -245,12 +249,30 @@ fn tab_from_the_last_editable_cell_moves_through_save_cancel_split_and_more() {
 }
 
 #[test]
-fn shift_tab_from_save_goes_back_to_the_last_editable_cell() {
+fn tab_from_the_last_editable_cell_of_an_unchanged_row_moves_through_split_and_more() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     open_last_cell(&mut harness);
-    press(&mut harness, Modifiers::NONE, Key::Tab);
-    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    let mut reached = Vec::new();
+    for _ in 0..2 {
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+        reached.push(focused_button(&harness).unwrap_or_default());
+    }
+
+    assert_eq!(reached, ["Split", "More actions"]);
+    assert!(!editing(&harness));
+}
+
+#[test]
+fn shift_tab_from_save_goes_back_to_the_last_editable_cell() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    rename_fresh_market(&mut harness);
+    // Payee, Category, Memo, Payment, Deposit, then Save and Cancel.
+    for _ in 0..6 {
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+    }
 
     press(&mut harness, Modifiers::SHIFT, Key::Tab);
     let back_one = focused_button(&harness);
@@ -261,11 +283,24 @@ fn shift_tab_from_save_goes_back_to_the_last_editable_cell() {
 }
 
 #[test]
+fn shift_tab_from_split_of_an_unchanged_row_goes_back_to_the_last_editable_cell() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    open_last_cell(&mut harness);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    press(&mut harness, Modifiers::SHIFT, Key::Tab);
+
+    assert_eq!(editor(&harness, "Deposit").as_deref(), Some(""));
+}
+
+#[test]
 fn tab_from_more_goes_round_to_the_rows_first_cell() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     open_last_cell(&mut harness);
-    for _ in 0..4 {
+    // Split, then More.
+    for _ in 0..2 {
         press(&mut harness, Modifiers::NONE, Key::Tab);
     }
 
@@ -406,8 +441,8 @@ fn tab_on_the_draft_row_skips_its_disabled_more_and_goes_round_to_its_date() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");
     // From the draft row's Date: Num, Payee, Category, Memo, Payment, Deposit, then
-    // Add, Cancel and Split.
-    for _ in 0..9 {
+    // Split, as the empty row's Add and Cancel are disabled.
+    for _ in 0..7 {
         press(&mut harness, Modifiers::NONE, Key::Tab);
     }
     let on_split = focused_button(&harness);
@@ -475,4 +510,79 @@ fn cancel_on_the_draft_row_empties_it() {
 
     assert!(!shows(&harness, "Corner Cafe"));
     assert!(!editing(&harness));
+}
+
+/// Whether the button labelled `label` is enabled.
+fn enabled(harness: &Harness<'static, App>, label: &str) -> bool {
+    !harness
+        .get_by_role_and_label(Role::Button, label)
+        .accesskit_node()
+        .is_disabled()
+}
+
+/// Whether each of the editing row's Save, Cancel, Split and More actions buttons is
+/// enabled.
+fn enabled_buttons(harness: &Harness<'static, App>) -> [bool; 4] {
+    ["Save", "Cancel", "Split", "More actions"].map(|label| enabled(harness, label))
+}
+
+#[test]
+fn an_unchanged_editing_row_disables_save_and_cancel() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    assert_eq!(enabled_buttons(&harness), [false, false, true, true]);
+}
+
+#[test]
+fn changing_a_value_enables_save_and_cancel() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+
+    rename_fresh_market(&mut harness);
+
+    assert_eq!(enabled_buttons(&harness), [true, true, true, true]);
+}
+
+#[test]
+fn moving_through_cells_without_changing_one_leaves_save_disabled() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+    press(&mut harness, Modifiers::NONE, Key::Enter);
+
+    // Payee, Category, then Memo.
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert!(!enabled(&harness, "Save"));
+}
+
+#[test]
+fn typing_back_the_saved_value_disables_save_again() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    click_cell(&mut harness, "Fresh Market");
+
+    // Typing opens the cell holding just the typed text, the saved payee.
+    type_text(&mut harness, "Fresh Market");
+
+    assert!(!enabled(&harness, "Save"));
+}
+
+#[test]
+fn an_empty_draft_row_disables_add_and_cancel() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+
+    // From the draft row's Date, Tab opens Num, leaving the row empty.
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+
+    assert_eq!(
+        ["Add", "Cancel"].map(|label| enabled(&harness, label)),
+        [false, false]
+    );
 }
