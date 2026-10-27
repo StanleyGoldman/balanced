@@ -139,6 +139,15 @@ struct LineForm {
     amount: String,
 }
 
+/// The New Category Dialog a line's Create row opened, and the line waiting for it to
+/// close.
+#[derive(Debug, Clone)]
+struct LineNewCategory {
+    dialog: OpenDialog<NewCategoryForm>,
+    /// The key of the line that asked for the category.
+    line: usize,
+}
+
 /// Why Done didn't close the Dialog, shown below the lines until a field changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SplitError {
@@ -182,10 +191,7 @@ pub(crate) struct SplitForm {
     account: AccountId,
     /// The New Category Dialog a line's Create row opened over this one, while it is
     /// open.
-    new_category: Option<OpenDialog<NewCategoryForm>>,
-    /// The key of the line whose Create row opened the New Category Dialog, which waits
-    /// for it to close.
-    awaiting_category: Option<usize>,
+    new_category: Option<LineNewCategory>,
     /// Where keyboard focus goes back to once the New Category Dialog has closed.
     focus_return: Option<FocusReturn>,
 }
@@ -224,7 +230,6 @@ impl SplitForm {
             focus: None,
             account,
             new_category: None,
-            awaiting_category: None,
             focus_return: None,
         };
         for line in &start.lines {
@@ -592,17 +597,17 @@ impl SplitForm {
                 line.category.set_text(text);
                 line.category.close_list();
             }
-            Some(ListRow::Create(name)) => {
-                line.category.drop_completion();
-                line.category.close_list();
-                create = Some(name);
-            }
+            Some(ListRow::Create(name)) => create = Some(name),
             None => {}
         }
         if let Some(name) = create {
-            self.awaiting_category = Some(line.key);
-            let form = NewCategoryForm::new(name);
-            self.new_category = Some(OpenDialog::new(ui.ctx(), form));
+            // The typed text stays in the field while New Category is open.
+            line.category.drop_completion();
+            line.category.close_list();
+            self.new_category = Some(LineNewCategory {
+                dialog: OpenDialog::new(ui.ctx(), NewCategoryForm::new(name)),
+                line: line.key,
+            });
         }
     }
 
@@ -616,14 +621,13 @@ impl SplitForm {
         commands: &CommandSender,
         view: &LedgerView,
     ) {
-        let Some(dialog) = &mut self.new_category else {
+        let Some(open) = &mut self.new_category else {
             return;
         };
-        match new_category::show(ctx, i18n, theme, commands, dialog, view) {
+        match new_category::show(ctx, i18n, theme, commands, &mut open.dialog, view) {
             NewCategoryOutcome::Open => {}
             NewCategoryOutcome::Cancelled => {
-                self.focus_return = self.new_category.take().map(|dialog| dialog.close(ctx));
-                self.awaiting_category = None;
+                self.focus_return = self.new_category.take().map(|open| open.dialog.close(ctx));
             }
         }
     }
@@ -637,20 +641,19 @@ impl SplitForm {
         ctx: &egui::Context,
         applied: Result<(), DomainError>,
     ) -> Option<Result<(), DomainError>> {
-        let Some(dialog) = &mut self.new_category else {
+        let Some(open) = &mut self.new_category else {
             return Some(applied);
         };
         if let Err(error) = applied {
-            dialog.form.rejected(error);
+            open.dialog.form.rejected(error);
             return None;
         }
+        let LineNewCategory { mut dialog, line } = self.new_category.take()?;
+        // Lines can't be removed while New Category is open over them, and the form
+        // holds the path of the category it asked for until it is taken here.
         let path = dialog.form.take_created_path();
-        self.focus_return = self.new_category.take().map(|dialog| dialog.close(ctx));
-        let key = self.awaiting_category.take();
-        if let (Some(path), Some(line)) = (
-            path,
-            self.lines.iter_mut().find(|line| Some(line.key) == key),
-        ) {
+        self.focus_return = Some(dialog.close(ctx));
+        if let (Some(path), Some(line)) = (path, self.lines.iter_mut().find(|l| l.key == line)) {
             line.category.set_text(&path);
         }
         None
@@ -767,8 +770,7 @@ fn amount_text_field(ui: &mut egui::Ui, text: &mut String, id: Id, label: &str) 
 /// `list` gives: the arrows as [`ComboText::arrow_keys`] takes them, and while the
 /// list is open, Esc closes it and Enter takes its highlighted row. The keys it acts on
 /// go no further, so Esc and Enter close the Dialog only while the list is closed.
-/// Returns the name to create when Enter takes the Create row, which keeps the typed
-/// text.
+/// Returns the name to create when Enter takes the Create row.
 fn list_keys<'a>(
     ctx: &egui::Context,
     combo: &mut ComboText,
@@ -787,8 +789,6 @@ fn list_keys<'a>(
         combo.drop_completion();
     } else if enter {
         if let Some(ListRow::Create(name)) = combo.highlighted(&list) {
-            combo.drop_completion();
-            combo.close_list();
             return Some(name);
         }
         combo.take_highlighted(&list);

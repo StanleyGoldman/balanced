@@ -181,6 +181,7 @@ fn done_after_creating_a_category_saves_the_split_with_it() {
     fill(&mut harness, "Line 3 amount", "42.37");
 
     click_button(&mut harness, "Done");
+    // Done closed the Split dialog, so it took the new category.
     assert_eq!(field(&harness, "Line 1 category"), None);
     click_button(&mut harness, "Save");
     press(&mut harness, Key::Escape);
@@ -237,6 +238,17 @@ fn escape_in_new_category_cancels_it_and_keeps_the_split_dialog_open() {
     let mut harness = new_category_for("Pets");
 
     press(&mut harness, Key::Escape);
+
+    assert_eq!(field(&harness, "Name"), None);
+    assert_eq!(field(&harness, "Line 3 category").as_deref(), Some("Pets"));
+    assert_eq!(costco_lines(&harness), costco_split());
+}
+
+#[test]
+fn enter_in_new_category_creates_it_and_keeps_the_split_dialog_open() {
+    let mut harness = new_category_for("Pets");
+
+    press(&mut harness, Key::Enter);
 
     assert_eq!(field(&harness, "Name"), None);
     assert_eq!(field(&harness, "Line 3 category").as_deref(), Some("Pets"));
