@@ -713,6 +713,32 @@ fn discard_in_the_prompt_a_split_click_raised_drops_the_changes_and_opens_the_sp
 }
 
 #[test]
+fn add_in_the_prompt_a_split_click_raised_on_the_draft_row_opens_the_split_dialog() {
+    let mut harness = app();
+    open(&mut harness, "Everyday Checking");
+    for c in "10/15/2026".chars() {
+        type_text(&mut harness, &c.to_string());
+    }
+    // Date, Num, Payee, then Category, Memo, Payment.
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    type_text(&mut harness, "Corner Shop");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    type_text(&mut harness, "Food & Dining:Groceries");
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    press(&mut harness, Modifiers::NONE, Key::Tab);
+    type_text(&mut harness, "12.00");
+    click_cell(&mut harness, "[Split]");
+
+    harness.get_by_role_and_label(Role::Button, "Add").click();
+    // The post, then the Split dialog it asks for: more frames than `run` allows.
+    harness.run_steps(8);
+
+    assert_eq!(cells(&harness, "Corner Shop"), 1);
+    assert_eq!(lines(&harness), costco_lines());
+}
+
+#[test]
 fn continue_editing_in_the_prompt_a_split_click_raised_opens_nothing() {
     let mut harness = app();
     open(&mut harness, "Everyday Checking");

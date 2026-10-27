@@ -3556,12 +3556,11 @@ fn open_split_from_cell(
     column: RegisterColumn,
     commands: &CommandSender,
 ) -> bool {
-    let start = split_from_cell(row, column);
-    let split = start.is_some();
-    if let Some(start) = start {
-        commands.send(open_split_command(start));
-    }
-    split
+    let Some(start) = split_from_cell(row, column) else {
+        return false;
+    };
+    commands.send(open_split_command(start));
+    true
 }
 
 /// Opens the Split dialog on `row`'s lines, as the row shows them.
