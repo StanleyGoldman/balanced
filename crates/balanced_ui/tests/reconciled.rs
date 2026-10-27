@@ -646,6 +646,22 @@ fn change_the_rent_then_close(harness: &mut Harness<'static, App>) {
     close_window(harness);
 }
 
+/// Changes the rent's Payment and closes the window, as `change_the_rent_then_close`
+/// does, then answers the leave-row prompt with Save.
+fn change_the_rent_close_and_save(harness: &mut Harness<'static, App>) {
+    change_the_rent_then_close(harness);
+    dialog_button(harness, "Save").click();
+    harness.run();
+}
+
+/// The text in the open Payment cell editor, or `None` when it isn't open. A kept
+/// amount opens formatted: 1500 as 1,500.00.
+fn payment_editor(harness: &Harness<'static, App>) -> Option<String> {
+    harness
+        .query_by_role_and_label(Role::TextInput, "Payment")
+        .map(|node| node.accesskit_node().value().unwrap_or_default())
+}
+
 #[test]
 fn save_on_closing_with_a_changed_reconciled_amount_asks_to_confirm_it_first() {
     let mut harness = everyday_checking();
@@ -660,9 +676,7 @@ fn save_on_closing_with_a_changed_reconciled_amount_asks_to_confirm_it_first() {
 #[test]
 fn confirming_the_amount_on_closing_saves_it_and_closes_the_window() {
     let mut harness = everyday_checking();
-    change_the_rent_then_close(&mut harness);
-    dialog_button(&harness, "Save").click();
-    harness.run();
+    change_the_rent_close_and_save(&mut harness);
 
     let closed = click_and_closes(&mut harness, "Change Amount");
 
@@ -673,15 +687,13 @@ fn confirming_the_amount_on_closing_saves_it_and_closes_the_window() {
 #[test]
 fn cancelling_the_amount_confirm_on_closing_keeps_the_window_and_the_change() {
     let mut harness = everyday_checking();
-    change_the_rent_then_close(&mut harness);
-    dialog_button(&harness, "Save").click();
-    harness.run();
+    change_the_rent_close_and_save(&mut harness);
 
     let closed = click_and_closes(&mut harness, "Cancel");
 
     assert!(!closed);
     assert!(cursor_on(&harness, "Payment", "Maple Property Management"));
-    assert!(editing(&harness));
+    assert_eq!(payment_editor(&harness).as_deref(), Some("1,500.00"));
     assert!(!can_undo(&mut harness));
 }
 
@@ -732,9 +744,14 @@ fn turn_on_save_without_asking(harness: &mut Harness<'static, App>) {
 fn closing_with_save_without_asking_on_asks_to_confirm_a_reconciled_amount() {
     let mut harness = everyday_checking();
     turn_on_save_without_asking(&mut harness);
+    click_cell(&mut harness, "Payment", "Maple Property Management");
+    type_text(&mut harness, "1500");
 
-    change_the_rent_then_close(&mut harness);
+    request_close(&mut harness);
+    let closed = closes(&mut harness);
+    harness.run();
 
+    assert!(!closed);
     assert!(asks(&harness, RENT_CONFIRM));
 }
 
@@ -760,7 +777,7 @@ fn cancelling_the_amount_confirm_with_save_without_asking_on_keeps_the_window() 
 
     assert!(!closed);
     assert!(cursor_on(&harness, "Payment", "Maple Property Management"));
-    assert!(editing(&harness));
+    assert_eq!(payment_editor(&harness).as_deref(), Some("1,500.00"));
     assert!(!can_undo(&mut harness));
 }
 
@@ -773,6 +790,8 @@ fn closing_with_save_without_asking_on_and_a_changed_reconciled_memo_closes() {
     // The close's frame leaves the row, and the next ones save it and close.
     request_close(&mut harness);
     let closed = closes(&mut harness);
+    harness.run();
 
     assert!(closed);
+    assert!(can_undo(&mut harness));
 }
