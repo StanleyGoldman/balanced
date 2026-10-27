@@ -890,6 +890,19 @@ pub(crate) struct Register {
 }
 
 impl Register {
+    /// PROTOTYPE #462: whether `row` holds a change not yet saved: its own changes, or
+    /// an open cell on it whose text differs from its saved text.
+    fn proto_row_dirty(&self, row: RowId) -> bool {
+        let cell_changed = match &self.edit {
+            Some(Edit::Text(edit)) if edit.cell.row == row => self
+                .proto_saved_text
+                .as_ref()
+                .is_none_or(|(cell, saved)| *cell != edit.cell || edit.combo.text() != saved),
+            Some(Edit::Text(_) | Edit::Date(_)) | None => false,
+        };
+        self.unsaved.is_changed(row) || cell_changed
+    }
+
     /// PROTOTYPE #462: whether the Register holds a change not yet saved: a changed row,
     /// a filled draft, or an open cell whose text differs from its saved text. Moving
     /// through cells with Tab leaves it clean.
@@ -2229,6 +2242,8 @@ impl Register {
         let inner = Rect::from_x_y_ranges(left + Theme::ROW_BUTTON_GAP..=right, y_range);
         let viewport = frame.viewport;
         let register_id = frame.register_id;
+        // PROTOTYPE #462: Save and Cancel wait for the row to change.
+        let enabled = !proto::is(Setting::CleanButtons, 1) || self.proto_row_dirty(row.id());
         let draw = |strip_ui: &mut egui::Ui| {
             strip_ui.set_clip_rect(strip.intersect(viewport));
             // Assistive technology reads the buttons as one group, the row's toolbar.
@@ -2254,6 +2269,7 @@ impl Register {
                 self.focus_button,
                 compact,
                 &overflow,
+                enabled,
             )
         };
         let shown = if below {
@@ -5091,8 +5107,15 @@ fn edit_buttons(
     focus: Option<RowButton>,
     compact: bool,
     overflow: &[RowButton],
+    enabled: bool,
 ) -> ButtonsShown {
     let draft = row.id() == RowId::Draft;
+    // PROTOTYPE #462: a disabled button can't take the keyboard, so Split takes the
+    // focus meant for Save or Cancel.
+    let focus = match focus {
+        Some(RowButton::Save | RowButton::Cancel) if !enabled => Some(RowButton::Split),
+        focus => focus,
+    };
     let mut ids = [Id::NULL; 4];
     let mut pressed = None;
     let mut action = None;
@@ -5101,9 +5124,13 @@ fn edit_buttons(
             continue;
         }
         let response = match button {
-            RowButton::Save if draft => ui.button(fl!(i18n, "register-row-add")),
-            RowButton::Save => ui.button(fl!(i18n, "register-row-save")),
-            RowButton::Cancel => ui.button(fl!(i18n, "register-row-cancel")),
+            RowButton::Save if draft => {
+                ui.add_enabled(enabled, Button::new(fl!(i18n, "register-row-add")))
+            }
+            RowButton::Save => ui.add_enabled(enabled, Button::new(fl!(i18n, "register-row-save"))),
+            RowButton::Cancel => {
+                ui.add_enabled(enabled, Button::new(fl!(i18n, "register-row-cancel")))
+            }
             // PROTOTYPE #469 B: Split and More as labelled icon buttons.
             RowButton::Split if compact => {
                 let label = fl!(i18n, "register-row-split");

@@ -26,6 +26,7 @@ pub enum Setting {
     PayeeRecallAgain,
     Locale,
     FocusAfterFlagClr,
+    CleanButtons,
 }
 
 pub struct SettingDef {
@@ -37,7 +38,7 @@ pub struct SettingDef {
     pub options: &'static [&'static str],
 }
 
-pub const SETTINGS: [SettingDef; 14] = [
+pub const SETTINGS: [SettingDef; 15] = [
     SettingDef {
         setting: Setting::EnterKey,
         id: "enter",
@@ -104,6 +105,14 @@ pub const SETTINGS: [SettingDef; 14] = [
             "Save, then stop: no undo",
             "off while the row is dirty; a hint says why",
         ],
+    },
+    SettingDef {
+        setting: Setting::CleanButtons,
+        id: "clean-buttons",
+        step: 5,
+        ticket: 462,
+        title: "Save and Cancel on an editing row with no changes",
+        options: &["enabled (today)", "disabled until the row changes"],
     },
     SettingDef {
         setting: Setting::SplitAfterPrompt,

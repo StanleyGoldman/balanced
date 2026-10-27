@@ -47,6 +47,7 @@
     clippy::disallowed_methods,
     clippy::collapsible_if,
     clippy::type_complexity,
+    clippy::too_many_arguments,
     clippy::string_slice,
     clippy::missing_docs_in_private_items
 )]
