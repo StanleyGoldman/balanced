@@ -157,9 +157,10 @@ impl RegisterColumn {
         column.clip(true)
     }
 
-    /// Whether the cell cursor can rest in the column. Balance is worked out from the
-    /// other cells, and Actions holds a menu.
-    fn holds_cursor(self) -> bool {
+    /// Whether the cell cursor can rest in the column's cell on `row`. Balance is
+    /// worked out from the other cells, Actions holds a menu, and the draft row's Clr
+    /// and Flag cells take no press.
+    fn holds_cursor(self, row: RowId) -> bool {
         match self {
             Self::Date
             | Self::Number
@@ -167,9 +168,8 @@ impl RegisterColumn {
             | Self::Category
             | Self::Memo
             | Self::Payment
-            | Self::Deposit
-            | Self::Clr
-            | Self::Flag => true,
+            | Self::Deposit => true,
+            Self::Clr | Self::Flag => row != RowId::Draft,
             Self::Balance | Self::Actions => false,
         }
     }
@@ -1486,13 +1486,34 @@ impl Register {
         }
     }
 
-    /// The columns the cell cursor can rest in, left to right.
-    fn cursor_columns(&self) -> Vec<RegisterColumn> {
+    /// The columns the cell cursor can rest in on `row`, left to right.
+    fn cursor_columns(&self, row: RowId) -> Vec<RegisterColumn> {
         self.shown
             .iter()
             .copied()
-            .filter(|column| column.holds_cursor())
+            .filter(|column| column.holds_cursor(row))
             .collect()
+    }
+
+    /// The column the cell cursor rests in on `row` when it comes from `column`:
+    /// `column` itself when the cursor can rest in it there, else the nearest column
+    /// to its left that it can, else the nearest to its right.
+    fn landing_column(&self, row: RowId, column: RegisterColumn) -> RegisterColumn {
+        if column.holds_cursor(row) {
+            return column;
+        }
+        let at = self
+            .shown
+            .iter()
+            .position(|&shown| shown == column)
+            .unwrap_or(0);
+        let (left, right) = self.shown.split_at(at);
+        left.iter()
+            .rev()
+            .chain(right)
+            .copied()
+            .find(|shown| shown.holds_cursor(row))
+            .unwrap_or(RegisterColumn::Date)
     }
 
     /// The columns of `row`'s cells Tab stops on, left to right, or none when the row
@@ -1501,7 +1522,7 @@ impl Register {
         let Some(row) = rows.find(row) else {
             return Vec::new();
         };
-        self.cursor_columns()
+        self.cursor_columns(row.id())
             .into_iter()
             .filter(|column| column.stops_tab(row))
             .collect()
@@ -1510,7 +1531,7 @@ impl Register {
     /// Whether `step`, a Tab move from `cursor`, goes into the editing row's buttons:
     /// a Tab forward from a cell with no Tab stop after it in its row.
     fn tabs_into_buttons(&self, cursor: CellAddress, step: Move, rows: Rows<'_>) -> bool {
-        let columns = self.cursor_columns();
+        let columns = self.cursor_columns(cursor.row);
         let Some(at) = columns.iter().position(|&column| column == cursor.column) else {
             return false;
         };
@@ -2372,13 +2393,16 @@ impl Register {
     }
 
     /// Puts the cell cursor on a click in `column` of `row`. A click in a column the
-    /// cursor can't rest in keeps the cursor's column.
+    /// cursor can't rest in on `row` keeps the cursor's column, or the nearest one it
+    /// can rest in there.
     fn place_cursor(&mut self, row: RowId, column: RegisterColumn) {
-        let column = if column.holds_cursor() {
+        let column = if column.holds_cursor(row) {
             column
         } else {
-            self.cursor
-                .map_or(RegisterColumn::Date, |cursor| cursor.column)
+            let kept = self
+                .cursor
+                .map_or(RegisterColumn::Date, |cursor| cursor.column);
+            self.landing_column(row, kept)
         };
         self.cursor = Some(CellAddress { row, column });
         self.tab_rest = None;
@@ -2931,30 +2955,39 @@ impl Register {
     }
 
     /// Moves the cell cursor from `cursor` by `step`. Returns `None`, leaving the
-    /// cursor where it is, when there is nowhere to go.
+    /// cursor where it is, when there is nowhere to go. A move up or down lands in the
+    /// column [`Self::landing_column`] picks on the row it moves to.
     fn move_cursor(&mut self, cursor: CellAddress, step: Move, rows: Rows<'_>) -> Option<Moved> {
-        let columns = self.cursor_columns();
+        let columns = self.cursor_columns(cursor.row);
         let row = rows.position(cursor.row)?;
         let column = columns.iter().position(|&column| column == cursor.column)?;
+        let in_row = |column: usize| columns.get(column).copied();
+        let into_row =
+            |row: usize| Some((row, self.landing_column(rows.get(row)?.id(), cursor.column)));
         let (row, column) = match step {
-            Move::Up => (row.checked_sub(1)?, column),
-            Move::Down => (row + 1, column),
-            Move::Left => (row, column.checked_sub(1)?),
-            Move::Right => (row, column + 1),
+            Move::Up => into_row(row.checked_sub(1)?)?,
+            Move::Down => into_row(row + 1)?,
+            Move::Left => (row, in_row(column.checked_sub(1)?)?),
+            Move::Right => (row, in_row(column + 1)?),
             Move::Next => {
-                if column + 1 < columns.len() {
-                    (row, column + 1)
+                if let Some(column) = in_row(column + 1) {
+                    (row, column)
                 } else {
-                    (row + 1, 0)
+                    let next = rows.get(row + 1)?.id();
+                    (row + 1, *self.cursor_columns(next).first()?)
                 }
             }
             Move::NextStop | Move::PreviousStop => {
-                let width = columns.len();
-                let start = row * width + column;
+                // The grid spans every column shown, so each row's Tab stops sit at
+                // the same width.
+                let shown = &self.shown;
+                let width = shown.len();
+                let at = shown.iter().position(|&column| column == cursor.column)?;
+                let start = row * width + at;
                 let stops_tab = |position: usize| {
                     rows.get(position / width).is_some_and(|row| {
                         // The remainder of a division by the width is a column index.
-                        columns[position % width].stops_tab(row)
+                        shown[position % width].stops_tab(row)
                     })
                 };
                 let position = if step == Move::NextStop {
@@ -2962,12 +2995,12 @@ impl Register {
                 } else {
                     (0..start).rev().find(|&position| stops_tab(position))?
                 };
-                (position / width, position % width)
+                (position / width, shown[position % width])
             }
         };
         let address = CellAddress {
             row: rows.get(row)?.id(),
-            column: *columns.get(column)?,
+            column,
         };
         self.cursor = Some(address);
         self.tab_rest = None;
@@ -3267,7 +3300,7 @@ impl Register {
                 .and_then(|index| keys.rows.get(index + 1))
                 .map(|row| CellAddress {
                     row: row.id(),
-                    column: cursor.column,
+                    column: self.landing_column(row.id(), cursor.column),
                 }),
             AfterEnter::SameRow => None,
         };
