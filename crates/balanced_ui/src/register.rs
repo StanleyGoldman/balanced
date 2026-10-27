@@ -1182,9 +1182,10 @@ impl Register {
     /// closing. The cell being edited is kept in its row first. A changed row is not
     /// left: the leave-row prompt asks about it, or, with "Save a changed transaction
     /// without asking" on, it saves, and `then` is sent once the row is saved or its
-    /// changes thrown away. Once the prompt is answered Save or Discard, and while a save
-    /// is on its way, `then` takes the place of what left the row before it, and
-    /// of the cell that move opened, so only the latest leave goes on.
+    /// changes thrown away. While the prompt is open, once it is answered Save or
+    /// Discard, and while a save is on its way, `then` takes the place of what left the
+    /// row before it, and of the cell that move opened, so only the latest leave goes
+    /// on.
     pub(crate) fn leave(
         &mut self,
         ctx: &egui::Context,
@@ -1194,7 +1195,7 @@ impl Register {
         then: AppCommand,
     ) -> bool {
         if let Some(leaving) = &mut self.leaving
-            && leaving.chose_to_leave()
+            && leaving.takes_later_leaves()
         {
             leaving.then = Some(then);
             leaving.resume = None;
@@ -3858,14 +3859,14 @@ struct Leaving {
 }
 
 impl Leaving {
-    /// Whether the user chose to leave the row: the prompt was answered Save or
-    /// Discard, or the save it chose is on its way.
-    fn chose_to_leave(&self) -> bool {
+    /// Whether a later leave takes the place of what left the row: the prompt is
+    /// open, or was answered Save or Discard, or the save it chose is on its way.
+    fn takes_later_leaves(&self) -> bool {
         match self.step {
-            LeaveStep::Answered(LeaveAnswer::Save | LeaveAnswer::Discard) | LeaveStep::Saving => {
-                true
-            }
-            LeaveStep::Asked | LeaveStep::Answered(LeaveAnswer::ContinueEditing) => false,
+            LeaveStep::Asked
+            | LeaveStep::Answered(LeaveAnswer::Save | LeaveAnswer::Discard)
+            | LeaveStep::Saving => true,
+            LeaveStep::Answered(LeaveAnswer::ContinueEditing) => false,
         }
     }
 
