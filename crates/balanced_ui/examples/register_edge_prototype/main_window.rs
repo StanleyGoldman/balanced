@@ -285,6 +285,13 @@ impl MainWindow {
         }
     }
 
+    /// PROTOTYPE #462: whether Undo and Redo are off: the setting says so and the open
+    /// Register holds a change not yet saved.
+    pub(crate) fn proto_undo_blocked(&self) -> bool {
+        crate::proto::is(crate::proto::Setting::UndoPrompt, 3)
+            && self.register().is_some_and(Register::proto_dirty)
+    }
+
     /// Whether the Main view shows a Register: the Accounts tab is active and a
     /// Register is open.
     fn shows_register(&self) -> bool {
@@ -295,8 +302,9 @@ impl MainWindow {
     /// can't.
     fn can_act(&self, action: UserAction, view: &LedgerView) -> bool {
         match action {
-            UserAction::Undo => view.can_undo(),
-            UserAction::Redo => view.can_redo(),
+            // PROTOTYPE #462: Undo and Redo are off while the Register holds a change.
+            UserAction::Undo => view.can_undo() && !self.proto_undo_blocked(),
+            UserAction::Redo => view.can_redo() && !self.proto_undo_blocked(),
             UserAction::NewTransaction
             | UserAction::GoToDate
             | UserAction::DeleteTransaction

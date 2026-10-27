@@ -420,6 +420,14 @@ impl App {
                     self.main_window.form_applied(ctx, result);
                 }
             }
+            // PROTOTYPE #462: with the Register dirty, Undo and Redo only say why not.
+            AppCommand::Undo | AppCommand::Redo if self.main_window.proto_undo_blocked() => {
+                crate::proto::decided(
+                    crate::proto::Setting::UndoPrompt,
+                    "Undo/Redo refused: the row has unsaved changes",
+                );
+                crate::proto::notice("Save or discard the row's changes to undo or redo");
+            }
             AppCommand::Undo => {
                 if self.leave_editing_row(ctx, AppCommand::Undo)
                     && let Session::Open { ledger, .. } = &mut self.session

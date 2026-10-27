@@ -102,6 +102,7 @@ pub const SETTINGS: [SettingDef; 14] = [
             "prompt as built: Save then undo (today)",
             "prompt offers Discard and Continue editing only",
             "Save, then stop: no undo",
+            "off while the row is dirty; a hint says why",
         ],
     },
     SettingDef {

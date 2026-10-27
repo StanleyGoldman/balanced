@@ -884,9 +884,27 @@ pub(crate) struct Register {
     proto_rows: HashMap<RowId, usize>,
     /// PROTOTYPE #469: the right edge of the editable cells drawn so far in this row.
     proto_editable_right: f32,
+    /// PROTOTYPE #462: the open cell and its saved text, to tell a changed cell from one
+    /// only moved through.
+    proto_saved_text: Option<(CellAddress, String)>,
 }
 
 impl Register {
+    /// PROTOTYPE #462: whether the Register holds a change not yet saved: a changed row,
+    /// a filled draft, or an open cell whose text differs from its saved text. Moving
+    /// through cells with Tab leaves it clean.
+    pub(crate) fn proto_dirty(&self) -> bool {
+        let row_changed = self.unsaved.changes.is_some() || self.unsaved.draft != Draft::default();
+        let cell_changed = match &self.edit {
+            Some(Edit::Text(edit)) => self
+                .proto_saved_text
+                .as_ref()
+                .is_none_or(|(cell, saved)| *cell != edit.cell || edit.combo.text() != saved),
+            Some(Edit::Date(_)) | None => false,
+        };
+        row_changed || cell_changed
+    }
+
     /// PROTOTYPE: the log's name for `column`'s cell on `row`.
     fn cell_name(&self, row: RowId, column: RegisterColumn) -> String {
         match row {
@@ -3170,6 +3188,7 @@ impl Register {
                 (row.amount_text_on(side), field)
             }
         };
+        self.proto_saved_text = Some((cursor, saved.to_owned()));
         let text = match start {
             EditStart::Saved => saved.to_owned(),
             EditStart::Empty => String::new(),
