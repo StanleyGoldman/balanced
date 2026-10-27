@@ -887,6 +887,8 @@ pub(crate) struct Register {
     /// PROTOTYPE #462: the open cell and its saved text, to tell a changed cell from one
     /// only moved through.
     proto_saved_text: Option<(CellAddress, String)>,
+    /// PROTOTYPE #443: whether a row button had the keyboard as this frame began.
+    proto_buttons_focused: bool,
 }
 
 impl Register {
@@ -989,6 +991,7 @@ impl Register {
     /// frame's are found from here on.
     fn editing_row_for_drawing(&mut self, ctx: &egui::Context) -> Option<RowId> {
         let editing = self.editing_row(ctx);
+        self.proto_buttons_focused = self.focused_button(ctx).is_some();
         self.buttons = None;
         editing
     }
@@ -2126,8 +2129,7 @@ impl Register {
             selected: self.cursor.is_some_and(|cursor| cursor.row == row.id()),
             // PROTOTYPE #443: the cell cursor hides while a row button has the keyboard.
             cursor: self.cursor == Some(address)
-                && !(proto::is(Setting::CursorWhileButtons, 1)
-                    && self.focused_button(ui.ctx()).is_some()),
+                && !(proto::is(Setting::CursorWhileButtons, 1) && self.proto_buttons_focused),
             cover,
             access,
             viewport,
