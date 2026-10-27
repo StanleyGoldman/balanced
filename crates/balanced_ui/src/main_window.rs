@@ -275,6 +275,11 @@ impl MainWindow {
         }
     }
 
+    /// Whether the open Register has a row with changes not yet saved.
+    fn has_unsaved_row(&self) -> bool {
+        self.register().is_some_and(Register::has_unsaved_changes)
+    }
+
     /// Whether the Main view shows a Register: the Accounts tab is active and a
     /// Register is open.
     fn shows_register(&self) -> bool {
@@ -285,8 +290,8 @@ impl MainWindow {
     /// can't.
     fn can_act(&self, action: UserAction, view: &LedgerView) -> bool {
         match action {
-            UserAction::Undo => view.can_undo(),
-            UserAction::Redo => view.can_redo(),
+            UserAction::Undo => view.can_undo() && !self.has_unsaved_row(),
+            UserAction::Redo => view.can_redo() && !self.has_unsaved_row(),
             UserAction::NewTransaction
             | UserAction::GoToDate
             | UserAction::DeleteTransaction
@@ -670,14 +675,15 @@ impl MainWindow {
 
     /// The Main window Shortcuts that act now. No Shortcut acts behind a Dialog, except
     /// Undo and Redo behind a Dialog whose changes apply as soon as they're confirmed,
-    /// while nothing is open over it. The Category List is the one such Dialog.
+    /// while nothing is open over it. The Category List is the one such Dialog. Undo
+    /// and Redo don't act while a Register row has changes not yet saved.
     fn shortcuts(&self) -> Vec<Binding> {
         let list_on_top = self
             .category_list
             .as_ref()
             .is_some_and(|dialog| !dialog.form.has_dialog_over())
             && !self.dialog_open_besides_category_list();
-        if list_on_top {
+        let mut bindings = if list_on_top {
             KEYMAP
                 .iter()
                 .copied()
@@ -687,7 +693,11 @@ impl MainWindow {
             Vec::new()
         } else {
             KEYMAP.to_vec()
+        };
+        if self.has_unsaved_row() {
+            bindings.retain(|binding| !binding.action.steps_undo_history());
         }
+        bindings
     }
 
     /// Whether a Dialog is open over the Main window.

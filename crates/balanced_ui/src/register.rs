@@ -886,6 +886,12 @@ impl Register {
             })
     }
 
+    /// Whether a row holds changes not yet saved: a transaction's row with changes kept,
+    /// or a filled draft row. Undo and Redo wait until they are saved or thrown away.
+    pub(crate) fn has_unsaved_changes(&self) -> bool {
+        self.unsaved.reopened_cell().is_some()
+    }
+
     /// Whether Tab goes to the Register: it owns the keyboard, or one of the editing
     /// row's buttons has keyboard focus.
     pub(crate) fn takes_tab(&self, ctx: &egui::Context) -> bool {

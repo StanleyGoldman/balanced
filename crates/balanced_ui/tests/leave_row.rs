@@ -113,9 +113,21 @@ fn prompted(harness: &Harness<'static, App>) -> bool {
 /// Whether the Edit menu's Undo item is enabled, opening the menu to look and closing
 /// it again.
 fn can_undo(harness: &mut Harness<'static, App>) -> bool {
+    edit_item_enabled(harness, "Undo Ctrl+Z")
+}
+
+/// Whether the Edit menu's Redo item is enabled, opening the menu to look and closing
+/// it again.
+fn can_redo(harness: &mut Harness<'static, App>) -> bool {
+    edit_item_enabled(harness, "Redo Ctrl+Y")
+}
+
+/// Whether the Edit menu's item labelled `label` is enabled, opening the menu to look
+/// and closing it again.
+fn edit_item_enabled(harness: &mut Harness<'static, App>, label: &str) -> bool {
     click_button(harness, "Edit");
     let enabled = !harness
-        .get_by_role_and_label(Role::Button, "Undo Ctrl+Z")
+        .get_by_role_and_label(Role::Button, label)
         .accesskit_node()
         .is_disabled();
     click_button(harness, "Edit");
@@ -548,19 +560,20 @@ fn change_bean_there(harness: &mut Harness<'static, App>) {
 }
 
 #[test]
-fn ctrl_z_outside_a_text_field_asks_before_undoing() {
+fn ctrl_z_outside_a_text_field_of_a_changed_row_changes_nothing() {
     let mut harness = app();
     save_a_rename(&mut harness);
     change_bean_there(&mut harness);
 
     press(&mut harness, Modifiers::COMMAND, Key::Z);
 
-    assert!(prompted(&harness));
+    assert!(!prompted(&harness));
     assert!(shows(&harness, "Corner Shop"));
+    assert!(shows(&harness, "Cafe"));
 }
 
 #[test]
-fn ctrl_z_behind_the_category_list_asks_before_undoing() {
+fn ctrl_z_behind_the_category_list_of_a_changed_row_changes_nothing() {
     let mut harness = app();
     save_a_rename(&mut harness);
     change_bean_there(&mut harness);
@@ -573,7 +586,7 @@ fn ctrl_z_behind_the_category_list_asks_before_undoing() {
 
     press(&mut harness, Modifiers::COMMAND, Key::Z);
 
-    assert!(prompted(&harness));
+    assert!(!prompted(&harness));
     assert!(
         harness
             .query_by_role_and_label(Role::Window, "Category List")
@@ -583,20 +596,7 @@ fn ctrl_z_behind_the_category_list_asks_before_undoing() {
 }
 
 #[test]
-fn discard_before_an_undo_throws_the_changes_away_then_undoes() {
-    let mut harness = app();
-    save_a_rename(&mut harness);
-    change_bean_there(&mut harness);
-    press(&mut harness, Modifiers::COMMAND, Key::Z);
-
-    click_button(&mut harness, "Discard");
-
-    assert!(shows(&harness, "Fresh Market"));
-    assert!(shows(&harness, "Bean There"));
-}
-
-#[test]
-fn ctrl_y_outside_a_text_field_asks_before_redoing() {
+fn ctrl_y_outside_a_text_field_of_a_changed_row_changes_nothing() {
     let mut harness = app();
     save_a_rename(&mut harness);
     press(&mut harness, Modifiers::COMMAND, Key::Z);
@@ -604,47 +604,43 @@ fn ctrl_y_outside_a_text_field_asks_before_redoing() {
 
     press(&mut harness, Modifiers::COMMAND, Key::Y);
 
-    assert!(prompted(&harness));
+    assert!(!prompted(&harness));
     assert!(shows(&harness, "Fresh Market"));
+    assert!(shows(&harness, "Cafe"));
 }
 
 #[test]
-fn discard_before_a_redo_throws_the_changes_away_then_redoes() {
+fn edit_undo_is_disabled_on_a_changed_row() {
+    let mut harness = app();
+    save_a_rename(&mut harness);
+
+    change_bean_there(&mut harness);
+
+    assert!(!can_undo(&mut harness));
+}
+
+#[test]
+fn edit_redo_is_disabled_on_a_changed_row() {
     let mut harness = app();
     save_a_rename(&mut harness);
     press(&mut harness, Modifiers::COMMAND, Key::Z);
+
     change_bean_there(&mut harness);
-    press(&mut harness, Modifiers::COMMAND, Key::Y);
 
-    click_button(&mut harness, "Discard");
-
-    assert!(shows(&harness, "Corner Shop"));
-    assert!(shows(&harness, "Bean There"));
+    assert!(!can_redo(&mut harness));
 }
 
 #[test]
-fn edit_undo_with_a_changed_row_asks_first() {
+fn undo_after_saving_a_changed_row_undoes_that_save_alone() {
     let mut harness = app();
     save_a_rename(&mut harness);
     change_bean_there(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "Save").click();
+    harness.run();
 
     click_button(&mut harness, "Edit");
     click_button(&mut harness, "Undo Ctrl+Z");
 
-    assert!(prompted(&harness));
-}
-
-#[test]
-fn save_before_an_undo_saves_then_undoes_that_save() {
-    let mut harness = app();
-    save_a_rename(&mut harness);
-    change_bean_there(&mut harness);
-    click_button(&mut harness, "Edit");
-    click_button(&mut harness, "Undo Ctrl+Z");
-
-    click_button(&mut harness, "Save");
-
-    // The undo takes back the save just made, and nothing before it.
     assert!(shows(&harness, "Bean There"));
     assert!(shows(&harness, "Corner Shop"));
 }
