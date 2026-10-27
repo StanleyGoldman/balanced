@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-Balanced-Plugin-Exception
 
 //! Times one frame of the App showing Household Checking's Register, in the stub written
-//! to a data file, at the stub's size (20,000 transactions) and at ten times it: a frame
-//! with nothing to do, and the frame that applies a Command and rebuilds what it
-//! changed. The Command flags or unflags the transaction in the middle, which moves no
-//! balance, so the difference between the two is the Command's cost, which the Commands
-//! benchmark in `balanced_core` times, and the rebuilds.
+//! to a data file, at the stub's size (20,000 transactions), at a busy household's 30
+//! years (90,000) and at ten times the stub (200,000): a frame with nothing to do, and
+//! the frame that applies a Command and rebuilds what it changed. The Command flags or
+//! unflags the transaction in the middle, which moves no balance, so the difference
+//! between the two is the Command's cost, which the Commands benchmark in
+//! `balanced_core` times, and the rebuilds. It also times the frames that take a
+//! keystroke in the filter bar's Search box, and a click on the Payee heading, and show
+//! the rows they narrow or order.
 //!
 //! Run it in the `release` profile on a quiet machine, as `docs/practices/tooling.md`
 //! describes: `taskset -c 0 cargo bench -p balanced_ui --features test-support --bench
@@ -19,7 +22,7 @@ use balanced_ui::testing::send_domain;
 use balanced_ui::{App, Clock, PreferencesFile};
 use divan::Bencher;
 use eframe::egui::accesskit::Role;
-use eframe::egui::vec2;
+use eframe::egui::{Event, Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 use icu_calendar::Date;
@@ -29,13 +32,10 @@ fn main() {
     divan::main();
 }
 
-/// How many transactions the stub's generated account holds at 1×.
-const STUB_TRANSACTIONS: u32 = 20_000;
+/// The sizes timed: how many transactions the stub's generated account holds.
+const SIZES: [u32; 3] = [20_000, 90_000, 200_000];
 
-/// The sizes timed, as multiples of the stub's.
-const SCALES: [u32; 2] = [1, 10];
-
-/// The App on the stub at `scale` times its size, in a data file in a directory of its
+/// The App on the stub with `size` transactions in its generated account, in a data file in a directory of its
 /// own, showing Household Checking's Register.
 struct Window {
     harness: RefCell<Harness<'static, App>>,
@@ -49,14 +49,13 @@ struct Window {
 }
 
 impl Window {
-    fn new(scale: u32) -> Self {
+    fn new(size: u32) -> Self {
         // Under the build's own directory, so the data file is on disk, where a commit
         // pays for its fsync as the app's does, rather than in a RAM-backed `/tmp`.
         let directory =
             TempDir::new_in(env!("CARGO_TARGET_TMPDIR")).expect("a temporary directory");
         let path = directory.path().join("household.balanced");
-        let ledger = Ledger::create_stub(&path, STUB_TRANSACTIONS * scale)
-            .expect("the stub is written to a new file");
+        let ledger = Ledger::create_stub(&path, size).expect("the stub is written to a new file");
         let view = ledger.snapshot();
         let register = view
             .accounts()
@@ -98,17 +97,17 @@ impl Window {
 }
 
 /// A frame with no input and nothing changed.
-#[divan::bench(args = SCALES, sample_size = 1, sample_count = 30)]
-fn idle(bencher: Bencher<'_, '_>, scale: u32) {
-    let window = Window::new(scale);
+#[divan::bench(args = SIZES, sample_size = 1, sample_count = 30)]
+fn idle(bencher: Bencher<'_, '_>, size: u32) {
+    let window = Window::new(size);
     bencher.bench_local(|| window.harness.borrow_mut().step());
 }
 
 /// The frame that applies a Command flagging or unflagging the middle transaction, and
 /// rebuilds what the Register shows.
-#[divan::bench(args = SCALES, sample_size = 1, sample_count = 30)]
-fn after_a_command(bencher: Bencher<'_, '_>, scale: u32) {
-    let window = Window::new(scale);
+#[divan::bench(args = SIZES, sample_size = 1, sample_count = 30)]
+fn after_a_command(bencher: Bencher<'_, '_>, size: u32) {
+    let window = Window::new(size);
     bencher
         .with_inputs(|| {
             let flagged = !window.flagged.get();
@@ -122,4 +121,52 @@ fn after_a_command(bencher: Bencher<'_, '_>, scale: u32) {
             window.flagged.set(flagged);
         })
         .bench_local_values(|()| window.harness.borrow_mut().step());
+}
+
+/// The frames that take a keystroke in the Search box, typing `e` or deleting it, and
+/// show the rows the filter lets through. Most payees and categories hold an `e`.
+#[divan::bench(args = SIZES, sample_size = 1, sample_count = 30)]
+fn filter_keystroke(bencher: Bencher<'_, '_>, size: u32) {
+    let window = Window::new(size);
+    {
+        let mut harness = window.harness.borrow_mut();
+        harness
+            .get_by_role_and_label(Role::TextInput, "Search")
+            .focus();
+        harness.run();
+    }
+    let typed = Cell::new(false);
+    bencher
+        .with_inputs(|| {
+            let event = if typed.get() {
+                Event::Key {
+                    key: Key::Backspace,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Modifiers::NONE,
+                }
+            } else {
+                Event::Text("e".to_owned())
+            };
+            window.harness.borrow_mut().event(event);
+            typed.set(!typed.get());
+        })
+        .bench_local_values(|()| window.harness.borrow_mut().run());
+}
+
+/// The frames that take a click on the Payee heading, which sorts by payee or reverses
+/// that sort, and show the rows in the new order.
+#[divan::bench(args = SIZES, sample_size = 1, sample_count = 30)]
+fn sort_by_payee(bencher: Bencher<'_, '_>, size: u32) {
+    let window = Window::new(size);
+    bencher
+        .with_inputs(|| {
+            window
+                .harness
+                .borrow()
+                .get_by_role_and_label(Role::ColumnHeader, "Payee")
+                .click();
+        })
+        .bench_local_values(|()| window.harness.borrow_mut().run());
 }

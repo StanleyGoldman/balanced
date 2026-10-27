@@ -171,14 +171,9 @@ pub(crate) struct Matcher<'a> {
 }
 
 impl Matcher<'_> {
-    /// Whether `row` is shown. Its payee, category and memo are searched, and so are
-    /// `split_targets`, the text of a split transaction's lines' targets: a category's
-    /// path, or `[Account]` for a transfer.
-    pub(crate) fn shows<'s>(
-        &self,
-        row: &RegisterRow,
-        split_targets: impl IntoIterator<Item = &'s str>,
-    ) -> bool {
+    /// Whether `row` is shown. Its payee, category and memo are searched, and so is
+    /// the text of a split transaction's lines' targets.
+    pub(crate) fn shows(&self, row: &RegisterRow) -> bool {
         if row.transaction().is_some_and(|id| self.kept.contains(&id)) {
             return true;
         }
@@ -187,7 +182,7 @@ impl Matcher<'_> {
             || found(row.payee())
             || found(row.category())
             || found(row.memo())
-            || split_targets.into_iter().any(found);
+            || row.split_targets().any(found);
         let dated = self
             .dates
             .is_none_or(|bounds| row.saved_date().is_some_and(|date| bounds.contains(date)));

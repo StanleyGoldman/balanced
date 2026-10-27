@@ -9,7 +9,7 @@ use balanced_core::{
     Account, AccountId, AccountKind, AccountSummary, ClearedStatus, CurrencyCode, DomainCommand,
     DomainError, LedgerView, Money, TransactionEdit, TransactionId,
 };
-use balanced_i18n::{AmountParseError, AmountReader, Localizer};
+use balanced_i18n::{AmountParseError, AmountReader, AmountStyle, Localizer};
 use eframe::egui::accesskit::{self, Role};
 use eframe::egui::emath::GuiRounding as _;
 use eframe::egui::text::{CCursor, CCursorRange};
@@ -30,7 +30,7 @@ use crate::command::{AnswerTo, AppCommand, CommandSender, DialogKind, RowSave, S
 use crate::date_field::{self, DateEdit};
 use crate::draft_row::{Draft, Missing};
 use crate::field_keys::FieldKeys;
-use crate::formatted_amount::i18n_currency;
+use crate::formatted_amount::{FormattedAmount, i18n_currency};
 use crate::i18n::fl;
 use crate::keypad::{self, Keypad};
 use crate::preferences::Preferences;
@@ -1808,11 +1808,20 @@ impl Register {
             today,
             today_divider,
         };
+        let account = summary.account().id();
         match self.model.take() {
-            Some(model) if model.is_current(summary.account().id(), view, shown, i18n) => {
-                (model, false)
+            Some(model) if model.is_current(account, view, shown, i18n) => (model, false),
+            earlier => {
+                let summary = view
+                    .accounts()
+                    .iter()
+                    .find(|shared| shared.account().id() == account)
+                    .expect("the Register's account is in its snapshot");
+                (
+                    RegisterModel::new(summary, view, shown, i18n, earlier),
+                    true,
+                )
             }
-            _ => (RegisterModel::new(summary, view, shown, i18n), true),
         }
     }
 
@@ -4298,9 +4307,11 @@ impl Cell<'_> {
             RegisterColumn::Deposit => row
                 .amount_on(AmountSide::Deposit)
                 .map_or_else(WidgetText::default, |amount| amount.styled(theme).into()),
-            RegisterColumn::Balance => row
-                .balance()
-                .map_or_else(WidgetText::default, |balance| balance.styled(theme).into()),
+            RegisterColumn::Balance => row.balance().map_or_else(WidgetText::default, |balance| {
+                FormattedAmount::new(i18n, balance, AmountStyle::Bare)
+                    .styled(theme)
+                    .into()
+            }),
             RegisterColumn::Clr => return clr_cell(ui, i18n, row, &response, access),
             RegisterColumn::Flag => return flag_cell(ui, i18n, row, &response, access),
             RegisterColumn::Actions => {
