@@ -380,7 +380,14 @@ impl Proto {
 
     /// The prototype's own keys, all with Alt so none types into the Register.
     fn keys(&mut self, ctx: &egui::Context) {
-        let alt = |key| ctx.input_mut(|i| i.consume_key(Modifiers::ALT, key));
+        // XWayland sends Alt+A's letter as a Text event too, and consume_key leaves it, so
+        // it typed "a" into a focused Register cell (session 2026-10-28). Drop it.
+        ctx.input_mut(|i| {
+            if i.modifiers.alt {
+                i.events.retain(|e| !matches!(e, egui::Event::Text(_)));
+            }
+        });
+        let alt =|key| ctx.input_mut(|i| i.consume_key(Modifiers::ALT, key));
         for (v, key) in Variant::ALL.into_iter().zip([Key::A, Key::B, Key::C]) {
             if alt(key) {
                 self.set_variant(v, "key");
