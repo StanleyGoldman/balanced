@@ -49,6 +49,7 @@ egui's own focus handling and widgets read keys and clicks before app code does.
 - **Tab stops in a table:** `TableBuilder::sense(Sense::click())` makes every cell a focus stop, since `Sense::click()` is `CLICK | FOCUSABLE`. In an editing row Tab then lands on each cell's background before its `TextEdit`, two Tabs per field. Use `Sense::CLICK` to keep clicks without the Tab stops.
 - **Modified keys first:** `consume_key` ignores any Shift or Alt the pattern leaves out, so `consume_key(Modifiers::NONE, Key::Tab)` also eats Shift+Tab. Consume the most specific key first: Shift+Tab before Tab, Alt+↓ before ↓.
 - **Bare-letter keys:** an app key with no modifier acts only while `!ctx.egui_wants_keyboard_input()`. Otherwise the letter also lands in the focused field as text.
+- **Alt+letter keys:** `consume_key(Modifiers::ALT, Key::A)` removes the key event but leaves the `Event::Text("a")` that arrives with it under XWayland, so the letter still types into the focused field. While `i.modifiers.alt`, also remove `Event::Text` from `i.events`. The Reconcile prototype's Alt+A typed "a" into a Register cell, which autocompleted to "Auto" (#374).
 - **Arrow keys:** while any widget has focus, egui moves focus to the nearest focusable widget in the arrow's direction, anywhere in the window and out of a popup. A popup that steps through its own items takes the arrows out of `RawInput` in `raw_input_hook` while it is open, as the Menu bar does.
 
 ### Typing and committing
