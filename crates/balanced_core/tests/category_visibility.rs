@@ -369,6 +369,26 @@ fn a_category_moved_under_a_hidden_one_is_hidden_with_those_under_it() {
 }
 
 #[test]
+fn a_category_moved_under_a_shown_one_stays_shown() {
+    let mut household = Household::new();
+
+    household
+        .apply(DomainCommand::MoveCategory {
+            category: household.restaurants,
+            parent: Some(household.income),
+        })
+        .unwrap();
+
+    let view = household.ledger.snapshot();
+    let restaurants = view.category(household.restaurants).unwrap();
+    assert_eq!(restaurants.parent(), Some(household.income));
+    assert_eq!(
+        household.visibilities(),
+        [Shown, Shown, Shown, Shown, Shown, Shown]
+    );
+}
+
+#[test]
 fn undo_moves_a_category_back_from_under_a_hidden_one_and_shows_it_again() {
     let mut household = Household::new();
     household.hide(household.coffee);
