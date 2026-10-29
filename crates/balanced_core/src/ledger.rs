@@ -2,7 +2,7 @@
 
 //! The [`Ledger`]: the financial data, and the snapshots windows read it through.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use balanced_store::{Stack, Store, StoreError};
@@ -499,10 +499,13 @@ impl LedgerView {
     /// Category `id` and every category under it, at every depth: the category first,
     /// then the ones under it, level by level.
     pub fn branch(&self, id: CategoryId) -> Vec<CategoryId> {
-        let mut branch = vec![id];
-        let mut next = 0;
-        while let Some(&parent) = branch.get(next) {
-            branch.extend(
+        let mut branch = Vec::new();
+        // Each pass takes one category off the queue, so the walk ends once no category
+        // is left under the ones taken.
+        let mut pending = VecDeque::from([id]);
+        while let Some(parent) = pending.pop_front() {
+            branch.push(parent);
+            pending.extend(
                 self.categories
                     .iter()
                     .filter(|category| category.parent() == Some(parent))
@@ -514,7 +517,6 @@ impl LedgerView {
                 branch.len() <= self.categories.len(),
                 "the category tree has a loop"
             );
-            next += 1;
         }
         branch
     }
