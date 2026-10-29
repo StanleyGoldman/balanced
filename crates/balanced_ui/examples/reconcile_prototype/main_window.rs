@@ -847,6 +847,8 @@ impl MainWindow {
                 if let Some(OpenRegister { register, .. }) = &mut self.open_register {
                     let height = ui.available_height() - if b && below { 96.0 } else { 0.0 };
                     ui.allocate_ui(vec2(ui.available_width(), height), |ui| {
+                        // PROTOTYPE: names the Register for the `click` verb.
+                        crate::proto::region(ui.max_rect(), "register");
                         register.show(
                             ui,
                             i18n,

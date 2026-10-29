@@ -315,13 +315,18 @@ impl Proto {
                         repeat: false,
                         modifiers,
                     };
-                    let mut down = vec![event(true)];
-                    // A real Space press types a space too.
+                    // The modifiers are held for the press, as a real one holds them.
+                    let mut down = vec![Event::ModifiersChanged(modifiers), event(true)];
+                    // A real Space press types a space too, and XWayland sends Alt+A's
+                    // letter as text as well.
                     if key == Key::Space && modifiers.is_none() {
                         down.push(Event::Text(" ".to_owned()));
+                    } else if modifiers.alt && key.name().len() == 1 {
+                        down.push(Event::Text(key.name().to_lowercase()));
                     }
                     self.inject.push_back(down);
-                    self.inject.push_back(vec![event(false)]);
+                    self.inject
+                        .push_back(vec![event(false), Event::ModifiersChanged(Modifiers::NONE)]);
                 }
                 None => bad(),
             },
@@ -387,7 +392,23 @@ impl Proto {
                 i.events.retain(|e| !matches!(e, egui::Event::Text(_)));
             }
         });
-        let alt =|key| ctx.input_mut(|i| i.consume_key(Modifiers::ALT, key));
+        // Consuming the key leaves Alt pressed and released alone, which opens the File
+        // menu (menu_nav.rs), so a stand-in key press tells it a key came between.
+        let alt = |key| {
+            ctx.input_mut(|i| {
+                let hit = i.consume_key(Modifiers::ALT, key);
+                if hit {
+                    i.events.push(egui::Event::Key {
+                        key: Key::F20,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: Modifiers::ALT,
+                    });
+                }
+                hit
+            })
+        };
         for (v, key) in Variant::ALL.into_iter().zip([Key::A, Key::B, Key::C]) {
             if alt(key) {
                 self.set_variant(v, "key");
